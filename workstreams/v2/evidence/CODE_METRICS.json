@@ -1,20 +1,25 @@
 {
-  "definition": "nonblank non-comment physical Python lines in src/researchweave/evidence; includes docstrings",
-  "tracked_python_modules_expected": 13,
-  "nonblank_noncomment_lines": 1724,
-  "measured_files": [
-    "src/researchweave/evidence/__init__.py",
-    "src/researchweave/evidence/bibliography.py",
-    "src/researchweave/evidence/documents.py",
-    "src/researchweave/evidence/errors.py",
-    "src/researchweave/evidence/facade.py",
-    "src/researchweave/evidence/library.py",
-    "src/researchweave/evidence/models.py",
-    "src/researchweave/evidence/project_format.py",
-    "src/researchweave/evidence/protocols.py",
-    "src/researchweave/evidence/provenance.py",
-    "src/researchweave/evidence/reviews.py",
-    "src/researchweave/evidence/storage.py",
-    "src/researchweave/evidence/writing.py"
-  ]
+  "definition": "Token-based nonblank noncomment Python code lines minus AST docstring lines",
+  "scope": "src/researchweave/evidence/**/*.py",
+  "files": 16,
+  "meaningful_source_lines": 2106,
+  "file_lines": {
+    "__init__.py": 7,
+    "bibliography.py": 242,
+    "documents.py": 65,
+    "errors.py": 11,
+    "extraction.py": 108,
+    "facade.py": 350,
+    "library.py": 147,
+    "migration.py": 145,
+    "models.py": 63,
+    "project_format.py": 218,
+    "protocols.py": 81,
+    "provenance.py": 49,
+    "reviews.py": 149,
+    "search_index.py": 103,
+    "storage.py": 278,
+    "writing.py": 90
+  },
+  "exclusions": "tests, workstreams, Markdown, fixtures, docstrings, comments, blanks"
 }

@@ -16,12 +16,15 @@ from uuid import UUID
 
 from .bibliography import parse_bibliography
 from .errors import EvidenceError, require
+from .extraction import ExtractedValue, ExtractionService, FieldDefinition
 from .library import LibraryService
+from .migration import MarkdownMigration, MarkdownRecord, preview_markdown
 from .models import new_id
 from .project_format import archive_project, restore_archive, verify_archive
 from .protocols import ProtocolService, question_feedback
 from .provenance import export_provenance
 from .reviews import ReviewService
+from .search_index import LocalIndex
 from .storage import ProjectStore
 from .writing import WritingService
 
@@ -32,7 +35,7 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "project.integrity": ("read", ("project_id",), "Audit project hashes"),
     "project.archive": ("local-write", ("project_id", "filename"), "Create .rwproj snapshot"),
     "project.archive_verify": ("read", ("filename",), "Verify .rwproj without writing"),
-    "project.restore": ("local-write", ("filename", "destination_id"), "Restore .rwproj"),
+    "project.restore": ("local-write", ("filename",), "Restore .rwproj"),
     "library.bibliography_preview": ("read", ("format", "data_base64"), "Preview references"),
     "library.bibliography_import": ("local-write", ("project_id", "format", "data_base64"),
                                      "Import bibliography"),
@@ -41,6 +44,9 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
                        "Import local document"),
     "library.source_text": ("read", ("project_id", "source_id"), "Read source text"),
     "discovery.search": ("read", ("project_id", "query"), "Offline library search"),
+    "library.fts_search": ("read", ("project_id", "query"), "Rebuildable offline FTS5 search"),
+    "library.index_rebuild": ("local-write", ("project_id",), "Rebuild local search cache"),
+    "library.index_health": ("read", ("project_id",), "Inspect search cache state"),
     "reference.validate": ("read", ("project_id", "reference_id"), "Inspect DOI syntax"),
     "evidence.anchor": ("local-write", ("project_id", "source_id", "quote", "start", "end"),
                         "Record exact quote anchor"),
@@ -65,11 +71,20 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "review.advance": ("local-write", ("project_id", "review_id", "record_id"),
                        "Advance included review record"),
     "review.prisma": ("read", ("project_id", "review_id"), "Screening reconciliation"),
+    "review.extract": ("local-write", ("project_id", "record_id", "schema",
+                                       "extracted", "reviewer"), "Create validated extraction"),
+    "review.evidence_matrix": ("read", ("project_id", "review_id"),
+                               "Read attributed study outcome fields"),
     "writing.section_save": ("local-write", ("project_id", "manuscript_id", "section",
                                            "body", "citations"), "Save manuscript section"),
     "writing.inspect": ("read", ("project_id", "manuscript_id"), "Inspect citations"),
     "writing.render": ("read", ("project_id", "manuscript_id"), "Export manuscript Markdown"),
     "provenance.graph": ("read", ("project_id",), "Export provenance graph"),
+    "migration.markdown_preview": ("read", ("files",), "Preview user-owned Markdown files"),
+    "migration.markdown_import": ("local-write", ("project_id", "files"),
+                                   "Import Markdown notes with fidelity receipt"),
+    "migration.markdown_undo": ("local-write", ("project_id", "batch_id"),
+                                 "Soft-delete a complete imported Markdown batch"),
 }
 
 
@@ -110,6 +125,25 @@ def _archive_filename(value: str) -> str:
             not any(char in value for char in "/\\:\x00") and
             value not in {".", ".."}, "Use a simple .rwproj archive filename")
     return value
+
+
+def _markdown_records(arguments: Mapping[str, Any]) -> list[MarkdownRecord]:
+    entries = _value(arguments, "files", list)
+    require(0 < len(entries) <= 1000, "Markdown import count outside bounds",
+            "RESOURCE_LIMIT")
+    records: list[MarkdownRecord] = []
+    for entry in entries:
+        require(isinstance(entry, dict), "Each migration file must have name and content")
+        require(isinstance(entry.get("filename"), str), "Migration filename required")
+        encoded = entry.get("data_base64")
+        require(isinstance(encoded, str), "Migration file content must be encoded")
+        try:
+            data = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise EvidenceError("INVALID_INPUT", "Invalid Markdown content encoding",
+                                "Supply a valid base64 UTF-8 Markdown note.") from exc
+        records.append(MarkdownRecord(entry["filename"], data))
+    return records
 
 
 class EvidenceFacade:
@@ -166,6 +200,8 @@ class EvidenceFacade:
                                                 _value(arguments, "format", str))
                 data["records"] = [record.as_wire() for record in references[:50]]
                 data["count"] = len(references)
+            if operation == "migration.markdown_preview":
+                data.update(preview_markdown(_markdown_records(arguments)))
             if operation == "project.archive_verify":
                 data.update(verify_archive(self.workspace_root / "exports" /
                             _archive_filename(_value(arguments, "filename", str))))
@@ -223,14 +259,16 @@ class EvidenceFacade:
             return {"count": len(references),
                     "records": [record.as_wire() for record in references[:50]],
                     "writes": 0}
+        if operation == "migration.markdown_preview":
+            return preview_markdown(_markdown_records(args))
         if operation == "project.archive_verify":
             return verify_archive(self.workspace_root / "exports" /
                                   _archive_filename(_value(args, "filename", str)))
         if operation == "project.restore":
             name = _archive_filename(_value(args, "filename", str))
-            destination_id = _uuid(_value(args, "destination_id", str))
-            return restore_archive(self.workspace_root / "exports" / name,
-                                   self.workspace_root / destination_id)
+            archive_path = self.workspace_root / "exports" / name
+            project_id = _uuid(verify_archive(archive_path)["project_id"])
+            return restore_archive(archive_path, self.workspace_root / project_id)
         with self._project(_value(args, "project_id", str)) as store:
             if operation == "project.open":
                 return asdict(store.info())
@@ -257,6 +295,14 @@ class EvidenceFacade:
             if operation == "discovery.search":
                 return library.search(_value(args, "query", str),
                                       int(args.get("limit", 50)))
+            if operation == "library.fts_search":
+                return LocalIndex(store).search(_value(args, "query", str),
+                    limit=int(args.get("limit", 25)), kind=args.get("kind"),
+                    auto_rebuild=False)
+            if operation == "library.index_rebuild":
+                return LocalIndex(store).rebuild()
+            if operation == "library.index_health":
+                return LocalIndex(store).diagnostics()
             if operation == "reference.validate":
                 return library.validate_reference(_value(args, "reference_id", str))
             if operation == "evidence.anchor":
@@ -302,6 +348,16 @@ class EvidenceFacade:
                     _value(args, "record_id", str), expected_revision=expected)
             if operation == "review.prisma":
                 return review.prisma(_value(args, "review_id", str))
+            if operation == "review.extract":
+                return ExtractionService(store).create_entry(
+                    _value(args, "record_id", str),
+                    FieldDefinition(**_value(args, "schema", dict)),
+                    ExtractedValue(**_value(args, "extracted", dict)),
+                    _value(args, "reviewer", str), args.get("anchor_id"),
+                    expected_revision=expected)
+            if operation == "review.evidence_matrix":
+                return {"records": ExtractionService(store).matrix(
+                    _value(args, "review_id", str))}
             writing = WritingService(store)
             if operation == "writing.section_save":
                 return writing.save_section(_value(args, "manuscript_id", str),
@@ -314,5 +370,11 @@ class EvidenceFacade:
                     _value(args, "manuscript_id", str))}
             if operation == "provenance.graph":
                 return export_provenance(store)
+            if operation == "migration.markdown_import":
+                return MarkdownMigration(store).import_batch(
+                    _markdown_records(args), expected_revision=expected)
+            if operation == "migration.markdown_undo":
+                return MarkdownMigration(store).undo_batch(
+                    _value(args, "batch_id", str), expected_revision=expected)
         raise EvidenceError("UNSUPPORTED_FORMAT", "Unknown operation",
                             "Choose an advertised evidence command.")

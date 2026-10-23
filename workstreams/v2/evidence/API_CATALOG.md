@@ -22,6 +22,6 @@ source = facade.execute("library.import", {
 print(facade.execute("project.integrity", {"project_id": project_id}, {}))
 ```
 
-The facade reports 30 named operations in `capability_manifest()`. Refer to `capabilities.v1.json` for machine-readable declarations. All are offline; GUI bindings require final integration. Mutating requests support `expected_revision` in context for stale-state detection. API command `project.restore` accepts a fresh `destination_id` to avoid overwriting any existing project. Verification and previews are read-only.
+The facade reports 38 named operations in `capability_manifest()`. Refer to `capabilities.v1.json` for machine-readable declarations. All are offline; GUI bindings require final integration. Mutating requests support `expected_revision` in context for stale-state detection. The `project.restore` command extracts to the archive's original project UUID and refuses to overwrite an existing project. Verification and previews are read-only. Indexed search operations are `library.index_rebuild`, `library.index_health`, and `library.fts_search`; typed extraction operations are `review.extract` and `review.evidence_matrix`. Markdown import/export interop uses `migration.markdown_preview`, `migration.markdown_import` and `migration.markdown_undo`.
 
-Unsupported: encrypted archive, live discovery, PDF/OCR, external proprietary migrations, FTS5 ranking, complete PRISMA source retrieval, journal submission, export-to-DOCX/PDF, full permissions/undo engine. No operation for these is advertised.
+Unsupported: encrypted archive, live discovery, PDF/OCR, proprietary direct app access, complete PRISMA retrieval, journal submission, DOCX/PDF export and general undo engine. These operations are not advertised.

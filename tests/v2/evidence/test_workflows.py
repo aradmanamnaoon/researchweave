@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import base64
 import json
-import sqlite3
 import zipfile
 from pathlib import Path
 
@@ -13,7 +12,7 @@ import pytest
 from researchweave.evidence import build_evidence_facade
 from researchweave.evidence.bibliography import normalize_doi, parse_bibliography
 from researchweave.evidence.errors import EvidenceError
-from researchweave.evidence.project_format import archive_project, restore_archive, verify_archive
+from researchweave.evidence.project_format import restore_archive, verify_archive
 from researchweave.evidence.storage import ProjectStore
 
 
@@ -104,7 +103,8 @@ def test_bibliography_and_review_disagreement(tmp_path: Path) -> None:
     facade = build_evidence_facade(project_dir, allow_local_writes=True)
     project_id = run(facade, "project.create", title="Review", question="What is the result?",
                      design="systematic_review")["project_id"]
-    bib = "@article{k1, title={Test {Trial}}, author={Doe, Ada and Roe, Bea}, year={2024}, doi={invalid}}"
+    bib = ("@article{k1, title={Test {Trial}}, author={Doe, Ada and Roe, Bea}, "
+           "year={2024}, doi={invalid}}")
     references = run(facade, "library.bibliography_import", project_id=project_id,
                      format="bibtex", data_base64=encoded(bib))["references"]
     ref = references[0]
@@ -152,7 +152,8 @@ def test_protocol_amendment_and_manuscript_check(tmp_path: Path) -> None:
     assert history[0]["body"] == body
     assert history[1]["rationale"] == "Changed after review"
     references = run(facade, "library.bibliography_import", project_id=project_id,
-        format="ris", data_base64=encoded("TY  - JOUR\nTI  - Synthetic source\nER  - \n"))["references"]
+        format="ris", data_base64=encoded(
+            "TY  - JOUR\nTI  - Synthetic source\nER  - \n"))["references"]
     run(facade, "writing.section_save", project_id=project_id, manuscript_id="paper-1",
         section="Introduction", body="Background [@study].",
         citations={"study": references[0]["id"]})
@@ -174,3 +175,112 @@ def test_denied_write_preview_and_malformed_bib(tmp_path: Path) -> None:
     with pytest.raises(EvidenceError):
         parse_bibliography(b"@article{k, title={unclosed}", "bibtex")
     assert normalize_doi("https://doi.org/10.1000/AbC") == "10.1000/abc"
+
+
+def test_fts_and_typed_extraction_roundtrip(tmp_path: Path) -> None:
+    from researchweave.evidence.extraction import ExtractedValue, FieldDefinition, validate_field
+
+    facade = build_evidence_facade(tmp_path / "workspace", allow_local_writes=True)
+    project_id = run(facade, "project.create", title="Local search",
+                     question="How are outcomes recorded?",
+                     design="systematic_review")["project_id"]
+    run(facade, "library.import", project_id=project_id, title="Memory study",
+        media_type="text/plain", data_base64=encoded("Memory recall was measured locally."))
+    stale = facade.execute("library.fts_search", {"project_id": project_id,
+                                                 "query": "Memory"}, {})
+    assert stale["error"]["code"] == "CONFLICT"
+    rebuild = run(facade, "library.index_rebuild", project_id=project_id)
+    assert rebuild["sources"] == 1
+    search = run(facade, "library.fts_search", project_id=project_id,
+                 query="Memory", kind="source")
+    assert search["count"] == 1 and search["network_queries"] == 0
+    malicious = run(facade, "library.fts_search", project_id=project_id,
+                    query='" OR memory')
+    assert malicious["count"] == 0
+    reference = run(facade, "library.bibliography_import", project_id=project_id,
+        format="ris", data_base64=encoded("TY  - JOUR\nTI  - Synthetic Trial\nER  - \n"))
+    record = run(facade, "review.register", project_id=project_id,
+                 review_id="review", reference_id=reference["references"][0]["id"])
+    with pytest.raises(EvidenceError):
+        validate_field(FieldDefinition("sample_size", "integer", minimum=0),
+                       ExtractedValue("sample_size", -1))
+    entry = run(facade, "review.extract", project_id=project_id,
+                record_id=record["record_id"], reviewer="human-1",
+                schema={"name": "sample_size", "datatype": "integer", "minimum": 0},
+                extracted={"field": "sample_size", "value": 72,
+                           "original_text": "synthetic N = 72"})
+    assert entry["value"]["value"] == 72
+    matrix = run(facade, "review.evidence_matrix", project_id=project_id,
+                 review_id="review")["records"]
+    assert len(matrix) == 1 and matrix[0]["extracted"]["value"] == 72
+    with ProjectStore(tmp_path / "workspace" / project_id) as store:
+        assert store.audit()["ok"]
+
+
+def test_markdown_migration_preview_import_undo_and_reopen(tmp_path: Path) -> None:
+    facade = build_evidence_facade(tmp_path / "workspace", allow_local_writes=True)
+    project_id = run(facade, "project.create", title="Migration",
+                     question="How to preserve notes?", design="exploratory")["project_id"]
+    files = [
+        {"filename": "فارسی.md", "data_base64": encoded(
+            "---\ntitle: Native Persian note\nunknown: original\n---\nText [[other]]\n")},
+        {"filename": "other.md", "data_base64": encoded("# Synthetic reference\n")},
+    ]
+    preview = run(facade, "migration.markdown_preview", files=files)
+    assert preview["writes"] == 0 and preview["mapped"] == 2
+    assert preview["records"][0]["wikilinks"] == ["other"]
+    assert run(facade, "project.open", project_id=project_id)["revision"] == 0
+    result = run(facade, "migration.markdown_import", project_id=project_id, files=files)
+    assert result["receipt"]["mapped"] == 2
+    assert result["receipt"]["raw_attachments_preserved"] is True
+    first = result["source_ids"][0]
+    assert "unknown: original" in run(facade, "library.source_text",
+                                      project_id=project_id, source_id=first)["text"]
+    undo = run(facade, "migration.markdown_undo", project_id=project_id,
+               batch_id=result["batch_id"])
+    assert undo["soft_deleted"] == 2
+    with ProjectStore(tmp_path / "workspace" / project_id) as store:
+        assert store.info().revision == 2
+        assert store.audit()["ok"]
+        assert store.conn.execute(
+            "SELECT COUNT(*) FROM sources WHERE deleted=0").fetchone()[0] == 0
+        assert store.get_object(store.conn.execute(
+            "SELECT digest FROM sources WHERE id=?", (first,)).fetchone()[0])
+    repeat = facade.execute("migration.markdown_undo",
+                            {"project_id": project_id, "batch_id": result["batch_id"]}, {})
+    assert repeat["error"]["code"] == "NOT_FOUND"
+
+
+def test_migration_rejects_case_collision_without_writes(tmp_path: Path) -> None:
+    facade = build_evidence_facade(tmp_path / "workspace", allow_local_writes=True)
+    project_id = run(facade, "project.create", title="Collision",
+                     question="Can filenames collide?", design="nonacademic")["project_id"]
+    files = [{"filename": name, "data_base64": encoded("Test")}
+             for name in ("A.md", "a.md")]
+    result = facade.execute("migration.markdown_import",
+                            {"project_id": project_id, "files": files}, {})
+    assert result["error"]["code"] == "CONFLICT"
+    assert run(facade, "project.open", project_id=project_id)["revision"] == 0
+
+
+def test_facade_archive_restore_to_new_workspace(tmp_path: Path) -> None:
+    source = build_evidence_facade(tmp_path / "source", allow_local_writes=True)
+    identifier = run(source, "project.create", title="Transfer",
+                     question="Does portable restore work?",
+                     design="exploratory")["project_id"]
+    run(source, "library.import", project_id=identifier, title="Preserved",
+        media_type="text/plain", data_base64=encoded("Portable synthetic text."))
+    run(source, "project.archive", project_id=identifier, filename="moving.rwproj")
+    import shutil
+
+    new_root = tmp_path / "destination"
+    (new_root / "exports").mkdir(parents=True)
+    shutil.copyfile(tmp_path / "source" / "exports" / "moving.rwproj",
+                    new_root / "exports" / "moving.rwproj")
+    dest = build_evidence_facade(new_root, allow_local_writes=True)
+    restored = run(dest, "project.restore", filename="moving.rwproj")
+    assert restored["project_id"] == identifier
+    assert run(dest, "project.open", project_id=identifier)["revision"] == 1
+    assert run(dest, "project.integrity", project_id=identifier)["ok"]
+    blocked = dest.execute("project.restore", {"filename": "moving.rwproj"}, {})
+    assert blocked["error"]["code"] == "CONFLICT"

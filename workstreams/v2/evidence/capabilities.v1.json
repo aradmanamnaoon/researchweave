@@ -141,14 +141,12 @@
     "preview_supported": true,
     "network_hosts": [],
     "required_arguments": [
-      "filename",
-      "destination_id"
+      "filename"
     ],
     "arguments_schema": {
       "type": "object",
       "required": [
-        "filename",
-        "destination_id"
+        "filename"
       ]
     },
     "result_schema": {
@@ -321,6 +319,83 @@
       "type": "object"
     },
     "summary": "Offline library search",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.fts_search",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "query"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "query"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Rebuildable offline FTS5 search",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.index_rebuild",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Rebuild local search cache",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.index_health",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Inspect search cache state",
     "ui_binding": "pending"
   },
   {
@@ -748,6 +823,66 @@
     "ui_binding": "pending"
   },
   {
+    "operation": "review.extract",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "record_id",
+      "schema",
+      "extracted",
+      "reviewer"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "record_id",
+        "schema",
+        "extracted",
+        "reviewer"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Create validated extraction",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.evidence_matrix",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "review_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "review_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read attributed study outcome fields",
+    "ui_binding": "pending"
+  },
+  {
     "operation": "writing.section_save",
     "protocol_version": 1,
     "version": "1.0.0",
@@ -857,6 +992,85 @@
       "type": "object"
     },
     "summary": "Export provenance graph",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "migration.markdown_preview",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "files"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "files"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Preview user-owned Markdown files",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "migration.markdown_import",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "files"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "files"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Import Markdown notes with fidelity receipt",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "migration.markdown_undo",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "batch_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "batch_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Soft-delete a complete imported Markdown batch",
     "ui_binding": "pending"
   }
 ]

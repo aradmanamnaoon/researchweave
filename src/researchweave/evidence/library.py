@@ -64,7 +64,7 @@ class LibraryService:
                 "duplicate_suggestions": suggestions, "revision": revision}
 
     def search(self, query: str, limit: int = 50) -> dict[str, Any]:
-        require(query.strip() and len(query) <= 200, "Search text is required")
+        require(bool(query.strip()) and len(query) <= 200, "Search text is required")
         require(1 <= limit <= 200, "Search result limit exceeds 200")
         # Escape SQL LIKE wildcards so the search is literal and deterministic.
         pattern = "%" + query.replace("\\", "\\\\").replace("%", "\\%") \
@@ -90,7 +90,7 @@ class LibraryService:
     def import_document(self, data: bytes, title: str, media_type: str,
                         origin: str = "local-upload", *,
                         expected_revision: int | None = None) -> dict[str, Any]:
-        require(title.strip() and len(title) <= 300, "Document title required")
+        require(bool(title.strip()) and len(title) <= 300, "Document title required")
         require(len(data) <= MAX_BLOB_BYTES, "Document exceeds size limit", "RESOURCE_LIMIT")
         require(len(origin) <= 300, "Origin label too long")
         body, extraction = extract_text(data, media_type)
@@ -142,8 +142,8 @@ class LibraryService:
 
     def add_note(self, source_id: str, title: str, body: str, *,
                  expected_revision: int | None = None) -> dict[str, Any]:
-        require(title.strip() and len(title) <= 300, "Note title required")
-        require(body.strip() and len(body) <= 250_000, "Invalid note text")
+        require(bool(title.strip()) and len(title) <= 300, "Note title required")
+        require(bool(body.strip()) and len(body) <= 250_000, "Invalid note text")
         note_id = new_id()
 
         def insert(conn: Any) -> None:

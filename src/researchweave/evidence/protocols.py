@@ -41,8 +41,8 @@ class ProtocolService:
 
     def create(self, title: str, author: str, body: Mapping[str, Any], *,
                expected_revision: int | None = None) -> dict[str, Any]:
-        require(title.strip() and len(title) <= 300, "Protocol title required")
-        require(author.strip() and len(author) <= 255, "Protocol author required")
+        require(bool(title.strip()) and len(title) <= 300, "Protocol title required")
+        require(bool(author.strip()) and len(author) <= 255, "Protocol author required")
         require(body.get("design") in ALLOWED_DESIGNS, "Invalid research design")
         require(bool(str(body.get("objective", "")).strip()), "Protocol objective required")
         encoded = canonical_json(dict(body))

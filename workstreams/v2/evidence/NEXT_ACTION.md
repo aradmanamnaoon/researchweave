@@ -1,7 +1,7 @@
 # Next work, in priority order
 
 1. Add review identification/search-run provenance, duplicate subtraction and full-text retrieval tracking, then compute complete PRISMA 2020 figures from immutable events.
-2. Implement FTS5 indexing and authoritative citation-identity check adapters with injected offline/network transports and typed rate-limit/cache behavior.
+2. Extend FTS5 with incremental indexing and authoritative citation-identity check adapters with injected offline/network transports and typed rate-limit/cache behavior.
 3. Implement reversible logical dedup merge and undo, versioned source extraction, and PDF/DOCX/EPUB parsing with safe optional dependencies.
 4. Add migrations from two earlier schema fixtures, authenticated encrypted .rwproj and crash/fuzz archive tests.
 5. Add extraction forms, evidence matrix, evidence support classification and complete manuscript citation formatter.

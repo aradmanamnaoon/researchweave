@@ -44,7 +44,7 @@ class ReviewService:
              expected_revision: int | None = None) -> dict[str, Any]:
         require(stage in STAGES and decision in DECISIONS, "Invalid screening stage/decision")
         require(bool(reviewer.strip()) and len(reviewer) <= 255, "Invalid reviewer")
-        require(decision != "exclude" or reason.strip(), "Exclusions require a reason")
+        require(decision != "exclude" or bool(reason.strip()), "Exclusions require a reason")
 
         def insert(conn: Any) -> None:
             row = conn.execute("SELECT stage FROM review_records WHERE id=? AND review_id=?",

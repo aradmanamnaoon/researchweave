@@ -12,6 +12,9 @@
 | RE-011, RE-012 | Four citation parsers and syntax-only DOI checks; bibliography.py, library.py | Partial; provider-based identity verification absent |
 | RE-013 | Duplicate candidate scoring, no unsafe auto-merge | Partial; reversible merge absent |
 | RE-018, RE-019 | Basic reference library and literal local search | Partial; FTS and collections absent |
+| RE-019 | Rebuildable SQLite FTS5 index with phrase search; search_index.py; test_fts_and_typed_extraction_roundtrip | Implemented with explicit cache rebuild |
+| RE-030, RE-033 | Typed missingness, units, bounds and persisted extraction matrix; extraction.py; test_fts_and_typed_extraction_roundtrip | Partial; full UI and forms pending |
+| RE-041, RE-042 | Safe Markdown export preview, provenance receipt, import and soft-delete undo; migration.py; test_markdown_migration_preview_import_undo_and_reopen | Implemented standard Markdown file handoff; complex Notion formats pending |
 | RE-023, RE-024, RE-025 | UTF-8 text extraction, exact/unverifiable quote anchoring, source-backed notebook | Partial; PDF and highlights UI absent |
 | RE-027, RE-028, RE-029 | Review report registration, blinded votes, conflict and adjudication | Implemented basic round |
 | RE-032 | Conservative persisted screening arithmetic | Partial; intentionally incomplete PRISMA flow |
