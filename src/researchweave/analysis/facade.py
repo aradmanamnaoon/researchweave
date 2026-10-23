@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from .advanced_statistics import (
     ancova,
@@ -548,7 +548,10 @@ class AnalysisFacade:
                 ledger = state.review_ledger()
                 decision = ledger.decide(
                     int(arguments["annotation_index"]),
-                    str(arguments["disposition"]),
+                    cast(
+                        Literal["accept", "reject", "needs_review"],
+                        str(arguments["disposition"]),
+                    ),
                     reviewer=str(arguments["reviewer"]),
                     rationale=str(arguments["rationale"]),
                 )
@@ -714,8 +717,11 @@ class AnalysisFacade:
                 right,
                 left_on=str(arguments["left_on"]),
                 right_on=str(arguments["right_on"]),
-                how=str(arguments.get("how", "inner")),
-                cardinality=str(arguments.get("cardinality", "one_to_one")),
+                how=cast(Literal["inner", "left"], str(arguments.get("how", "inner"))),
+                cardinality=cast(
+                    Literal["one_to_one", "one_to_many", "many_to_one"],
+                    str(arguments.get("cardinality", "one_to_one")),
+                ),
                 max_expansion=int(arguments.get("max_expansion", 5)),
             )
             self.store.save(updated)
@@ -806,7 +812,9 @@ class AnalysisFacade:
                 updated, receipt = simple_impute(
                     obj,
                     str(arguments["column"]),
-                    strategy=str(arguments["strategy"]),
+                    strategy=cast(
+                        Literal["mean", "median", "mode"], str(arguments["strategy"])
+                    ),
                 )
             else:
                 updated = recode_missing(
@@ -1048,11 +1056,24 @@ class AnalysisFacade:
                 elif operation == "statistics.seasonal_decompose":
                     data = seasonal_decomposition(chronology, period=int(arguments["period"]))
                 else:
+                    order_values = [int(value) for value in arguments["order"]]
+                    seasonal_values = [
+                        int(value)
+                        for value in arguments.get("seasonal_order", [0, 0, 0, 0])
+                    ]
+                    require(len(order_values) == 3, "ARIMA order must have three integers")
+                    require(
+                        len(seasonal_values) == 4,
+                        "Seasonal ARIMA order must have four integers",
+                    )
                     data = arima_forecast(
                         chronology,
-                        order=tuple(int(value) for value in arguments["order"]),
-                        seasonal_order=tuple(
-                            int(value) for value in arguments.get("seasonal_order", [0, 0, 0, 0])
+                        order=(order_values[0], order_values[1], order_values[2]),
+                        seasonal_order=(
+                            seasonal_values[0],
+                            seasonal_values[1],
+                            seasonal_values[2],
+                            seasonal_values[3],
                         ),
                         horizon=int(arguments["horizon"]),
                         validation_horizon=int(arguments.get("validation_horizon", 0)),

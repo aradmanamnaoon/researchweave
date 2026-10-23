@@ -11,7 +11,7 @@ import os
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from .errors import require
 from .models import canonical_json, digest, runtime_versions, utc_now
@@ -39,7 +39,7 @@ class AnalysisPlan:
 
     def validate(self) -> None:
         require(self.schema_version == 1, "Unsupported analysis plan schema", "SCHEMA_MISMATCH")
-        require(self.plan_id and self.plan_id.isidentifier(), "Invalid plan identifier")
+        require(bool(self.plan_id) and self.plan_id.isidentifier(), "Invalid plan identifier")
         require(
             isinstance(self.seed, int) and 0 <= self.seed < 2**32,
             "Seed must be an unsigned 32-bit integer",
@@ -158,7 +158,8 @@ def _bind_arguments(step: AnalysisStep, results: Mapping[str, Mapping[str, Any]]
             "Bound predecessor output missing",
             "SCHEMA_MISMATCH",
         )
-        arguments[key] = output[key]
+        bound_output = cast(Mapping[str, Any], output)
+        arguments[key] = bound_output[key]
     return arguments
 
 

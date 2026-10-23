@@ -8,9 +8,10 @@ import io
 import json
 import os
 import re
+from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 
 from .errors import AnalysisError, require
 from .models import Dataset, Variable, canonical_json, digest, utc_now
@@ -349,13 +350,13 @@ def import_table(
             raise AnalysisError(
                 "DEPENDENCY_MISSING", f"Reader for {kind} is not installed"
             ) from exc
-        readstat = {
+        readstat = cast(Callable[..., tuple[Any, Any]], {
             "sav": pyreadstat.read_sav,
             "zsav": pyreadstat.read_sav,
             "por": pyreadstat.read_por,
             "dta": pyreadstat.read_dta,
             "xpt": pyreadstat.read_xport,
-        }[kind]
+        }[kind])
         readstat_options: dict[str, Any] = {"apply_value_formats": False}
         if kind in {"sav", "zsav"}:
             # Preserve SPSS user-missing values in the data so the dictionary can
@@ -507,20 +508,27 @@ def import_table(
     names = tuple(str(c) for c in frame.columns)
     require(len(set(names)) == len(names), "Duplicate columns prohibited")
     rows = json.loads(frame.to_json(orient="records", date_format="iso"))
-    labels = []
+    imported_variables: list[Variable] = []
     for i, c in enumerate(names):
         rich = (metadata_variables or {}).get(c, {})
-        labels.append(
+        rich_label = str(rich.get("label", ""))
+        rich_value_labels = cast(dict[str, str], rich.get("value_labels", {}))
+        rich_missing = cast(tuple[str, ...], rich.get("missing_values", ()))
+        rich_scale = cast(
+            Literal["nominal", "ordinal", "interval", "ratio", "unknown"],
+            rich.get("scale", "unknown"),
+        )
+        imported_variables.append(
             Variable(
                 name=c,
                 dtype="number" if pd.api.types.is_numeric_dtype(frame.iloc[:, i]) else "text",
-                label=rich.get("label", ""),
-                value_labels=rich.get("value_labels", {}),
-                missing_values=tuple(rich.get("missing_values", ())),
-                scale=rich.get("scale", "unknown"),
+                label=rich_label,
+                value_labels=rich_value_labels,
+                missing_values=rich_missing,
+                scale=rich_scale,
             )
         )
-    labels = tuple(labels)
+    labels = tuple(imported_variables)
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     identifier = dataset_id or digest({"source": source_hash})[:24]
     validate_dataset_identity(identifier)

@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from typing import Any
+from typing import Any, Literal, cast
 
 from .datasets import revise, revise_schema
 from .errors import AnalysisError, require
@@ -15,22 +15,27 @@ def predicate(row: dict[str, Any], expression: dict[str, Any], *, depth: int = 0
     connective = expression.get("logic")
     if connective is not None:
         require(connective in {"and", "or", "not"}, "Unsupported logical operator")
-        children = expression.get("expressions")
-        require(isinstance(children, list), "Logical expression requires child list")
+        children_value = expression.get("expressions")
+        require(isinstance(children_value, list), "Logical expression requires child list")
+        children = cast(list[Any], children_value)
         require(1 <= len(children) <= 50, "Logical expression child budget exceeded")
         require(
-            all(isinstance(child, dict) for child in children), "Filter children must be objects"
+            all(isinstance(child, dict) for child in children),
+            "Filter children must be objects",
         )
+        typed_children = cast(list[dict[str, Any]], children)
         if connective == "not":
             require(len(children) == 1, "NOT requires exactly one child")
-            return not predicate(row, children[0], depth=depth + 1)
-        evaluated = [predicate(row, child, depth=depth + 1) for child in children]
+            return not predicate(row, typed_children[0], depth=depth + 1)
+        evaluated = [predicate(row, child, depth=depth + 1) for child in typed_children]
         return all(evaluated) if connective == "and" else any(evaluated)
     column = expression.get("column")
     operator = expression.get("op")
-    require(column in row, "Filter references unknown column")
+    require(isinstance(column, str) and column in row, "Filter references unknown column")
+    column = cast(str, column)
     require(
-        operator
+        isinstance(operator, str)
+        and operator
         in {
             "eq",
             "ne",
@@ -45,6 +50,7 @@ def predicate(row: dict[str, Any], expression: dict[str, Any], *, depth: int = 0
         },
         "Unsupported filter operator",
     )
+    operator = cast(str, operator)
     left = row[column]
     if operator == "is_null":
         return left is None
@@ -54,21 +60,22 @@ def predicate(row: dict[str, Any], expression: dict[str, Any], *, depth: int = 0
     if left is None or right is None:
         raise AnalysisError("INVALID_INPUT", "Explicit null comparison required")
     if operator == "eq":
-        return left == right
+        return bool(left == right)
     if operator == "ne":
-        return left != right
+        return bool(left != right)
     if operator in {"in", "not_in"}:
         require(isinstance(right, list) and len(right) <= 1000, "Invalid filter members")
         included = left in right
         return included if operator == "in" else not included
     lhs = finite_number(left, name=column)
     rhs = finite_number(right, name="comparison")
-    return {
+    comparisons = {
         "gt": lambda: lhs > rhs,
         "ge": lambda: lhs >= rhs,
         "lt": lambda: lhs < rhs,
         "le": lambda: lhs <= rhs,
-    }[operator]()
+    }
+    return bool(comparisons[operator]())
 
 
 def transform(dataset: Dataset, spec: dict[str, Any]) -> Dataset:
@@ -78,21 +85,34 @@ def transform(dataset: Dataset, spec: dict[str, Any]) -> Dataset:
     if action == "filter":
         expression = spec.get("expression")
         require(isinstance(expression, dict), "Filter expression must be an object")
-        rows = [row for row in rows if predicate(row, expression)]
+        rows = [row for row in rows if predicate(row, cast(dict[str, Any], expression))]
     elif action == "recode":
         column, mapping = spec.get("column"), spec.get("mapping")
-        require(column in dataset.columns and isinstance(mapping, dict), "Invalid recode")
+        require(
+            isinstance(column, str) and column in dataset.columns and isinstance(mapping, dict),
+            "Invalid recode",
+        )
+        column = cast(str, column)
+        mapping = cast(dict[str, Any], mapping)
         for row in rows:
             if row[column] is not None:
                 row[column] = mapping.get(str(row[column]), row[column])
     else:
         column, source = spec.get("column"), spec.get("source")
         require(isinstance(column, str) and column.isidentifier(), "Invalid derived column name")
+        column = cast(str, column)
         require(column not in dataset.columns, "Derived column must be new", "CONFLICT")
-        require(source in dataset.columns, "Invalid derivation source")
+        require(isinstance(source, str) and source in dataset.columns, "Invalid derivation source")
+        source = cast(str, source)
         operation = spec.get("operation")
         require(operation in ("add", "subtract", "multiply", "divide"), "Invalid arithmetic")
-        operand_column = spec.get("operand_column")
+        operation = cast(Literal["add", "subtract", "multiply", "divide"], operation)
+        operand_column_value = spec.get("operand_column")
+        require(
+            operand_column_value is None or isinstance(operand_column_value, str),
+            "Invalid operand column",
+        )
+        operand_column = cast(str | None, operand_column_value)
         has_constant = "operand" in spec
         require(bool(operand_column) ^ has_constant, "Choose one operand source")
         if operand_column is not None:
@@ -112,6 +132,7 @@ def transform(dataset: Dataset, spec: dict[str, Any]) -> Dataset:
                 else operand
             )
             require(right is not None, "Missing derivation operand")
+            right = cast(float, right)
             if operation == "add":
                 outcome = original + right
             elif operation == "subtract":

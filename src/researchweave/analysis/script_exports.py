@@ -6,7 +6,7 @@ import hashlib
 import json
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .errors import require
 from .models import Dataset, canonical_json, digest, finite_number, runtime_versions
@@ -75,9 +75,10 @@ def export_python_script(
     requires_dataset = {"dataset_id", "revision"} <= set(schema.required)
     if requires_dataset:
         require(dataset is not None, "Dataset revision required for syntax replay")
+        selected_dataset = cast(Dataset, dataset)
         require(
-            arguments.get("dataset_id") == dataset.dataset_id
-            and arguments.get("revision") == dataset.revision,
+            arguments.get("dataset_id") == selected_dataset.dataset_id
+            and arguments.get("revision") == selected_dataset.revision,
             "Export parameters do not identify exact source revision",
             "INTEGRITY_FAILURE",
         )
@@ -163,7 +164,8 @@ def export_r_script(operation: str, arguments: dict[str, Any], dataset: Dataset)
         "INTEGRITY_FAILURE",
     )
     column = arguments.get("column")
-    require(column in dataset.columns, "Unknown column")
+    require(isinstance(column, str) and column in dataset.columns, "Unknown column")
+    column = cast(str, column)
     values = [finite_number(row[column]) for row in dataset.records if row[column] is not None]
     require(len(values) >= 2, "At least two numeric observations required")
     literals = ", ".join(format(value, ".17g") for value in values)
