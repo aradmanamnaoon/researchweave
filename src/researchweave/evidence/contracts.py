@@ -56,7 +56,8 @@ _OPTIONAL: dict[str, str] = {
     "anchor_id": "string", "interpretation": "boolean", "relationship": "string",
     "status": "string", "priority": "string", "style": "string",
     "version": "integer", "requirements": "object", "supplied_metadata": "object",
-    "reference_ids": "array",
+    "reference_ids": "array", "redact_fields": "array",
+    "destination_review_id": "string",
 }
 _NUMERIC_MIN = {
     "start": 0,

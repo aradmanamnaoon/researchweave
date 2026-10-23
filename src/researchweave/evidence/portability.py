@@ -10,7 +10,7 @@ import shutil
 import stat
 import tempfile
 import zipfile
-from collections.abc import Iterable
+from collections.abc import Iterable, Mapping
 from pathlib import Path
 from typing import Any
 
@@ -24,6 +24,38 @@ from .timeline import research_timeline
 MAX_EXPORT_BYTES = 128 * 1024 * 1024
 MAX_CLONE_ITEMS = 2000
 FIXED_TIME = (2020, 1, 1, 0, 0, 0)
+REVIEW_PACKET_FILES = {
+    "manifest.json",
+    "protocols.json",
+    "review_records.json",
+    "references.json",
+    "screening_votes.json",
+    "adjudications.json",
+    "extractions.json",
+    "prisma.json",
+    "provenance.json",
+    "redaction_report.json",
+}
+SENSITIVE_FIELD_NAMES = {
+    "api_key",
+    "apikey",
+    "access_token",
+    "auth_token",
+    "credential",
+    "credentials",
+    "date_of_birth",
+    "dob",
+    "email",
+    "mrn",
+    "name",
+    "participant_id",
+    "password",
+    "phone",
+    "private_key",
+    "secret",
+    "subject_id",
+    "token",
+}
 
 
 def _safe_filename(value: str, suffix: str) -> str:
@@ -116,6 +148,186 @@ def _write_bundle(
             staged.unlink(missing_ok=True)
 
 
+def _redact_value(
+    value: Any,
+    *,
+    explicit_fields: set[str],
+    path: str,
+    report: list[str],
+) -> Any:
+    if isinstance(value, Mapping):
+        output: dict[str, Any] = {}
+        for key, item in value.items():
+            key_text = str(key)
+            normalized = key_text.casefold().replace("-", "_").replace(" ", "_")
+            location = f"{path}.{key_text}" if path else key_text
+            if normalized in SENSITIVE_FIELD_NAMES or normalized in explicit_fields:
+                output[key_text] = "[REDACTED]"
+                report.append(location)
+            else:
+                output[key_text] = _redact_value(
+                    item,
+                    explicit_fields=explicit_fields,
+                    path=location,
+                    report=report,
+                )
+        return output
+    if isinstance(value, list):
+        return [
+            _redact_value(
+                item,
+                explicit_fields=explicit_fields,
+                path=f"{path}[{index}]",
+                report=report,
+            )
+            for index, item in enumerate(value)
+        ]
+    return value
+
+
+def _redacted_packet_rows(
+    rows: list[dict[str, Any]],
+    *,
+    explicit_fields: set[str],
+    payload_name: str,
+    report: list[str],
+) -> list[dict[str, Any]]:
+    output: list[dict[str, Any]] = []
+    for index, row in enumerate(rows):
+        current = dict(row)
+        if payload_name == "extractions.json":
+            field_name = str(current.get("field_name", ""))
+            normalized = field_name.casefold().replace("-", "_").replace(" ", "_")
+            if normalized in SENSITIVE_FIELD_NAMES or normalized in explicit_fields:
+                current["value_json"] = canonical_json("[REDACTED]")
+                report.append(f"{payload_name}[{index}].value_json:{field_name}")
+            else:
+                try:
+                    parsed = json.loads(str(current.get("value_json", "null")))
+                except json.JSONDecodeError:
+                    parsed = current.get("value_json")
+                current["value_json"] = canonical_json(
+                    _redact_value(
+                        parsed,
+                        explicit_fields=explicit_fields,
+                        path=f"{payload_name}[{index}].value_json",
+                        report=report,
+                    )
+                )
+        elif payload_name == "protocols.json":
+            try:
+                body = json.loads(str(current.get("body_json", "{}")))
+            except json.JSONDecodeError:
+                body = {}
+                report.append(f"{payload_name}[{index}].body_json:invalid_json_removed")
+            current["body_json"] = canonical_json(
+                _redact_value(
+                    body,
+                    explicit_fields=explicit_fields,
+                    path=f"{payload_name}[{index}].body_json",
+                    report=report,
+                )
+            )
+        current = _redact_value(
+            current,
+            explicit_fields=explicit_fields,
+            path=f"{payload_name}[{index}]",
+            report=report,
+        )
+        require(isinstance(current, dict), "Redacted packet row must remain an object")
+        output.append(dict(current))
+    return output
+
+
+def _load_review_packet(path: Path) -> tuple[dict[str, Any], dict[str, Any], str]:
+    path = path.resolve()
+    require(path.is_file() and not path.is_symlink(), "Review packet does not exist", "NOT_FOUND")
+    require(
+        path.stat().st_size <= MAX_EXPORT_BYTES,
+        "Review packet exceeds size limit",
+        "RESOURCE_LIMIT",
+    )
+    packet_bytes = path.read_bytes()
+    try:
+        archive = zipfile.ZipFile(io.BytesIO(packet_bytes), "r")
+    except zipfile.BadZipFile as exc:
+        raise EvidenceError(
+            "INVALID_ARCHIVE", "Review packet is not a valid ZIP archive", "Choose a valid packet."
+        ) from exc
+    with archive:
+        infos = archive.infolist()
+        require(0 < len(infos) <= len(REVIEW_PACKET_FILES), "Unexpected review packet file count")
+        names = [info.filename for info in infos]
+        require(len(names) == len(set(names)), "Duplicate review packet member", "INVALID_ARCHIVE")
+        require(
+            set(names) <= REVIEW_PACKET_FILES,
+            "Unexpected review packet member",
+            "INVALID_ARCHIVE",
+        )
+        require("manifest.json" in names, "Review packet manifest is missing", "INVALID_ARCHIVE")
+        total_uncompressed = sum(info.file_size for info in infos)
+        require(
+            total_uncompressed <= MAX_EXPORT_BYTES,
+            "Expanded review packet exceeds size limit",
+            "RESOURCE_LIMIT",
+        )
+        for info in infos:
+            require(
+                info.filename == Path(info.filename).name
+                and not info.is_dir()
+                and info.file_size <= MAX_EXPORT_BYTES,
+                "Unsafe review packet member",
+                "INVALID_ARCHIVE",
+            )
+            require(
+                info.compress_size == 0
+                or info.file_size <= max(1024 * 1024, info.compress_size * 200),
+                "Review packet member has unsafe compression ratio",
+                "RESOURCE_LIMIT",
+            )
+        try:
+            manifest = json.loads(archive.read("manifest.json"))
+        except (KeyError, UnicodeError, json.JSONDecodeError) as exc:
+            raise EvidenceError(
+                "INVALID_ARCHIVE", "Review packet manifest is invalid", "Re-export the packet."
+            ) from exc
+        require(isinstance(manifest, dict), "Review packet manifest must be an object")
+        require(
+            manifest.get("format") == "researchweave-review-packet"
+            and manifest.get("version") == 1,
+            "Unsupported review packet format",
+            "UNSUPPORTED_FORMAT",
+        )
+        files = manifest.get("files")
+        require(isinstance(files, list) and len(files) <= 20, "Invalid review packet inventory")
+        inventory_names = {
+            item.get("path") for item in files if isinstance(item, dict)
+        }
+        require(
+            inventory_names == set(names) - {"manifest.json"},
+            "Review packet inventory does not match archive members",
+            "INTEGRITY_FAILURE",
+        )
+        payloads: dict[str, Any] = {}
+        for item in files:
+            require(isinstance(item, dict), "Invalid review packet inventory row")
+            name = item.get("path")
+            require(isinstance(name, str) and name in names, "Missing review packet payload")
+            data = archive.read(name)
+            require(
+                len(data) == item.get("bytes") and sha256(data) == item.get("sha256"),
+                "Review packet checksum mismatch",
+                "INTEGRITY_FAILURE",
+            )
+            try:
+                payloads[name] = json.loads(data.decode("utf-8-sig"))
+            except (UnicodeError, json.JSONDecodeError) as exc:
+                raise EvidenceError(
+                    "INVALID_ARCHIVE", f"Invalid JSON payload: {name}", "Re-export the packet."
+                ) from exc
+    return manifest, payloads, sha256(packet_bytes)
+
+
 def export_research_artifacts(
     store: ProjectStore,
     destination: Path,
@@ -194,6 +406,7 @@ def export_review_packet(
     review_id: str,
     *,
     confirm_private_export: bool = False,
+    redact_fields: list[str] | None = None,
 ) -> dict[str, Any]:
     """Create a provenance-preserving review packet without copyrighted source files."""
     _safe_filename(destination.name, ".rw-review.zip")
@@ -246,6 +459,61 @@ def export_review_packet(
         dict(row) for row in store.conn.execute("SELECT * FROM protocols ORDER BY id,version")
     ]
     prisma = ReviewService(store).prisma(review_id)
+    explicit_fields = {
+        value.casefold().replace("-", "_").replace(" ", "_")
+        for value in (redact_fields or [])
+    }
+    require(
+        len(explicit_fields) == len(redact_fields or []),
+        "Redaction field names must be unique",
+    )
+    require(
+        len(explicit_fields) <= 100 and all(0 < len(value) <= 100 for value in explicit_fields),
+        "Invalid redaction field list",
+    )
+    redaction_locations: list[str] = []
+    protocols = _redacted_packet_rows(
+        protocols,
+        explicit_fields=explicit_fields,
+        payload_name="protocols.json",
+        report=redaction_locations,
+    )
+    records = _redacted_packet_rows(
+        records,
+        explicit_fields=explicit_fields,
+        payload_name="review_records.json",
+        report=redaction_locations,
+    )
+    references = _redacted_packet_rows(
+        references,
+        explicit_fields=explicit_fields,
+        payload_name="references.json",
+        report=redaction_locations,
+    )
+    votes = _redacted_packet_rows(
+        votes,
+        explicit_fields=explicit_fields,
+        payload_name="screening_votes.json",
+        report=redaction_locations,
+    )
+    adjudications = _redacted_packet_rows(
+        adjudications,
+        explicit_fields=explicit_fields,
+        payload_name="adjudications.json",
+        report=redaction_locations,
+    )
+    extractions = _redacted_packet_rows(
+        extractions,
+        explicit_fields=explicit_fields,
+        payload_name="extractions.json",
+        report=redaction_locations,
+    )
+    redaction_report = {
+        "automatic_sensitive_keys": sorted(SENSITIVE_FIELD_NAMES),
+        "requested_fields": sorted(explicit_fields),
+        "locations": sorted(set(redaction_locations)),
+        "redaction_count": len(set(redaction_locations)),
+    }
     payloads = {
         "protocols.json": _json_bytes(protocols),
         "review_records.json": _json_bytes(records),
@@ -255,6 +523,7 @@ def export_review_packet(
         "extractions.json": _json_bytes(extractions),
         "prisma.json": _json_bytes(prisma),
         "provenance.json": _json_bytes(export_provenance(store)),
+        "redaction_report.json": _json_bytes(redaction_report),
     }
     receipt = _write_bundle(
         destination,
@@ -269,11 +538,489 @@ def export_review_packet(
             "private_export_confirmed": confirm_private_export,
             "source_attachment_bytes_included": False,
             "source_full_text_included": False,
+            "redaction_count": redaction_report["redaction_count"],
+            "requested_redaction_fields": sorted(explicit_fields),
         },
     )
     receipt["review_id"] = review_id
     receipt["privacy"] = info.privacy
+    receipt["redaction_count"] = redaction_report["redaction_count"]
     return receipt
+
+
+def preview_review_packet_merge(store: ProjectStore, packet: Path) -> dict[str, Any]:
+    """Verify a review packet and summarize its merge surface without writing state."""
+    manifest, payloads, packet_sha256 = _load_review_packet(packet)
+    required_arrays = {
+        "protocols.json",
+        "review_records.json",
+        "references.json",
+        "screening_votes.json",
+        "adjudications.json",
+        "extractions.json",
+    }
+    for name in required_arrays:
+        require(
+            isinstance(payloads.get(name), list),
+            f"Review packet payload must be an array: {name}",
+        )
+    source_project_id = manifest.get("project_id")
+    source_review_id = manifest.get("review_id")
+    require(
+        isinstance(source_project_id, str) and bool(source_project_id),
+        "Packet project ID is missing",
+    )
+    require(isinstance(source_review_id, str) and source_review_id, "Packet review ID is missing")
+    references = payloads["references.json"]
+    doi_conflicts: list[dict[str, Any]] = []
+    for row in references:
+        require(isinstance(row, dict), "Reference packet row must be an object")
+        doi = row.get("doi")
+        if not isinstance(doi, str) or not doi:
+            continue
+        matches = [
+            dict(existing)
+            for existing in store.conn.execute(
+                "SELECT * FROM reference WHERE doi=? ORDER BY id", (doi,)
+            )
+        ]
+        for existing in matches:
+            differences = {
+                key: {"existing": existing.get(key), "incoming": row.get(key)}
+                for key in ("title", "authors_json", "year", "kind")
+                if existing.get(key) != row.get(key)
+            }
+            if differences:
+                doi_conflicts.append(
+                    {"entity": "reference", "doi": doi, "differences": differences}
+                )
+    return {
+        "packet_sha256": packet_sha256,
+        "source_project_id": source_project_id,
+        "source_review_id": source_review_id,
+        "privacy": manifest.get("privacy"),
+        "redaction_count": int(manifest.get("redaction_count", 0)),
+        "counts": {
+            "protocols": len(payloads["protocols.json"]),
+            "review_records": len(payloads["review_records.json"]),
+            "references": len(references),
+            "votes": len(payloads["screening_votes.json"]),
+            "adjudications": len(payloads["adjudications.json"]),
+            "extractions": len(payloads["extractions.json"]),
+        },
+        "potential_conflicts": doi_conflicts,
+        "writes_performed": False,
+    }
+
+
+def merge_review_packet(
+    store: ProjectStore,
+    packet: Path,
+    *,
+    destination_review_id: str | None = None,
+    actor: str = "local-user",
+    expected_revision: int | None = None,
+) -> dict[str, Any]:
+    """Merge a verified review packet without silently overwriting conflicts."""
+    manifest, payloads, packet_sha256 = _load_review_packet(packet)
+    preview = preview_review_packet_merge(store, packet)
+    source_project_id = str(preview["source_project_id"])
+    source_review_id = str(preview["source_review_id"])
+    target_review_id = (destination_review_id or source_review_id).strip()
+    require(
+        bool(target_review_id) and len(target_review_id) <= 255,
+        "Destination review ID is invalid",
+    )
+    require(bool(actor.strip()) and len(actor) <= 255, "Merge actor is required")
+    import_table = store.conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_packet_imports'"
+    ).fetchone()
+    if import_table is not None:
+        prior = store.conn.execute(
+            "SELECT * FROM review_packet_imports WHERE packet_sha256=?", (packet_sha256,)
+        ).fetchone()
+        if prior is not None:
+            prior_conflicts = json.loads(prior["conflicts_json"])
+            prior_warnings = json.loads(prior["warnings_json"])
+            require(isinstance(prior_conflicts, list), "Stored packet conflicts are corrupt",
+                    "INTEGRITY_FAILURE")
+            require(isinstance(prior_warnings, list), "Stored packet warnings are corrupt",
+                    "INTEGRITY_FAILURE")
+            return {
+                "packet_sha256": packet_sha256,
+                "source_project_id": str(prior["source_project_id"]),
+                "source_review_id": str(prior["source_review_id"]),
+                "destination_review_id": str(prior["destination_review_id"]),
+                "project_revision": store.info().revision,
+                "counts": {},
+                "conflicts": prior_conflicts,
+                "conflict_count": len(prior_conflicts),
+                "warnings": prior_warnings,
+                "silent_overwrite": False,
+                "redaction_count": int(manifest.get("redaction_count", 0)),
+                "already_merged": True,
+            }
+
+    references = [dict(row) for row in payloads["references.json"]]
+    records = [dict(row) for row in payloads["review_records.json"]]
+    votes = [dict(row) for row in payloads["screening_votes.json"]]
+    adjudications = [dict(row) for row in payloads["adjudications.json"]]
+    extractions = [dict(row) for row in payloads["extractions.json"]]
+    protocols = [dict(row) for row in payloads["protocols.json"]]
+    for label, rows in (
+        ("references", references),
+        ("review records", records),
+        ("votes", votes),
+        ("adjudications", adjudications),
+        ("extractions", extractions),
+        ("protocols", protocols),
+    ):
+        require(len(rows) <= MAX_CLONE_ITEMS, f"Too many packet {label}", "RESOURCE_LIMIT")
+
+    conflicts: list[dict[str, Any]] = []
+    warnings: list[dict[str, Any]] = []
+    counts = {"references_inserted": 0, "records_inserted": 0, "votes_inserted": 0,
+              "adjudications_inserted": 0, "extractions_inserted": 0,
+              "protocol_versions_inserted": 0, "skipped_identical": 0}
+
+    def persist(conn: Any) -> None:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS review_packet_origins ("
+            "source_project_id TEXT NOT NULL,entity_kind TEXT NOT NULL,source_id TEXT NOT NULL,"
+            "destination_id TEXT NOT NULL,packet_sha256 TEXT NOT NULL,imported_at TEXT NOT NULL,"
+            "PRIMARY KEY(source_project_id,entity_kind,source_id))"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS review_packet_imports ("
+            "packet_sha256 TEXT PRIMARY KEY,source_project_id TEXT NOT NULL,"
+            "source_review_id TEXT NOT NULL,destination_review_id TEXT NOT NULL,"
+            "manifest_json TEXT NOT NULL,conflicts_json TEXT NOT NULL,warnings_json TEXT NOT NULL,"
+            "imported_at TEXT NOT NULL,actor TEXT NOT NULL)"
+        )
+        imported_at = now_utc()
+
+        def origin_lookup(kind: str, source_id: str) -> str | None:
+            row = conn.execute(
+                "SELECT destination_id FROM review_packet_origins "
+                "WHERE source_project_id=? AND entity_kind=? AND source_id=?",
+                (source_project_id, kind, source_id),
+            ).fetchone()
+            return str(row[0]) if row is not None else None
+
+        def remember(kind: str, source_id: str, destination_id: str) -> None:
+            conn.execute(
+                "INSERT INTO review_packet_origins VALUES (?,?,?,?,?,?)",
+                (source_project_id, kind, source_id, destination_id, packet_sha256, imported_at),
+            )
+
+        reference_map: dict[str, str] = {}
+        for row in references:
+            source_id = str(row.get("id", ""))
+            require(source_id, "Packet reference ID is missing")
+            mapped = origin_lookup("reference", source_id)
+            if mapped is not None:
+                require(
+                    conn.execute(
+                        "SELECT 1 FROM reference WHERE id=?", (mapped,)
+                    ).fetchone()
+                    is not None,
+                    "Packet origin reference is missing",
+                    "INTEGRITY_FAILURE",
+                )
+                reference_map[source_id] = mapped
+                counts["skipped_identical"] += 1
+                continue
+            doi = row.get("doi")
+            candidates = []
+            if isinstance(doi, str) and doi:
+                candidates = [
+                    dict(existing)
+                    for existing in conn.execute(
+                        "SELECT * FROM reference WHERE doi=? ORDER BY id", (doi,)
+                    )
+                ]
+            if len(candidates) == 1:
+                existing = candidates[0]
+                differences = {
+                    key: {"existing": existing.get(key), "incoming": row.get(key)}
+                    for key in ("title", "authors_json", "year", "kind")
+                    if existing.get(key) != row.get(key)
+                }
+                if differences:
+                    conflicts.append(
+                        {"entity": "reference", "source_id": source_id, "doi": doi,
+                         "differences": differences, "resolution": "kept_existing"}
+                    )
+                destination_id = str(existing["id"])
+            elif len(candidates) > 1:
+                conflicts.append(
+                    {"entity": "reference", "source_id": source_id, "doi": doi,
+                     "resolution": "ambiguous_existing_match"}
+                )
+                continue
+            else:
+                destination_id = new_id()
+                status = row.get("status") if row.get("status") in {
+                    "unverified", "verified", "mismatch", "unknown"
+                } else "unverified"
+                conn.execute(
+                    "INSERT INTO reference VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                    (
+                        destination_id,
+                        str(row.get("title", "")),
+                        str(row.get("authors_json", "[]")),
+                        row.get("year") if isinstance(row.get("year"), int) else None,
+                        doi if isinstance(doi, str) and doi else None,
+                        str(row.get("kind", "article")),
+                        str(row.get("format", "review-packet")),
+                        "",
+                        canonical_json({"packet_sha256": packet_sha256, "source_id": source_id}),
+                        status,
+                        imported_at,
+                    ),
+                )
+                counts["references_inserted"] += 1
+            remember("reference", source_id, destination_id)
+            reference_map[source_id] = destination_id
+
+        record_map: dict[str, str] = {}
+        for row in records:
+            source_id = str(row.get("id", ""))
+            source_reference_id = str(row.get("reference_id", ""))
+            require(source_id and source_reference_id, "Packet review record is incomplete")
+            if source_reference_id not in reference_map:
+                conflicts.append(
+                    {"entity": "review_record", "source_id": source_id,
+                     "resolution": "reference_unresolved"}
+                )
+                continue
+            mapped = origin_lookup("review_record", source_id)
+            if mapped is not None:
+                record_map[source_id] = mapped
+                counts["skipped_identical"] += 1
+                continue
+            existing = conn.execute(
+                "SELECT * FROM review_records WHERE review_id=? AND reference_id=?",
+                (target_review_id, reference_map[source_reference_id]),
+            ).fetchone()
+            if existing is not None:
+                destination_id = str(existing["id"])
+                differences = {
+                    key: {"existing": existing[key], "incoming": row.get(key)}
+                    for key in ("study_id", "stage")
+                    if existing[key] != row.get(key)
+                }
+                if differences:
+                    conflicts.append(
+                        {"entity": "review_record", "source_id": source_id,
+                         "differences": differences, "resolution": "kept_existing"}
+                    )
+            else:
+                destination_id = new_id()
+                stage = row.get("stage") if row.get("stage") in {"title_abstract", "full_text"} \
+                    else "title_abstract"
+                conn.execute(
+                    "INSERT INTO review_records VALUES (?,?,?,?,?)",
+                    (
+                        destination_id,
+                        target_review_id,
+                        reference_map[source_reference_id],
+                        row.get("study_id") if isinstance(row.get("study_id"), str) else None,
+                        stage,
+                    ),
+                )
+                counts["records_inserted"] += 1
+            remember("review_record", source_id, destination_id)
+            record_map[source_id] = destination_id
+
+        for row in votes:
+            source_record = str(row.get("record_id", ""))
+            if source_record not in record_map:
+                conflicts.append(
+                    {"entity": "vote", "record_id": source_record,
+                     "resolution": "record_unresolved"}
+                )
+                continue
+            vote_key = (
+                target_review_id,
+                record_map[source_record],
+                str(row.get("reviewer", "")),
+                str(row.get("stage", "")),
+            )
+            existing = conn.execute(
+                "SELECT decision,reason,recorded_at FROM votes "
+                "WHERE review_id=? AND record_id=? AND reviewer=? AND stage=?",
+                vote_key,
+            ).fetchone()
+            vote_values = (row.get("decision"), row.get("reason"), row.get("recorded_at"))
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO votes VALUES (?,?,?,?,?,?,?)",
+                    (*vote_key, *vote_values),
+                )
+                counts["votes_inserted"] += 1
+            elif tuple(existing) == vote_values:
+                counts["skipped_identical"] += 1
+            else:
+                conflicts.append(
+                    {"entity": "vote", "record_id": source_record, "reviewer": vote_key[2],
+                     "stage": vote_key[3], "resolution": "kept_existing"}
+                )
+
+        for row in adjudications:
+            source_record = str(row.get("record_id", ""))
+            if source_record not in record_map:
+                conflicts.append(
+                    {"entity": "adjudication", "record_id": source_record,
+                     "resolution": "record_unresolved"}
+                )
+                continue
+            adjudication_key = (
+                target_review_id,
+                record_map[source_record],
+                str(row.get("stage", "")),
+            )
+            existing = conn.execute(
+                "SELECT decision,reason,adjudicator,recorded_at FROM adjudications "
+                "WHERE review_id=? AND record_id=? AND stage=?",
+                adjudication_key,
+            ).fetchone()
+            adjudication_values = (
+                row.get("decision"),
+                row.get("reason"),
+                row.get("adjudicator"),
+                row.get("recorded_at"),
+            )
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO adjudications VALUES (?,?,?,?,?,?,?)",
+                    (*adjudication_key, *adjudication_values),
+                )
+                counts["adjudications_inserted"] += 1
+            elif tuple(existing) == adjudication_values:
+                counts["skipped_identical"] += 1
+            else:
+                conflicts.append(
+                    {"entity": "adjudication", "record_id": source_record,
+                     "stage": adjudication_key[2],
+                     "resolution": "kept_existing"}
+                )
+
+        for row in extractions:
+            source_id = str(row.get("id", ""))
+            source_record = str(row.get("record_id", ""))
+            if not source_id or source_record not in record_map:
+                conflicts.append(
+                    {"entity": "extraction", "source_id": source_id,
+                     "resolution": "record_unresolved"}
+                )
+                continue
+            mapped = origin_lookup("extraction", source_id)
+            if mapped is not None:
+                counts["skipped_identical"] += 1
+                continue
+            destination_id = new_id()
+            source_anchor = row.get("source_anchor")
+            if source_anchor is not None:
+                warnings.append(
+                    {"entity": "extraction", "source_id": source_id,
+                     "warning": "source_anchor_omitted_from_packet"}
+                )
+            conn.execute(
+                "INSERT INTO extractions VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    destination_id,
+                    record_map[source_record],
+                    str(row.get("field_name", "")),
+                    str(row.get("value_json", "null")),
+                    row.get("unit") if isinstance(row.get("unit"), str) else None,
+                    None,
+                    str(row.get("reviewer", "packet-import")),
+                    str(row.get("recorded_at", imported_at)),
+                ),
+            )
+            remember("extraction", source_id, destination_id)
+            counts["extractions_inserted"] += 1
+
+        protocol_map: dict[str, str] = {}
+        for row in protocols:
+            source_id = str(row.get("id", ""))
+            require(source_id, "Packet protocol ID is missing")
+            mapped_protocol = origin_lookup("protocol", source_id)
+            if mapped_protocol is None:
+                mapped_protocol = protocol_map.setdefault(source_id, new_id())
+                remember("protocol", source_id, mapped_protocol)
+            destination_id = mapped_protocol
+            protocol_map[source_id] = destination_id
+            version = row.get("version")
+            require(type(version) is int and version > 0, "Packet protocol version is invalid")
+            existing = conn.execute(
+                "SELECT title,body_json,rationale,author,recorded_at FROM protocols "
+                "WHERE id=? AND version=?",
+                (destination_id, version),
+            ).fetchone()
+            protocol_values = (
+                str(row.get("title", "")),
+                str(row.get("body_json", "{}")),
+                str(row.get("rationale", "")),
+                str(row.get("author", "")),
+                str(row.get("recorded_at", imported_at)),
+            )
+            if existing is None:
+                conn.execute(
+                    "INSERT INTO protocols VALUES (?,?,?,?,?,?,?)",
+                    (destination_id, version, *protocol_values),
+                )
+                counts["protocol_versions_inserted"] += 1
+            elif tuple(existing) == protocol_values:
+                counts["skipped_identical"] += 1
+            else:
+                conflicts.append(
+                    {"entity": "protocol", "source_id": source_id, "version": version,
+                     "resolution": "kept_existing"}
+                )
+
+        conn.execute(
+            "INSERT INTO review_packet_imports VALUES (?,?,?,?,?,?,?,?,?)",
+            (
+                packet_sha256,
+                source_project_id,
+                source_review_id,
+                target_review_id,
+                canonical_json(manifest),
+                canonical_json(conflicts),
+                canonical_json(warnings),
+                imported_at,
+                actor.strip(),
+            ),
+        )
+
+    _, revision = store.mutate(
+        "review.packet_merge",
+        {
+            "packet_sha256": packet_sha256,
+            "source_project_id": source_project_id,
+            "source_review_id": source_review_id,
+            "destination_review_id": target_review_id,
+        },
+        persist,
+        expected_revision=expected_revision,
+        actor=actor.strip(),
+    )
+    return {
+        "packet_sha256": packet_sha256,
+        "source_project_id": source_project_id,
+        "source_review_id": source_review_id,
+        "destination_review_id": target_review_id,
+        "project_revision": revision,
+        "counts": counts,
+        "conflicts": conflicts,
+        "conflict_count": len(conflicts),
+        "warnings": warnings,
+        "silent_overwrite": False,
+        "redaction_count": int(manifest.get("redaction_count", 0)),
+        "already_merged": False,
+    }
 
 
 def selective_clone(
