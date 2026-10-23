@@ -37,6 +37,7 @@ from .datasets import (
     import_csv,
     import_table,
     page,
+    scan_parquet_page,
     set_variable,
 )
 from .diagnostics import ols_diagnostics, variance_inflation
@@ -144,6 +145,7 @@ class AnalysisFacade:
     def capability_manifest(self) -> list[Mapping[str, Any]]:
         names = {
             "dataset.import": "local-write",
+            "dataset.scan_parquet": "read",
             "dataset.inspect": "read",
             "dataset.page": "read",
             "dataset.view": "read",
@@ -457,6 +459,16 @@ class AnalysisFacade:
                 language=language,
                 timeout_seconds=timeout_seconds,
                 directory=self.host_paths.execution_directory(),
+            )
+        elif operation == "dataset.scan_parquet":
+            path = self.host_paths.import_file(str(arguments["filename"]))
+            require(path.suffix.lower() == ".parquet", "Parquet scan requires a .parquet source")
+            data = scan_parquet_page(
+                path,
+                offset=int(arguments.get("offset", 0)),
+                limit=int(arguments.get("limit", 100)),
+                columns=list(arguments["columns"]) if "columns" in arguments else None,
+                batch_size=int(arguments.get("batch_size", 65_536)),
             )
         elif operation == "dataset.import":
             path = self.host_paths.import_file(str(arguments["filename"]))

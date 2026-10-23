@@ -554,6 +554,97 @@ def import_table(
     )
 
 
+def scan_parquet_page(
+    path: Path,
+    *,
+    offset: int = 0,
+    limit: int = 100,
+    columns: list[str] | None = None,
+    batch_size: int = 65_536,
+) -> dict[str, Any]:
+    """Read one bounded Parquet page without materializing the complete table.
+
+    The scan validates file-level row/column budgets from Parquet metadata, then
+    converts only the requested slice of each Arrow batch to Python objects.
+    This path is intended for large-table inspection before an analyst chooses
+    whether to create an in-memory immutable Dataset revision.
+    """
+
+    require(path.is_file(), "Parquet source does not exist", "NOT_FOUND")
+    require(path.stat().st_size <= MAX_BYTES, "Source exceeds byte budget", "RESOURCE_LIMIT")
+    require(offset >= 0 and 1 <= limit <= 10_000, "Invalid Parquet page range")
+    require(1 <= batch_size <= 65_536, "Parquet batch size outside supported range")
+    try:
+        import pyarrow.parquet as pq
+    except ImportError as exc:
+        raise AnalysisError("DEPENDENCY_MISSING", "Reader for parquet is not installed") from exc
+    try:
+        parquet = pq.ParquetFile(path)
+        metadata = parquet.metadata
+        require(
+            metadata.num_rows <= MAX_ROWS and metadata.num_columns <= MAX_COLUMNS,
+            "Parquet metadata exceeds row/column budget",
+            "RESOURCE_LIMIT",
+        )
+        available = [str(name) for name in parquet.schema_arrow.names]
+        require(
+            len(available) == len(set(available)) and all(available),
+            "Duplicate/empty columns prohibited",
+        )
+        selected = available if columns is None else [str(value) for value in columns]
+        require(bool(selected), "At least one Parquet column required")
+        require(len(selected) == len(set(selected)), "Duplicate Parquet scan columns")
+        require(set(selected) <= set(available), "Unknown Parquet scan column", "NOT_FOUND")
+        require(len(selected) <= MAX_COLUMNS, "Too many selected columns", "RESOURCE_LIMIT")
+        rows: list[dict[str, Any]] = []
+        seen = 0
+        converted_rows = 0
+        for batch in parquet.iter_batches(batch_size=batch_size, columns=selected):
+            batch_rows = batch.num_rows
+            batch_start = seen
+            batch_end = seen + batch_rows
+            seen = batch_end
+            if batch_end <= offset:
+                continue
+            local_start = max(offset - batch_start, 0)
+            remaining = limit - len(rows)
+            if remaining <= 0:
+                break
+            local_length = min(batch_rows - local_start, remaining)
+            if local_length <= 0:
+                continue
+            sliced = batch.slice(local_start, local_length)
+            converted = sliced.to_pylist()
+            converted_rows += len(converted)
+            rows.extend(
+                {str(key): value for key, value in record.items()} for record in converted
+            )
+            if len(rows) >= limit:
+                break
+        schema = {
+            name: str(parquet.schema_arrow.field(available.index(name)).type) for name in selected
+        }
+        return {
+            "format": "parquet",
+            "reader": "pyarrow.iter_batches_slice",
+            "offset": offset,
+            "limit": limit,
+            "total_rows": int(metadata.num_rows),
+            "total_columns": int(metadata.num_columns),
+            "columns": selected,
+            "schema": schema,
+            "rows": rows,
+            "returned_rows": len(rows),
+            "converted_python_rows": converted_rows,
+            "batch_size": batch_size,
+            "materialized_entire_table": False,
+        }
+    except AnalysisError:
+        raise
+    except (ValueError, TypeError, OSError) as exc:
+        raise AnalysisError("INVALID_INPUT", "Could not scan parquet source") from exc
+
+
 def revise(
     dataset: Dataset,
     records: list[dict[str, Any]],

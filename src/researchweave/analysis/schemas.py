@@ -107,6 +107,10 @@ IDENTITY = {"dataset_id": S, "revision": S}
 
 OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "dataset.import": _schema({"filename": S}, {"options": OBJ}),
+    "dataset.scan_parquet": _schema(
+        {"filename": S},
+        {"offset": INT, "limit": INT, "columns": AS, "batch_size": INT},
+    ),
     "dataset.inspect": _schema(IDENTITY, {"offset": INT, "limit": INT}),
     "dataset.page": _schema(IDENTITY, {"offset": INT, "limit": INT}),
     "dataset.view": _schema(

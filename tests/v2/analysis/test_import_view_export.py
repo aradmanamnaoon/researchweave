@@ -13,6 +13,7 @@ from researchweave.analysis.datasets import (
     export_csv,
     import_csv,
     import_table,
+    scan_parquet_page,
 )
 from researchweave.analysis.errors import AnalysisError
 
@@ -127,6 +128,41 @@ def test_parquet_uses_batched_reader_and_preserves_nullable_values(tmp_path: Pat
     assert dataset.operation["batch_size"] == 65_536
     assert dataset.records[1]["x"] is None
     assert dataset.variables[0].dtype == "number"
+
+
+def test_parquet_page_scan_converts_only_requested_rows(tmp_path: Path):
+    path = tmp_path / "large.parquet"
+    table = pa.table(
+        {
+            "id": pa.array(range(100_000), type=pa.int32()),
+            "value": pa.array((index % 17 for index in range(100_000)), type=pa.int16()),
+        }
+    )
+    pq.write_table(table, path, row_group_size=10_000)
+    page = scan_parquet_page(path, offset=54_321, limit=23, columns=["id"])
+    assert page["total_rows"] == 100_000
+    assert page["returned_rows"] == 23
+    assert page["converted_python_rows"] == 23
+    assert page["materialized_entire_table"] is False
+    assert page["columns"] == ["id"]
+    assert [row["id"] for row in page["rows"]] == list(range(54_321, 54_344))
+
+
+def test_facade_parquet_scan_is_bounded_to_host_import_root(tmp_path: Path):
+    from researchweave.analysis import build_analysis_facade
+
+    path = tmp_path / "page.parquet"
+    pq.write_table(pa.table({"x": [1, 2, 3]}), path)
+    facade = build_analysis_facade(tmp_path / "store", import_root=tmp_path)
+    scanned = facade.execute(
+        "dataset.scan_parquet", {"filename": path.name, "limit": 2}, {"request_id": "scan"}
+    )
+    assert scanned["status"] == "ok"
+    assert scanned["data"]["rows"] == [{"x": 1}, {"x": 2}]
+    escaped = facade.execute(
+        "dataset.scan_parquet", {"filename": "../outside.parquet"}, {"request_id": "escape"}
+    )
+    assert escaped["error"]["code"] == "PERMISSION_DENIED"
 
 
 def test_xlsx_sheet_range_and_formula_policy(tmp_path: Path):
