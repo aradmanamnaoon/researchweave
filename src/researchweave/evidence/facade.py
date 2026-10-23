@@ -63,10 +63,16 @@ from .storage import ProjectStore
 from .study_registry import StudyRegistryService
 from .synthesis import Finding, SynthesisService
 from .timeline import research_timeline, timeline_json
+from .workspace_integrity import scan_workspace
 from .writing import WritingService
 
 # effect, required arguments, description
 OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
+    "workspace.integrity": (
+        "read",
+        (),
+        "Audit project index archives dependencies and project integrity without writes",
+    ),
     "project.create": ("local-write", ("title", "question", "design"), "Create a local project"),
     "project.wizard_preview": (
         "read", ("title", "question", "design"),
@@ -662,6 +668,8 @@ class EvidenceFacade:
 
     def _dispatch(self, operation: str, args: Mapping[str, Any],
                   expected: int | None) -> Any:
+        if operation == "workspace.integrity":
+            return scan_workspace(self.workspace_root)
         if operation == "question.feedback":
             return question_feedback(_value(args, "question", str),
                                      _value(args, "framework", str),
