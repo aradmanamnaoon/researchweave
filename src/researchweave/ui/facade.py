@@ -34,6 +34,8 @@ from .evidence import (
     inspect_anchor,
     inspect_claim,
 )
+from .i18n import Localizer, validate_catalog
+from .presets import WORKSPACE_SCREENS, decode_presets, delete_preset, save_preset
 from .recovery import RecoveryJournal
 from .release import inspect_submission, submission_markdown
 from .research_guides import (
@@ -247,6 +249,10 @@ class UIFacade:
             "ui.activity.list": ("Read local audit history", Effect.READ),
             "ui.preferences.read": ("Read desktop preferences", Effect.READ),
             "ui.preferences.update": ("Save validated preferences", Effect.WRITE),
+            "ui.localization.read": ("Read locale fallback and layout direction", Effect.READ),
+            "ui.workspace.preset.list": ("List validated workspace presets", Effect.READ),
+            "ui.workspace.preset.save": ("Save validated workspace preset", Effect.WRITE),
+            "ui.workspace.preset.delete": ("Delete local workspace preset", Effect.WRITE),
             "ui.export.preview": ("Preview an offline export", Effect.READ),
             "ui.export.write": ("Write approved export under host root", Effect.WRITE),
             "ui.backup.plan": ("Preview project snapshot", Effect.READ),
@@ -301,7 +307,9 @@ class UIFacade:
             "ui.project.list", "ui.project.create", "ui.project.open",
             "ui.templates.list", "ui.guidance.search", "ui.backup.list",
             "ui.backup.inspect", "ui.backup.restore", "ui.preferences.read",
-            "ui.preferences.update", "ui.agent.propose", "ui.agent.deny",
+            "ui.preferences.update", "ui.localization.read", "ui.workspace.preset.list",
+            "ui.workspace.preset.save", "ui.workspace.preset.delete",
+            "ui.agent.propose", "ui.agent.deny",
         )
         for name in no_project:
             schemas[name] = {}
@@ -368,6 +376,8 @@ class UIFacade:
         }
         schemas["ui.notification.dismiss"] |= {"notification_id": string}
         schemas["ui.prisma.update"] |= {"flow": {"type": "object"}}
+        schemas["ui.workspace.preset.save"] = {"preset": {"type": "object"}}
+        schemas["ui.workspace.preset.delete"] = {"preset_id": string}
         return schemas
 
     def health(self) -> Mapping[str, Any]:
@@ -1410,6 +1420,53 @@ class UIFacade:
         updated = replace(current, **args)
         self.settings.save(updated)
         return {"preferences": asdict(updated)}
+
+    def _do_ui_localization_read(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        localizer = Localizer(self.settings.load().locale)
+        return {
+            "localization": localizer.metadata(),
+            "catalog": validate_catalog(),
+        }
+
+    def _do_ui_workspace_preset_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        preferences = self.settings.load()
+        presets, warnings = decode_presets(
+            preferences.workspace_presets, known_screens=WORKSPACE_SCREENS
+        )
+        return {
+            "presets": [asdict(item) for item in presets],
+            "warnings": warnings,
+        }
+
+    def _do_ui_workspace_preset_save(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        raw = args.get("preset")
+        if not isinstance(raw, dict):
+            raise UIError("INVALID_INPUT", "Workspace preset must be a structured object.",
+                          "Use the workspace preset controls.")
+        preferences = self.settings.load()
+        saved, preset, warnings = save_preset(
+            preferences.workspace_presets, raw, known_screens=WORKSPACE_SCREENS
+        )
+        preferences.workspace_presets = saved
+        self.settings.save(preferences)
+        return {
+            "preset": asdict(preset),
+            "presets": saved,
+            "warnings": warnings,
+        }
+
+    def _do_ui_workspace_preset_delete(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        preset_id = _string(args, "preset_id", 60)
+        preferences = self.settings.load()
+        remaining, deleted, warnings = delete_preset(
+            preferences.workspace_presets, preset_id, known_screens=WORKSPACE_SCREENS
+        )
+        if not deleted:
+            raise UIError("NOT_FOUND", "Workspace preset was not found.",
+                          "Refresh the preset list.")
+        preferences.workspace_presets = remaining
+        self.settings.save(preferences)
+        return {"deleted": True, "presets": remaining, "warnings": warnings}
 
     def _export_payload(self, args: Mapping[str, Any]) -> tuple[str, str]:
         project = _required_project(args, self.store)

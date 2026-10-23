@@ -208,6 +208,29 @@ class PreferenceStore:
         if not 150 <= preferences.sidebar_width <= 480:
             raise UIError("INVALID_INPUT", "Sidebar width is outside allowed limits.",
                           "Choose a width between 150 and 480.")
+        if not 760 <= preferences.window_width <= 7680:
+            raise UIError("INVALID_INPUT", "Window width is outside allowed limits.",
+                          "Use a desktop window width between 760 and 7680 pixels.")
+        if not 490 <= preferences.window_height <= 4320:
+            raise UIError("INVALID_INPUT", "Window height is outside allowed limits.",
+                          "Use a desktop window height between 490 and 4320 pixels.")
+        if not isinstance(preferences.locale, str) or not 1 <= len(preferences.locale) <= 40:
+            raise UIError("INVALID_INPUT", "Locale identifier is invalid.",
+                          "Use a language tag such as en or fa-IR.")
+        if len(preferences.workspace_presets) > 50:
+            raise UIError("RESOURCE_LIMIT", "Too many workspace presets.",
+                          "Delete an old preset before saving another.")
+        if not all(isinstance(item, dict) for item in preferences.workspace_presets):
+            raise UIError("INVALID_INPUT", "Workspace preset storage is corrupt.",
+                          "Reset the saved workspace presets.")
+        if not all(isinstance(key, str) and isinstance(value, bool)
+                   for key, value in preferences.panel_visibility.items()):
+            raise UIError("INVALID_INPUT", "Panel visibility settings are invalid.",
+                          "Reset the workspace layout.")
+        if not all(isinstance(key, str) and isinstance(value, int)
+                   for key, value in preferences.panel_sizes.items()):
+            raise UIError("INVALID_INPUT", "Panel size settings are invalid.",
+                          "Reset the workspace layout.")
 
     def save(self, preferences: Preferences) -> None:
         self.validate(preferences)

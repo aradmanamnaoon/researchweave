@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QCloseEvent, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -34,21 +35,15 @@ from PyQt6.QtWidgets import (
 from .contracts import Preferences, UIError
 from .design import apply_theme, named
 from .facade import UIFacade
+from .i18n import Localizer
 from .jobs import JobManager
 from .models import ResearchTableModel
 from .pdf_reader import PDFReader
+from .presets import WORKSPACE_SCREENS
 from .text_offsets import qt_range_to_codepoints
 from .visualization import Bin, ChartSpec, HistogramWidget
 
-SCREENS = (
-    "Dashboard", "Search", "Protocol", "Library", "Reader", "PDF Reader", "Evidence",
-    "Review",
-    "Data View", "Variable View",
-    "Statistics", "Qualitative", "Manuscript", "Notebook", "Publishing",
-    "Agent", "Privacy",
-    "Exports", "Backups", "Recovery", "Diagnostics", "Jobs", "Guidance",
-    "Preferences", "Activity", "About",
-)
+SCREENS = WORKSPACE_SCREENS
 
 
 def button(text: str, callback: Callable[..., Any], *,
@@ -88,10 +83,29 @@ class CommandPalette(QDialog):
 
     def refresh(self, query: str) -> None:
         self.results.clear()
-        actions = ("Create project", "Import text source", "Search library", "Export preview")
-        self.results.addItems(
-            [name for name in (*SCREENS, *actions) if query.casefold() in name.casefold()]
+        parent = self.parent()
+        if not isinstance(parent, ResearchWindow):
+            return
+        entries = parent.command_entries()
+        exact_screen = next(
+            (
+                entry for entry in entries
+                if entry["kind"] == "screen"
+                and entry["value"].casefold() == query.strip().casefold()
+            ),
+            None,
         )
+        if exact_screen is not None:
+            entries = [exact_screen]
+        for entry in entries:
+            searchable = f"{entry['label']} {entry.get('summary', '')}".casefold()
+            if query.casefold() not in searchable:
+                continue
+            suffix = "" if entry["enabled"] else f" · disabled: {entry['reason']}"
+            item = QListWidgetItem(f"{entry['label']}{suffix}")
+            item.setData(Qt.ItemDataRole.UserRole, entry)
+            item.setToolTip(entry.get("summary", "") or entry.get("reason", ""))
+            self.results.addItem(item)
         if self.results.count():
             self.results.setCurrentRow(0)
 
@@ -99,21 +113,15 @@ class CommandPalette(QDialog):
         current = self.results.currentItem()
         if current is None:
             return
-        name = current.text()
-        self.accept()
         parent = self.parent()
-        if isinstance(parent, ResearchWindow):
-            if name in SCREENS:
-                parent.navigate(name)
-            elif name == "Create project":
-                parent.create_project()
-            elif name == "Import text source":
-                parent.import_source()
-            elif name == "Search library":
-                parent.navigate("Library")
-                parent.search.setFocus()
-            elif name == "Export preview":
-                parent.navigate("Exports")
+        if not isinstance(parent, ResearchWindow):
+            return
+        entry = current.data(Qt.ItemDataRole.UserRole)
+        if not entry["enabled"]:
+            parent._set_status(entry["reason"])
+            return
+        self.accept()
+        parent.execute_palette_entry(entry)
 
 
 class ResearchWindow(QMainWindow):
@@ -127,19 +135,21 @@ class ResearchWindow(QMainWindow):
         self.current_dataset_id = ""
         self._editor_loading = False
         self.protocol_fields: dict[str, QPlainTextEdit] = {}
+        self.extraction_pending_fields: list[dict[str, Any]] = []
+        self.extraction_value_widgets: dict[str, QWidget] = {}
         self.jobs = JobManager()
         self.jobs.error.connect(lambda _key, message: self._set_status(message))
         self.jobs.changed.connect(lambda key, state: self._set_status(f"{key}: {state}"))
         self.setWindowTitle("ResearchWeave · Local research desktop")
         self.setMinimumSize(760, 490)
-        self.resize(1260, 780)
+        self.resize(max(760, self.prefs.window_width), max(490, self.prefs.window_height))
         self._build()
         self._draft_timers: dict[str, QTimer] = {}
         for field, editor in (("manuscript", self.manuscript_editor),
                               ("notebook", self.notebook_editor)):
             timer = QTimer(self)
             timer.setSingleShot(True)
-            timer.setInterval(600)
+            timer.setInterval(250)
             timer.timeout.connect(lambda which=field: self._journal_editor(which))
             editor.textChanged.connect(lambda which=field: self._schedule_journal(which))
             self._draft_timers[field] = timer
@@ -149,8 +159,13 @@ class ResearchWindow(QMainWindow):
         self.refresh_projects()
         if self.project_id:
             self.open_project(self.project_id)
-        self.navigate(self.prefs.selected_screen if self.prefs.selected_screen in SCREENS
-                      else "Dashboard")
+        if not self.prefs.onboarding_complete:
+            self.navigate("Welcome")
+        else:
+            self.navigate(
+                self.prefs.selected_screen if self.prefs.selected_screen in SCREENS
+                else "Dashboard"
+            )
         self._set_status("Offline-ready · no AI credentials required")
 
     def _build(self) -> None:
@@ -164,6 +179,11 @@ class ResearchWindow(QMainWindow):
         side = QVBoxLayout(sidebar)
         side.addWidget(heading("researchweave"))
         side.addWidget(QLabel("Private by default · local workspace"))
+        self.project_search = QLineEdit()
+        self.project_search.setPlaceholderText("Find local projects")
+        named(self.project_search, "Search recent local projects")
+        self.project_search.textChanged.connect(self.refresh_projects)
+        side.addWidget(self.project_search)
         self.project_picker = QComboBox()
         named(self.project_picker, "Current project")
         self.project_picker.currentIndexChanged.connect(self._selected_project)
@@ -193,6 +213,9 @@ class ResearchWindow(QMainWindow):
         self._shortcut("Ctrl+S", self.save_active)
         self._shortcut("Ctrl+1", lambda: self.navigate("Dashboard"))
         self._shortcut("Ctrl+2", lambda: self.navigate("Library"))
+        self._shortcut("Ctrl+L", lambda: self.navigate("Library"))
+        self._shortcut("Ctrl+Shift+E", lambda: self.navigate("Exports"))
+        self._shortcut("F1", lambda: self.navigate("Shortcuts"))
 
     def _shortcut(self, keys: str, callback: Callable[..., Any]) -> None:
         action = QAction(keys, self)
@@ -215,6 +238,29 @@ class ResearchWindow(QMainWindow):
         return layout
 
     def _build_pages(self) -> None:
+        layout = self._page(
+            "Welcome",
+            "ResearchWeave works locally without an account, API key or AI provider. "
+            "Start with your own question or open a clearly labeled synthetic demo.",
+        )
+        self.welcome_status = QLabel(
+            "Beginner path: create project → structure question → add a source → "
+            "screen/capture evidence → write notes → preview export."
+        )
+        self.welcome_status.setWordWrap(True)
+        layout.addWidget(self.welcome_status)
+        layout.addWidget(button("Create my first project", self.create_project, primary=True))
+        layout.addWidget(button("Open synthetic local demo", self.create_local_demo))
+        layout.addWidget(button("Show research-question tutorial",
+                                lambda: self.navigate("Question")))
+        layout.addWidget(button("Finish first-run guide", self.finish_onboarding))
+        self.welcome_privacy = QLabel(
+            "No provider is required. Demo content is synthetic and is not a research finding."
+        )
+        self.welcome_privacy.setWordWrap(True)
+        layout.addWidget(self.welcome_privacy)
+        layout.addStretch()
+
         layout = self._page("Dashboard", "Start with a research question. Your work stays local.")
         self.dashboard = QLabel("Choose a project or create a new one.")
         self.dashboard.setWordWrap(True)
@@ -225,6 +271,39 @@ class ResearchWindow(QMainWindow):
         self.tutorial = QLabel("First steps: create project → add source → notes → export")
         layout.addWidget(self.tutorial)
         layout.addStretch()
+
+        layout = self._page(
+            "Question",
+            "Build an editable research question from explicit user-entered components. "
+            "The structure guides planning and does not certify scientific validity.",
+        )
+        self.question_topic = QLineEdit()
+        self.question_population = QLineEdit()
+        self.question_exposure = QLineEdit()
+        self.question_outcome = QLineEdit()
+        self.question_type = QComboBox()
+        self.question_type.addItems([
+            "descriptive", "association", "causal", "prediction", "qualitative",
+            "systematic-review", "mixed-methods",
+        ])
+        self.question_editable = QPlainTextEdit()
+        self.question_editable.setMaximumHeight(110)
+        question_form = QFormLayout()
+        for label, widget in (
+            ("Topic", self.question_topic),
+            ("Population / context", self.question_population),
+            ("Exposure / intervention / phenomenon", self.question_exposure),
+            ("Outcome / target", self.question_outcome),
+            ("Question type", self.question_type),
+            ("Editable question", self.question_editable),
+        ):
+            named(widget, label)
+            question_form.addRow(label, widget)
+        layout.addLayout(question_form)
+        layout.addWidget(button("Save structured question", self.save_question, primary=True))
+        self.question_status = QLabel("Open a project to structure its research question.")
+        self.question_status.setWordWrap(True)
+        layout.addWidget(self.question_status)
 
         layout = self._page(
             "Search",
@@ -339,13 +418,29 @@ class ResearchWindow(QMainWindow):
         named(self.claim_details, "Claim support limitations and verification warnings")
         layout.addWidget(self.claim_details)
 
-        layout = self._page("Review", "Screen included and excluded sources with a reason.")
+        layout = self._page(
+            "Review",
+            "Record independent reviewer decisions. Local aliases separate sessions but do not "
+            "authenticate reviewer identity.",
+        )
+        reviewer_row = QHBoxLayout()
+        self.reviewer_alias = QLineEdit("Reviewer 1")
+        named(self.reviewer_alias, "Local reviewer alias",
+              "A local session label only; this is not authenticated identity.")
+        reviewer_row.addWidget(QLabel("Reviewer alias"))
+        reviewer_row.addWidget(self.reviewer_alias)
+        layout.addLayout(reviewer_row)
         self.review_summary = QLabel("No screening decisions.")
+        self.review_summary.setWordWrap(True)
         layout.addWidget(self.review_summary)
         self.review_filter = QComboBox()
-        self.review_filter.addItems(["All", "pending", "include", "exclude", "unsure"])
+        self.review_filter.addItems([
+            "All", "pending", "needs-your-review", "awaiting-second",
+            "conflict", "agreed", "adjudicated",
+        ])
         named(self.review_filter, "Review queue decision filter")
         self.review_filter.currentTextChanged.connect(self.refresh_review)
+        self.reviewer_alias.textChanged.connect(self.refresh_review)
         layout.addWidget(self.review_filter)
         self.review_queue = QListWidget()
         named(self.review_queue, "Select a source to review")
@@ -358,7 +453,99 @@ class ResearchWindow(QMainWindow):
         for status in ("include", "exclude", "unsure"):
             layout.addWidget(button(f"Screen: {status.title()}",
                                     lambda _checked=False, choice=status: self.vote(choice)))
+        self.adjudicator_alias = QLineEdit()
+        self.adjudicator_alias.setPlaceholderText("Independent adjudicator alias")
+        named(self.adjudicator_alias, "Independent adjudicator alias")
+        layout.addWidget(self.adjudicator_alias)
+        self.adjudication_choice = QComboBox()
+        self.adjudication_choice.addItems(["include", "exclude", "unsure"])
+        named(self.adjudication_choice, "Final adjudication decision")
+        layout.addWidget(self.adjudication_choice)
+        self.adjudication_reason = QLineEdit()
+        self.adjudication_reason.setPlaceholderText("Adjudication rationale")
+        named(self.adjudication_reason, "Adjudication rationale")
+        layout.addWidget(self.adjudication_reason)
+        layout.addWidget(button("Adjudicate selected conflict", self.adjudicate_selected))
         layout.addStretch()
+
+        layout = self._page(
+            "PRISMA",
+            "Record only review-flow counts you actually know. Unknown stages remain unknown "
+            "and are never inferred from unrelated screening events.",
+        )
+        self.prisma_fields: dict[str, QLineEdit] = {}
+        prisma_form = QFormLayout()
+        for key, label in (
+            ("records_identified", "Records identified"),
+            ("duplicates_removed", "Duplicates removed"),
+            ("records_screened", "Records screened"),
+            ("records_excluded", "Records excluded"),
+            ("reports_sought", "Reports sought"),
+            ("reports_not_retrieved", "Reports not retrieved"),
+            ("reports_assessed", "Reports assessed for eligibility"),
+            ("reports_excluded", "Reports excluded"),
+            ("studies_included", "Studies included"),
+        ):
+            field = QLineEdit()
+            field.setPlaceholderText("Unknown")
+            named(field, f"PRISMA {label}")
+            self.prisma_fields[key] = field
+            prisma_form.addRow(label, field)
+        layout.addLayout(prisma_form)
+        self.prisma_reasons = QLineEdit()
+        self.prisma_reasons.setPlaceholderText("Reason=3; Other reason=1")
+        named(self.prisma_reasons, "PRISMA exclusion reason counts")
+        layout.addWidget(self.prisma_reasons)
+        layout.addWidget(button("Save measured review-flow events", self.save_prisma, primary=True))
+        layout.addWidget(button("Refresh PRISMA state", self.refresh_prisma))
+        self.prisma_summary = QPlainTextEdit()
+        self.prisma_summary.setReadOnly(True)
+        named(self.prisma_summary, "Grounded PRISMA flow summary")
+        layout.addWidget(self.prisma_summary)
+
+        layout = self._page(
+            "Extraction",
+            "Build a versioned extraction form, then record validated values against an "
+            "imported source.",
+        )
+        self.extraction_title = QLineEdit("Study extraction")
+        named(self.extraction_title, "Extraction form title")
+        layout.addWidget(self.extraction_title)
+        extraction_builder = QFormLayout()
+        self.extraction_field_name = QLineEdit()
+        self.extraction_field_type = QComboBox()
+        self.extraction_field_type.addItems(
+            ["text", "integer", "float", "categorical", "boolean", "date", "source-passage"]
+        )
+        self.extraction_required = QCheckBox("Required")
+        self.extraction_categories = QLineEdit()
+        self.extraction_categories.setPlaceholderText("category A, category B")
+        for label, widget in (
+            ("Field name", self.extraction_field_name),
+            ("Field type", self.extraction_field_type),
+            ("Categories", self.extraction_categories),
+        ):
+            named(widget, f"Extraction {label.lower()}")
+            extraction_builder.addRow(label, widget)
+        extraction_builder.addRow("", self.extraction_required)
+        layout.addLayout(extraction_builder)
+        layout.addWidget(button("Add field to form", self.add_extraction_field))
+        self.extraction_fields_list = QListWidget()
+        named(self.extraction_fields_list, "Pending extraction form fields")
+        layout.addWidget(self.extraction_fields_list)
+        layout.addWidget(button("Save versioned extraction form", self.save_extraction_schema,
+                                primary=True))
+        self.extraction_source = QComboBox()
+        named(self.extraction_source, "Source for extraction record")
+        layout.addWidget(self.extraction_source)
+        self.extraction_record_widget = QWidget()
+        self.extraction_record_form = QFormLayout(self.extraction_record_widget)
+        named(self.extraction_record_widget, "Extraction record fields")
+        layout.addWidget(self.extraction_record_widget)
+        layout.addWidget(button("Save extraction record", self.save_extraction_record))
+        self.extraction_records = QListWidget()
+        named(self.extraction_records, "Saved extraction records")
+        layout.addWidget(self.extraction_records)
 
         layout = self._page("Data View", "Import a small local CSV; cells stay in a virtual table.")
         layout.addWidget(button("Import CSV text", self.import_csv, primary=True))
@@ -381,10 +568,37 @@ class ResearchWindow(QMainWindow):
         self.data_total = 0
         self.data_page_size = 250
 
-        layout = self._page("Variable View", "Choose a column and inspect its raw values.")
+        layout = self._page(
+            "Variable View",
+            "Inspect inferred structure and save explicit variable type, role, units and "
+            "missing-code metadata.",
+        )
         self.variable_list = QListWidget()
         named(self.variable_list, "Variables available for descriptive statistics")
+        self.variable_list.currentItemChanged.connect(self.load_variable_metadata)
         layout.addWidget(self.variable_list)
+        variable_form = QFormLayout()
+        self.variable_type = QComboBox()
+        self.variable_type.addItems(["numeric", "categorical", "boolean", "date", "text"])
+        self.variable_role = QComboBox()
+        self.variable_role.addItems(
+            ["outcome", "predictor", "group", "confounder", "identifier", "weight", "other"]
+        )
+        self.variable_units = QLineEdit()
+        self.variable_levels = QLineEdit()
+        self.variable_levels.setPlaceholderText("level A, level B")
+        self.variable_missing = QLineEdit()
+        self.variable_missing.setPlaceholderText("NA, -99")
+        self.variable_description = QLineEdit()
+        for label, widget in (
+            ("Type", self.variable_type), ("Role", self.variable_role),
+            ("Units", self.variable_units), ("Categorical levels", self.variable_levels),
+            ("Missing codes", self.variable_missing), ("Description", self.variable_description),
+        ):
+            named(widget, f"Variable metadata {label.lower()}")
+            variable_form.addRow(label, widget)
+        layout.addLayout(variable_form)
+        layout.addWidget(button("Save variable metadata", self.save_variable_metadata))
 
         layout = self._page("Statistics", "Descriptive summaries; missing values are reported.")
         self.variable_picker = QComboBox()
@@ -398,6 +612,24 @@ class ResearchWindow(QMainWindow):
         self.stats_result.setReadOnly(True)
         named(self.stats_result, "Text alternative for numeric summary")
         layout.addWidget(self.stats_result)
+        self.analysis_method = QComboBox()
+        named(self.analysis_method, "Scientific analysis method")
+        layout.addWidget(self.analysis_method)
+        layout.addWidget(button("Run selected analysis", self.run_analysis))
+
+        layout = self._page(
+            "Analysis Results",
+            "Review versioned scientific results with method, inputs, assumptions, warnings, "
+            "uncertainty, diagnostics and provenance.",
+        )
+        self.analysis_results_list = QListWidget()
+        named(self.analysis_results_list, "Versioned analysis results")
+        self.analysis_results_list.currentItemChanged.connect(self.inspect_analysis_result)
+        layout.addWidget(self.analysis_results_list)
+        self.analysis_result_detail = QPlainTextEdit()
+        self.analysis_result_detail.setReadOnly(True)
+        named(self.analysis_result_detail, "Selected analysis result provenance")
+        layout.addWidget(self.analysis_result_detail)
 
         layout = self._page("Qualitative", "Code Unicode spans with original source offsets.")
         layout.addWidget(button("Code selection in Reader", self.annotate_selection))
@@ -405,11 +637,109 @@ class ResearchWindow(QMainWindow):
         named(self.annotation_list, "Saved text annotations")
         layout.addWidget(self.annotation_list)
 
+        layout = self._page(
+            "Codebook",
+            "Manage qualitative codes and preserve recoding history when codes are merged.",
+        )
+        self.codebook_list = QListWidget()
+        named(self.codebook_list, "Qualitative codebook")
+        layout.addWidget(self.codebook_list)
+        code_form = QFormLayout()
+        self.code_name = QLineEdit()
+        self.code_description = QLineEdit()
+        self.code_inclusion = QLineEdit()
+        self.code_exclusion = QLineEdit()
+        self.code_marker = QLineEdit("●")
+        for label, widget in (
+            ("Name", self.code_name), ("Description", self.code_description),
+            ("Inclusion rule", self.code_inclusion), ("Exclusion rule", self.code_exclusion),
+            ("Text marker", self.code_marker),
+        ):
+            named(widget, f"Codebook {label.lower()}")
+            code_form.addRow(label, widget)
+        layout.addLayout(code_form)
+        layout.addWidget(button("Create code", self.save_code, primary=True))
+        self.code_merge_sources = QLineEdit()
+        self.code_merge_sources.setPlaceholderText("source code IDs separated by commas")
+        self.code_merge_target = QLineEdit()
+        self.code_merge_target.setPlaceholderText("target code ID")
+        self.code_merge_note = QLineEdit()
+        self.code_merge_note.setPlaceholderText("why this merge is appropriate")
+        named(self.code_merge_sources, "Code IDs to merge")
+        named(self.code_merge_target, "Target code ID for merge")
+        named(self.code_merge_note, "Code merge conflict resolution note")
+        layout.addWidget(self.code_merge_sources)
+        layout.addWidget(self.code_merge_target)
+        layout.addWidget(self.code_merge_note)
+        layout.addWidget(button("Merge codes with trace", self.merge_codes_ui))
+
+        layout = self._page(
+            "Mixed Methods",
+            "Link qualitative and quantitative evidence while preserving units, groups and "
+            "method-specific limitations.",
+        )
+        mixed_form = QFormLayout()
+        self.mixed_qual_refs = QLineEdit()
+        self.mixed_quant_refs = QLineEdit()
+        self.mixed_relation = QComboBox()
+        self.mixed_relation.addItems(["converges", "diverges", "complements", "uncertain"])
+        self.mixed_units = QLineEdit()
+        self.mixed_groups = QLineEdit()
+        self.mixed_origin = QLineEdit()
+        self.mixed_interpretation = QLineEdit()
+        for label, widget in (
+            ("Qualitative refs", self.mixed_qual_refs),
+            ("Quantitative refs", self.mixed_quant_refs),
+            ("Relation", self.mixed_relation), ("Units", self.mixed_units),
+            ("Group definition", self.mixed_groups), ("Evidence origin", self.mixed_origin),
+            ("Interpretation", self.mixed_interpretation),
+        ):
+            named(widget, f"Mixed methods {label.lower()}")
+            mixed_form.addRow(label, widget)
+        layout.addLayout(mixed_form)
+        layout.addWidget(button("Add mixed-method link", self.add_mixed_link, primary=True))
+        self.mixed_links = QListWidget()
+        named(self.mixed_links, "Mixed-method evidence links")
+        layout.addWidget(self.mixed_links)
+
         layout = self._page("Manuscript", "Verify each manuscript claim against its source.")
         self.manuscript_editor = QPlainTextEdit()
         named(self.manuscript_editor, "Editable manuscript draft")
         layout.addWidget(self.manuscript_editor)
         layout.addWidget(button("Save manuscript · Ctrl+S", lambda: self.save_text("manuscript")))
+
+        layout = self._page(
+            "References",
+            "Maintain source-linked citation metadata manually. Missing fields stay visible and "
+            "no DOI or bibliography entry is invented.",
+        )
+        self.reference_list = QListWidget()
+        named(self.reference_list, "Manuscript references")
+        self.reference_list.currentItemChanged.connect(self.inspect_reference)
+        layout.addWidget(self.reference_list)
+        reference_form = QFormLayout()
+        self.reference_title = QLineEdit()
+        self.reference_authors = QLineEdit()
+        self.reference_year = QLineEdit()
+        self.reference_container = QLineEdit()
+        self.reference_doi = QLineEdit()
+        self.reference_url = QLineEdit()
+        self.reference_verified = QCheckBox("Metadata manually verified")
+        for label, widget in (
+            ("Title", self.reference_title), ("Authors", self.reference_authors),
+            ("Year", self.reference_year), ("Journal / container", self.reference_container),
+            ("DOI", self.reference_doi), ("URL", self.reference_url),
+        ):
+            named(widget, f"Reference {label.lower()}")
+            reference_form.addRow(label, widget)
+        reference_form.addRow("", self.reference_verified)
+        layout.addLayout(reference_form)
+        layout.addWidget(button("Save reference", self.save_reference, primary=True))
+        layout.addWidget(button("Insert selected citation into manuscript",
+                                self.insert_selected_citation))
+        self.reference_detail = QLabel("Select a reference to inspect its verification state.")
+        self.reference_detail.setWordWrap(True)
+        layout.addWidget(self.reference_detail)
 
         layout = self._page("Notebook", "Record observations, questions and source checks.")
         self.notebook_editor = QPlainTextEdit()
@@ -451,15 +781,99 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.risk_picker)
         layout.addWidget(button("Preview proposal", self.preview_agent))
         layout.addWidget(button("Deny proposed change", self.deny_agent))
+        agent_form = QFormLayout()
+        self.agent_operation = QLineEdit()
+        self.agent_target = QLineEdit()
+        self.agent_files = QLineEdit()
+        self.agent_network = QLineEdit()
+        self.agent_egress = QCheckBox("Proposal sends selected data to this destination")
+        self.agent_destructive = QCheckBox("Proposal has a destructive effect")
+        for label, widget in (
+            ("Exact operation", self.agent_operation),
+            ("Exact target", self.agent_target),
+            ("Affected files", self.agent_files),
+            ("Network destination", self.agent_network),
+        ):
+            named(widget, f"Agent action {label.lower()}")
+            agent_form.addRow(label, widget)
+        agent_form.addRow("", self.agent_egress)
+        agent_form.addRow("", self.agent_destructive)
+        layout.addLayout(agent_form)
+        layout.addWidget(button("Create scope-bound proposal", self.create_agent_action,
+                                primary=True))
+        self.agent_timeline = QListWidget()
+        named(self.agent_timeline, "Persistent agent action timeline")
+        self.agent_timeline.currentItemChanged.connect(self.inspect_agent_action)
+        layout.addWidget(self.agent_timeline)
+        action_row = QHBoxLayout()
+        action_row.addWidget(button("Approve exact selected proposal", self.approve_agent_action))
+        action_row.addWidget(button("Deny selected proposal", self.deny_agent_action))
+        layout.addLayout(action_row)
         self.agent_status = QLabel("No provider configured; manual work remains available.")
         self.agent_status.setWordWrap(True)
         layout.addWidget(self.agent_status)
 
-        layout = self._page("Privacy", "Offline mode is on. The demo never contacts a server.")
-        self.privacy_status = QLabel("Local data only · no telemetry · no accounts required")
-        self.privacy_status.setWordWrap(True)
+        layout = self._page(
+            "Providers",
+            "Configure manual, local or supported cloud-API metadata. Credentials are not stored "
+            "by this UI workstream, and consumer subscriptions are never assumed.",
+        )
+        provider_form = QFormLayout()
+        self.provider_mode = QComboBox()
+        self.provider_mode.addItems(["manual", "local", "cloud-api"])
+        self.provider_id = QLineEdit("manual")
+        self.provider_enabled = QCheckBox("Enabled")
+        self.provider_credential = QCheckBox("Supported credential configured externally")
+        self.provider_egress = QCheckBox("I reviewed and accept the selected data egress")
+        self.provider_scope = QLineEdit()
+        self.provider_scope.setPlaceholderText("source-text, evidence")
+        for label, widget in (
+            ("Mode", self.provider_mode), ("Provider identifier", self.provider_id),
+            ("Selected data scope", self.provider_scope),
+        ):
+            named(widget, f"Provider {label.lower()}")
+            provider_form.addRow(label, widget)
+        provider_form.addRow("", self.provider_enabled)
+        provider_form.addRow("", self.provider_credential)
+        provider_form.addRow("", self.provider_egress)
+        layout.addLayout(provider_form)
+        layout.addWidget(button("Save provider configuration", self.save_provider, primary=True))
+        self.provider_status = QPlainTextEdit()
+        self.provider_status.setReadOnly(True)
+        named(self.provider_status, "Provider availability and egress status")
+        layout.addWidget(self.provider_status)
+
+        layout = self._page(
+            "Privacy",
+            "Inspect offline mode, telemetry, provider egress, selected data scope, backup and "
+            "sync destinations, retention and deletion impact.",
+        )
+        self.offline_toggle = QCheckBox("Offline mode")
+        self.offline_toggle.setChecked(self.prefs.offline)
+        named(self.offline_toggle, "Offline mode network gate")
+        layout.addWidget(self.offline_toggle)
+        layout.addWidget(button("Save offline mode", self.save_offline_mode))
+        layout.addWidget(button("Refresh privacy report", self.refresh_privacy, primary=True))
+        self.privacy_status = QPlainTextEdit()
+        self.privacy_status.setReadOnly(True)
+        named(self.privacy_status, "Privacy and data egress report")
         layout.addWidget(self.privacy_status)
         layout.addStretch()
+
+        layout = self._page(
+            "Integrations",
+            "Optional adapters are disabled by default. This local UI remains usable without "
+            "connecting any external service.",
+        )
+        self.integration_list = QListWidget()
+        named(self.integration_list, "Optional integration adapters")
+        layout.addWidget(self.integration_list)
+        layout.addWidget(button("Refresh integration catalog", self.refresh_integrations))
+        layout.addWidget(button("Disconnect selected integration", self.disconnect_integration,
+                                primary=True))
+        self.integration_status = QLabel("No external integration is required.")
+        self.integration_status.setWordWrap(True)
+        layout.addWidget(self.integration_status)
 
         layout = self._page("Exports", "Preview file hashes before saving a local export.")
         self.export_name = QLineEdit("research-notes.md")
@@ -530,6 +944,29 @@ class ResearchWindow(QMainWindow):
         self.jobs.changed.connect(lambda key, state: self.job_list.addItem(f"{key}: {state}"))
 
         layout = self._page(
+            "Notifications",
+            "Persistent, actionable local diagnostics. Secret-looking content is rejected from "
+            "the stored error log.",
+        )
+        self.notification_list = QListWidget()
+        named(self.notification_list, "Persistent notification and error center")
+        layout.addWidget(self.notification_list)
+        layout.addWidget(button("Refresh notifications", self.refresh_notifications))
+        layout.addWidget(button("Dismiss selected notification", self.dismiss_notification))
+
+        layout = self._page(
+            "Tutorials",
+            "Work through synthetic, local-only exercises for the main research workflow. "
+            "Completion records actions; it does not certify methodological competence.",
+        )
+        self.tutorial_list = QListWidget()
+        named(self.tutorial_list, "Research tutorial progress")
+        layout.addWidget(self.tutorial_list)
+        layout.addWidget(button("Mark selected tutorial action complete",
+                                self.complete_tutorial_step, primary=True))
+        layout.addWidget(button("Refresh tutorial progress", self.refresh_tutorials))
+
+        layout = self._page(
             "Guidance", "Plain-language definitions and limitations for research methods."
         )
         self.help_query = QLineEdit()
@@ -546,6 +983,26 @@ class ResearchWindow(QMainWindow):
         named(self.help_detail, "Method definition, example and limitations")
         layout.addWidget(self.help_detail)
         self.refresh_guidance()
+
+        layout = self._page(
+            "Shortcuts",
+            "Current keyboard bindings. Escape closes modal dialogs and standard tab navigation "
+            "moves between controls without trapping focus.",
+        )
+        self.shortcut_help = QPlainTextEdit()
+        self.shortcut_help.setReadOnly(True)
+        self.shortcut_help.setPlainText(
+            "Ctrl+K  Commands\n"
+            "Ctrl+N  New project\n"
+            "Ctrl+F  Global project search\n"
+            "Ctrl+S  Save active writing/protocol\n"
+            "Ctrl+1  Dashboard\n"
+            "Ctrl+2  Library\n"
+            "F1      Shortcut help\n"
+            "Escape  Close the active modal dialog"
+        )
+        named(self.shortcut_help, "Keyboard shortcut help")
+        layout.addWidget(self.shortcut_help)
 
         layout = self._page("Preferences", "Theme, density and text size are saved locally.")
         form = QFormLayout()
@@ -564,9 +1021,31 @@ class ResearchWindow(QMainWindow):
         self.scale_picker.setCurrentText(f"{round(self.prefs.scale * 100)}%")
         named(self.scale_picker, "Text scaling factor")
         form.addRow("Text scaling", self.scale_picker)
+        self.locale_entry = QLineEdit(self.prefs.locale)
+        named(self.locale_entry, "Interface locale")
+        form.addRow("Locale", self.locale_entry)
         layout.addLayout(form)
         layout.addWidget(button("Apply and save preferences", self.save_preferences, primary=True))
-        layout.addStretch()
+        self.localization_status = QLabel()
+        self.localization_status.setWordWrap(True)
+        layout.addWidget(self.localization_status)
+        preset_row = QHBoxLayout()
+        self.preset_name = QLineEdit()
+        self.preset_name.setPlaceholderText("Preset name")
+        named(self.preset_name, "Workspace preset name")
+        preset_row.addWidget(self.preset_name)
+        preset_row.addWidget(button("Save workspace preset", self.save_workspace_preset))
+        layout.addLayout(preset_row)
+        self.preset_list = QListWidget()
+        named(self.preset_list, "Saved workspace presets")
+        layout.addWidget(self.preset_list)
+        preset_actions = QHBoxLayout()
+        preset_actions.addWidget(button("Restore selected preset", self.restore_workspace_preset))
+        preset_actions.addWidget(button("Delete selected preset", self.delete_workspace_preset))
+        preset_actions.addWidget(button("Reset layout", self.reset_workspace_layout))
+        layout.addLayout(preset_actions)
+        self.refresh_localization()
+        self.refresh_workspace_presets()
 
         layout = self._page("Activity", "Local operation history for the current project.")
         self.activity_list = QListWidget()
@@ -588,16 +1067,26 @@ class ResearchWindow(QMainWindow):
                              "ui.templates.list", "ui.guidance.search",
                              "ui.backup.list", "ui.backup.inspect", "ui.backup.restore",
                              "ui.preferences.read", "ui.preferences.update", "ui.agent.propose",
-                             "ui.agent.deny"):
+                             "ui.agent.deny", "ui.localization.read",
+                             "ui.workspace.preset.list", "ui.workspace.preset.save",
+                             "ui.workspace.preset.delete"):
             if not self.project_id:
                 self._set_status("Create or select a project first.")
                 return None
             values.setdefault("project_id", self.project_id)
         if operation in {
             "ui.project.update", "ui.source.add", "ui.review.vote", "ui.qual.annotate",
+            "ui.screening.vote", "ui.screening.adjudicate",
             "ui.dataset.import", "ui.manuscript.save", "ui.notebook.save", "ui.tutorial.step",
             "ui.protocol.start", "ui.protocol.update",
             "ui.evidence.capture", "ui.claim.create",
+            "ui.question.update", "ui.prisma.update",
+            "ui.extraction.schema.update", "ui.extraction.record.save",
+            "ui.variable.metadata.update", "ui.analysis.run",
+            "ui.codebook.upsert", "ui.codebook.merge", "ui.mixed.add",
+            "ui.reference.upsert", "ui.agent.action.propose", "ui.agent.action.approve",
+            "ui.agent.action.deny", "ui.agent.action.record", "ui.provider.update",
+            "ui.integration.disconnect", "ui.notification.add", "ui.notification.dismiss",
         }:
             values.setdefault("expected_revision", self.revision)
         result = self.facade.execute(operation, values)
@@ -620,12 +1109,38 @@ class ResearchWindow(QMainWindow):
             self.nav.setCurrentRow(index)
         if name == "Library":
             self.search_sources()
+        elif name == "Question":
+            self.refresh_question()
         elif name == "Review":
             self.refresh_review()
+        elif name == "PRISMA":
+            self.refresh_prisma()
+        elif name == "Extraction":
+            self.refresh_extraction()
         elif name == "Qualitative":
             self.refresh_annotations()
+        elif name == "Codebook":
+            self.refresh_codebook()
+        elif name == "Mixed Methods":
+            self.refresh_mixed_links()
         elif name == "Evidence":
             self.refresh_evidence()
+        elif name == "References":
+            self.refresh_references()
+        elif name == "Analysis Results":
+            self.refresh_analysis_results()
+        elif name == "Agent":
+            self.refresh_agent_timeline()
+        elif name == "Providers":
+            self.refresh_provider()
+        elif name == "Privacy":
+            self.refresh_privacy()
+        elif name == "Integrations":
+            self.refresh_integrations()
+        elif name == "Notifications":
+            self.refresh_notifications()
+        elif name == "Tutorials":
+            self.refresh_tutorials()
         elif name == "Activity":
             self.refresh_activity()
         elif name == "Protocol":
@@ -648,6 +1163,92 @@ class ResearchWindow(QMainWindow):
         dialog = CommandPalette(self)
         dialog.query.setFocus()
         dialog.exec()
+
+    def command_entries(self) -> list[dict[str, Any]]:
+        project_required = bool(self.project_id)
+        entries: list[dict[str, Any]] = [
+            {
+                "label": f"Open {screen}",
+                "kind": "screen",
+                "value": screen,
+                "enabled": True,
+                "reason": "",
+                "summary": f"Navigate to the {screen} workspace.",
+            }
+            for screen in SCREENS
+        ]
+        entries.extend([
+            {
+                "label": "Create project",
+                "kind": "action",
+                "value": "create-project",
+                "enabled": True,
+                "reason": "",
+                "summary": "Create a new local research project.",
+            },
+            {
+                "label": "Import text source",
+                "kind": "action",
+                "value": "import-source",
+                "enabled": project_required,
+                "reason": "Open or create a project first.",
+                "summary": "Add user-supplied source text to the current project.",
+            },
+            {
+                "label": "Search library",
+                "kind": "action",
+                "value": "search-library",
+                "enabled": project_required,
+                "reason": "Open or create a project first.",
+                "summary": "Focus the current project's local source search.",
+            },
+            {
+                "label": "Preview export",
+                "kind": "action",
+                "value": "export-preview",
+                "enabled": project_required,
+                "reason": "Open or create a project first.",
+                "summary": "Open the local export preview without writing a file.",
+            },
+        ])
+        surfaced = {
+            "ui.project.create", "ui.source.add", "ui.search.global", "ui.export.preview",
+        }
+        for capability in self.facade.capability_manifest():
+            operation = str(capability["operation"])
+            if operation in surfaced:
+                continue
+            entries.append({
+                "label": operation,
+                "kind": "capability",
+                "value": operation,
+                "enabled": False,
+                "reason": "Use its workspace screen to provide the required structured inputs.",
+                "summary": str(capability["summary"]),
+            })
+        return entries
+
+    def execute_palette_entry(self, entry: Mapping[str, Any]) -> None:
+        kind = entry.get("kind")
+        value = str(entry.get("value", ""))
+        if kind == "screen" and value in SCREENS:
+            self.navigate(value)
+            return
+        if kind != "action":
+            self._set_status(
+                "This capability requires structured inputs from its workspace screen."
+            )
+            return
+        if value == "create-project":
+            self.create_project()
+        elif value == "import-source":
+            self.import_source()
+        elif value == "search-library":
+            self.navigate("Library")
+            self.search.setFocus()
+        elif value == "export-preview":
+            self.navigate("Exports")
+            self.export_name.setFocus()
 
     def focus_search(self) -> None:
         self.navigate("Search")
@@ -708,20 +1309,79 @@ class ResearchWindow(QMainWindow):
         elif hit["kind"] == "manuscript":
             self.navigate("Manuscript")
 
-    def refresh_projects(self) -> None:
+    def refresh_projects(self, query: str = "") -> None:
         value = self._call("ui.project.list")
         if value is None:
             return
+        query = query.strip().casefold()
         self.project_picker.blockSignals(True)
         self.project_picker.clear()
         self.project_picker.addItem("Choose a project", "")
         for project in value["projects"]:
-            self.project_picker.addItem(project["title"], project["id"])
+            haystack = f"{project['title']} {project['question']} {project['id']}".casefold()
+            if query and query not in haystack:
+                continue
+            updated = str(project["updated_at"])[:10]
+            self.project_picker.addItem(
+                f"{project['title']} · {project['id'][:8]} · {updated}",
+                project["id"],
+            )
         if self.project_id:
             index = self.project_picker.findData(self.project_id)
             if index >= 0:
                 self.project_picker.setCurrentIndex(index)
         self.project_picker.blockSignals(False)
+
+    def finish_onboarding(self) -> None:
+        response = self._call("ui.preferences.update", onboarding_complete=True)
+        if response is None:
+            return
+        self.prefs = Preferences(**response["preferences"])
+        self.welcome_status.setText(
+            "First-run guide completed. You can reopen tutorials from the Tutorials screen."
+        )
+        self.navigate("Dashboard")
+
+    def create_local_demo(self) -> None:
+        created = self._call(
+            "ui.project.create",
+            title="Synthetic attention demo",
+            question="How is a synthetic distraction described in this local fixture?",
+            study_type="literature",
+        )
+        if created is None:
+            return
+        self.project_id = created["project_id"]
+        self.revision = created["revision"]
+        source = self._call(
+            "ui.source.add",
+            title="Synthetic demonstration source",
+            text=(
+                "This is synthetic demonstration text. It contains no real participant, "
+                "publication, effect, or scientific finding. A learner can select passages, "
+                "screen the record, and practice evidence linkage safely."
+            ),
+            source_label="Synthetic local tutorial fixture",
+        )
+        if source is None:
+            self.open_project(self.project_id)
+            return
+        note = self._call(
+            "ui.notebook.save",
+            notebook=(
+                "Tutorial note: this project contains synthetic content only. "
+                "Any interpretation must remain labeled as practice."
+            ),
+        )
+        if note is not None:
+            for step in ("create-project", "add-source", "write-note"):
+                self._call("ui.tutorial.step", step=step)
+        self.refresh_projects()
+        self.open_project(self.project_id)
+        self.welcome_status.setText(
+            "Synthetic demo created locally. No network call or AI provider was used."
+        )
+        self.navigate("Dashboard")
 
     def _selected_project(self, index: int) -> None:
         project_id = self.project_picker.itemData(index)
@@ -850,11 +1510,6 @@ class ResearchWindow(QMainWindow):
         self.revision = project["revision"]
         self.current_source_id = ""
         self.current_dataset_id = ""
-        self.dashboard.setText(
-            f"{project['title']}\n\nResearch question: {project['question']}\n"
-            f"Study approach: {project['study_type']}\n"
-            f"{len(project['sources'])} sources · {len(project['datasets'])} datasets"
-        )
         self._editor_loading = True
         self.manuscript_editor.setPlainText(project["manuscript"])
         self.notebook_editor.setPlainText(project["notebook"])
@@ -865,9 +1520,23 @@ class ResearchWindow(QMainWindow):
         self.prefs.last_project_id = self.project_id
         self.facade.settings.save(self.prefs)
         self.search_sources()
+        self.refresh_dashboard()
+        self.refresh_question()
         self.refresh_review()
+        self.refresh_prisma()
+        self.refresh_extraction()
         self.refresh_datasets()
         self.refresh_protocol()
+        self.refresh_codebook()
+        self.refresh_mixed_links()
+        self.refresh_references()
+        self.refresh_analysis_results()
+        self.refresh_agent_timeline()
+        self.refresh_provider()
+        self.refresh_privacy()
+        self.refresh_integrations()
+        self.refresh_notifications()
+        self.refresh_tutorials()
         self._set_status(f"Opened {project['title']}")
 
     def _text_dialog(self, label: str) -> tuple[str, bool]:
@@ -927,9 +1596,35 @@ class ResearchWindow(QMainWindow):
             self._set_status("Select a source in the review queue first.")
             return
         selected_id = selected.data(Qt.ItemDataRole.UserRole)
-        if self._call("ui.review.vote", source_id=selected_id,
-                      decision=decision, reason=self.review_reason.text()):
+        reviewer = self.reviewer_alias.text().strip()
+        if not reviewer:
+            self._set_status("Enter a local reviewer alias before screening.")
+            self.reviewer_alias.setFocus()
+            return
+        if self._call(
+            "ui.screening.vote",
+            source_id=selected_id,
+            reviewer=reviewer,
+            decision=decision,
+            reason=self.review_reason.text(),
+        ):
             self.current_source_id = selected_id
+            self.refresh_review()
+
+    def adjudicate_selected(self) -> None:
+        selected = self.review_queue.currentItem()
+        if selected is None:
+            self._set_status("Select a screening conflict first.")
+            return
+        response = self._call(
+            "ui.screening.adjudicate",
+            source_id=selected.data(Qt.ItemDataRole.UserRole),
+            adjudicator=self.adjudicator_alias.text(),
+            final_decision=self.adjudication_choice.currentText(),
+            rationale=self.adjudication_reason.text(),
+        )
+        if response is not None:
+            self.adjudication_reason.clear()
             self.refresh_review()
 
     def _select_review_source(self, current: QListWidgetItem | None,
@@ -949,19 +1644,21 @@ class ResearchWindow(QMainWindow):
     def refresh_review(self, unused: str = "") -> None:
         if not self.project_id:
             return
-        counts = self._call("ui.review.counts")
+        counts = self._call("ui.screening.flow")
         if counts:
+            states = counts["status_counts"]
             self.review_summary.setText(
-                f"Records: {counts['total']}; screened: {counts['screened']}; "
-                f"include: {counts['include']}; exclude: {counts['exclude']}; "
-                f"uncertain: {counts['unsure']}; pending: {counts['pending']}\n"
+                f"Sources: {counts['local_source_records']} · decisions: "
+                f"{counts['decision_events']} · adjudications: {counts['adjudication_events']}\n"
+                f"Pending: {states['pending']} · awaiting second: {states['awaiting-second']} · "
+                f"conflict: {states['conflict']} · agreed: {states['agreed']} · "
+                f"adjudicated: {states['adjudicated']}\n"
+                f"Final include: {counts['included']} · exclude: {counts['excluded']} · "
+                f"unsure: {counts['unsure_after_adjudication']}\n"
                 f"{counts['note']}"
             )
-        decision = self.review_filter.currentText()
-        filtered = self._call(
-            "ui.review.queue", limit=500,
-            decision="" if decision == "All" else decision,
-        )
+        reviewer = self.reviewer_alias.text().strip()
+        filtered = self._call("ui.screening.queue", reviewer=reviewer)
         if filtered is None:
             return
         selected = self.review_queue.currentItem()
@@ -969,15 +1666,279 @@ class ResearchWindow(QMainWindow):
         self.review_queue.blockSignals(True)
         self.review_queue.clear()
         for source in filtered["records"]:
+            selection = self.review_filter.currentText()
+            if selection != "All" and source["status"] != selection:
+                continue
+            outcome = (
+                "peer decision hidden"
+                if source["computed_status"] == "blinded"
+                else source["final_decision"] or "no final outcome"
+            )
             item = QListWidgetItem(
-                f"{source['status'].upper()} · {source['title']} · {source['source_label']}"
+                f"{source['status'].upper()} · {source['title']} · "
+                f"{outcome}"
             )
             item.setData(Qt.ItemDataRole.UserRole, source["source_id"])
+            item.setToolTip(f"{source['title']}; screening status {source['status']}")
             self.review_queue.addItem(item)
             if source["source_id"] == previous_selection:
                 self.review_queue.setCurrentItem(item)
         self.review_queue.blockSignals(False)
         self.review_reason.clear()
+
+    @staticmethod
+    def _comma_values(text: str) -> list[str]:
+        return [item.strip() for item in text.split(",") if item.strip()]
+
+    def refresh_question(self) -> None:
+        if not self.project_id:
+            self.question_status.setText("Create or open a project first.")
+            return
+        response = self._call("ui.question.read")
+        if response is None:
+            return
+        record = response["question_structure"]
+        self.question_topic.setText(record.get("topic", ""))
+        self.question_population.setText(record.get("population_context", ""))
+        self.question_exposure.setText(record.get("exposure_phenomenon", ""))
+        self.question_outcome.setText(record.get("outcome_target", ""))
+        self.question_type.setCurrentText(record.get("question_type", "descriptive"))
+        self.question_editable.setPlainText(
+            record.get("editable_question", response["fallback_question"])
+        )
+        self.question_status.setText(
+            "Saved structured question loaded." if record
+            else "No structured question yet. Existing free-text question is shown for editing."
+        )
+
+    def save_question(self) -> None:
+        response = self._call(
+            "ui.question.update",
+            topic=self.question_topic.text(),
+            population_context=self.question_population.text(),
+            exposure_phenomenon=self.question_exposure.text(),
+            outcome_target=self.question_outcome.text(),
+            question_type=self.question_type.currentText(),
+            editable_question=self.question_editable.toPlainText(),
+        )
+        if response is not None:
+            self.question_status.setText(
+                "Structured question saved. Methodological validity still requires human review."
+            )
+            self.refresh_dashboard()
+
+    def refresh_dashboard(self) -> None:
+        if not self.project_id:
+            self.dashboard.setText("Choose a project or create a new one.")
+            return
+        response = self._call("ui.project.dashboard")
+        if response is None:
+            return
+        screening = response["screening"]
+        states = screening["status_counts"]
+        self.dashboard.setText(
+            f"{response['title']}\n\nResearch question: {response['question']}\n"
+            f"Sources: {response['source_count']} · datasets: {response['dataset_count']}\n"
+            f"Screening: {states['pending']} pending · {states['conflict']} conflicts · "
+            f"{screening['screened_with_final_outcome']} final outcomes\n"
+            f"Writing: {response['draft']['manuscript_characters']} manuscript characters · "
+            f"{response['draft']['notebook_characters']} note characters\n\n"
+            f"Next: {'; '.join(response['next_steps'])}\n"
+            f"Warnings: {'; '.join(response['warnings']) or 'none'}"
+        )
+
+    def _parse_prisma_count(self, key: str) -> int | None:
+        text = self.prisma_fields[key].text().strip()
+        if not text:
+            return None
+        try:
+            value = int(text)
+        except ValueError:
+            self._set_status(f"{key.replace('_', ' ')} must be a nonnegative integer or blank.")
+            return -1
+        if value < 0:
+            self._set_status(f"{key.replace('_', ' ')} cannot be negative.")
+            return -1
+        return value
+
+    def save_prisma(self) -> None:
+        flow: dict[str, Any] = {}
+        for key in self.prisma_fields:
+            value = self._parse_prisma_count(key)
+            if value == -1:
+                return
+            flow[key] = value
+        reasons: dict[str, int] = {}
+        for part in self.prisma_reasons.text().split(";"):
+            if not part.strip():
+                continue
+            label, separator, raw = part.partition("=")
+            if not separator:
+                self._set_status(
+                    "Exclusion reasons use Reason=number entries separated by semicolons."
+                )
+                return
+            try:
+                count = int(raw.strip())
+            except ValueError:
+                self._set_status("Each PRISMA exclusion reason needs an integer count.")
+                return
+            if count < 0:
+                self._set_status("PRISMA exclusion reason counts cannot be negative.")
+                return
+            reasons[label.strip()] = count
+        flow["exclusion_reasons"] = reasons
+        if self._call("ui.prisma.update", flow=flow) is not None:
+            self.refresh_prisma()
+
+    def refresh_prisma(self) -> None:
+        if not self.project_id:
+            self.prisma_summary.setPlainText("Open a project to inspect review-flow evidence.")
+            return
+        response = self._call("ui.prisma.read")
+        if response is None:
+            return
+        flow = response["flow"]
+        lines = []
+        for key in self.prisma_fields:
+            value = flow.get(key)
+            shown = "unknown" if value is None else str(value)
+            lines.append(f"{key.replace('_', ' ').title()}: {shown}")
+            self.prisma_fields[key].setText("" if value is None else str(value))
+        lines.append(f"Exclusion reasons: {flow['exclusion_reasons'] or 'none recorded'}")
+        lines.append(flow["warning"])
+        self.prisma_summary.setPlainText("\n".join(lines))
+
+    def add_extraction_field(self) -> None:
+        name = self.extraction_field_name.text().strip()
+        if not name:
+            self._set_status("Enter an extraction field name.")
+            return
+        field_type = self.extraction_field_type.currentText()
+        record: dict[str, Any] = {
+            "name": name,
+            "label": name.replace("_", " ").title(),
+            "field_type": field_type,
+            "required": self.extraction_required.isChecked(),
+            "description": "",
+        }
+        if field_type == "categorical":
+            record["categories"] = self._comma_values(self.extraction_categories.text())
+        self.extraction_pending_fields.append(record)
+        self.extraction_fields_list.addItem(
+            f"{name} · {field_type} · {'required' if record['required'] else 'optional'}"
+        )
+        self.extraction_field_name.clear()
+        self.extraction_categories.clear()
+        self.extraction_required.setChecked(False)
+
+    def save_extraction_schema(self) -> None:
+        if not self.extraction_pending_fields:
+            self._set_status("Add at least one extraction field.")
+            return
+        response = self._call(
+            "ui.extraction.schema.update",
+            title=self.extraction_title.text(),
+            fields=self.extraction_pending_fields,
+        )
+        if response is not None:
+            self.extraction_pending_fields.clear()
+            self.refresh_extraction()
+
+    def _clear_extraction_record_form(self) -> None:
+        self.extraction_value_widgets.clear()
+        while self.extraction_record_form.count():
+            child = self.extraction_record_form.takeAt(0)
+            if child is None:
+                break
+            widget = child.widget()
+            if widget is not None:
+                widget.deleteLater()
+
+    def refresh_extraction(self) -> None:
+        self._clear_extraction_record_form()
+        self.extraction_records.clear()
+        self.extraction_source.clear()
+        if not self.project_id:
+            return
+        sources = self._call("ui.source.search", query="", limit=500)
+        if sources is not None:
+            for source in sources["sources"]:
+                self.extraction_source.addItem(source["title"], source["id"])
+        response = self._call("ui.extraction.list")
+        if response is None:
+            return
+        schema = response["schema"]
+        if not schema:
+            self.extraction_fields_list.clear()
+            self.extraction_fields_list.addItem("No extraction form saved yet.")
+            return
+        self.extraction_title.setText(schema["title"])
+        self.extraction_fields_list.clear()
+        for field in schema["fields"]:
+            self.extraction_fields_list.addItem(
+                f"v{schema['version']} · {field['name']} · {field['field_type']} · "
+                f"{'required' if field['required'] else 'optional'}"
+            )
+            if field["field_type"] == "categorical":
+                combo = QComboBox()
+                combo.addItems(field.get("categories", []))
+                widget: QWidget = combo
+            elif field["field_type"] == "boolean":
+                combo = QComboBox()
+                combo.addItems(["", "true", "false"])
+                widget = combo
+            else:
+                widget = QLineEdit()
+            named(widget, f"Extraction value {field['label']}")
+            self.extraction_record_form.addRow(
+                f"{field['label']} {'*' if field['required'] else ''}", widget
+            )
+            widget.setProperty("field_type", field["field_type"])
+            self.extraction_value_widgets[field["name"]] = widget
+        for record in response["records"]:
+            self.extraction_records.addItem(
+                f"{record['id']} · source {record['source_id']} · "
+                f"schema v{record['schema_version']}"
+            )
+
+    def _extraction_widget_value(self, widget: QWidget) -> Any:
+        field_type = str(widget.property("field_type"))
+        if isinstance(widget, QComboBox):
+            text = widget.currentText().strip()
+        elif isinstance(widget, QLineEdit):
+            text = widget.text().strip()
+        else:
+            return None
+        if not text:
+            return None
+        if field_type == "integer":
+            try:
+                return int(text)
+            except ValueError:
+                return text
+        if field_type == "float":
+            try:
+                return float(text)
+            except ValueError:
+                return text
+        if field_type == "boolean":
+            return text == "true"
+        return text
+
+    def save_extraction_record(self) -> None:
+        source_id = self.extraction_source.currentData()
+        if not source_id:
+            self._set_status("Choose a source for the extraction record.")
+            return
+        values = {
+            name: self._extraction_widget_value(widget)
+            for name, widget in self.extraction_value_widgets.items()
+        }
+        if self._call(
+            "ui.extraction.record.save", source_id=source_id, values=values
+        ) is not None:
+            self.refresh_extraction()
 
     def annotate_selection(self) -> None:
         if not self.current_source_id:
@@ -1008,6 +1969,157 @@ class ResearchWindow(QMainWindow):
         if value:
             for item in value["annotations"]:
                 self.annotation_list.addItem(f"{item['code']}: {item['quote'][:120]}")
+
+    def refresh_codebook(self) -> None:
+        self.codebook_list.clear()
+        if not self.project_id:
+            return
+        response = self._call("ui.codebook.list")
+        if response is None:
+            return
+        for code in response["codes"]:
+            item = QListWidgetItem(
+                f"{code['marker']} {code['name']} · {code['description'] or 'no description'}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, code)
+            self.codebook_list.addItem(item)
+        for trace in response["recoding_trace"][-10:]:
+            self.codebook_list.addItem(
+                f"TRACE · merged {len(trace['source_ids'])} code(s) into {trace['target_id']} · "
+                f"{trace['affected_annotations']} annotations recoded"
+            )
+
+    def save_code(self) -> None:
+        response = self._call(
+            "ui.codebook.upsert",
+            code_id="",
+            name=self.code_name.text(),
+            description=self.code_description.text(),
+            inclusion_rule=self.code_inclusion.text(),
+            exclusion_rule=self.code_exclusion.text(),
+            marker=self.code_marker.text() or "●",
+        )
+        if response is not None:
+            self.code_name.clear()
+            self.code_description.clear()
+            self.code_inclusion.clear()
+            self.code_exclusion.clear()
+            self.refresh_codebook()
+
+    def merge_codes_ui(self) -> None:
+        response = self._call(
+            "ui.codebook.merge",
+            source_ids=self._comma_values(self.code_merge_sources.text()),
+            target_id=self.code_merge_target.text().strip(),
+            conflict_note=self.code_merge_note.text(),
+        )
+        if response is not None:
+            self.code_merge_sources.clear()
+            self.code_merge_target.clear()
+            self.code_merge_note.clear()
+            self.refresh_codebook()
+            self.refresh_annotations()
+
+    def refresh_mixed_links(self) -> None:
+        self.mixed_links.clear()
+        if not self.project_id:
+            return
+        response = self._call("ui.mixed.list")
+        if response is None:
+            return
+        for record in response["links"]:
+            item = QListWidgetItem(
+                f"{record['relation'].upper()} · {len(record['qualitative_refs'])} qualitative ↔ "
+                f"{len(record['quantitative_refs'])} quantitative · {record['evidence_origin']}"
+            )
+            item.setToolTip(record["warning"])
+            self.mixed_links.addItem(item)
+
+    def add_mixed_link(self) -> None:
+        response = self._call(
+            "ui.mixed.add",
+            link={
+                "qualitative_refs": self._comma_values(self.mixed_qual_refs.text()),
+                "quantitative_refs": self._comma_values(self.mixed_quant_refs.text()),
+                "relation": self.mixed_relation.currentText(),
+                "units": self.mixed_units.text(),
+                "group_definition": self.mixed_groups.text(),
+                "evidence_origin": self.mixed_origin.text(),
+                "interpretation": self.mixed_interpretation.text(),
+            },
+        )
+        if response is not None:
+            self.refresh_mixed_links()
+            self._set_status(response["link"]["warning"])
+
+    def refresh_references(self) -> None:
+        self.reference_list.clear()
+        if not self.project_id:
+            return
+        response = self._call("ui.reference.list")
+        if response is None:
+            return
+        for record in response["references"]:
+            state = "verified" if record["verified"] else "unverified"
+            item = QListWidgetItem(f"{state.upper()} · {record['title']}")
+            item.setData(Qt.ItemDataRole.UserRole, record)
+            self.reference_list.addItem(item)
+
+    def save_reference(self) -> None:
+        response = self._call(
+            "ui.reference.upsert",
+            reference={
+                "title": self.reference_title.text(),
+                "authors": self._comma_values(self.reference_authors.text()),
+                "year": self.reference_year.text(),
+                "container": self.reference_container.text(),
+                "doi": self.reference_doi.text(),
+                "url": self.reference_url.text(),
+                "verified": self.reference_verified.isChecked(),
+                "verification_note": (
+                    "Manually verified by local user." if self.reference_verified.isChecked()
+                    else "Metadata remains unverified."
+                ),
+            },
+        )
+        if response is not None:
+            self.refresh_references()
+
+    def inspect_reference(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
+        if current is None:
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        citation = self._call("ui.reference.citation", reference_id=record["id"])
+        if citation is None:
+            return
+        self.reference_detail.setText(
+            f"{citation['text']}\nVerified: {citation['verified']} · "
+            f"missing: {', '.join(citation['missing_fields']) or 'none'}\n"
+            f"{citation['warning']}"
+        )
+
+    def insert_selected_citation(self) -> None:
+        current = self.reference_list.currentItem()
+        if current is None:
+            self._set_status("Select a reference first.")
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        citation = self._call("ui.reference.citation", reference_id=record["id"])
+        if citation is None:
+            return
+        if citation["missing_fields"]:
+            self._set_status(
+                "Citation has missing metadata; correct it before manuscript insertion."
+            )
+            return
+        cursor = self.manuscript_editor.textCursor()
+        cursor.insertText(citation["text"])
+        document = self.manuscript_editor.document()
+        if document is not None:
+            document.setModified(True)
+        self.navigate("Manuscript")
 
     def import_csv(self) -> None:
         if not self.project_id:
@@ -1054,11 +2166,21 @@ class ResearchWindow(QMainWindow):
         response = self._call("ui.dataset.variables", dataset_id=self.current_dataset_id)
         if response is not None:
             for variable in response["variables"]:
-                self.variable_list.addItem(
+                item = QListWidgetItem(
                     f"{variable['name']} · {variable['inferred_type']} · "
                     f"missing {variable['missing_n']} / {response['total_rows']}"
                 )
+                item.setData(Qt.ItemDataRole.UserRole, variable["name"])
+                self.variable_list.addItem(item)
                 self.variable_picker.addItem(variable["name"])
+        methods = self._call("ui.analysis.methods")
+        if methods is not None:
+            self.analysis_method.clear()
+            for method in methods["methods"]:
+                label = method["label"]
+                if not method.get("available", False):
+                    label += " · unavailable"
+                self.analysis_method.addItem(label, method)
 
     def load_data_page(self) -> None:
         if not self.current_dataset_id:
@@ -1124,6 +2246,109 @@ class ResearchWindow(QMainWindow):
                     )
                 )
 
+    def load_variable_metadata(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
+        if current is None or not self.current_dataset_id:
+            return
+        variable = str(current.data(Qt.ItemDataRole.UserRole))
+        response = self._call("ui.variable.metadata", dataset_id=self.current_dataset_id)
+        record = None
+        if response is not None:
+            record = next(
+                (item for item in response["records"] if item["variable"] == variable), None
+            )
+        if record is None:
+            self.variable_type.setCurrentText("numeric")
+            self.variable_role.setCurrentText("other")
+            self.variable_units.clear()
+            self.variable_levels.clear()
+            self.variable_missing.clear()
+            self.variable_description.clear()
+            return
+        self.variable_type.setCurrentText(record["type"])
+        self.variable_role.setCurrentText(record["role"])
+        self.variable_units.setText(record["units"])
+        self.variable_levels.setText(", ".join(record["levels"]))
+        self.variable_missing.setText(", ".join(record["missing_codes"]))
+        self.variable_description.setText(record["description"])
+
+    def save_variable_metadata(self) -> None:
+        current = self.variable_list.currentItem()
+        if current is None or not self.current_dataset_id:
+            self._set_status("Select a variable from the active dataset.")
+            return
+        variable = str(current.data(Qt.ItemDataRole.UserRole))
+        response = self._call(
+            "ui.variable.metadata.update",
+            dataset_id=self.current_dataset_id,
+            variable=variable,
+            metadata={
+                "type": self.variable_type.currentText(),
+                "role": self.variable_role.currentText(),
+                "units": self.variable_units.text(),
+                "levels": self._comma_values(self.variable_levels.text()),
+                "missing_codes": self._comma_values(self.variable_missing.text()),
+                "description": self.variable_description.text(),
+            },
+        )
+        if response is not None:
+            self._set_status(f"Saved metadata for {variable}.")
+
+    def run_analysis(self) -> None:
+        method = self.analysis_method.currentData()
+        if not isinstance(method, dict):
+            self._set_status("Choose an analysis method.")
+            return
+        if not method.get("available"):
+            self.stats_result.setPlainText(
+                f"{method['label']} is unavailable.\n{method.get('blocker', '')}\n"
+                "No statistical result was fabricated."
+            )
+            return
+        if not self.current_dataset_id or not self.variable_picker.currentText():
+            self._set_status("Choose a dataset and variable.")
+            return
+        response = self._call(
+            "ui.analysis.run",
+            method=method["id"],
+            inputs={
+                "dataset_id": self.current_dataset_id,
+                "column": self.variable_picker.currentText(),
+            },
+        )
+        if response is not None:
+            self.refresh_analysis_results()
+            self.navigate("Analysis Results")
+
+    def refresh_analysis_results(self) -> None:
+        self.analysis_results_list.clear()
+        if not self.project_id:
+            return
+        response = self._call("ui.analysis.results")
+        if response is None:
+            return
+        for record in reversed(response["results"]):
+            item = QListWidgetItem(
+                f"{record['method']} · {record['method_version']} · {record['created_at']}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, record)
+            self.analysis_results_list.addItem(item)
+
+    def inspect_analysis_result(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
+        if current is None:
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        self.analysis_result_detail.setPlainText(
+            f"Method: {record['method']}\nVersion: {record['method_version']}\n"
+            f"Inputs: {record['inputs']}\nAssumptions: {record['assumptions']}\n"
+            f"Warnings: {record['warnings']}\nEstimates: {record['estimates']}\n"
+            f"Uncertainty: {record['uncertainty']}\nDiagnostics: {record['diagnostics']}\n"
+            f"Provenance: {record['provenance']}"
+        )
+
     def save_text(self, which: str) -> None:
         if not self.project_id:
             self._set_status("Select a project first.")
@@ -1159,6 +2384,274 @@ class ResearchWindow(QMainWindow):
                             summary=self.agent_proposal.toPlainText())
         if result:
             self.agent_status.setText(result["message"])
+
+    def create_agent_action(self) -> None:
+        proposal = {
+            "operation": self.agent_operation.text(),
+            "target": self.agent_target.text(),
+            "changed_fields": {"proposal_text": self.agent_proposal.toPlainText()},
+            "files": self._comma_values(self.agent_files.text()),
+            "network_destination": self.agent_network.text(),
+            "data_egress": self.agent_egress.isChecked(),
+            "destructive_effect": self.agent_destructive.isChecked(),
+            "provider": "manual",
+            "model": "",
+            "input_refs": [],
+        }
+        response = self._call("ui.agent.action.propose", proposal=proposal)
+        if response is not None:
+            self.agent_status.setText(
+                "Scope-bound proposal saved. Nothing executed; select it to approve or deny."
+            )
+            self.refresh_agent_timeline()
+
+    def refresh_agent_timeline(self) -> None:
+        self.agent_timeline.clear()
+        if not self.project_id:
+            return
+        response = self._call("ui.agent.timeline")
+        if response is None:
+            return
+        for record in reversed(response["events"]):
+            item = QListWidgetItem(
+                f"{record['event'].upper()} · {record['operation']} · {record['target']} · "
+                f"{record['timestamp']}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, record)
+            self.agent_timeline.addItem(item)
+
+    def inspect_agent_action(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
+        if current is None:
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        self.agent_status.setText(
+            f"Event: {record['event']}\nOperation: {record['operation']}\n"
+            f"Target: {record['target']}\nChanged fields: {record['changed_fields']}\n"
+            f"Files: {record['files']}\nNetwork: {record['network_destination'] or 'none'}\n"
+            f"Data egress: {record['data_egress']} · destructive: "
+            f"{record['destructive_effect']}\nFingerprint: {record['fingerprint']}\n"
+            f"Approval ID: {record['approval_id'] or 'none'}\n{record['message']}"
+        )
+
+    def approve_agent_action(self) -> None:
+        current = self.agent_timeline.currentItem()
+        if current is None:
+            self._set_status("Select a proposed action to review.")
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        if record["event"] != "proposed":
+            self._set_status("Only a pending proposal can be approved.")
+            return
+        preview = (
+            f"Operation: {record['operation']}\nTarget: {record['target']}\n"
+            f"Changed fields: {record['changed_fields']}\nFiles: {record['files']}\n"
+            f"Network destination: {record['network_destination'] or 'none'}\n"
+            f"Data egress: {record['data_egress']}\n"
+            f"Destructive effect: {record['destructive_effect']}\n"
+            f"Fingerprint: {record['fingerprint']}\n\n"
+            "Approval is bound to exactly this fingerprint and does not execute the action."
+        )
+        answer = QMessageBox.question(
+            self,
+            "Approve exact proposed action",
+            preview,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        response = self._call(
+            "ui.agent.action.approve",
+            action_id=record["id"],
+            expected_fingerprint=record["fingerprint"],
+        )
+        if response is not None:
+            self.refresh_agent_timeline()
+            self.agent_status.setText(
+                "Exact scope approved. Execution is still separate and requires the "
+                "integration host."
+            )
+
+    def deny_agent_action(self) -> None:
+        current = self.agent_timeline.currentItem()
+        if current is None:
+            self._set_status("Select a proposed action to deny.")
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        reason, accepted = QInputDialog.getText(
+            self, "Deny proposed action", "Reason for denial"
+        )
+        if not accepted:
+            return
+        response = self._call(
+            "ui.agent.action.deny", action_id=record["id"], reason=reason
+        )
+        if response is not None:
+            self.refresh_agent_timeline()
+            self.agent_status.setText(
+                "Proposal denied. No write or network execution was performed."
+            )
+
+    def refresh_provider(self) -> None:
+        if not self.project_id:
+            self.provider_status.setPlainText("Open a project to configure provider metadata.")
+            return
+        response = self._call("ui.provider.read")
+        if response is None:
+            return
+        self.provider_mode.setCurrentText(response["mode"])
+        self.provider_id.setText(response["provider_id"])
+        self.provider_enabled.setChecked(bool(response["enabled"]))
+        self.provider_credential.setChecked(bool(response["credential_present"]))
+        self.provider_egress.setChecked(bool(response["egress_acknowledged"]))
+        self.provider_scope.setText(", ".join(response["permission_scope"]))
+        self.provider_status.setPlainText(
+            f"Mode: {response['mode']}\nProvider: {response['provider_id']}\n"
+            f"Availability: {response['effective_availability']}\n"
+            f"Credential present: {response['credential_present']}\n"
+            f"Permission scope: {response['permission_scope']}\n"
+            f"Data-egress acknowledged: {response['egress_acknowledged']}\n"
+            f"Observed network calls: {response['network_calls_observed']}\n"
+            f"{response['note']}"
+        )
+
+    def save_provider(self) -> None:
+        response = self._call(
+            "ui.provider.update",
+            provider={
+                "mode": self.provider_mode.currentText(),
+                "provider_id": self.provider_id.text(),
+                "enabled": self.provider_enabled.isChecked(),
+                "credential_present": self.provider_credential.isChecked(),
+                "availability": "not-checked",
+                "permission_scope": self._comma_values(self.provider_scope.text()),
+                "egress_acknowledged": self.provider_egress.isChecked(),
+            },
+        )
+        if response is not None:
+            self.refresh_provider()
+
+    def save_offline_mode(self) -> None:
+        response = self._call(
+            "ui.preferences.update", offline=self.offline_toggle.isChecked()
+        )
+        if response is not None:
+            self.prefs = Preferences(**response["preferences"])
+            self.refresh_privacy()
+            self.refresh_provider()
+
+    def refresh_privacy(self) -> None:
+        if not self.project_id:
+            self.privacy_status.setPlainText("Open a project to inspect privacy state.")
+            return
+        self.offline_toggle.setChecked(self.facade.settings.load().offline)
+        response = self._call("ui.privacy.read")
+        if response is None:
+            return
+        deletion = response["deletion_preview"]
+        self.privacy_status.setPlainText(
+            f"Offline mode: {response['offline_mode']}\n"
+            f"Telemetry enabled: {response['telemetry_enabled']}\n"
+            f"Provider egress enabled: {response['provider_egress_enabled']}\n"
+            f"Selected data scope: {response['selected_data_scope']}\n"
+            f"Backup destination: {response['backup_destination']}\n"
+            f"Sync destinations: {response['sync_destinations']}\n"
+            f"Retention: {response['retention']}\n"
+            f"Credential handling: {response['credential_storage']}\n"
+            f"Audit events: {response['audit_events']}\n"
+            f"Deletion preview: {deletion['sources']} sources, "
+            f"{deletion['datasets']} datasets · {deletion['warning']}\n"
+            f"Observed network calls: {response['network_calls_observed']}"
+        )
+
+    def refresh_integrations(self) -> None:
+        self.integration_list.clear()
+        if not self.project_id:
+            return
+        response = self._call("ui.integration.list")
+        if response is None:
+            return
+        for record in response["integrations"]:
+            item = QListWidgetItem(
+                f"{record['id']} · {record['status']} · "
+                f"{', '.join(record['capabilities'])}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, record)
+            self.integration_list.addItem(item)
+
+    def disconnect_integration(self) -> None:
+        current = self.integration_list.currentItem()
+        if current is None:
+            self._set_status("Select an integration adapter.")
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        response = self._call(
+            "ui.integration.disconnect",
+            integration_id=record["id"],
+            permissions=record["permissions"],
+        )
+        if response is not None:
+            self.integration_status.setText(
+                f"{record['id']} is disconnected. No network connection was attempted."
+            )
+            self.refresh_integrations()
+
+    def refresh_notifications(self) -> None:
+        self.notification_list.clear()
+        if not self.project_id:
+            return
+        response = self._call("ui.notification.list")
+        if response is None:
+            return
+        for record in response["notifications"]:
+            item = QListWidgetItem(
+                f"{record['severity'].upper()} · {record['code']} · {record['message']} · "
+                f"diagnostic {record['diagnostic_id']}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, record)
+            item.setToolTip(f"Recovery: {record['recovery']} · linkage: {record['linkage']}")
+            self.notification_list.addItem(item)
+
+    def dismiss_notification(self) -> None:
+        current = self.notification_list.currentItem()
+        if current is None:
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        if self._call("ui.notification.dismiss", notification_id=record["id"]) is not None:
+            self.refresh_notifications()
+
+    def refresh_tutorials(self) -> None:
+        self.tutorial_list.clear()
+        if not self.project_id:
+            return
+        response = self._call("ui.tutorial.status")
+        if response is None:
+            return
+        completed = set(response["completed"])
+        for step in (
+            "research-question", "source-import", "screening", "data",
+            "evidence", "writing", "export", "privacy",
+        ):
+            item = QListWidgetItem(
+                f"{'DONE' if step in completed else 'NEXT'} · {step.replace('-', ' ')}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, step)
+            self.tutorial_list.addItem(item)
+        self.tutorial.setText(
+            f"Learning progress: {len(completed)} actions recorded · "
+            f"{len(response['remaining'])} core tutorial actions remaining"
+        )
+
+    def complete_tutorial_step(self) -> None:
+        current = self.tutorial_list.currentItem()
+        if current is None:
+            self._set_status("Select a tutorial action.")
+            return
+        step = current.data(Qt.ItemDataRole.UserRole)
+        if self._call("ui.tutorial.step", step=step) is not None:
+            self.refresh_tutorials()
 
     def preview_export(self) -> None:
         result = self._call("ui.export.preview", filename=self.export_name.text())
@@ -1432,11 +2925,21 @@ class ResearchWindow(QMainWindow):
             self.jobs.cancel(selected.text().split(": ", 1)[0])
 
     def save_preferences(self) -> None:
+        try:
+            locale = Localizer(self.locale_entry.text()).normalized_locale
+        except UIError as exc:
+            self._set_status(f"{exc.message} {exc.recovery}")
+            return
         values = {
             "theme": self.theme_picker.currentText(),
             "density": self.density_picker.currentText(),
             "scale": float(self.scale_picker.currentText().rstrip("%")) / 100,
             "sidebar_width": self.splitter.sizes()[0],
+            "window_width": self.width(),
+            "window_height": self.height(),
+            "panel_visibility": {"sidebar": self.splitter.sizes()[0] > 0},
+            "panel_sizes": {"sidebar": self.splitter.sizes()[0]},
+            "locale": locale,
         }
         response = self._call("ui.preferences.update", **values)
         if response:
@@ -1444,7 +2947,122 @@ class ResearchWindow(QMainWindow):
             app = QApplication.instance()
             if isinstance(app, QApplication):
                 apply_theme(app, self.prefs)
+                direction = Localizer(self.prefs.locale).direction
+                app.setLayoutDirection(
+                    Qt.LayoutDirection.RightToLeft
+                    if direction == "rtl"
+                    else Qt.LayoutDirection.LeftToRight
+                )
+            self.refresh_localization()
             self._set_status("Preferences saved.")
+
+    def refresh_localization(self) -> None:
+        response = self._call("ui.localization.read")
+        if response is None:
+            return
+        state = response["localization"]
+        self.localization_status.setText(
+            f"Requested locale: {state['requested_locale']} · direction: {state['direction']} · "
+            f"translated catalog: {state['translated']} · "
+            f"fallback: {state['fallback_locale'] or 'none'}\n"
+            f"Complete catalogs: {', '.join(state['complete_catalogs'])}. "
+            "English is the only complete translation shipped in this workstream."
+        )
+
+    def refresh_workspace_presets(self) -> None:
+        self.preset_list.clear()
+        response = self._call("ui.workspace.preset.list")
+        if response is None:
+            return
+        for preset in response["presets"]:
+            item = QListWidgetItem(
+                f"{preset['name']} · {preset['active_screen']} · "
+                f"{round(float(preset['scale']) * 100)}%"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, preset)
+            self.preset_list.addItem(item)
+        if response["warnings"]:
+            self._set_status("; ".join(response["warnings"]))
+
+    def save_workspace_preset(self) -> None:
+        name = self.preset_name.text().strip()
+        if not name:
+            self._set_status("Enter a workspace preset name.")
+            return
+        sizes = self.splitter.sizes()
+        response = self._call(
+            "ui.workspace.preset.save",
+            preset={
+                "name": name,
+                "project_id": self.project_id,
+                "active_screen": SCREENS[self.pages.currentIndex()],
+                "panel_visibility": {"sidebar": bool(sizes and sizes[0] > 0)},
+                "panel_sizes": {"sidebar": sizes[0] if sizes else self.prefs.sidebar_width},
+                "theme": self.theme_picker.currentText(),
+                "density": self.density_picker.currentText(),
+                "scale": float(self.scale_picker.currentText().rstrip("%")) / 100,
+                "table_settings": {"page_size": self.data_page_size},
+                "window_width": self.width(),
+                "window_height": self.height(),
+            },
+        )
+        if response is not None:
+            self.refresh_workspace_presets()
+            self._set_status(f"Saved workspace preset {response['preset']['name']}.")
+
+    def restore_workspace_preset(self) -> None:
+        current = self.preset_list.currentItem()
+        if current is None:
+            self._set_status("Select a workspace preset.")
+            return
+        preset = current.data(Qt.ItemDataRole.UserRole)
+        self.theme_picker.setCurrentText(preset["theme"])
+        self.density_picker.setCurrentText(preset["density"])
+        self.scale_picker.setCurrentText(f"{round(float(preset['scale']) * 100)}%")
+        self.resize(int(preset["window_width"]), int(preset["window_height"]))
+        sidebar = int(preset["panel_sizes"].get("sidebar", self.prefs.sidebar_width))
+        self.splitter.setSizes([sidebar, max(400, self.width() - sidebar)])
+        table_size = preset.get("table_settings", {}).get("page_size")
+        if isinstance(table_size, int) and 1 <= table_size <= 5000:
+            self.data_page_size = table_size
+        project_id = str(preset.get("project_id", ""))
+        if project_id and project_id != self.project_id:
+            available = {
+                project["id"] for project in (self._call("ui.project.list") or {}).get(
+                    "projects", []
+                )
+            }
+            if project_id in available:
+                if not self._confirm_leave_project():
+                    return
+                self.open_project(project_id)
+            else:
+                self._set_status(
+                    "Preset project no longer exists; restored layout without switching project."
+                )
+        self.navigate(str(preset["active_screen"]))
+        self.save_preferences()
+        self._set_status(f"Restored workspace preset {preset['name']}.")
+
+    def delete_workspace_preset(self) -> None:
+        current = self.preset_list.currentItem()
+        if current is None:
+            return
+        preset = current.data(Qt.ItemDataRole.UserRole)
+        if self._call("ui.workspace.preset.delete", preset_id=preset["id"]) is not None:
+            self.refresh_workspace_presets()
+
+    def reset_workspace_layout(self) -> None:
+        self.resize(1260, 780)
+        self.splitter.setSizes([214, 1046])
+        self.theme_picker.setCurrentText("light")
+        self.density_picker.setCurrentText("comfortable")
+        self.scale_picker.setCurrentText("100%")
+        self.locale_entry.setText("en")
+        self.data_page_size = 250
+        self.navigate("Dashboard")
+        self.save_preferences()
+        self._set_status("Workspace layout reset to safe defaults.")
 
     def refresh_activity(self) -> None:
         self.activity_list.clear()
@@ -1714,9 +3332,24 @@ class ResearchWindow(QMainWindow):
         if not self._confirm_leave_project():
             event.ignore()
             return
+        if self.project_id:
+            for field, editor in (
+                ("manuscript", self.manuscript_editor),
+                ("notebook", self.notebook_editor),
+            ):
+                document = editor.document()
+                if document is not None and document.isModified():
+                    self._call(
+                        "ui.recovery.save",
+                        field=field,
+                        text=editor.toPlainText(),
+                        expected_revision=self.revision,
+                    )
         for timer in self._draft_timers.values():
             timer.stop()
         self.jobs.invalidate()
         self.prefs.sidebar_width = max(150, min(480, self.splitter.sizes()[0]))
+        self.prefs.window_width = self.width()
+        self.prefs.window_height = self.height()
         self.facade.settings.save(self.prefs)
         event.accept()
