@@ -1,6 +1,6 @@
 # Execution ledger
 
-`SOURCE_LAYOUT_VERIFIED`: package installed and imported from worktree using `uv sync --offline --extra dev`; tracked Git index check pending final local commit. Worker source: `D:\coding\codex\researchweave-v2-ai\src\researchweave\ai`. Intended final path: `D:\coding\codex\researchweave\src\researchweave\ai`. Production count: 12 Python files / 1,210 token-bearing SLOC (see `CODE_METRICS.json`).
+`SOURCE_LAYOUT_VERIFIED`: package installed and imported from worktree using `uv sync --offline --extra dev`; tracked Git index check pending final local commit. Worker source: `D:\coding\codex\researchweave-v2-ai\src\researchweave\ai`. Intended final path: `D:\coding\codex\researchweave\src\researchweave\ai`. Production count: 13 Python files / 1,354 token-bearing SLOC (see `CODE_METRICS.json`).
 
 | ID | Capability | Real files | Test evidence | Status |
 |---|---|---|---|---|
@@ -17,7 +17,8 @@
 | AI-016 | Verify source-bound quotes and offer no-model evidence-only response | `grounding.py`, `test_grounding.py` | `test_offline_evidence_anchors_and_stale_citation_rejection` | Implemented lexical evidence-only slice |
 | AI-013/014 | Fingerprinted local vector index with exact cosine search, evidence checks and hybrid rank fusion | `embeddings.py`, `test_embeddings.py` | `test_versioned_vector_index_hybrid_ranks_and_source_delete`, `test_invalid_embedding_fails_closed` | Implemented local vector slice; external embedder pending |
 | AI-018/020/048 | Host-defined tool manifest validation, acyclic dependency plan compilation and human-edit revalidation | `planner.py`, `test_planner.py` | `test_graph_topological_order_and_approval_preview`, `test_human_revision_recompiles_and_invalidates_approval`, invalid-plan cases | Implemented compiler slice; durable DAG execution pending |
-| QA-001 | Hostile and failure-state regression | `test_edge_cases.py` | Six explicit success+denial tests | 38 total tests passing; 81% coverage |
+| AI-038 | Host-owned connector registry and read-only Markdown vault | `integrations.py`, `test_integrations.py` | `test_vault_scopes_and_notes_are_untrusted`, invalid path and size tests | Implemented local connector slice; cloud connectors pending |
+| QA-001 | Hostile and failure-state regression | `test_edge_cases.py` | Six explicit success+denial tests | 44 total tests passing; 81% coverage |
 
 All other AI-001–AI-050 tasks remain pending or partial; no missing task is implicitly marked implemented. Synthetic test data are original and distributable; no external fixture license applies. GUI wiring is pending for all operations. Full validation and precise remaining work are in `TEST_RESULTS.md` and `NEXT_ACTION.md`.
 

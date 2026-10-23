@@ -59,3 +59,5 @@ with TemporaryDirectory() as folder:
 
 Structured graph planning is available headlessly with `PlanCompiler`, `ToolManifest`, and `PlannedStep` from `researchweave.ai.planner`. The host defines exact allowed operation names and argument keys. `compile(project_id, steps)` performs stable topological sorting, schema constraints and offline checks; `revise(compiled, {step_id: new_arguments})` recompiles the plan and reports approval invalidation. The durable executor currently accepts ordered steps; the integrator must connect graph dependencies and authority at the trusted composition root before exposing general multi-step execution.
 
+The read-only Markdown connector is available through `ConnectorRegistry` and `MarkdownVault` in `researchweave.ai.integrations`. It is constructed with a trusted existing vault directory and requires `granted_scopes=frozenset({"notes.read"})` for `registry.invoke("local.markdown", "read", {"path": "paper.md"}, ...)`. It returns raw UTF-8 Markdown, a SHA-256 checksum, and `untrusted=True`. Imported instructions cannot grant tool authority.
+
