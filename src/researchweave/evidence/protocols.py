@@ -95,3 +95,61 @@ class ProtocolService:
         return [{"version": r["version"], "title": r["title"],
                  "body": json.loads(r["body_json"]), "rationale": r["rationale"],
                  "author": r["author"], "recorded_at": r["recorded_at"]} for r in rows]
+
+    def diff(
+        self, protocol_id: str, from_version: int, to_version: int
+    ) -> dict[str, Any]:
+        require(
+            type(from_version) is int and type(to_version) is int
+            and 0 < from_version < to_version,
+            "Protocol diff requires ordered positive versions",
+        )
+        versions = {row["version"]: row for row in self.history(protocol_id)}
+        require(from_version in versions and to_version in versions,
+                "Protocol version not found", "NOT_FOUND")
+        before = versions[from_version]["body"]
+        after = versions[to_version]["body"]
+        keys = sorted(set(before) | set(after))
+        changes = []
+        for key in keys:
+            old = before.get(key)
+            new = after.get(key)
+            if old == new:
+                continue
+            if key not in before:
+                kind = "added"
+            elif key not in after:
+                kind = "removed"
+            else:
+                kind = "changed"
+            changes.append({"field": key, "kind": kind, "before": old, "after": new})
+        return {
+            "protocol_id": protocol_id,
+            "from_version": from_version,
+            "to_version": to_version,
+            "changes": changes,
+            "changed_fields": [item["field"] for item in changes],
+            "amendment_rationale": versions[to_version]["rationale"],
+            "amendment_author": versions[to_version]["author"],
+            "amendment_recorded_at": versions[to_version]["recorded_at"],
+            "history_overwritten": False,
+        }
+
+    def export_markdown(self, protocol_id: str) -> str:
+        history = self.history(protocol_id)
+        lines = [f"# {history[0]['title']}", "", "## Version history", ""]
+        for row in history:
+            body = json.dumps(
+                row["body"], ensure_ascii=False, indent=2, sort_keys=True
+            ).splitlines()
+            lines.extend([
+                f"### Version {row['version']}",
+                "",
+                f"- Author: {row['author']}",
+                f"- Recorded at: {row['recorded_at']}",
+                f"- Rationale: {row['rationale']}",
+                "",
+                *[f"    {line}" for line in body],
+                "",
+            ])
+        return "\n".join(lines)
