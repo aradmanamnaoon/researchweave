@@ -21,6 +21,7 @@
 | RE-032 | Conservative persisted screening arithmetic | Partial; intentionally incomplete PRISMA flow |
 | RE-037, RE-039 | Manuscript section revisions and unverified citation lint | Partial |
 | RE-050 | Provenance graph with orphan/cycle checks | Implemented service; further adversarial tests pending |
+| RE-050-VERIFY | Reopen graph equivalence, persisted source/note/anchor causal links, orphan and cycle detection; test_provenance.py | 2 local tests passed |
 | RE-004, RE-014..017, RE-020..022, RE-026, RE-030..031, RE-033..036, RE-038, RE-040..049, RE-051..052 | Not implemented or incomplete; consult NEXT_ACTION.md | Pending |
 
 The source is tracked at relative `src/researchweave/evidence/` in isolated branch `rebuild/v2-evidence`. Source layout verification, measured meaningful SLOC, test count and commit SHA are recorded in TEST_RESULTS.md and HANDOFF.md after final local checks.

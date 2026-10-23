@@ -19,3 +19,8 @@
 - `python -m compileall -q src/researchweave/evidence`: passed.
 - `python workstreams/v2/evidence/count_sloc.py`: 17 files, 2,432 meaningful source lines.
 - Provider requests were mocked; no live network provider validation was performed.
+
+## Provenance regression
+
+- `pytest -q tests/v2/evidence -o pythonpath=src`: 21 tests passed, including provenance graph preservation across reopen and adversarial cycle/orphan fixtures.
+- `ruff check src/researchweave/evidence tests/v2/evidence`: passed.
