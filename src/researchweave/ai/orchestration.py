@@ -109,8 +109,9 @@ class LongTaskOrchestrator:
         encoded = self._encode(arguments)
         with self.db:
             self.db.execute(
-                "INSERT INTO long_jobs(id,name,state,arguments_json,attempts,created_at,updated_at) "
-                "VALUES(?,?,?,?,0,?,?)",
+                "INSERT INTO long_jobs("
+                "id,name,state,arguments_json,attempts,created_at,updated_at"
+                ") VALUES(?,?,?,?,0,?,?)",
                 (job_id, name, "queued", encoded, now, now),
             )
             self._event(job_id, "submitted", {"name": name})
