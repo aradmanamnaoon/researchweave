@@ -45,3 +45,58 @@ def test_schema_runs_before_authorization_and_preview_never_executes(tmp_path: P
     preview = facade.preview("dataset.import", {"filename": "source.csv"}, {})
     assert preview["effect"] == "local-write"
     assert list((tmp_path / "store").glob("*.json")) == []
+
+
+def test_nested_command_payloads_are_recursively_schema_checked():
+    identity = {"dataset_id": "dataset", "revision": "a" * 64}
+    validate_arguments(
+        "dataset.transform",
+        {
+            **identity,
+            "spec": {
+                "type": "derive",
+                "column": "z",
+                "source": "x",
+                "operation": "add",
+                "operand": 2.0,
+            },
+        },
+    )
+    with pytest.raises(AnalysisError, match="does not match any allowed schema"):
+        validate_arguments(
+            "dataset.transform",
+            {
+                **identity,
+                "spec": {
+                    "type": "derive",
+                    "column": "z",
+                    "source": "x",
+                    "operation": "add",
+                    "operand": 2.0,
+                    "surprise": True,
+                },
+            },
+        )
+    with pytest.raises(AnalysisError, match="Invalid value for options.alternative"):
+        validate_arguments(
+            "statistics.test",
+            {**identity, "outcome": "x", "options": {"alternative": "sometimes"}},
+        )
+    with pytest.raises(AnalysisError, match="Unknown fields at updates"):
+        validate_arguments(
+            "dataset.variable",
+            {**identity, "column": "x", "updates": {"label": "X", "arbitrary": 1}},
+        )
+
+
+def test_manifest_exposes_nested_scale_and_meta_schemas(tmp_path: Path):
+    facade = build_analysis_facade(tmp_path / "store")
+    by_name = {
+        entry["operation"]: entry["arguments_schema"] for entry in facade.capability_manifest()
+    }
+    scale = by_name["statistics.score_scale"]["properties"]["scale"]
+    assert scale["additionalProperties"] is False
+    assert set(scale["required"]) == {"name", "version", "items"}
+    studies = by_name["statistics.meta_random"]["properties"]["studies"]
+    assert studies["items"]["additionalProperties"] is False
+    assert set(studies["items"]["required"]) == {"id", "scale", "estimate", "se"}

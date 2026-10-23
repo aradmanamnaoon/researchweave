@@ -13,6 +13,7 @@ from .errors import AnalysisError, require
 class Field:
     kind: str
     nullable: bool = False
+    schema: Mapping[str, Any] | None = None
 
 
 S = Field("string")
@@ -24,6 +25,195 @@ OBJ = Field("object")
 A = Field("array")
 AS = Field("array_string")
 AN = Field("array_number")
+
+
+def _structured(kind: str, schema: Mapping[str, Any]) -> Field:
+    return Field(kind, schema=schema)
+
+
+IMPORT_OPTIONS = _structured(
+    "object",
+    {
+        "type": "object",
+        "properties": {
+            "encoding": {"type": "string"},
+            "delimiter": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "decimal": {"type": "string"},
+            "grouping": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "missing": {"type": "array", "items": {"type": "string"}},
+            "dataset_id": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "format": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "sheet": {"anyOf": [{"type": "string"}, {"type": "integer"}]},
+            "data_only": {"type": "boolean"},
+            "min_row": {"type": "integer"},
+            "max_row": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+            "min_col": {"type": "integer"},
+            "max_col": {"anyOf": [{"type": "integer"}, {"type": "null"}]},
+        },
+        "additionalProperties": False,
+    },
+)
+
+FILTER_EXPRESSION = {"type": "object"}
+TRANSFORM_SPEC = _structured(
+    "object",
+    {
+        "anyOf": [
+            {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "const": "filter"},
+                    "expression": FILTER_EXPRESSION,
+                },
+                "required": ["type", "expression"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "const": "recode"},
+                    "column": {"type": "string"},
+                    "mapping": {"type": "object"},
+                },
+                "required": ["type", "column", "mapping"],
+                "additionalProperties": False,
+            },
+            {
+                "type": "object",
+                "properties": {
+                    "type": {"type": "string", "const": "derive"},
+                    "column": {"type": "string"},
+                    "source": {"type": "string"},
+                    "operation": {
+                        "type": "string",
+                        "enum": ["add", "subtract", "multiply", "divide"],
+                    },
+                    "operand": {"type": "number"},
+                    "operand_column": {"type": "string"},
+                },
+                "required": ["type", "column", "source", "operation"],
+                "additionalProperties": False,
+            },
+        ]
+    },
+)
+
+VARIABLE_UPDATES = _structured(
+    "object",
+    {
+        "type": "object",
+        "properties": {
+            "label": {"type": "string"},
+            "units": {"type": "string"},
+            "scale": {
+                "type": "string",
+                "enum": ["nominal", "ordinal", "interval", "ratio", "unknown"],
+            },
+            "value_labels": {"type": "object", "additionalProperties": {"type": "string"}},
+            "missing_values": {"type": "array", "items": {"type": "string"}},
+            "category_order": {"type": "array", "items": {"type": "string"}},
+            "allowed_min": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+            "allowed_max": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+            "privacy_class": {
+                "type": "string",
+                "enum": ["public", "internal", "sensitive", "restricted"],
+            },
+            "private": {"type": "boolean"},
+            "dtype": {"type": "string", "enum": ["text", "number", "boolean", "date"]},
+        },
+        "additionalProperties": False,
+    },
+)
+
+T_TEST_OPTIONS = _structured(
+    "object",
+    {
+        "type": "object",
+        "properties": {
+            "group": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "groups": {
+                "anyOf": [
+                    {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "minItems": 2,
+                        "maxItems": 2,
+                    },
+                    {"type": "null"},
+                ]
+            },
+            "paired": {"anyOf": [{"type": "string"}, {"type": "null"}]},
+            "alternative": {"type": "string", "enum": ["two-sided", "less", "greater"]},
+            "equal_variance": {"type": "boolean"},
+            "null_mean": {"type": "number"},
+            "alpha": {"type": "number"},
+        },
+        "additionalProperties": False,
+    },
+)
+
+PSYCHOMETRIC_OPTIONS = _structured(
+    "object",
+    {
+        "type": "object",
+        "properties": {
+            "reverse": {"type": "array", "items": {"type": "string"}},
+            "scale_min": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+            "scale_max": {"anyOf": [{"type": "number"}, {"type": "null"}]},
+        },
+        "additionalProperties": False,
+    },
+)
+
+META_STUDIES = _structured(
+    "array",
+    {
+        "type": "array",
+        "minItems": 2,
+        "items": {
+            "type": "object",
+            "properties": {
+                "id": {"type": "string"},
+                "scale": {
+                    "type": "string",
+                    "enum": [
+                        "mean_difference",
+                        "log_or",
+                        "fisher_z",
+                        "standardized_mean_difference",
+                    ],
+                },
+                "estimate": {"type": "number"},
+                "se": {"type": "number"},
+            },
+            "required": ["id", "scale", "estimate", "se"],
+            "additionalProperties": False,
+        },
+    },
+)
+
+SCALE_SPEC = _structured(
+    "object",
+    {
+        "type": "object",
+        "properties": {
+            "name": {"type": "string"},
+            "version": {"type": "string"},
+            "items": {"type": "array", "items": {"type": "string"}, "minItems": 2},
+            "reverse_items": {"type": "array", "items": {"type": "string"}},
+            "minimum": {"type": "number"},
+            "maximum": {"type": "number"},
+            "min_answered": {"type": "integer"},
+            "aggregation": {"type": "string", "enum": ["mean", "sum"]},
+            "subscales": {
+                "type": "object",
+                "additionalProperties": {"type": "array", "items": {"type": "string"}},
+            },
+        },
+        "required": ["name", "version", "items"],
+        "additionalProperties": False,
+    },
+)
 
 
 @dataclass(frozen=True)
@@ -52,6 +242,11 @@ class OperationSchema:
 
 
 def _field_schema(field: Field) -> dict[str, Any]:
+    if field.schema is not None:
+        schema = dict(field.schema)
+        if field.nullable:
+            schema = {"anyOf": [schema, {"type": "null"}]}
+        return schema
     mapping: dict[str, dict[str, Any]] = {
         "string": {"type": "string"},
         "integer": {"type": "integer"},
@@ -72,6 +267,9 @@ def _validate_field(name: str, value: Any, *, fields: Mapping[str, Field]) -> No
     field = fields[name]
     if value is None:
         require(field.nullable, f"{name} cannot be null", "SCHEMA_MISMATCH")
+        return
+    if field.schema is not None:
+        _validate_json_schema(value, field.schema, path=name)
         return
     valid = False
     if field.kind == "string":
@@ -95,6 +293,88 @@ def _validate_field(name: str, value: Any, *, fields: Mapping[str, Field]) -> No
     require(valid, f"Invalid type for {name}", "SCHEMA_MISMATCH")
 
 
+def _validate_json_schema(value: Any, schema: Mapping[str, Any], *, path: str) -> None:
+    alternatives = schema.get("anyOf")
+    if alternatives is not None:
+        require(bool(isinstance(alternatives, list) and alternatives), f"Invalid schema for {path}")
+        for alternative in alternatives:
+            try:
+                _validate_json_schema(value, alternative, path=path)
+                return
+            except AnalysisError:
+                continue
+        raise AnalysisError("SCHEMA_MISMATCH", f"Value at {path} does not match any allowed schema")
+
+    expected = schema.get("type")
+    if expected == "null":
+        require(value is None, f"Invalid type for {path}", "SCHEMA_MISMATCH")
+        return
+    if expected == "object":
+        require(isinstance(value, Mapping), f"Invalid type for {path}", "SCHEMA_MISMATCH")
+        properties = schema.get("properties", {})
+        require(isinstance(properties, Mapping), f"Invalid schema for {path}")
+        required = set(schema.get("required", []))
+        missing = required - set(value)
+        require(not missing, f"Missing fields at {path}: {sorted(missing)}", "SCHEMA_MISMATCH")
+        additional = schema.get("additionalProperties", True)
+        unknown = set(value) - set(properties)
+        if additional is False:
+            require(not unknown, f"Unknown fields at {path}: {sorted(unknown)}", "SCHEMA_MISMATCH")
+        elif isinstance(additional, Mapping):
+            for key in unknown:
+                _validate_json_schema(value[key], additional, path=f"{path}.{key}")
+        for key, nested in properties.items():
+            if key in value:
+                _validate_json_schema(value[key], nested, path=f"{path}.{key}")
+    elif expected == "array":
+        require(isinstance(value, (list, tuple)), f"Invalid type for {path}", "SCHEMA_MISMATCH")
+        if "minItems" in schema:
+            require(
+                len(value) >= int(schema["minItems"]),
+                f"Too few items at {path}",
+                "SCHEMA_MISMATCH",
+            )
+        if "maxItems" in schema:
+            require(
+                len(value) <= int(schema["maxItems"]),
+                f"Too many items at {path}",
+                "SCHEMA_MISMATCH",
+            )
+        if schema.get("uniqueItems"):
+            require(
+                len({repr(item) for item in value}) == len(value),
+                f"Duplicate items at {path}",
+                "SCHEMA_MISMATCH",
+            )
+        item_schema = schema.get("items")
+        if isinstance(item_schema, Mapping):
+            for index, item in enumerate(value):
+                _validate_json_schema(item, item_schema, path=f"{path}[{index}]")
+    elif expected == "string":
+        require(isinstance(value, str), f"Invalid type for {path}", "SCHEMA_MISMATCH")
+    elif expected == "integer":
+        require(
+            isinstance(value, int) and not isinstance(value, bool),
+            f"Invalid type for {path}",
+            "SCHEMA_MISMATCH",
+        )
+    elif expected == "number":
+        require(
+            isinstance(value, (int, float)) and not isinstance(value, bool),
+            f"Invalid type for {path}",
+            "SCHEMA_MISMATCH",
+        )
+    elif expected == "boolean":
+        require(isinstance(value, bool), f"Invalid type for {path}", "SCHEMA_MISMATCH")
+    else:
+        require(expected is None, f"Unsupported schema type for {path}")
+
+    if "const" in schema:
+        require(value == schema["const"], f"Invalid value for {path}", "SCHEMA_MISMATCH")
+    if "enum" in schema:
+        require(value in schema["enum"], f"Invalid value for {path}", "SCHEMA_MISMATCH")
+
+
 def _schema(
     required: Mapping[str, Field] | None = None,
     optional: Mapping[str, Field] | None = None,
@@ -106,7 +386,7 @@ IDENTITY = {"dataset_id": S, "revision": S}
 
 
 OPERATION_SCHEMAS: dict[str, OperationSchema] = {
-    "dataset.import": _schema({"filename": S}, {"options": OBJ}),
+    "dataset.import": _schema({"filename": S}, {"options": IMPORT_OPTIONS}),
     "dataset.scan_parquet": _schema(
         {"filename": S},
         {"offset": INT, "limit": INT, "columns": AS, "batch_size": INT},
@@ -121,8 +401,8 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
         {**IDENTITY, "filename": S},
         {"delimiter": S, "decimal": S, "formula_safe": B},
     ),
-    "dataset.transform": _schema({**IDENTITY, "spec": OBJ}),
-    "dataset.variable": _schema({**IDENTITY, "column": S, "updates": OBJ}),
+    "dataset.transform": _schema({**IDENTITY, "spec": TRANSFORM_SPEC}),
+    "dataset.variable": _schema({**IDENTITY, "column": S, "updates": VARIABLE_UPDATES}),
     "dataset.missingness": _schema(IDENTITY, {"by": SN}),
     "dataset.select": _schema({**IDENTITY, "column": S, "allowed": A}, {"include_null": B}),
     "dataset.user_missing": _schema({**IDENTITY, "column": S, "missing_values": AS}),
@@ -178,12 +458,14 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "statistics.describe": _schema({**IDENTITY, "column": S}),
     "statistics.frequency": _schema({**IDENTITY, "column": S}),
     "statistics.grouped_describe": _schema({**IDENTITY, "column": S, "group": S}),
-    "statistics.test": _schema({**IDENTITY, "outcome": S}, {"options": OBJ}),
+    "statistics.test": _schema({**IDENTITY, "outcome": S}, {"options": T_TEST_OPTIONS}),
     "statistics.correlate": _schema({**IDENTITY, "x": S, "y": S}, {"method": S}),
     "statistics.correlation_matrix": _schema(
         {**IDENTITY, "columns": AS}, {"method": S, "adjustment": S}
     ),
-    "statistics.psychometric": _schema({**IDENTITY, "columns": AS}, {"options": OBJ}),
+    "statistics.psychometric": _schema(
+        {**IDENTITY, "columns": AS}, {"options": PSYCHOMETRIC_OPTIONS}
+    ),
     "statistics.reliability_diagnostics": _schema(
         {**IDENTITY, "columns": AS},
         {
@@ -208,9 +490,11 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "statistics.negative_binomial_estimated": _schema(
         {**IDENTITY, "outcome": S, "predictors": AS}, {"offset": SN}
     ),
-    "statistics.meta": _schema({"studies": A}, {"model": S}),
-    "statistics.meta_random": _schema({"studies": A}, {"tau_method": S, "hartung_knapp": B}),
-    "statistics.egger": _schema({"studies": A}),
+    "statistics.meta": _schema({"studies": META_STUDIES}, {"model": S}),
+    "statistics.meta_random": _schema(
+        {"studies": META_STUDIES}, {"tau_method": S, "hartung_knapp": B}
+    ),
+    "statistics.egger": _schema({"studies": META_STUDIES}),
     "statistics.adjust": _schema({"pvalues": AN}, {"method": S}),
     "statistics.distribution": _schema({**IDENTITY, "column": S}),
     "statistics.contingency": _schema({**IDENTITY, "first": S, "second": S}),
@@ -286,8 +570,8 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "statistics.required_n_precision": _schema({"assumed_sd": N, "margin": N}, {"confidence": N}),
     "statistics.diagnostics": _schema({**IDENTITY, "outcome": S, "predictors": AS}),
     "statistics.vif": _schema({**IDENTITY, "predictors": AS}),
-    "statistics.score_scale": _schema({**IDENTITY, "scale": OBJ}, {"row_id": SN}),
-    "statistics.item_total": _schema({**IDENTITY, "scale": OBJ}),
+    "statistics.score_scale": _schema({**IDENTITY, "scale": SCALE_SPEC}, {"row_id": SN}),
+    "statistics.item_total": _schema({**IDENTITY, "scale": SCALE_SPEC}),
     "statistics.time_features": _schema(
         {**IDENTITY, "time_column": S, "value_column": S, "lags": A},
         {"rolling_window": INT},
