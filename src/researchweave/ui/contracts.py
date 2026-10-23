@@ -151,6 +151,7 @@ class Project:
     tutorial_steps: list[str] = field(default_factory=list)
     question_structure: dict[str, str] = field(default_factory=dict)
     protocol_history: list[dict[str, Any]] = field(default_factory=list)
+    protocol_deviations: list[dict[str, Any]] = field(default_factory=list)
     extraction_schema: dict[str, Any] = field(default_factory=dict)
     extractions: list[dict[str, Any]] = field(default_factory=list)
     variable_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)

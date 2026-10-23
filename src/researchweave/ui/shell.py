@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Mapping
+from pathlib import Path
 from typing import Any, cast
 
 from PyQt6.QtCore import Qt, QTimer
@@ -13,6 +14,7 @@ from PyQt6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFormLayout,
     QHBoxLayout,
     QInputDialog,
@@ -377,6 +379,18 @@ class ResearchWindow(QMainWindow):
         self.protocol_history = QListWidget()
         named(self.protocol_history, "Protocol amendment history")
         layout.addWidget(self.protocol_history)
+        deviation_form = QFormLayout()
+        self.protocol_deviation = QLineEdit()
+        self.protocol_deviation_reason = QLineEdit()
+        self.protocol_deviation_impact = QLineEdit()
+        named(self.protocol_deviation, "Protocol deviation description")
+        named(self.protocol_deviation_reason, "Protocol deviation reason")
+        named(self.protocol_deviation_impact, "Protocol deviation impact")
+        deviation_form.addRow("Deviation", self.protocol_deviation)
+        deviation_form.addRow("Reason", self.protocol_deviation_reason)
+        deviation_form.addRow("Impact", self.protocol_deviation_impact)
+        layout.addLayout(deviation_form)
+        layout.addWidget(button("Record protocol deviation", self.add_protocol_deviation))
         self._refresh_templates()
 
         layout = self._page("Library", "Search local sources; sample records are always labeled.")
@@ -1016,6 +1030,13 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.integration_status)
 
         layout = self._page("Exports", "Preview file hashes before saving a local export.")
+        export_location = QHBoxLayout()
+        self.export_directory = QLineEdit(str(self.facade.export_root))
+        self.export_directory.setReadOnly(True)
+        named(self.export_directory, "Selected local export directory")
+        export_location.addWidget(self.export_directory)
+        export_location.addWidget(button("Choose export folder", self.choose_export_folder))
+        layout.addLayout(export_location)
         self.export_name = QLineEdit("research-notes.md")
         named(self.export_name, "Export filename")
         layout.addWidget(self.export_name)
@@ -1099,6 +1120,7 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.notification_list)
         layout.addWidget(button("Refresh notifications", self.refresh_notifications))
         layout.addWidget(button("Dismiss selected notification", self.dismiss_notification))
+        layout.addWidget(button("Retry selected safe local action", self.retry_notification))
 
         layout = self._page(
             "Tutorials",
@@ -1249,7 +1271,7 @@ class ResearchWindow(QMainWindow):
             "ui.screening.vote", "ui.screening.adjudicate",
             "ui.dataset.import", "ui.manuscript.save", "ui.manuscript.sections.update",
             "ui.notebook.save", "ui.tutorial.step",
-            "ui.protocol.start", "ui.protocol.update",
+            "ui.protocol.start", "ui.protocol.update", "ui.protocol.deviation.add",
             "ui.evidence.capture", "ui.claim.create",
             "ui.question.update", "ui.prisma.update",
             "ui.extraction.schema.update", "ui.extraction.record.save",
@@ -2248,8 +2270,20 @@ class ResearchWindow(QMainWindow):
         value = self._call("ui.qual.list")
         if value:
             for item in value["annotations"]:
-                row = QListWidgetItem(f"{item['code']}: {item['quote'][:120]}")
+                overlap = (
+                    f" · overlaps {item['overlap_count']}"
+                    if item.get("overlap_count")
+                    else ""
+                )
+                row = QListWidgetItem(
+                    f"{item['code']}: {item['quote'][:120]}{overlap}"
+                )
                 row.setData(Qt.ItemDataRole.UserRole, item)
+                if item.get("overlap_ids"):
+                    row.setToolTip(
+                        "Overlapping annotation IDs: "
+                        + ", ".join(str(value) for value in item["overlap_ids"])
+                    )
                 self.annotation_list.addItem(row)
 
     def _open_source_span(self, source_id: str, start: int, end: int, label: str) -> None:
@@ -3258,6 +3292,18 @@ class ResearchWindow(QMainWindow):
         if self._call("ui.notification.dismiss", notification_id=record["id"]) is not None:
             self.refresh_notifications()
 
+    def retry_notification(self) -> None:
+        current = self.notification_list.currentItem()
+        if current is None:
+            self._set_status("Select a notification with a safe retry action.")
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        response = self._call("ui.notification.retry", notification_id=record["id"])
+        if response is not None:
+            self._set_status(
+                f"Retried {response['retried_operation']} locally with no network or writes."
+            )
+
     def refresh_tutorials(self) -> None:
         self.tutorial_list.clear()
         if not self.project_id:
@@ -3296,6 +3342,22 @@ class ResearchWindow(QMainWindow):
                 f"{result['filename']} · {result['bytes']} bytes\n"
                 f"SHA-256: {result['sha256']}\nDestination: {result['destination']}"
             )
+
+    def choose_export_folder(self) -> None:
+        selected = QFileDialog.getExistingDirectory(
+            self,
+            "Choose local export folder",
+            str(self.facade.export_root),
+        )
+        if not selected:
+            return
+        destination = Path(selected)
+        if destination.is_symlink() or not destination.is_dir():
+            self._set_status("Choose an existing ordinary local directory.")
+            return
+        self.facade.export_root = destination.resolve()
+        self.export_directory.setText(str(self.facade.export_root))
+        self._set_status("Local export folder selected. Each write still requires approval.")
 
     def export_file(self) -> None:
         preview = self._call("ui.export.preview", filename=self.export_name.text())
@@ -3829,6 +3891,15 @@ class ResearchWindow(QMainWindow):
                     f"{entry['timestamp']} · {entry['action']} · "
                     f"{', '.join(entry.get('changed_fields', [])) or 'no field diff'}"
                 )
+            for deviation in history.get("deviations", [])[-100:]:
+                item = QListWidgetItem(
+                    f"DEVIATION · {deviation['created_at']} · {deviation['description']}"
+                )
+                item.setToolTip(
+                    f"Reason: {deviation['reason']} · Impact: "
+                    f"{deviation['impact'] or 'not specified'}"
+                )
+                self.protocol_history.addItem(item)
         if not record:
             self.protocol_summary.setText(
                 "No protocol draft yet. Select a research design and start a template."
@@ -3869,9 +3940,24 @@ class ResearchWindow(QMainWindow):
         self.protocol_summary.setText(
             self.protocol_summary.text()
             + "\n\nStructured export preview:"
-            + f" {response['entries']} history entries · SHA-256 {response['sha256']}\n"
+            + f" {response['entries']} history entries · "
+            + f"{response['deviations']} deviations · SHA-256 {response['sha256']}\n"
             + "Export preserves user-authored protocol/history without certifying validity."
         )
+
+    def add_protocol_deviation(self) -> None:
+        response = self._call(
+            "ui.protocol.deviation.add",
+            description=self.protocol_deviation.text(),
+            reason=self.protocol_deviation_reason.text(),
+            impact=self.protocol_deviation_impact.text(),
+        )
+        if response is not None:
+            self.protocol_deviation.clear()
+            self.protocol_deviation_reason.clear()
+            self.protocol_deviation_impact.clear()
+            self.refresh_protocol()
+            self._set_status("Recorded protocol deviation with protocol revision hash.")
 
     def save_protocol(self) -> None:
         if not self.protocol_fields:

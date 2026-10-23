@@ -11,7 +11,7 @@ from pathlib import Path
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QFileDialog
 
 from researchweave.ui import build_ui_facade, build_ui_shell
 
@@ -361,3 +361,214 @@ def test_recovery_survives_abrupt_child_process_exit(tmp_path: Path) -> None:
     assert recovery["text"] == "abrupt Ω draft"
     assert recovery["conflict"] is False
     assert recovery["note"].startswith("Preview only")
+
+
+def test_protocol_deviation_overlap_and_safe_notification_retry(tmp_path: Path) -> None:
+    facade = build_ui_facade(tmp_path)
+    pid, revision = create_project(facade)
+    started = ok(
+        facade,
+        "ui.protocol.start",
+        project_id=pid,
+        expected_revision=revision,
+        template_id="literature-map",
+    )
+    revision = int(started["revision"])
+    deviation = ok(
+        facade,
+        "ui.protocol.deviation.add",
+        project_id=pid,
+        expected_revision=revision,
+        description="Synthetic search source became unavailable.",
+        reason="Fixture-only deviation test.",
+        impact="No scientific conclusion is drawn.",
+    )
+    revision = int(deviation["revision"])
+    exported = ok(facade, "ui.protocol.export", project_id=pid)
+    assert exported["deviations"] == 1
+    payload = json.loads(exported["content"])
+    assert payload["deviations"][0]["protocol_revision_sha256"]
+
+    source = ok(
+        facade,
+        "ui.source.add",
+        project_id=pid,
+        expected_revision=revision,
+        title="Overlap fixture",
+        text="abcdefghij",
+    )
+    revision = int(source["revision"])
+    first = ok(
+        facade,
+        "ui.qual.annotate",
+        project_id=pid,
+        expected_revision=revision,
+        source_id=source["source_id"],
+        start=1,
+        end=6,
+        code="first",
+    )
+    revision = int(first["revision"])
+    second = ok(
+        facade,
+        "ui.qual.annotate",
+        project_id=pid,
+        expected_revision=revision,
+        source_id=source["source_id"],
+        start=4,
+        end=8,
+        code="second",
+    )
+    revision = int(second["revision"])
+    annotations = ok(facade, "ui.qual.list", project_id=pid)["annotations"]
+    assert annotations[0]["overlap_count"] == 1
+    assert annotations[1]["overlap_ids"] == [annotations[0]["id"]]
+
+    notification = ok(
+        facade,
+        "ui.notification.add",
+        project_id=pid,
+        expected_revision=revision,
+        code="SOURCE_SEARCH_RETRY",
+        severity="warning",
+        message="A local source search can be retried.",
+        recovery="Retry the same bounded local source search.",
+        linkage={
+            "retry_operation": "ui.source.search",
+            "retry_arguments": {"query": "Overlap", "limit": 10},
+        },
+    )
+    revision = int(notification["revision"])
+    retried = ok(
+        facade,
+        "ui.notification.retry",
+        project_id=pid,
+        notification_id=notification["notification"]["id"],
+    )
+    assert retried["retried_operation"] == "ui.source.search"
+    assert retried["result"]["total"] == 1
+    assert retried["local_writes"] == []
+    assert retried["network_hosts"] == []
+
+    unsafe = ok(
+        facade,
+        "ui.notification.add",
+        project_id=pid,
+        expected_revision=revision,
+        code="UNSAFE_RETRY",
+        severity="warning",
+        message="Unsafe write retry is intentionally rejected.",
+        recovery="Repeat manually after review.",
+        linkage={
+            "retry_operation": "ui.source.add",
+            "retry_arguments": {"title": "No", "text": "No"},
+        },
+    )
+    denied = facade.execute(
+        "ui.notification.retry",
+        {
+            "project_id": pid,
+            "notification_id": unsafe["notification"]["id"],
+        },
+    )
+    assert denied["error"]["code"] == "PERMISSION_DENIED"
+
+
+def test_visible_deviation_retry_overlap_and_export_folder(
+    tmp_path: Path,
+    monkeypatch,
+) -> None:
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
+    facade = build_ui_facade(tmp_path)
+    pid, revision = create_project(facade)
+    started = ok(
+        facade,
+        "ui.protocol.start",
+        project_id=pid,
+        expected_revision=revision,
+        template_id="literature-map",
+    )
+    revision = int(started["revision"])
+    source = ok(
+        facade,
+        "ui.source.add",
+        project_id=pid,
+        expected_revision=revision,
+        title="Overlap UI fixture",
+        text="abcdefghij",
+    )
+    revision = int(source["revision"])
+    first = ok(
+        facade,
+        "ui.qual.annotate",
+        project_id=pid,
+        expected_revision=revision,
+        source_id=source["source_id"],
+        start=1,
+        end=6,
+        code="first",
+    )
+    revision = int(first["revision"])
+    second = ok(
+        facade,
+        "ui.qual.annotate",
+        project_id=pid,
+        expected_revision=revision,
+        source_id=source["source_id"],
+        start=4,
+        end=8,
+        code="second",
+    )
+    revision = int(second["revision"])
+    notification = ok(
+        facade,
+        "ui.notification.add",
+        project_id=pid,
+        expected_revision=revision,
+        code="VISIBLE_RETRY",
+        severity="info",
+        message="Safe local retry.",
+        recovery="Retry source search.",
+        linkage={
+            "retry_operation": "ui.source.search",
+            "retry_arguments": {"query": "Overlap", "limit": 10},
+        },
+    )
+
+    shell = build_ui_shell(fake_services=facade)
+    shell.open_project(pid)
+    shell.navigate("Protocol")
+    shell.protocol_deviation.setText("Visible synthetic deviation")
+    shell.protocol_deviation_reason.setText("Acceptance fixture")
+    shell.protocol_deviation_impact.setText("No scientific impact")
+    shell.add_protocol_deviation()
+    assert any(
+        "DEVIATION" in shell.protocol_history.item(row).text()
+        for row in range(shell.protocol_history.count())
+    )
+
+    shell.navigate("Qualitative")
+    assert "overlaps 1" in shell.annotation_list.item(0).text()
+
+    shell.navigate("Notifications")
+    shell.refresh_notifications()
+    assert shell.notification_list.count() == 1
+    shell.notification_list.setCurrentRow(0)
+    shell.retry_notification()
+    assert "Retried ui.source.search" in shell.statusBar().currentMessage()
+
+    destination = tmp_path / "chosen-exports"
+    destination.mkdir()
+    monkeypatch.setattr(
+        QFileDialog,
+        "getExistingDirectory",
+        lambda *args, **kwargs: str(destination),
+    )
+    shell.navigate("Exports")
+    shell.choose_export_folder()
+    assert facade.export_root == destination.resolve()
+    assert shell.export_directory.text() == str(destination.resolve())
+    assert notification["notification"]["id"]
+    shell.close()

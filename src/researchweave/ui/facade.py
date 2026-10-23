@@ -213,6 +213,7 @@ class UIFacade:
             "ui.protocol.update": ("Revise draft protocol fields", Effect.WRITE),
             "ui.protocol.complete": ("Validate protocol for human review", Effect.READ),
             "ui.protocol.history": ("Read protocol amendment history", Effect.READ),
+            "ui.protocol.deviation.add": ("Record protocol deviation", Effect.WRITE),
             "ui.protocol.export": ("Export protocol and amendment history", Effect.READ),
             "ui.source.add": ("Import a local text source", Effect.WRITE),
             "ui.source.search": ("Search project library", Effect.READ),
@@ -315,6 +316,10 @@ class UIFacade:
             "ui.notification.list": ("List persistent actionable notifications", Effect.READ),
             "ui.notification.add": ("Persist redacted actionable notification", Effect.WRITE),
             "ui.notification.dismiss": ("Dismiss persistent notification", Effect.WRITE),
+            "ui.notification.retry": (
+                "Retry an allowlisted read-only recovery operation",
+                Effect.READ,
+            ),
         }
         self._argument_schemas = self._build_argument_schemas()
 
@@ -430,7 +435,13 @@ class UIFacade:
             "recovery": string, "linkage": {"type": "object"},
         }
         schemas["ui.notification.dismiss"] |= {"notification_id": string}
+        schemas["ui.notification.retry"] |= {"notification_id": string}
         schemas["ui.prisma.update"] |= {"flow": {"type": "object"}}
+        schemas["ui.protocol.deviation.add"] |= {
+            "description": string,
+            "reason": string,
+            "impact": string,
+        }
         schemas["ui.qual.annotation.update"] |= {
             "annotation_id": string, "code": string, "memo": string,
         }
@@ -788,7 +799,43 @@ class UIFacade:
 
     def _do_ui_protocol_history(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
-        return {"entries": list(project.protocol_history), "revision": project.revision}
+        return {
+            "entries": list(project.protocol_history),
+            "deviations": list(project.protocol_deviations),
+            "revision": project.revision,
+        }
+
+    def _do_ui_protocol_deviation_add(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        description = _string(args, "description", 2_000)
+        reason = _string(args, "reason", 2_000)
+        impact = _string(args, "impact", 2_000, required=False)
+
+        def update(project: Project) -> dict[str, Any]:
+            if not project.protocol:
+                raise UIError(
+                    "NOT_FOUND",
+                    "No protocol exists for this deviation.",
+                    "Start a protocol before recording deviations.",
+                )
+            record = {
+                "id": new_id(),
+                "description": description,
+                "reason": reason,
+                "impact": impact,
+                "created_at": utc_now(),
+                "protocol_revision_sha256": hashlib.sha256(
+                    json.dumps(
+                        project.protocol,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                    ).encode("utf-8")
+                ).hexdigest(),
+            }
+            project.protocol_deviations.append(record)
+            project.protocol_deviations = project.protocol_deviations[-500:]
+            return {"deviation": record}
+
+        return self._mutate(args, "ui.protocol.deviation.add", update)
 
     def _do_ui_protocol_export(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
@@ -799,6 +846,7 @@ class UIFacade:
                 "project_revision": project.revision,
                 "protocol": project.protocol,
                 "history": project.protocol_history,
+                "deviations": project.protocol_deviations,
                 "warning": (
                     "Protocol state is user-authored planning material and does not certify "
                     "ethics, registration or scientific validity."
@@ -813,6 +861,7 @@ class UIFacade:
             "content": payload,
             "sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
             "entries": len(project.protocol_history),
+            "deviations": len(project.protocol_deviations),
         }
 
     def _do_ui_source_add(self, args: Mapping[str, Any]) -> dict[str, Any]:
@@ -1231,7 +1280,21 @@ class UIFacade:
 
     def _do_ui_qual_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
-        return {"annotations": [asdict(item) for item in project.annotations]}
+        annotations: list[dict[str, Any]] = []
+        for item in project.annotations:
+            overlaps = [
+                other.id
+                for other in project.annotations
+                if other.id != item.id
+                and other.source_id == item.source_id
+                and max(item.start, other.start) < min(item.end, other.end)
+            ]
+            annotations.append({
+                **asdict(item),
+                "overlap_ids": overlaps,
+                "overlap_count": len(overlaps),
+            })
+        return {"annotations": annotations}
 
     def _do_ui_dataset_import(self, args: Mapping[str, Any]) -> dict[str, Any]:
         name = _string(args, "name", MAX_TITLE)
@@ -2296,6 +2359,69 @@ class UIFacade:
             }
 
         return self._mutate(args, "ui.notification.dismiss", update)
+
+    def _do_ui_notification_retry(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        notification_id = _string(args, "notification_id", 60)
+        record = next(
+            (item for item in project.notifications if item.get("id") == notification_id),
+            None,
+        )
+        if record is None:
+            raise UIError(
+                "NOT_FOUND",
+                "Notification was not found.",
+                "Refresh the notification center.",
+            )
+        linkage = record.get("linkage", {})
+        if not isinstance(linkage, Mapping):
+            raise UIError(
+                "INVALID_INPUT",
+                "Notification has no valid retry linkage.",
+                "Use the recovery text instead of replaying an unknown operation.",
+            )
+        operation = linkage.get("retry_operation", "")
+        arguments = linkage.get("retry_arguments", {})
+        allowlist = {
+            "ui.project.audit",
+            "ui.source.search",
+            "ui.search.global",
+            "ui.prisma.read",
+            "ui.protocol.read",
+            "ui.evidence.inspect",
+            "ui.claim.inspect",
+            "ui.analysis.results",
+            "ui.reference.list",
+        }
+        if not isinstance(operation, str) or operation not in allowlist:
+            raise UIError(
+                "PERMISSION_DENIED",
+                "This notification cannot be retried automatically.",
+                "Only explicitly allowlisted read-only local operations can be replayed.",
+            )
+        if not isinstance(arguments, Mapping):
+            raise UIError(
+                "INVALID_INPUT",
+                "Notification retry arguments are invalid.",
+                "Use the recovery text and repeat the action manually.",
+            )
+        retry_args = dict(arguments)
+        retry_args["project_id"] = project.id
+        nested = self.execute(operation, retry_args)
+        if nested["status"] != "ok":
+            error = nested["error"]
+            raise UIError(
+                str(error["code"]),
+                str(error["message"]),
+                str(error["recovery"]),
+            )
+        return {
+            "notification_id": notification_id,
+            "retried_operation": operation,
+            "result": nested["data"],
+            "network_hosts": [],
+            "local_writes": [],
+        }
 
 
 def build_ui_facade(
