@@ -76,3 +76,41 @@ def test_script_artifact_hash_and_one_time_approval():
     assert result["runner_version"]
     with pytest.raises(AnalysisError, match="already used"):
         run_script(source, authorizer=authorizer, approval=approval)
+
+
+def test_script_output_budget_and_runtime_limit_binding():
+    authorizer = RuntimeAuthorizer()
+    source = "print('x' * 5000)"
+    approval = authorizer.issue(source, timeout_seconds=2)
+    result = run_script(
+        source,
+        authorizer=authorizer,
+        approval=approval,
+        timeout_seconds=2,
+        max_output_bytes=1000,
+    )
+    assert result["status"] == "ok"
+    assert result["output_truncated"] is True
+    assert len(result["stdout"].encode("utf-8")) <= 1000
+
+    changed_limit = authorizer.issue("print('ok')", timeout_seconds=2)
+    with pytest.raises(AnalysisError, match="Runtime limits changed"):
+        run_script(
+            "print('ok')",
+            authorizer=authorizer,
+            approval=changed_limit,
+            timeout_seconds=3,
+        )
+    with pytest.raises(AnalysisError, match="Timeout outside allowed range"):
+        authorizer.issue("print('ok')", timeout_seconds=0)
+
+
+def test_script_artifact_count_budget_is_enforced():
+    authorizer = RuntimeAuthorizer()
+    source = (
+        "from pathlib import Path\n"
+        "for i in range(101):\n"
+        "    Path(f'a{i}.txt').write_text('x', encoding='utf-8')\n"
+    )
+    with pytest.raises(AnalysisError, match="artifact count exceeds budget"):
+        run_script(source, authorizer=authorizer, approval=authorizer.issue(source))
