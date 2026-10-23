@@ -51,8 +51,14 @@ are required for writes; external-network operations are fail-closed offline.
 The generated manifest's JSON Schemas still lack complete typed property and
 cross-field validation and must be enriched before final public UI integration.
 
-Contract update: all 104 operations now declare JSON Schema 2020-12
+Contract update: all **147 operations** now declare JSON Schema 2020-12
 argument types and bounds for required/known optional fields, shared standard
 response envelopes, sensitivity markers and effect-specific risks. The
 `contracts.py` checks execute before command side effects. Deep nested
 validation and command-specific result payload schemas remain partial.
+
+Notable final operation families also include real page extraction/highlight relocation histories,
+study/report registries, versioned extraction forms, PRISMA 2020 audit/SVG output, exact DOI identity,
+trusted opt-in reference watch checks, recovery autosave status, exact Zotero source export, and
+dependency-closed selective project clones. `capabilities.v1.json` is regenerated from the actual
+facade and is the machine-readable source for current operation names.

@@ -26,6 +26,7 @@ archives, deterministic manifests and safe fresh-root restores.
 `encrypted_archive.py` adds optional AES-256-GCM/scrypt authenticated
 encryption, keyed on a user-supplied password retained only in process memory.
 `recovery.py` provides explicit snapshots, verification and fresh-copy restore.
+It also exposes a read-only revision/age autosave-due contract; timing and execution remain host-driven.
 `schema_migrations.py` and legacy store migration perform checked data backup
 and compatibility gates. `diagnostics.py` provides read-only corruption and
 library warnings. `timeline.py` reconstructs verified actions from the event
@@ -60,6 +61,12 @@ submission-preview artifacts. `migration.py`, `interoperability.py` and
 loss/undo receipts, selected clones, artifact exports and privacy-gated
 review packets. These preserve unrecognized metadata rather than silently
 rewriting unknown fields.
+
+Selective cloning performs explicit dependency closure over the current evidence graph: selected
+collections can pull parent collections and references; reviews can pull reports, search/screening/
+retrieval/extraction state and extraction anchors/sources; study links, extraction forms, aliases,
+tags, notes/full-text pages and selected protocol histories are copied only when required. New domain
+tables must add copy rules explicitly.
 
 ## Integrity rules
 

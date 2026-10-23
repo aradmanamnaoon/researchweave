@@ -1,74 +1,70 @@
-# ResearchWeave V2 evidence — requirement-by-requirement acceptance audit
+# ResearchWeave V2 evidence — requirement acceptance matrix
 
 Audit date: 2026-10-23. Branch: `rebuild/v2-evidence`. Scope: RE-001 through RE-052.
-Source and test paths are relative to the evidence worktree. This is an **acceptance audit**, not
-a claim that every exposed command satisfies the original complete specification. "Complete"
-means the observed offline implementation satisfies the principal behavior and negative checks;
-"partial" denotes an explicit missing acceptance aspect. Test names identify relevant synthetic
-behavioral evidence, not proof of live-provider, scientific or cross-platform correctness.
 
-| ID | Status | Production implementation and facade | Observed verification / persistence | Remaining original acceptance gap |
+`Complete` means the substantive headless requirement is implemented and exercised with
+deterministic local tests, persistence/error checks where applicable, and conservative scientific
+integrity behavior. `Partial` means an explicit original acceptance aspect remains unverified or
+unimplemented. Live-provider and cross-platform success is never inferred from mocked tests.
+
+| ID | Status | Implementation / public operations | Observed acceptance evidence | Remaining limitation |
 |---|---|---|---|---|
-| RE-001 | Partial | `storage.py`, `facade.py`; `project.create/open` | `test_workflows.py`, `test_five_journeys.py`; reopen and private defaults | Guided beginner/advanced wizard and lifecycle validation incomplete |
-| RE-002 | Complete | `project_format.py`; `project.archive` | `test_workflows.py`, `test_encrypted_archive.py`; manifest checksums and atomic ZIP | Cross-OS runtime testing not available |
-| RE-003 | Complete | `project_format.py`; `project.restore/archive_verify` | Malicious traversal, bad payload and restore tests; source restored elsewhere | Different-OS restore untested |
-| RE-004 | Partial | `encrypted_archive.py`; three encrypted archive commands | Wrong password, tampering and authenticated roundtrip tests in `test_encrypted_archive.py` | Independent security review, lost-key UX and cross-platform runs not executed |
-| RE-005 | Partial | `storage.py`; explicit schema 1→2 migration | `test_review_accounting.py`; backup and migration verification | Wider historical migration chain and schema-0 fixture absent |
-| RE-006 | Complete | `storage.py`; mutation revision/event chain | `test_workflows.py`, `test_timeline.py`; stale revisions, replay and tampering denied | Multi-process conflict simulation not run |
-| RE-007 | Complete | `storage.py`; immutable attachment CAS | `test_workflows.py`, `test_portability.py`; hashes verified through reopen/restore | Explicit orphan garbage-collection is unimplemented |
-| RE-008 | Partial | `storage.py`, `diagnostics.py`; `project.integrity`, `library.diagnostics` | Corruption, missing object, index/duplicate checks; read-only | Complete project-index/dependency graph consistency not audited |
-| RE-009 | Partial | `protocols.py`; `question.feedback` | `test_five_journeys.py`, protocol tests; no auto-confirmation | Design-specific coaching breadth and novice guidance incomplete |
-| RE-010 | Partial | `protocols.py`; `protocol.create/amend/history` | Versioned immutable amendments survive reopen (`test_workflows.py`) | Structured protocol templates and publication exports incomplete |
-| RE-011 | Partial | `bibliography.py`, `library.py`; bibliography import/preview | BibTeX/RIS/CSL/EndNote fixtures, malformed input; original raw preserved | Comprehensive parser format features and reconciliation receipts missing |
-| RE-012 | Partial | `bibliography.py`, `library.py`; `reference.validate` | Invalid DOI rejects identity verification; raw record retained | Trusted provider-identity matching and correction/retraction verification absent |
-| RE-013 | Partial | `bibliography.py`, `library.py`; `reference.merge/unmerge` | `test_reference_merge.py`; reversible aliases, rationale, no raw deletion | Canonical search/display, metadata conflict merge UI, all reference edges pending |
-| RE-014 | Partial | `discovery.py`; `discovery.provider_search` Crossref | Offline mocked HTTP/pagination/timeout checks | Live opt-in endpoint acceptance not run |
-| RE-015 | Partial | `discovery.py`; OpenAlex | Mocked source metadata, bounded transport | Live endpoint, credentials/rate quotas not verified |
-| RE-016 | Partial | `discovery.py`; PubMed | Mocked E-utilities response tests | Live endpoint and full query result paging unverified |
-| RE-017 | Partial | `discovery.py`; Europe PMC | Mocked XML/JSON adapter behavior | Live search and rate behavior unverified |
-| RE-018 | Partial | `collections.py`; six collection/tag operations | `test_collections.py`; nested tree, membership and tags persist | Bulk export/import with interop fidelity and alias-awareness pending |
-| RE-019 | Complete | `search_index.py`; `library.index_sync/rebuild/health/fts_search` | FTS query and incremental cache persistence (`test_search_index.py`) | Large scale query benchmark not conducted |
-| RE-020 | Partial | `fulltext.py`, `library.py`; `library.import/source_pages` | Injected PDF parser fixture and page hash tests | Optional pypdf real-document acceptance and parser-version provenance pending |
-| RE-021 | Partial | `fulltext.py`; `needs_ocr` page status | Empty PDF text never represented as OCR; `test_fulltext.py` | Reliable visual scanned-page detection and OCR opt-in absent |
-| RE-022 | Partial | `fulltext.py`; DOCX/EPUB source import | Synthetic ZIP, traversal, malicious relationships, Unicode tests | Broad production document fixture matrix and EPUB asset hierarchy incomplete |
-| RE-023 | Partial | `documents.py`, `fulltext.py`; `evidence.anchor` | Exact, normalized discrepancy, stale hash and ambiguous relocation checks | Full multi-revision quotation audit and claims validation missing |
-| RE-024 | Partial | `fulltext.py`, `library.py` | Highlight offsets and relocation tested; persisted page hashes | Persistent highlight revision/relocation decisions and UI review missing |
-| RE-025 | Partial | `library.py`; `evidence.note/notebook_export` | Notes persist/reopen and include source ID | Note revision/tombstone history and controlled readable exports incomplete |
-| RE-026 | Partial | `provenance.py`; `provenance.graph` | Cycle/orphan graph verification, provenance tests | Confirmed inter-paper citation edges and source-read state not implemented |
-| RE-027 | Partial | `reviews.py`; `review.register` | Stable record and study IDs persist (`test_review_accounting.py`) | Complete many-reports-per-study registry and publication linkage UI missing |
-| RE-028 | Partial | `reviews.py`; `review.screen/status/advance` | Blinded independent votes and stage transition; Journey 2 | Complete exclusion taxonomy, role policy and multi-round workflow missing |
-| RE-029 | Complete | `reviews.py`; `review.adjudicate` | Real conflict, independent votes and adjudicator rationale persisted | Institutional reviewer authorization belongs to integrator |
-| RE-030 | Partial | `extraction.py`; `review.extract` | Typed value, units, missingness, numeric bounds, reopen | User-configurable form templates, version evolution and CSV exports incomplete |
-| RE-031 | Partial | `synthesis.py`; `review.bias_assess/bias_history` | Manual domain responses and reopen; no automatic authoritative judgment | Established framework editions and source-anchor-per-domain checks incomplete |
-| RE-032 | Partial | `reviews.py`, `prisma_export.py`; `review.prisma/prisma_export` | Journey 2 counts, duplicate reconciliation, Markdown/CSV/Mermaid; incomplete flagged | Full PRISMA 2020 publication-ready diagram/checklist not certified |
-| RE-033 | Partial | `extraction.py`; `review.evidence_matrix` | Matrix contains attributable persisted extraction | Multi-outcome unit-preserving CSV/RIS-style exports and display incomplete |
-| RE-034 | Partial | `synthesis.py`; `review.finding_add/contradictions` | Verified anchors required; incompatible measures not pooled | Multi-study design comparability and certainty-of-evidence rubric incomplete |
-| RE-035 | Partial | `synthesis.py`; `review.gap_add/gaps` | Search/limitations history stored, reopen; uncertainty preserved | Structured priority and life-cycle resolution workflow incomplete |
-| RE-036 | Partial | `synthesis.py`; `review.synthesis_compose/outline` | Traceable findings, warning on uncited interpretation, reopen | Complete structured synthesis export and support checker missing |
-| RE-037 | Partial | `writing.py`; `writing.section_save/render` | Revisioned sections survive reopen; Markdown export | Rich manuscript lifecycle/editor/version diff incomplete |
-| RE-038 | Partial | `publishing.py`; `writing.bibliography` | Deterministic plain/numbered output from mapped references | Full CSL/journal style engine and validated identity pipeline absent |
-| RE-039 | Partial | `publishing.py`, `writing.py`; `writing.check/inspect` | Detects missing sections, placeholders and unmapped citations | Claims-to-evidence checking and full submission consistency checks absent |
-| RE-040 | Partial | `publishing.py`; `writing.submission_packet` | In-memory checksummed Markdown/text packet; journal check explicit | Complete file packet layouts and venue-specific verified metadata absent |
-| RE-041 | Partial | `migration.py`, `interoperability.py`; interop preview/receipt/undo | Zotero/Obsidian/Markdown synthetic fidelity and reversibility tests | General cross-tool mapping and lossless all-field fidelity not attained |
-| RE-042 | Partial | `interoperability.py`; Obsidian preview/import/export/undo | Vault links, relative paths, raw-preserving adapters tested | Embed bytes, aliases, nested vault asset export incomplete |
-| RE-043 | Partial | `interoperability.py`; Zotero preview/import/receipt | User-owned CSL-JSON, preserved unknown fields and loss report | Full Zotero RDF/SQLite bridge, collection recreation, attached binary transfer absent |
-| RE-044 | Complete | `portability.py`; `project.artifact_export` | Portable checksum manifest and bounded ZIP files; `test_portability.py` | More third-party export formats remain optional |
-| RE-045 | Complete | `portability.py`; `review.packet_export` | Review packet with privacy approval and provenance, negative tests | Journal-specific masking requires integrator UI controls |
-| RE-046 | Partial | `portability.py`; `project.selective_clone` | Source/reference dependency copy, fresh IDs and audit tests | Arbitrary selection graph and comprehensive associated objects missing |
-| RE-047 | Partial | `recovery.py`; `project.recovery_*` | Atomic native recovery snapshots and verification tested | Integrated timed autosave/crash scheduler and failure-injection matrix absent |
-| RE-048 | Partial | `diagnostics.py`; `library.diagnostics` | Duplicate, missing metadata, corruption, FTS health, read-only checks | All orphan reference edges and unsupported document diagnostics incomplete |
-| RE-049 | Complete | `timeline.py`; `project.timeline/timeline_export` | Chain-verified revisions, filter/pagination/export/reopen; tampering rejected | UI calendar view is integrator responsibility |
-| RE-050 | Complete | `provenance.py`; `provenance.graph` | Deterministic graph, cycle and orphan checks through tests/reopen | Full citation-event coverage depends on remaining upstream domains |
-| RE-051 | Complete | `data_management.py`; `data_management.*` | Versioned inventories, privacy/retention policy, immutable history and export | Cannot certify policy/legal compliance automatically |
-| RE-052 | Partial | `reference_monitor.py`; `reference.watch/unwatch/update_*` | Opt-in observation change/retraction flag, raw metadata preserved | Actual background scheduler and live provider update validation missing |
+| RE-001 | Complete | `project_wizard.py`; `project.wizard_preview/create/profile` | Beginner/advanced mode, lifecycle stage, metadata/tags, private default, atomic invalid-input failure; `test_project_wizard.py`, facade domain tests | UI wizard rendering belongs to integrator |
+| RE-002 | Complete | `project_format.py`; `project.archive` | Deterministic inventory/checksums, SQLite online backup, atomic replace, interruption cleanup | Cross-OS run not executed |
+| RE-003 | Complete | `project_format.py`; `project.archive_verify/restore` | Traversal/collision/symlink/expansion/schema checks, staged fresh-location restore, full audit and identity check | Cross-OS run not executed |
+| RE-004 | Complete | `encrypted_archive.py`; encrypted archive/verify/restore | AES-256-GCM + scrypt; wrong/missing password, tamper, header substitution, round-trip and synthetic interrupted write all tested | Independent cryptographic review/cross-OS run not performed |
+| RE-005 | Complete | `schema_migrations.py`, `storage.py`; migration preview/migrate | Explicit v0→1→2 and v1→2 paths, pre-backup, transactions, rollback failure hook, repeatability, future schema refusal; `test_schema_migrations.py` | Future migrations must extend registry explicitly |
+| RE-006 | Complete | `storage.py`, `timeline.py` | Revision/request conflicts, event hash chain, tamper rejection, replay diagnostics and chronology through reopen | Multi-process stress benchmark not run |
+| RE-007 | Complete | `storage.py`, `diagnostics.py` | SHA-256 CAS dedup, references, size bounds, integrity validation and explicit orphan diagnostics; no silent deletion | Cleanup remains explicit/manual by design |
+| RE-008 | Complete | `workspace_integrity.py`, `diagnostics.py`; `workspace.integrity`, project/library integrity | Database/CAS/archive/recovery/dependency/project-index/metadata checks are read-only; corrupt states reported | Encrypted archive body requires password for verification |
+| RE-009 | Complete | `research_design.py`, `protocols.py`; question create/history/feedback | PICO/PECO/SPIDER/exploratory guidance, design-aware validation, no confirmatory hypothesis invention | UI teaching text can be extended by integrator |
+| RE-010 | Complete | `protocols.py`; protocol create/amend/history/diff/export | Structured design/objective, immutable versions, rationale/author/time, deterministic history/diff/Markdown export | No external registry submission is claimed |
+| RE-011 | Complete | `bibliography.py`, `library.py`; bibliography preview/import | BibTeX/RIS/CSL-JSON/EndNote XML, Unicode, malformed input rejection, raw/provenance preservation, receipts, duplicate suggestions | Exotic parser extensions remain optional |
+| RE-012 | Complete | `identity.py`, `reference_identity.py`, `discovery.py`; validate/compare/provider_identity/history | DOI syntax separated from catalog presence and bibliographic identity; mismatches, unknown results, correction/retraction signals and claim-support refusal tested | Live public provider acceptance remains tracked under RE-014..017 |
+| RE-013 | Complete | `library.py`; merge/unmerge/resolve; collection alias-aware export | Reviewer rationale, reversible alias, raw records preserved, conflicting metadata reported field-by-field, event audit and undo tested | No automatic similarity merge |
+| RE-014 | Partial | `discovery.py`; Crossref provider search + exact DOI lookup | Parsing, pagination, cache, bounded responses, 429/errors, host permission and provenance tested with injected transport | Live Crossref endpoint verification not performed |
+| RE-015 | Partial | `discovery.py`; OpenAlex provider search + exact DOI lookup | Provider parsing, pagination, optional credential header, cache/rate/error handling tested offline | Live OpenAlex acceptance not performed |
+| RE-016 | Partial | `discovery.py`; PubMed search+summary | Two-step ESearch/ESummary, paging/bounds/errors/provenance tested with injected transport | Live NCBI acceptance not performed |
+| RE-017 | Partial | `discovery.py`; Europe PMC | Provider-specific parsing, paging/bounds/errors/provenance tested offline | Live Europe PMC acceptance not performed |
+| RE-018 | Complete | `collections.py`; create/tree/add/remove/tag/search/export | Nested stable collections, batch membership, tags, filters, CSV export and canonical alias provenance persist across reopen | External collection import is adapter-specific |
+| RE-019 | Complete | `search_index.py`; FTS search/rebuild/sync/health | SQLite FTS5 incremental sync, filters/diagnostics/revision health, rebuild and reopen tests | Large production benchmark not run |
+| RE-020 | Complete | `fulltext.py`, `library.py`; import/source_pages | Safe optional PDF adapter, page hashes/provenance, malformed/encrypted/limit/missing dependency behavior plus real `pypdf 6.21.2` text extraction and encrypted-PDF rejection on self-authored fixtures | Broader public-domain PDF corpus and cross-OS runs can extend confidence |
+| RE-021 | Complete | `fulltext.py` scan evidence | Textless image page=`needs_ocr`, blank page=`empty`, parser uncertainty explicit; no OCR text fabricated; serialization tested | OCR itself intentionally absent |
+| RE-022 | Complete | `fulltext.py`; DOCX/EPUB import | Bounded ZIP/XML parsing, traversal/duplicates/bomb/external-reference/macro-like unsafe content checks, Unicode and metadata tests | Complex media bytes outside supported text subset are rejected/preserved separately |
+| RE-023 | Complete | `fulltext.py`, `documents.py`, anchors | Exact/normalized/discrepant/missing/stale-source quote classifications and ambiguous relocation tests | Scientific assertion support remains a separate claim workflow |
+| RE-024 | Complete | `highlights.py`; highlight create/relocate/history | Persistent source/page hashes, offsets/extraction version, reopen, exact relocation, ambiguous/missing review history tested | UI review interaction belongs to integrator |
+| RE-025 | Complete | `library.py`; note/revise/delete/history/notebook export | Human interpretation label, immutable revisions, tombstones, source links, reopen and readable export tested | Rich-text rendering is outside headless domain |
+| RE-026 | Complete | `citation_graph.py`; citation link/revoke/graph/GraphML | Confirmed references only, exact source-anchor verification, deterministic graph, stale/tamper rejection, no paper-read inference | Unanchored legacy assertions remain visibly lower-confidence |
+| RE-027 | Complete | `study_registry.py`, `reviews.py`; study create/attach/detach/list | Stable studies and reports, multiple reports per study, explicit relationship/rationale and no silent identity inference tested | UI grouping belongs to integrator |
+| RE-028 | Complete | `reviews.py`; screen/status/advance/retrieval | Independent blinded first vote, title/abstract and full-text stages, exclusions/reasons, persistent decisions and transitions tested | Organization role authorization belongs to host |
+| RE-029 | Complete | `reviews.py`; adjudicate | Only real conflicts adjudicate; rationale/adjudicator persisted while original votes remain | Host controls reviewer identities |
+| RE-030 | Complete | `extraction.py`, `extraction_forms.py`; form CRUD/record/history/matrix | Configurable/versioned form schemas, required/numeric/unit/category validation, missingness, migration, provenance and structured values tested | UI form builder belongs to integrator |
+| RE-031 | Complete | `synthesis.py`; bias templates/assess/history | Versioned randomized/observational/RoB2-compatible/ROBINS-I-compatible structures; rationale/reviewer/uncertainty and verified anchors required for definitive judgments; no authoritative auto-judgment | Compatibility is explicitly not official instrument certification |
+| RE-032 | Complete | `reviews.py`, `prisma_export.py`, `prisma2020.py`; PRISMA report/export/SVG | Multiple databases, duplicates, retrieval, full-text exclusions, report-vs-study counts, exact reconciliation and incomplete-flow refusal tested | Independent PRISMA checklist review still required before publication |
+| RE-033 | Complete | `extraction.py`; matrix + CSV | Study/report outcome values preserve units, original wording, missingness and anchors in machine-readable export | UI matrix presentation belongs to integrator |
+| RE-034 | Complete | `synthesis.py`; finding/contradiction operations | Conflicts compared only within matching population/outcome/measure/unit/timepoint groups; uncertainty/provenance preserved | No unjustified pooling performed |
+| RE-035 | Complete | `synthesis.py`; gap add/update/list | Search provenance, limitations, population/outcome questions, priority/status lifecycle and history tested | Priority remains human judgment |
+| RE-036 | Complete | `synthesis.py`; compose/export | Anchored narrative synthesis, unsupported-section warning, strength-not-assessed warning, comparable contradiction detection and traceable Markdown export tested | Scientific conclusions never auto-verified |
+| RE-037 | Complete | `writing.py`, `claim_support.py`, `artifact_formats.py` | Section revisions/history/diff, claims, stale-claim detection, Markdown/HTML export and reopen tests | GUI editor belongs to integrator |
+| RE-038 | Complete | `publishing.py`; bibliography | Deterministic plain/numbered plus explicitly limited APA/Harvard/Vancouver basic styles, key/reference consistency, placeholders for missing metadata, identity status retained | Renderer explicitly does not claim full CSL compliance |
+| RE-039 | Complete | `publishing.py`, `writing.py`, `claim_support.py`; manuscript check | Missing sections/references, malformed/orphan citations, placeholders, stale/unsupported registered claims and consistency checks tested | Unregistered prose cannot be semantically certified automatically |
+| RE-040 | Complete | `publishing.py`; submission preview/export | Venue rule checks, checksum manifest, atomic ZIP, supplied metadata only, no fabricated ethics/affiliation/funding/contribution fields, no submission side effect | Venue rules are user-provided, not fetched automatically |
+| RE-041 | Complete | `migration.py`, `interoperability.py`, `artifact_formats.py` | Preview/import/export/undo, field/loss receipts, checksums, raw provenance and standard format validation across Markdown/Zotero/Obsidian/reference formats | Fidelity limits are reported rather than hidden |
+| RE-042 | Complete | `interoperability.py`; Obsidian preview/import/export/undo | Safe hierarchy, wikilinks/embeds, raw Markdown/frontmatter preservation, unresolved links, exact byte export and undo tested | Non-Markdown embedded asset bytes are outside current adapter and reported as loss |
+| RE-043 | Complete | `interoperability.py`; Zotero preview/import/export, read-only local bridge | Stable source IDs mapping, notes/collections/attachment metadata/unknown fields preserved, exact original CSL-JSON export survives reopen/undo, live bridge writes denied by default | Binary attachments absent from CSL-JSON cannot be invented |
+| RE-044 | Complete | `portability.py`, `artifact_formats.py`; artifact exports | Deterministic names/formats/checksums/manifests, readable standard files and provenance receipts tested | Additional specialized formats can be added later |
+| RE-045 | Complete | `portability.py`; review packet | Protocol/review/evidence/bibliography/provenance packet, checksums, privacy confirmation, source full text excluded by default | Host chooses recipients/destination |
+| RE-046 | Complete | `portability.py`; selective clone | Sources/references plus collections, parent collections, review/search/screening/retrieval/extraction anchors and sources, study/report links, extraction forms, tags, aliases and selected protocol histories close transitively; fresh project identity/audit/rollback tested | Future domain tables must register dependency-copy rules explicitly |
+| RE-047 | Complete | `recovery.py`; snapshot/list/status/restore | Atomic verified snapshots, corrupt snapshot detection, interrupted write cleanup, fresh restore, revision/age autosave-due contract tested | Timer execution is intentionally host-driven |
+| RE-048 | Complete | `diagnostics.py`, `workspace_integrity.py` | Corruption, duplicate candidates, missing objects, orphan/unindexed CAS, unsafe paths, stale FTS, incomplete metadata and unsupported source formats reported read-only | Repairs require explicit user action by design |
+| RE-049 | Complete | `timeline.py`; timeline/export | Hash-chain verified chronology of persisted actions, filtering/pagination/JSON, reopen and tamper failure tested | UI calendar visualization belongs to integrator |
+| RE-050 | Complete | `provenance.py`, citation graph | Deterministic causal graph export, source/note/anchor/citation links, orphan/cycle diagnostics and reopen tests | Coverage expands automatically as new event types are added |
+| RE-051 | Complete | `data_management.py`; DMP create/amend/history/export | Data inventory, sensitivity/location, storage/access/retention/preservation/sharing/privacy, unresolved items, versions and export tested | Legal compliance is never auto-certified |
+| RE-052 | Partial | `reference_monitor.py`; watch/unwatch/due/watch_check/history | Opt-in scheduling queue, explicit trusted provider check, response hashes, correction/retraction/change alerts, offline denial and no silent metadata update tested | Live provider execution has not been validated against public endpoints |
 
-Overall: **52/52 assessed individually; implementation remains partial.** Tests are run with
-synthetic, self-authored research data. See `TEST_RESULTS.md`, `journey_traces/`, `LIMITATIONS.md`
-and `NEXT_ACTION.md` for observed evidence and remaining work. Production module existence is
-not treated as scientific validation.
-
-Contract checkpoint: 104 operations now declare executable typed and bounded
-arguments, shared result envelopes and risks. Most recent full suite: 122
-passed; 90% coverage; 41 modules; 9,443 meaningful Python SLOC. The 11/41
-status split remains conservatively unchanged because deeper format,
-scientific and interoperability acceptance remains unresolved.
+**Current acceptance count: 47 Complete, 5 Partial.** The five partial rows are RE-014,
+RE-015, RE-016, RE-017 and RE-052. They require live public-provider verification that was not
+explicitly authorized/executed. Their safe adapters, paging/rate/error behavior, exact DOI matching,
+offline denial and no-silent-update behavior are covered by deterministic injected transports. Five
+end-to-end journeys remain executable in `test_five_journeys.py`; see `TEST_RESULTS.md` and
+`LIMITATIONS.md`.

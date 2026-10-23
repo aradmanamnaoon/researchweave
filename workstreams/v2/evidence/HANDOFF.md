@@ -26,19 +26,12 @@ Use `allow_local_writes=True` only after trusted host authorization;
 `metadata_transport`. No network requests or telemetry are performed by
 default. The facade's response envelope is standardized; see `API_CATALOG.md`.
 
-**Latest fully observed quality baseline (2026-10-23):** Windows Python 3.12.9;
-105 passing tests, **89% combined measured coverage**, 37 production modules,
-8,545 meaningful token-based Python source lines, clean Ruff, strict mypy and
-compileall. The branch has advanced concurrently with additional tested
-scientific services; re-run `TEST_RESULTS.md` commands before merge and record
-the final exact SHA, source count, test count and working-tree state.
-
-**Newer observed contract checkpoint:** 122 passing tests, 90% combined
-coverage, 41 production modules, 9,443 meaningful source lines and 104 facade
-operations. Ruff, strict mypy (41 source modules), and compileall passed.
-This supersedes the older baseline above. `contracts.py` adds actual bounded
-argument validation and risk metadata; comprehensive domain-specific result
-schemas and cross-field validation remain unfinished.
+**Latest fully observed quality baseline (2026-10-23):** Windows CPython 3.12.9;
+**153 passing tests**, **89% combined measured coverage**, **44 tracked production modules**,
+**11,579 meaningful token-based Python source lines**, **147 registered facade operations**,
+clean Ruff, strict mypy and compileall. `pypdf 6.21.2` and `cryptography` were available and their
+production paths were exercised. The only unexecuted acceptance class is live public-provider
+network verification. See `TEST_RESULTS.md` for exact commands.
 
 **End-to-end research journeys:** all five dedicated tests in
 `tests/v2/evidence/test_five_journeys.py` passed. Normalized observed call
@@ -47,17 +40,17 @@ beginner source brief, independent screening disagreement/adjudication and
 PRISMA accounting, a refused fabricated DOI identity, native backup survival,
 and migration preview/fidelity/undo after reopen.
 
-**Acceptance status:** `ACCEPTANCE_MATRIX.md` evaluates each RE-001 through
-RE-052 item with tested files, facade names and remaining gaps. Its audit
-currently marks **11 complete and 41 partial**; therefore this is a working
-integration checkpoint and **not yet a 100% accepted subsystem**. External
-metadata providers have only mocked network validation, optional PDF parsing
-has no real-world corpus acceptance, and broad methodology/export coverage
-requires follow-up. See `LIMITATIONS.md` and `NEXT_ACTION.md`.
+**Acceptance status:** `ACCEPTANCE_MATRIX.md` evaluates every RE-001 through RE-052 requirement.
+The current evidence supports **47 complete / 5 partial**. The only partial rows are RE-014,
+RE-015, RE-016, RE-017 and RE-052 because live Crossref/OpenAlex/PubMed/Europe PMC behavior has
+not been exercised through an explicitly authorized trusted network transport. Their offline
+adapters, pagination, rate limiting, exact DOI matching, provider provenance, opt-in watch checks,
+offline denial and no-silent-metadata-update behavior are implemented and tested.
 
 **For final integrator:** retain this isolated branch until the evidence
 worker's regressions and compatibility contracts are accepted; integrate
 the facade with PyQt6 host permission controls, add optional extras
-`cryptography` and `pypdf` to approved shared packaging, and run cross-platform
-validation. Do not silently promote incomplete PRISMA or unverified citations
-to published scientific facts. This worker has made no remote push or merge.
+`cryptography` and `pypdf` to approved shared packaging, run cross-platform validation, and only
+then perform low-volume live-provider acceptance if the user explicitly authorizes it. Do not
+silently promote PRISMA accounting, provider metadata, identifiers, or quotations to scientific
+truth. This worker has made no remote push or merge.

@@ -1,46 +1,38 @@
-# ResearchWeave V2 evidence — next executable engineering actions
+# ResearchWeave V2 evidence — remaining acceptance actions
 
-Branch: `rebuild/v2-evidence` at `D:\coding\codex\researchweave-v2-evidence`.
-Read `ACCEPTANCE_MATRIX.md` for all 52 statuses. Do not restart or overwrite
-existing work. Do not push or merge this branch without the integrator.
+Branch: `rebuild/v2-evidence` in `D:\coding\codex\researchweave-v2-evidence`.
+All feasible local implementation work in the 52-row specification is complete at this checkpoint.
+Do not push or merge this worker branch automatically.
 
-1. **Finish provenance and citation support (RE-012, RE-026).** Add a trusted,
-   explicit provider DOI detail lookup with correction/retraction fields, verify
-   exact DOI, title, year and authors across independent providers, preserve raw
-   response digests, and keep paper-read/claim-support status unverified until
-   independently evidenced. Continue hardening `reference_identity.py`,
-   `identity.py`, `citation_graph.py` and facade commands with synthetic tests.
-2. **Complete review methodology (RE-027..036).** Expand study/report
-   equivalence links, versioned exclusion taxonomy, full PRISMA 2020 checklist
-   and checked diagram exports, source-anchored extraction matrix exports and
-   official bias-template versioning. Never impute missing research outcomes.
-3. **Complete manuscript and interoperability (RE-037..045).** Use a real
-   maintained CSL renderer for styles in optional dependency mode; implement
-   deterministic journal packet file manifests, metadata requirements and
-   location-aware citation checks. Extend Zotero/Obsidian export fidelity for
-   collections, rich notes, embedded assets and safe undo with actual fixtures.
-4. **Finish native recovery and compatibility (RE-002..008, RE-046..052).**
-   Add N-2 documented migrations and failure-injection fixtures; verify
-   SQLite object/event equivalence through selective cloning and encrypted
-   recovery. Support opt-in host autosave scheduling and reference monitoring
-   via the final agent, never hidden network activity.
-5. **Expand real input and provider acceptance.** With a trusted host-approved
-   transport, test provider pagination/credentials/rate restrictions, DOI
-   nonexistence/mismatches and retraction notices. With optional `pypdf`, test
-   actual open/public-domain text PDFs, encrypted scans and malformed corpora.
-   Record exact tests and environment. Do not claim success from mocks.
-6. **Finalize typed facade contracts.** Add truthful per-field JSON schemas,
-   range/enum/size checks, typed result schemas, feature readiness flags,
-   and no-automatic-privacy-export gates. See `API_CATALOG.md`.
-7. **Run cross-platform gates.** Windows passed baseline automated checks;
-   Linux/macOS and large-scale benchmarks are unverified. Test in isolated
-   runners if available, produce artifact hashes, exact versions and regression
-   traces. Keep all five executable journeys green.
+## Only remaining acceptance blocker: live provider verification
 
-At the end of each small validated change, run relevant focused tests,
-`ruff`, strict `mypy`, and compile checks. Stage **only the changed evidence
-domain production/tests/workstream files**, commit locally, and update
-`TEST_RESULTS.md` plus the 52-row acceptance matrix. For complete regression:
+RE-014, RE-015, RE-016, RE-017 and RE-052 remain Partial solely because live Crossref, OpenAlex,
+PubMed and Europe PMC behavior was not explicitly authorized/executed. Do **not** infer live success
+from deterministic injected transports.
+
+If the user explicitly authorizes trusted public-endpoint validation:
+
+1. Use the existing permissioned `StdlibHTTPS`/trusted transport and the fixed HTTPS hosts already
+   enforced in `discovery.py`. Do not broaden host allowlists or follow redirects.
+2. Use low-volume, non-sensitive synthetic/public DOI queries only. Do not use paid APIs or private
+   participant data.
+3. For each provider, observe exact DOI identity, title/year/author mismatch handling, pagination,
+   malformed/error response handling, current rate-limit headers and source SHA-256 provenance.
+4. Exercise one opted-in `reference.watch_check` using public metadata and confirm the stored
+   observation leaves the reference row unchanged until human confirmation.
+5. Record exact provider/date/response status and hashes in a new acceptance note. Do not store
+   credentials or raw secrets.
+6. Re-run the complete regression suite and update the five provider-related rows to Complete only
+   if their original acceptance tests are genuinely satisfied.
+
+## Integration confidence work
+
+- Run the existing suite on Linux and macOS if runners are available. Record real results; never
+  invent cross-platform status.
+- Add production-scale benchmarks only if the final integrator needs concrete performance gates.
+- Wire PyQt6/UI host permissions around the existing facade; keep evidence business logic headless.
+
+Current Windows regression commands:
 
 ```powershell
 D:\coding\codex\researchweave\.venv\Scripts\python.exe -m compileall -q src/researchweave/evidence
@@ -52,6 +44,5 @@ git status --short --branch
 git ls-files -- src/researchweave/evidence
 ```
 
-When continuing an interrupted session, inspect current git state and
-already committed work before applying patches. Other coding sessions
-have advanced this same branch in parallel. Do not discard their changes.
+Inspect Git state before future changes. Two test files had concurrent uncommitted edits at this
+checkpoint; never reset or overwrite them merely to obtain a clean tree.

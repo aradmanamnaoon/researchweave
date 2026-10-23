@@ -6,6 +6,15 @@ are superseded by the matrix. Read its per-requirement implementation,
 facade IDs, tests, persistence checks and remaining scientific/security
 limitations before using this branch for integration.
 
+**Final local implementation checkpoint (2026-10-23):** the 52-row matrix now reports
+**47 Complete / 5 Partial**. The only partial requirements are RE-014..RE-017 and RE-052 because
+live public-provider validation was not authorized/executed. Full Windows regression: **153 passed,
+89% coverage, 44 production modules, 11,579 meaningful SLOC, 147 facade operations**; Ruff, strict
+mypy and compileall passed. Five end-to-end journeys passed independently. Real `pypdf 6.21.2`
+text extraction/encrypted-PDF rejection and encrypted archive interruption cleanup were exercised.
+Selective cloning now closes collection/review/protocol dependencies. Provider-watch checks are
+explicit network operations and never silently mutate reference metadata.
+
 2026-10-23 contract update: `contracts.py` supplies bounded typed argument
 schemas and runtime enforcement for 104 registered facade operations; public
 envelope schemas, write/network/privacy risk and constraints accompany the
