@@ -22,7 +22,7 @@ class ReviewService:
                  *, expected_revision: int | None = None) -> dict[str, Any]:
         require(bool(review_id), "Review ID is required")
         require(bool(reference_id), "Reference ID is required")
-        record_id = new_id()
+        record_id = str(new_id())
 
         def insert(conn: Any) -> str:
             require(conn.execute("SELECT 1 FROM reference WHERE id=?", (reference_id,)).fetchone()
@@ -215,6 +215,105 @@ class ReviewService:
                                   "reason": reason}, insert, expected_revision=expected_revision)
         return {"record_id": record_id, "revision": revision, "decision": decision}
 
+    def reverse_adjudication(
+        self,
+        review_id: str,
+        record_id: str,
+        stage: str,
+        actor: str,
+        reason: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        """Undo an adjudication while preserving the original decision in audit history."""
+        require(stage in STAGES, "Invalid adjudication stage")
+        require(bool(actor.strip()) and bool(reason.strip()),
+                "Reversal requires identity and written rationale")
+
+        def persist(conn: Any) -> dict[str, str]:
+            row = conn.execute(
+                "SELECT * FROM adjudications WHERE review_id=? AND record_id=? AND stage=?",
+                (review_id, record_id, stage),
+            ).fetchone()
+            require(row is not None, "Adjudication not found", "NOT_FOUND")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS adjudication_reversals ("
+                "id TEXT PRIMARY KEY,review_id TEXT NOT NULL,record_id TEXT NOT NULL,"
+                "stage TEXT NOT NULL,decision TEXT NOT NULL,reason TEXT NOT NULL,"
+                "adjudicator TEXT NOT NULL,adjudicated_at TEXT NOT NULL,"
+                "reversed_by TEXT NOT NULL,reversal_reason TEXT NOT NULL,reversed_at TEXT NOT NULL)"
+            )
+            reversal_id = new_id()
+            reversed_at = now_utc()
+            conn.execute(
+                "INSERT INTO adjudication_reversals VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                (
+                    reversal_id,
+                    review_id,
+                    record_id,
+                    stage,
+                    row["decision"],
+                    row["reason"],
+                    row["adjudicator"],
+                    row["recorded_at"],
+                    actor.strip(),
+                    reason.strip(),
+                    reversed_at,
+                ),
+            )
+            conn.execute(
+                "DELETE FROM adjudications WHERE review_id=? AND record_id=? AND stage=?",
+                (review_id, record_id, stage),
+            )
+            return {
+                "reversal_id": reversal_id,
+                "previous_decision": str(row["decision"]),
+                "reversed_at": reversed_at,
+            }
+
+        result, revision = self.store.mutate(
+            "review.adjudication_reverse",
+            {
+                "review_id": review_id,
+                "record_id": record_id,
+                "stage": stage,
+                "actor": actor.strip(),
+                "reason": reason.strip(),
+            },
+            persist,
+            expected_revision=expected_revision,
+        )
+        return {**result, "record_id": record_id, "stage": stage, "revision": revision}
+
+    def adjudication_history(self, review_id: str, record_id: str, stage: str) -> dict[str, Any]:
+        require(stage in STAGES, "Invalid adjudication stage")
+        current = self.store.conn.execute(
+            "SELECT * FROM adjudications WHERE review_id=? AND record_id=? AND stage=?",
+            (review_id, record_id, stage),
+        ).fetchone()
+        table = self.store.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='adjudication_reversals'"
+        ).fetchone()
+        reversals = (
+            [
+                dict(row)
+                for row in self.store.conn.execute(
+                    "SELECT * FROM adjudication_reversals WHERE review_id=? AND record_id=? "
+                    "AND stage=? ORDER BY reversed_at,id",
+                    (review_id, record_id, stage),
+                )
+            ]
+            if table is not None
+            else []
+        )
+        return {
+            "review_id": review_id,
+            "record_id": record_id,
+            "stage": stage,
+            "current": dict(current) if current is not None else None,
+            "reversals": reversals,
+        }
+
     def advance(self, review_id: str, record_id: str, *,
                 expected_revision: int | None = None) -> dict[str, Any]:
         status = self.status(review_id, record_id, "title_abstract")
@@ -258,6 +357,29 @@ class ReviewService:
         title_states: Counter[str] = Counter()
         full_states: Counter[str] = Counter()
         included_studies: set[str] = set()
+        registry_table = self.store.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_study_reports'"
+        ).fetchone()
+        registry_studies = self.store.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_studies'"
+        ).fetchone()
+        registry_map: dict[str, str] = {}
+        registry_active = False
+        if registry_table is not None and registry_studies is not None:
+            registry_map = {
+                str(row["record_id"]): str(row["study_id"])
+                for row in self.store.conn.execute(
+                    "SELECT rsr.record_id,rsr.study_id FROM review_study_reports rsr "
+                    "JOIN review_studies rs ON rs.id=rsr.study_id WHERE rs.review_id=?",
+                    (review_id,),
+                )
+            }
+            registry_active = bool(
+                self.store.conn.execute(
+                    "SELECT 1 FROM review_studies WHERE review_id=? LIMIT 1", (review_id,)
+                ).fetchone()
+            )
+        unresolved_study_identity = 0
         for record in records:
             title = self.status(review_id, record["id"], "title_abstract")
             title_states[title.get("decision", title["status"])] += 1
@@ -265,7 +387,15 @@ class ReviewService:
                 full = self.status(review_id, record["id"], "full_text")
                 full_states[full.get("decision", full["status"])] += 1
                 if full.get("decision") == "include":
-                    included_studies.add(record["study_id"] or record["id"])
+                    if registry_active:
+                        explicit_study = registry_map.get(str(record["id"]))
+                        if explicit_study is None:
+                            unresolved_study_identity += 1
+                            included_studies.add(str(record["id"]))
+                        else:
+                            included_studies.add(explicit_study)
+                    else:
+                        included_studies.add(record["study_id"] or record["id"])
         screened = identified - title_states["unassessed"]
         excluded_title = title_states["exclude"]
         retrievals = self.store.conn.execute(
@@ -289,7 +419,8 @@ class ReviewService:
                             ("duplicate", "removed_automation", "removed_other")))
         complete = (all_finalized and hit_counts_match and count_reconciled and
                     title_completed and full_completed and
-                    full_sought == title_states["include"])
+                    full_sought == title_states["include"] and
+                    unresolved_study_identity == 0)
         return {"review_id": review_id, "records_identified": identified,
                 "duplicates_removed": removals["duplicate"],
                 "removed_automation": removals["removed_automation"],
@@ -302,6 +433,8 @@ class ReviewService:
                 "reports_excluded_full_text": excluded_full,
                 "reports_included": included_reports,
                 "studies_included": len(included_studies),
+                "study_registry_used": registry_active,
+                "unresolved_study_identity": unresolved_study_identity,
                 "unresolved_title": unresolved_title,
                 "unresolved_full_text": unresolved_full,
                 "missing_retrieval_status": (max(0, title_states["include"] - full_sought)

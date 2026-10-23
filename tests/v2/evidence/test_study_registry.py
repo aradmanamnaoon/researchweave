@@ -60,6 +60,32 @@ def test_one_study_can_group_multiple_reports_without_identity_inference(
         assert reopened.audit()["ok"]
 
 
+def test_prisma_counts_explicit_registry_studies_instead_of_legacy_report_ids(
+    tmp_path: Path,
+) -> None:
+    with ProjectStore.create(
+        tmp_path / "project", "Studies", "Question", "systematic_review"
+    ) as store:
+        first, second = _records(store)
+        review = ReviewService(store)
+        for record_id in (first, second):
+            for reviewer in ("a", "b"):
+                review.vote("review-1", record_id, reviewer, "title_abstract", "include")
+            review.retrieval("review-1", record_id, "retrieved", "Available", "reviewer")
+            review.advance("review-1", record_id)
+            for reviewer in ("a", "b"):
+                review.vote("review-1", record_id, reviewer, "full_text", "include")
+        registry = StudyRegistryService(store)
+        study = registry.create("review-1", "One trial")
+        registry.attach_report(study["study_id"], first, "primary", "Primary report")
+        registry.attach_report(study["study_id"], second, "secondary", "Follow-up report")
+        prisma = review.prisma("review-1")
+        assert prisma["reports_included"] == 2
+        assert prisma["studies_included"] == 1
+        assert prisma["study_registry_used"] is True
+        assert prisma["unresolved_study_identity"] == 0
+
+
 def test_report_cannot_silently_belong_to_two_studies(tmp_path: Path) -> None:
     with ProjectStore.create(
         tmp_path / "project", "Studies", "Question", "systematic_review"

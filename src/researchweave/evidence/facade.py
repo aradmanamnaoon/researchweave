@@ -272,6 +272,12 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "review.adjudicate": ("local-write", ("project_id", "review_id", "record_id", "stage",
                                         "decision", "adjudicator", "reason"),
                           "Record adjudication"),
+    "review.adjudication_reverse": (
+        "local-write", ("project_id", "review_id", "record_id", "stage", "actor", "reason"),
+        "Reverse an adjudication while preserving its audit history"),
+    "review.adjudication_history": (
+        "read", ("project_id", "review_id", "record_id", "stage"),
+        "Read current and reversed adjudication history"),
     "review.advance": ("local-write", ("project_id", "review_id", "record_id"),
                        "Advance included review record"),
     "review.prisma": ("read", ("project_id", "review_id"), "Screening reconciliation"),
@@ -1215,6 +1221,21 @@ class EvidenceFacade:
                     _value(args, "record_id", str), _value(args, "stage", str),
                     _value(args, "decision", str), _value(args, "adjudicator", str),
                     _value(args, "reason", str), expected_revision=expected)
+            if operation == "review.adjudication_reverse":
+                return review.reverse_adjudication(
+                    _value(args, "review_id", str),
+                    _value(args, "record_id", str),
+                    _value(args, "stage", str),
+                    _value(args, "actor", str),
+                    _value(args, "reason", str),
+                    expected_revision=expected,
+                )
+            if operation == "review.adjudication_history":
+                return review.adjudication_history(
+                    _value(args, "review_id", str),
+                    _value(args, "record_id", str),
+                    _value(args, "stage", str),
+                )
             if operation == "review.advance":
                 return review.advance(_value(args, "review_id", str),
                     _value(args, "record_id", str), expected_revision=expected)
