@@ -7,7 +7,14 @@ from researchweave.evidence.storage import ProjectStore
 from researchweave.evidence.synthesis import Finding, SynthesisService
 
 
-def _finding(store: ProjectStore, text: bytes, quote: str, direction: str) -> str:
+def _finding(
+    store: ProjectStore,
+    text: bytes,
+    quote: str,
+    direction: str,
+    *,
+    record_id: str | None = None,
+) -> str:
     library = LibraryService(store)
     source = library.import_document(text, f"Source {direction}", "text/plain")
     body = library.source_text(source["source_id"])
@@ -17,7 +24,7 @@ def _finding(store: ProjectStore, text: bytes, quote: str, direction: str) -> st
         question="Effect?", population="Adults", outcome="Outcome",
         measure="mean difference", unit="points", timepoint="8 weeks",
         direction=direction, statement=f"Human-coded {direction} finding",
-        anchor_id=anchor["anchor_id"],
+        anchor_id=anchor["anchor_id"], record_id=record_id,
     ))["id"]
 
 
@@ -54,3 +61,14 @@ def test_composer_marks_unsupported_section_explicitly(tmp_path: Path) -> None:
         }])
         assert outline["unsupported_sections"] == 1
         assert outline["sections"][0]["warnings"] == ["UNSUPPORTED_NARRATIVE_NO_FINDINGS"]
+
+
+def test_contradiction_explorer_does_not_overstate_unidentified_findings(tmp_path: Path) -> None:
+    with ProjectStore.create(
+        tmp_path / "project", "Synthesis", "Question", "systematic_review"
+    ) as store:
+        _finding(store, b"Outcome increased.", "increased", "positive")
+        _finding(store, b"Outcome decreased.", "decreased", "negative")
+        group = SynthesisService(store).compare("Effect?")["groups"][0]
+        assert group["classification"] == "identity_unresolved_directional_difference"
+        assert group["identity_complete"] is False

@@ -46,18 +46,33 @@ class ExtractedValue:
     missingness: Missingness = "present"
     unit: str | None = None
     original_text: str = ""
+    population: str | None = None
+    timepoint: str | None = None
+    uncertainty: str | None = None
 
 
 def validate_field(field: FieldDefinition, extracted: ExtractedValue) -> dict[str, Any]:
     require(extracted.field == field.name, "Field name does not match schema")
     require(extracted.missingness in {"present", "not_reported", "not_applicable",
                                       "not_extracted"}, "Unknown missingness state")
+    for name, metadata_value in (
+        ("population", extracted.population),
+        ("timepoint", extracted.timepoint),
+        ("uncertainty", extracted.uncertainty),
+    ):
+        require(
+            metadata_value is None
+            or isinstance(metadata_value, str) and len(metadata_value) <= 4000,
+            f"Extraction {name} must be bounded text",
+        )
     if extracted.missingness != "present":
         require(extracted.value is None, "Missing data must have null value")
         require(not field.required, "Required extraction field is missing")
         return {"field": field.name, "value": None,
                 "missingness": extracted.missingness, "unit": field.unit,
-                "original_text": extracted.original_text}
+                "original_text": extracted.original_text,
+                "population": extracted.population, "timepoint": extracted.timepoint,
+                "uncertainty": extracted.uncertainty}
     require(extracted.value is not None, "Present extraction has null value")
     value = extracted.value
     if field.datatype == "boolean":
@@ -84,7 +99,9 @@ def validate_field(field: FieldDefinition, extracted: ExtractedValue) -> dict[st
     require(extracted.unit == field.unit or extracted.unit is None,
             "Unit mismatch; conversions must be explicit")
     return {"field": field.name, "value": value, "missingness": "present",
-            "unit": field.unit, "original_text": extracted.original_text}
+            "unit": field.unit, "original_text": extracted.original_text,
+            "population": extracted.population, "timepoint": extracted.timepoint,
+            "uncertainty": extracted.uncertainty}
 
 
 class ExtractionService:
@@ -142,6 +159,9 @@ class ExtractionService:
             "value",
             "missingness",
             "unit",
+            "population",
+            "timepoint",
+            "uncertainty",
             "original_text",
             "source_anchor",
             "reviewer",
@@ -159,6 +179,9 @@ class ExtractionService:
                     "value": extracted.get("value"),
                     "missingness": extracted.get("missingness"),
                     "unit": extracted.get("unit", row["unit"]),
+                    "population": extracted.get("population") or "",
+                    "timepoint": extracted.get("timepoint") or "",
+                    "uncertainty": extracted.get("uncertainty") or "",
                     "original_text": extracted.get("original_text", ""),
                     "source_anchor": row["source_anchor"] or "",
                     "reviewer": row["reviewer"],

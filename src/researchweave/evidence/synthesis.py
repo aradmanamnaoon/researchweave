@@ -87,7 +87,8 @@ CREATE TABLE IF NOT EXISTS synthesis_findings (
  timepoint TEXT NOT NULL, direction TEXT NOT NULL
  CHECK(direction IN ('positive','negative','null','mixed')),
  statement TEXT NOT NULL, anchor_id TEXT NOT NULL REFERENCES anchors(id),
- source_id TEXT NOT NULL REFERENCES sources(id), created_at TEXT NOT NULL
+ source_id TEXT NOT NULL REFERENCES sources(id), created_at TEXT NOT NULL,
+ record_id TEXT REFERENCES review_records(id), study_id TEXT, uncertainty TEXT
 );
 CREATE INDEX IF NOT EXISTS synthesis_findings_question ON synthesis_findings(question);
 CREATE TABLE IF NOT EXISTS synthesis_gaps (
@@ -120,6 +121,8 @@ class Finding:
     direction: Literal["positive", "negative", "null", "mixed"]
     statement: str
     anchor_id: str
+    record_id: str | None = None
+    uncertainty: str | None = None
 
 
 class SynthesisService:
@@ -131,6 +134,16 @@ class SynthesisService:
         for sql in SCHEMA.strip().split(";"):
             if sql.strip():
                 conn.execute(sql)
+        columns = {
+            str(row["name"])
+            for row in conn.execute("PRAGMA table_info(synthesis_findings)")
+        }
+        if "record_id" not in columns:
+            conn.execute("ALTER TABLE synthesis_findings ADD COLUMN record_id TEXT")
+        if "study_id" not in columns:
+            conn.execute("ALTER TABLE synthesis_findings ADD COLUMN study_id TEXT")
+        if "uncertainty" not in columns:
+            conn.execute("ALTER TABLE synthesis_findings ADD COLUMN uncertainty TEXT")
 
     def _has_table(self, name: str) -> bool:
         return self.store.conn.execute(
@@ -266,9 +279,14 @@ class SynthesisService:
                 f"{name} is required and must be bounded",
             )
         require(finding.direction in {"positive", "negative", "null", "mixed"}, "Invalid direction")
+        require(
+            finding.uncertainty is None
+            or isinstance(finding.uncertainty, str) and len(finding.uncertainty) <= 4000,
+            "Finding uncertainty must be bounded text",
+        )
         finding_id = new_id()
 
-        def persist(conn: Any) -> str:
+        def persist(conn: Any) -> tuple[str, str | None]:
             self._tables(conn)
             anchor = conn.execute(
                 "SELECT a.source_id,a.verified,s.deleted FROM anchors a "
@@ -280,8 +298,30 @@ class SynthesisService:
                 "Finding requires a verified anchor from an active source",
                 "INTEGRITY_FAILURE",
             )
+            study_id: str | None = None
+            if finding.record_id is not None:
+                record = conn.execute(
+                    "SELECT study_id FROM review_records WHERE id=?", (finding.record_id,)
+                ).fetchone()
+                require(record is not None, "Finding review record not found", "NOT_FOUND")
+                registry = conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' "
+                    "AND name='review_study_reports'"
+                ).fetchone()
+                if registry is not None:
+                    linked = conn.execute(
+                        "SELECT study_id FROM review_study_reports WHERE record_id=?",
+                        (finding.record_id,),
+                    ).fetchone()
+                    if linked is not None:
+                        study_id = str(linked["study_id"])
+                if study_id is None and record["study_id"] is not None:
+                    study_id = str(record["study_id"])
             conn.execute(
-                "INSERT INTO synthesis_findings VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                "INSERT INTO synthesis_findings("
+                "id,question,population,outcome,measure,unit,timepoint,direction,statement,"
+                "anchor_id,source_id,created_at,record_id,study_id,uncertainty) "
+                "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
                 (
                     finding_id,
                     finding.question,
@@ -295,17 +335,22 @@ class SynthesisService:
                     finding.anchor_id,
                     anchor["source_id"],
                     now_utc(),
+                    finding.record_id,
+                    study_id,
+                    finding.uncertainty,
                 ),
             )
-            return str(anchor["source_id"])
+            return str(anchor["source_id"]), study_id
 
-        source_id, revision = self.store.mutate(
+        persisted, revision = self.store.mutate(
             "evidence.synthesis.add_finding",
             {"anchor_id": finding.anchor_id, "statement_hash": sha256(finding.statement.encode())},
             persist,
             expected_revision=expected_revision,
         )
-        return {"id": finding_id, "source_id": source_id, "revision": revision}
+        source_id, study_id = persisted
+        return {"id": finding_id, "source_id": source_id, "record_id": finding.record_id,
+                "study_id": study_id, "revision": revision}
 
     def compare(self, question: str) -> dict[str, Any]:
         require(bool(question.strip()), "Question required")
@@ -327,6 +372,19 @@ class SynthesisService:
         comparisons = []
         for key, members in sorted(cohorts.items()):
             directions = sorted({r["direction"] for r in members})
+            identified_studies = {str(r["study_id"]) for r in members if r.get("study_id")}
+            identified_records = {str(r["record_id"]) for r in members if r.get("record_id")}
+            identity_complete = all(r.get("record_id") for r in members)
+            if len(directions) <= 1:
+                classification = "same_reported_direction"
+            elif not identity_complete:
+                classification = "identity_unresolved_directional_difference"
+            elif len(identified_studies) > 1:
+                classification = "between_study_potential_conflict"
+            elif len(identified_studies) == 1 or len(identified_records) > 1:
+                classification = "within_study_or_report_disagreement"
+            else:
+                classification = "potential_disagreement"
             comparisons.append(
                 {
                     "population": key[0],
@@ -334,14 +392,16 @@ class SynthesisService:
                     "measure": key[2],
                     "unit": key[3],
                     "timepoint": key[4],
-                    "classification": (
-                        "potential_disagreement"
-                        if len(directions) > 1
-                        else "same_reported_direction"
-                    ),
+                    "classification": classification,
                     "directions": directions,
                     "findings": members,
-                    "interpretation": "Requires human review of heterogeneity and bias",
+                    "identity_complete": identity_complete,
+                    "study_ids": sorted(identified_studies),
+                    "record_ids": sorted(identified_records),
+                    "interpretation": (
+                        "Directional differences require human review of study identity, "
+                        "heterogeneity, measurement and risk of bias"
+                    ),
                 }
             )
         return {
