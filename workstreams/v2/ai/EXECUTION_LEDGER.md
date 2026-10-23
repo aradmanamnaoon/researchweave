@@ -1,6 +1,6 @@
 # Execution ledger
 
-`SOURCE_LAYOUT_VERIFIED`: package installed and imported from worktree using `uv sync --offline --extra dev`; tracked Git index check pending final local commit. Worker source: `D:\coding\codex\researchweave-v2-ai\src\researchweave\ai`. Intended final path: `D:\coding\codex\researchweave\src\researchweave\ai`. Production count: 10 Python files / 871 token-bearing SLOC (see `CODE_METRICS.json`).
+`SOURCE_LAYOUT_VERIFIED`: package installed and imported from worktree using `uv sync --offline --extra dev`; tracked Git index check pending final local commit. Worker source: `D:\coding\codex\researchweave-v2-ai\src\researchweave\ai`. Intended final path: `D:\coding\codex\researchweave\src\researchweave\ai`. Production count: 11 Python files / 1,025 token-bearing SLOC (see `CODE_METRICS.json`).
 
 | ID | Capability | Real files | Test evidence | Status |
 |---|---|---|---|---|
@@ -15,7 +15,8 @@
 | AI-035/036/050 | Local immutable snapshot push, optimistic revision conflict, hash-verified restore | `sync.py`, `test_sync.py` | `test_snapshot_conflict_and_restore`, `test_corrupted_blob_fails_closed` | Partial: no remote CAS/encryption |
 | AI-003/004 | Explicit loopback model discovery | `local_runtime.py`, `test_local_runtime.py` | `test_local_ollama_discovery_in_offline_mode`, catalog rejection tests | Partial: no model text generation |
 | AI-016 | Verify source-bound quotes and offer no-model evidence-only response | `grounding.py`, `test_grounding.py` | `test_offline_evidence_anchors_and_stale_citation_rejection` | Implemented lexical evidence-only slice |
-| QA-001 | Hostile and failure-state regression | `test_edge_cases.py` | Six explicit success+denial tests | 25 total tests passing; 79% coverage |
+| AI-013/014 | Fingerprinted local vector index with exact cosine search, evidence checks and hybrid rank fusion | `embeddings.py`, `test_embeddings.py` | `test_versioned_vector_index_hybrid_ranks_and_source_delete`, `test_invalid_embedding_fails_closed` | Implemented local vector slice; external embedder pending |
+| QA-001 | Hostile and failure-state regression | `test_edge_cases.py` | Six explicit success+denial tests | 30 total tests passing; 81% coverage |
 
 All other AI-001–AI-050 tasks remain pending or partial; no missing task is implicitly marked implemented. Synthetic test data are original and distributable; no external fixture license applies. GUI wiring is pending for all operations. Full validation and precise remaining work are in `TEST_RESULTS.md` and `NEXT_ACTION.md`.
 

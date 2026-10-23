@@ -26,6 +26,21 @@ Public `AIFacade` methods: `capability_manifest`, `preview`, `execute`, `execute
 
 Local runtime model discovery is available separately via `LocalRuntimeDiscovery("http://127.0.0.1:11434").discover(EgressPolicy())`. It probes only the explicit loopback endpoint; no model downloads or ambient port scans occur.
 
+Local embedding index usage:
+
+```python
+from researchweave.ai.embeddings import EmbeddingIndex, HybridRetriever
+
+# Reuse the EvidenceIndex already opened by the host at a trusted path.
+# The injected embedding model produces matching fixed-width vectors.
+vectors = EmbeddingIndex(Path(folder) / "vectors.sqlite", fingerprint="model:v1", dimension=2)
+hit = ai.retrieval.query("synthetic")[0]
+vectors.put(hit, [1.0, 0.0], ai.retrieval)
+results = HybridRetriever(ai.retrieval, vectors).search("synthetic", [1.0, 0.0])
+assert results and results[0].source_id == hit.source_id
+vectors.close()
+```
+
 The return envelope contains `request_id`, `status`, `data`, `artifacts`, `warnings`, `error`, `provenance`, `impact`. Errors are structured; source text is never treated as policy authority. This is an initial slice, not a complete versioned schema contract.
 
 Snapshot demonstration:
