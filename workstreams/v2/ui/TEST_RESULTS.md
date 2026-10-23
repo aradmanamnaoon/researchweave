@@ -56,3 +56,11 @@ Repository-wide verification after milestone 3: QT_QPA_PLATFORM=offscreen uv run
 - Screenshot evidence generation: **60 PNG captures**, 5 major screens × 3 themes × 2 size classes × 2 scale factors, plus `capture-manifest.json` and `capture-matrix.json`; total 719,127 bytes for 62 files.
 - Screenshot fixture network calls observed: 0. Captures are explicitly labeled prototype/synthetic.
 - Native screen-reader and native multi-platform/DPI validation remain unperformed and are not claimed.
+
+## Milestone 7 journey and coverage validation
+
+- `QT_QPA_PLATFORM=offscreen uv run pytest -q tests/v2/ui/test_journeys.py`: **5 passed**.
+- Receipt generation with `RESEARCHWEAVE_JOURNEY_OUTPUT=workstreams/v2/ui/journeys`: **5 passed** and five JSON receipts written.
+- UTF-8 receipt verification confirmed `café` as codepoints `0x63 0x61 0x66 0xe9`; PowerShell's console preview can display the UTF-8 bytes incorrectly, but the JSON file content is correct.
+- `QT_QPA_PLATFORM=offscreen uv run pytest -q tests/v2/ui --cov=researchweave.ui --cov-branch --cov-report=term-missing`: **95 passed**, combined coverage **76%**.
+- Native keyboard QTest sequence: blocked by a Windows Qt offscreen platform process crash. Journey 3 therefore records deterministic keyboard command-routing/accessibility evidence and does not claim native key-event success.

@@ -211,10 +211,11 @@ class ResearchWindow(QMainWindow):
         self._shortcut("Ctrl+N", self.create_project)
         self._shortcut("Ctrl+F", self.focus_search)
         self._shortcut("Ctrl+S", self.save_active)
+        self._shortcut("Ctrl+Shift+A", self.annotate_selection)
         self._shortcut("Ctrl+1", lambda: self.navigate("Dashboard"))
         self._shortcut("Ctrl+2", lambda: self.navigate("Library"))
-        self._shortcut("Ctrl+L", lambda: self.navigate("Library"))
-        self._shortcut("Ctrl+Shift+E", lambda: self.navigate("Exports"))
+        self._shortcut("Ctrl+L", self.focus_library_search)
+        self._shortcut("Ctrl+Shift+E", self.focus_export)
         self._shortcut("F1", lambda: self.navigate("Shortcuts"))
 
     def _shortcut(self, keys: str, callback: Callable[..., Any]) -> None:
@@ -1023,6 +1024,8 @@ class ResearchWindow(QMainWindow):
             "Ctrl+N  New project\n"
             "Ctrl+F  Global project search\n"
             "Ctrl+S  Save active writing/protocol\n"
+            "Ctrl+Shift+A  Code selected Reader passage\n"
+            "Ctrl+Shift+E  Open export studio and focus filename\n"
             "Ctrl+1  Dashboard\n"
             "Ctrl+2  Library\n"
             "F1      Shortcut help\n"
@@ -1274,14 +1277,22 @@ class ResearchWindow(QMainWindow):
             self.import_source()
         elif value == "search-library":
             self.navigate("Library")
-            self.search.setFocus()
+            QTimer.singleShot(20, self.search.setFocus)
         elif value == "export-preview":
             self.navigate("Exports")
-            self.export_name.setFocus()
+            QTimer.singleShot(20, self.export_name.setFocus)
 
     def focus_search(self) -> None:
         self.navigate("Search")
         self.global_query.setFocus()
+
+    def focus_library_search(self) -> None:
+        self.navigate("Library")
+        self.search.setFocus()
+
+    def focus_export(self) -> None:
+        self.navigate("Exports")
+        self.export_name.setFocus()
 
     def search_global(self) -> None:
         self.global_results.clear()

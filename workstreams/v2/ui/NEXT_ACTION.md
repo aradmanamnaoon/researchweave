@@ -25,3 +25,5 @@ Current next actions after Milestone 6:
 5. Refresh the UX matrix, API catalog, capabilities manifest, user guide and handoff with final observed SHAs and exact external/native blockers.
 
 Do not push or merge from this worker worktree.
+
+After Milestone 7 the five journey receipts are complete. The immediate priority is targeted security/resource testing of currently uncovered error branches, followed by another full branch-coverage run. Coverage is 76%, so the >=80% target remains open.

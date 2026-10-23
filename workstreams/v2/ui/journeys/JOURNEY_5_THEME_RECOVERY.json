@@ -1,0 +1,436 @@
+{
+  "denial_behavior": null,
+  "failures": [
+    {
+      "case": "corrupt preferences JSON",
+      "fallback_applied": true,
+      "project_data_preserved": true
+    }
+  ],
+  "fixture_values": {
+    "saved_window": [
+      1180,
+      700
+    ],
+    "scale": 1.5,
+    "sidebar_width": 260,
+    "theme_sequence": [
+      "dark",
+      "light",
+      "contrast"
+    ]
+  },
+  "journey": "5-theme-recovery",
+  "limitations": [
+    "Offscreen Qt validates application state, not native monitor placement.",
+    "Corrupt preference fallback is isolated from project storage."
+  ],
+  "network_calls_observed": 0,
+  "network_observation_method": "All invoked UI V2 operations are local facade/store operations; no provider or integration connection operation was enabled during this journey.",
+  "operation_sequence": [
+    {
+      "arguments": {
+        "question": "Does user data survive settings failure?",
+        "study_type": "literature",
+        "title": "Synthetic theme recovery"
+      },
+      "index": 1,
+      "operation": "ui.project.create",
+      "output": {
+        "project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+        "revision": 1,
+        "study_type": "literature",
+        "title": "Synthetic theme recovery"
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "expected_revision": 1,
+        "notebook": "User data that must survive settings corruption.",
+        "project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d"
+      },
+      "index": 2,
+      "operation": "ui.notebook.save",
+      "output": {
+        "characters": 48,
+        "content_sha256": "f193ea2abda105f8bb9525c713d6392e1f1b2450eb1d1596b9aca64770a54177",
+        "project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+        "revision": 2
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "theme": "dark"
+      },
+      "index": 3,
+      "operation": "ui.preferences.update",
+      "output": {
+        "preferences": {
+          "density": "comfortable",
+          "expert": false,
+          "last_project_id": "",
+          "locale": "en",
+          "offline": true,
+          "onboarding_complete": false,
+          "panel_sizes": {},
+          "panel_visibility": {},
+          "scale": 1.0,
+          "selected_screen": "Dashboard",
+          "sidebar_width": 214,
+          "theme": "dark",
+          "version": 1,
+          "window_height": 780,
+          "window_width": 1260,
+          "workspace_presets": []
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "theme": "light"
+      },
+      "index": 4,
+      "operation": "ui.preferences.update",
+      "output": {
+        "preferences": {
+          "density": "comfortable",
+          "expert": false,
+          "last_project_id": "",
+          "locale": "en",
+          "offline": true,
+          "onboarding_complete": false,
+          "panel_sizes": {},
+          "panel_visibility": {},
+          "scale": 1.0,
+          "selected_screen": "Dashboard",
+          "sidebar_width": 214,
+          "theme": "light",
+          "version": 1,
+          "window_height": 780,
+          "window_width": 1260,
+          "workspace_presets": []
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "theme": "contrast"
+      },
+      "index": 5,
+      "operation": "ui.preferences.update",
+      "output": {
+        "preferences": {
+          "density": "comfortable",
+          "expert": false,
+          "last_project_id": "",
+          "locale": "en",
+          "offline": true,
+          "onboarding_complete": false,
+          "panel_sizes": {},
+          "panel_visibility": {},
+          "scale": 1.0,
+          "selected_screen": "Dashboard",
+          "sidebar_width": 214,
+          "theme": "contrast",
+          "version": 1,
+          "window_height": 780,
+          "window_width": 1260,
+          "workspace_presets": []
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "last_project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+        "onboarding_complete": true,
+        "scale": 1.5,
+        "selected_screen": "Manuscript",
+        "sidebar_width": 260,
+        "window_height": 700,
+        "window_width": 1180
+      },
+      "index": 6,
+      "operation": "ui.preferences.update",
+      "output": {
+        "preferences": {
+          "density": "comfortable",
+          "expert": false,
+          "last_project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+          "locale": "en",
+          "offline": true,
+          "onboarding_complete": true,
+          "panel_sizes": {},
+          "panel_visibility": {},
+          "scale": 1.5,
+          "selected_screen": "Manuscript",
+          "sidebar_width": 260,
+          "theme": "contrast",
+          "version": 1,
+          "window_height": 700,
+          "window_width": 1180,
+          "workspace_presets": []
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "preset": {
+          "active_screen": "Manuscript",
+          "density": "comfortable",
+          "name": "Theme recovery layout",
+          "panel_sizes": {
+            "sidebar": 260
+          },
+          "panel_visibility": {
+            "sidebar": true
+          },
+          "project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+          "scale": 1.5,
+          "table_settings": {
+            "page_size": 250
+          },
+          "theme": "contrast",
+          "window_height": 700,
+          "window_width": 1180
+        }
+      },
+      "index": 7,
+      "operation": "ui.workspace.preset.save",
+      "output": {
+        "preset": {
+          "active_screen": "Manuscript",
+          "created_at": "2026-10-23T15:01:55.990206+00:00",
+          "density": "comfortable",
+          "id": "5835f624-7e78-4813-9191-a863097d7121",
+          "name": "Theme recovery layout",
+          "panel_sizes": {
+            "sidebar": 260
+          },
+          "panel_visibility": {
+            "sidebar": true
+          },
+          "project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+          "scale": 1.5,
+          "table_settings": {
+            "page_size": 250
+          },
+          "theme": "contrast",
+          "updated_at": "2026-10-23T15:01:55.990206+00:00",
+          "window_height": 700,
+          "window_width": 1180
+        },
+        "presets": [
+          {
+            "active_screen": "Manuscript",
+            "created_at": "2026-10-23T15:01:55.990206+00:00",
+            "density": "comfortable",
+            "id": "5835f624-7e78-4813-9191-a863097d7121",
+            "name": "Theme recovery layout",
+            "panel_sizes": {
+              "sidebar": 260
+            },
+            "panel_visibility": {
+              "sidebar": true
+            },
+            "project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+            "scale": 1.5,
+            "table_settings": {
+              "page_size": 250
+            },
+            "theme": "contrast",
+            "updated_at": "2026-10-23T15:01:55.990206+00:00",
+            "window_height": 700,
+            "window_width": 1180
+          }
+        ],
+        "warnings": []
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {},
+      "index": 8,
+      "operation": "ui.preferences.read",
+      "output": {
+        "preferences": {
+          "density": "comfortable",
+          "expert": false,
+          "last_project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+          "locale": "en",
+          "offline": true,
+          "onboarding_complete": true,
+          "panel_sizes": {},
+          "panel_visibility": {},
+          "scale": 1.5,
+          "selected_screen": "Manuscript",
+          "sidebar_width": 480,
+          "theme": "contrast",
+          "version": 1,
+          "window_height": 700,
+          "window_width": 1180,
+          "workspace_presets": [
+            {
+              "active_screen": "Manuscript",
+              "created_at": "2026-10-23T15:01:55.990206+00:00",
+              "density": "comfortable",
+              "id": "5835f624-7e78-4813-9191-a863097d7121",
+              "name": "Theme recovery layout",
+              "panel_sizes": {
+                "sidebar": 260
+              },
+              "panel_visibility": {
+                "sidebar": true
+              },
+              "project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+              "scale": 1.5,
+              "table_settings": {
+                "page_size": 250
+              },
+              "theme": "contrast",
+              "updated_at": "2026-10-23T15:01:55.990206+00:00",
+              "window_height": 700,
+              "window_width": 1180
+            }
+          ]
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {},
+      "index": 9,
+      "operation": "ui.workspace.preset.list",
+      "output": {
+        "presets": [
+          {
+            "active_screen": "Manuscript",
+            "created_at": "2026-10-23T15:01:55.990206+00:00",
+            "density": "comfortable",
+            "id": "5835f624-7e78-4813-9191-a863097d7121",
+            "name": "Theme recovery layout",
+            "panel_sizes": {
+              "sidebar": 260
+            },
+            "panel_visibility": {
+              "sidebar": true
+            },
+            "project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+            "scale": 1.5,
+            "table_settings": {
+              "page_size": 250
+            },
+            "theme": "contrast",
+            "updated_at": "2026-10-23T15:01:56.199620+00:00",
+            "window_height": 700,
+            "window_width": 1180
+          }
+        ],
+        "warnings": []
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d"
+      },
+      "index": 10,
+      "operation": "ui.project.open",
+      "output": {
+        "project": {
+          "activity": [
+            {
+              "operation": "ui.project.create",
+              "sequence": 1,
+              "summary": "Project created",
+              "timestamp": "2026-10-23T15:01:55.952570+00:00"
+            },
+            {
+              "operation": "ui.notebook.save",
+              "sequence": 2,
+              "summary": "ui notebook save",
+              "timestamp": "2026-10-23T15:01:55.959996+00:00"
+            }
+          ],
+          "adjudications": [],
+          "agent_actions": [],
+          "analysis_results": [],
+          "annotations": [],
+          "claims": [],
+          "codebook": [],
+          "created_at": "2026-10-23T15:01:55.952570+00:00",
+          "datasets": [],
+          "evidence": [],
+          "extraction_schema": {},
+          "extractions": [],
+          "id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+          "integrations": [],
+          "manuscript": "",
+          "mixed_method_links": [],
+          "notebook": "User data that must survive settings corruption.",
+          "notifications": [],
+          "protocol": {},
+          "protocol_history": [],
+          "provider_config": {},
+          "question": "Does user data survive settings failure?",
+          "question_structure": {},
+          "recoding_trace": [],
+          "references": [],
+          "review_flow": {},
+          "revision": 2,
+          "screening_decisions": [],
+          "sources": [],
+          "study_type": "literature",
+          "title": "Synthetic theme recovery",
+          "tutorial_steps": [],
+          "updated_at": "2026-10-23T15:01:55.959996+00:00",
+          "variable_metadata": {},
+          "votes": []
+        }
+      },
+      "status": "ok"
+    }
+  ],
+  "output_values": {
+    "corrupt_settings_fallback_scale": 1.0,
+    "corrupt_settings_fallback_theme": "light",
+    "final_saved_preferences": {
+      "density": "comfortable",
+      "expert": false,
+      "last_project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+      "locale": "en",
+      "offline": true,
+      "onboarding_complete": true,
+      "panel_sizes": {},
+      "panel_visibility": {},
+      "scale": 1.5,
+      "selected_screen": "Manuscript",
+      "sidebar_width": 260,
+      "theme": "contrast",
+      "version": 1,
+      "window_height": 700,
+      "window_width": 1180,
+      "workspace_presets": []
+    },
+    "preset_id": "5835f624-7e78-4813-9191-a863097d7121"
+  },
+  "persistence_restart_state": {
+    "layout_preferences_restored": false,
+    "preset_restored": true,
+    "project_revision": 2,
+    "user_data_intact_after_corrupt_settings": true
+  },
+  "project_id": "fc363985-c0bc-4ef3-877e-5281fbd44b6d",
+  "schema_version": 1,
+  "screenshots": [
+    "workstreams/v2/ui/screenshots/researchweave-prototype-dashboard-dark-1280x720-100.png",
+    "workstreams/v2/ui/screenshots/researchweave-prototype-dashboard-light-1280x720-100.png",
+    "workstreams/v2/ui/screenshots/researchweave-prototype-dashboard-contrast-1280x720-200.png"
+  ],
+  "synthetic_fixture": true
+}

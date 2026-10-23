@@ -899,6 +899,16 @@ class UIFacade:
                                        reviewer=_string(args, "reviewer", 60),
                                        decision=_string(args, "decision", 12),
                                        reason=_string(args, "reason", 1200, required=False))
+            # Compatibility mirror for older single-review callers. The independent
+            # screening model remains authoritative for the V2 Review screen.
+            project.votes = [
+                vote for vote in project.votes if vote.source_id != decision.source_id
+            ]
+            project.votes.append(ReviewVote(
+                source_id=decision.source_id,
+                decision=decision.decision,
+                reason=decision.reason,
+            ))
             return {"decision": asdict(decision), "flow": screening_flow(project)}
         return self._mutate(args, "ui.screening.vote", update)
 
@@ -912,6 +922,14 @@ class UIFacade:
                                   adjudicator=_string(args, "adjudicator", 60),
                                   final_decision=_string(args, "final_decision", 12),
                                   rationale=_string(args, "rationale", 1200))
+            project.votes = [
+                vote for vote in project.votes if vote.source_id != decision.source_id
+            ]
+            project.votes.append(ReviewVote(
+                source_id=decision.source_id,
+                decision=decision.final_decision,
+                reason=decision.rationale,
+            ))
             return {"adjudication": asdict(decision), "flow": screening_flow(project)}
         return self._mutate(args, "ui.screening.adjudicate", update)
 

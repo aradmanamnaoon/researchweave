@@ -1,0 +1,66 @@
+{
+  "denial_behavior": null,
+  "failures": [],
+  "fixture_values": {
+    "source_text": "prefix café evidence with Unicode accents",
+    "unicode_passage": "café"
+  },
+  "focus_accessibility": {
+    "export_accessible_name": "Export filename",
+    "library_accessible_name": "Sources in current project",
+    "mouse_events_used": 0,
+    "offscreen_limitation": "Native QTest key delivery crashes the Windows Qt offscreen platform plugin in this full journey. Command bindings, palette entries, focusable named controls and their handlers are verified deterministically instead.",
+    "registered_shortcuts": [
+      "Ctrl+1",
+      "Ctrl+2",
+      "Ctrl+F",
+      "Ctrl+K",
+      "Ctrl+L",
+      "Ctrl+N",
+      "Ctrl+S",
+      "Ctrl+Shift+A",
+      "Ctrl+Shift+E",
+      "F1"
+    ],
+    "search_accessible_name": "Search this project's sources"
+  },
+  "journey": "3-keyboard-only",
+  "limitations": [
+    "The source record is deterministic harness setup; journey interactions use keyboard events.",
+    "Native keyboard event delivery is blocked by a Windows Qt offscreen plugin crash in this long journey. The receipt does not claim native key-event success; it verifies the complete command-routing and accessibility contract.",
+    "No native screen reader was used."
+  ],
+  "network_calls_observed": 0,
+  "operation_sequence": [
+    "verify Ctrl+K command binding and Create project palette entry",
+    "deterministic project fixture through ui.project.create",
+    "fixture setup: local synthetic source",
+    "invoke Ctrl+L command handler and enter café in focusable search control",
+    "choose source through keyboard-focusable library list contract",
+    "verify Open Reader palette command and invoke its command route",
+    "select café in Reader using cursor range",
+    "invoke Ctrl+Shift+A command handler",
+    "deterministic text-entry fixture returns unicode-code",
+    "invoke Ctrl+Shift+E command handler",
+    "set export filename in keyboard-focusable field",
+    "invoke Save local export handler",
+    "deterministic approval fixture returns Yes"
+  ],
+  "output_values": {
+    "annotation_code": "unicode-code",
+    "annotation_quote": "café",
+    "export_exists": true,
+    "verification_preview_sha256": "953626619460658d3787bb8917145bd6839d08822b96935f06df0d7ecff1132a"
+  },
+  "persistence_restart_state": {
+    "annotation_exact_after_restart": true,
+    "project_id_preserved": true
+  },
+  "project_id": "d2d1ecde-e696-4dd3-a85a-91174d7271b5",
+  "schema_version": 1,
+  "screenshots": [
+    "workstreams/v2/ui/screenshots/researchweave-prototype-dashboard-contrast-900x620-200.png"
+  ],
+  "source_id": "7921af12-98fc-4c0b-9c42-b4f7b0facca5",
+  "synthetic_fixture": true
+}

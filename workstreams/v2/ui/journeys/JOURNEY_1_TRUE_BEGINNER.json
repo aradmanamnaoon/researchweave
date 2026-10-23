@@ -1,0 +1,302 @@
+{
+  "denial_behavior": null,
+  "failures": [
+    {
+      "code": "INVALID_INPUT",
+      "operation": "ui.source.add",
+      "recovery": "Correct the field and try again.",
+      "write_occurred": false
+    }
+  ],
+  "fixture_values": {
+    "account_required": false,
+    "provider_required": false,
+    "question_type": "descriptive",
+    "source_text": "Synthetic tutorial source only. Attention appears as a practice term; this is not a participant result or publication."
+  },
+  "journey": "1-true-beginner",
+  "limitations": [
+    "All content is synthetic.",
+    "The recovery draft is previewed separately and never overwrites the saved note.",
+    "No scientific validity or research finding is inferred."
+  ],
+  "network_calls_observed": 0,
+  "network_observation_method": "All invoked UI V2 operations are local facade/store operations; no provider or integration connection operation was enabled during this journey.",
+  "operation_sequence": [
+    {
+      "arguments": {
+        "question": "What does this synthetic source say about attention?",
+        "study_type": "literature",
+        "title": "Synthetic beginner journey"
+      },
+      "index": 1,
+      "operation": "ui.project.create",
+      "output": {
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+        "revision": 1,
+        "study_type": "literature",
+        "title": "Synthetic beginner journey"
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "editable_question": "What does a synthetic reading prompt say about reported focus?",
+        "expected_revision": 1,
+        "exposure_phenomenon": "synthetic reading prompt",
+        "outcome_target": "reported focus",
+        "population_context": "synthetic learners",
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+        "question_type": "descriptive",
+        "topic": "attention"
+      },
+      "index": 2,
+      "operation": "ui.question.update",
+      "output": {
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+        "question_structure": {
+          "editable_question": "What does a synthetic reading prompt say about reported focus?",
+          "exposure_phenomenon": "synthetic reading prompt",
+          "outcome_target": "reported focus",
+          "population_context": "synthetic learners",
+          "question_type": "descriptive",
+          "topic": "attention"
+        },
+        "revision": 2
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "expected_revision": 2,
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+        "text": "This injected failure must not be saved.",
+        "title": ""
+      },
+      "error": {
+        "code": "INVALID_INPUT",
+        "message": "'title' must be nonempty text under 180 characters.",
+        "recovery": "Correct the field and try again."
+      },
+      "index": 3,
+      "operation": "ui.source.add",
+      "status": "failed"
+    },
+    {
+      "arguments": {
+        "expected_revision": 2,
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+        "source_label": "Synthetic fixture; not a citation",
+        "text": "Synthetic tutorial source only. Attention appears as a practice term; this is not a participant result or publication.",
+        "title": "Synthetic tutorial source"
+      },
+      "index": 4,
+      "operation": "ui.source.add",
+      "output": {
+        "content_sha256": "ffda0794c6bad62568540b6e0b06ea0a5502110b055c953ef94930db4c0571a7",
+        "count": 1,
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+        "revision": 3,
+        "source_id": "e98b43d1-b91f-4fdf-a4a5-16b6918b34b8"
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "expected_revision": 3,
+        "notebook": "Summary note: this synthetic source contains a practice statement only; no scientific conclusion is claimed.",
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca"
+      },
+      "index": 5,
+      "operation": "ui.notebook.save",
+      "output": {
+        "characters": 108,
+        "content_sha256": "5abd6acc2b1780d8608770ed7a16fcea1a5957b7ffb6649b303c9e9a3ac768ca",
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+        "revision": 4
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "expected_revision": 4,
+        "field": "notebook",
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+        "text": "Unsaved synthetic addendum for crash-recovery demonstration."
+      },
+      "index": 6,
+      "operation": "ui.recovery.save",
+      "output": {
+        "base_revision": 4,
+        "characters": 60,
+        "field": "notebook",
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+        "recoverable": true,
+        "sha256": "5e463997e59779c6c5ab07ebe4f2472e8d3338128d692f63908936be34028583"
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "filename": "beginner-journey.md",
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca"
+      },
+      "index": 7,
+      "operation": "ui.export.preview",
+      "output": {
+        "bytes": 341,
+        "confirmation_required": true,
+        "destination": "C:\\Users\\saba\\AppData\\Local\\Temp\\pytest-of-saba\\pytest-387\\test_journey_1_true_beginner0\\journey-1\\exports\\beginner-journey.md",
+        "filename": "beginner-journey.md",
+        "sha256": "2515b1080714584dd03fa97bc65d4ed2ef759963613f51896153a3a86a98637a"
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "filename": "beginner-journey.md",
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca"
+      },
+      "index": 8,
+      "operation": "ui.export.write",
+      "output": {
+        "bytes": 341,
+        "filename": "beginner-journey.md",
+        "path": "C:\\Users\\saba\\AppData\\Local\\Temp\\pytest-of-saba\\pytest-387\\test_journey_1_true_beginner0\\journey-1\\exports\\beginner-journey.md",
+        "sha256": "2515b1080714584dd03fa97bc65d4ed2ef759963613f51896153a3a86a98637a"
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca"
+      },
+      "index": 9,
+      "operation": "ui.project.open",
+      "output": {
+        "project": {
+          "activity": [
+            {
+              "operation": "ui.project.create",
+              "sequence": 1,
+              "summary": "Project created",
+              "timestamp": "2026-10-23T15:01:55.671710+00:00"
+            },
+            {
+              "operation": "ui.question.update",
+              "sequence": 2,
+              "summary": "ui question update",
+              "timestamp": "2026-10-23T15:01:55.679146+00:00"
+            },
+            {
+              "operation": "ui.source.add",
+              "sequence": 3,
+              "summary": "ui source add",
+              "timestamp": "2026-10-23T15:01:55.684686+00:00"
+            },
+            {
+              "operation": "ui.notebook.save",
+              "sequence": 4,
+              "summary": "ui notebook save",
+              "timestamp": "2026-10-23T15:01:55.691626+00:00"
+            }
+          ],
+          "adjudications": [],
+          "agent_actions": [],
+          "analysis_results": [],
+          "annotations": [],
+          "claims": [],
+          "codebook": [],
+          "created_at": "2026-10-23T15:01:55.671710+00:00",
+          "datasets": [],
+          "evidence": [],
+          "extraction_schema": {},
+          "extractions": [],
+          "id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+          "integrations": [],
+          "manuscript": "",
+          "mixed_method_links": [],
+          "notebook": "Summary note: this synthetic source contains a practice statement only; no scientific conclusion is claimed.",
+          "notifications": [],
+          "protocol": {},
+          "protocol_history": [],
+          "provider_config": {},
+          "question": "What does a synthetic reading prompt say about reported focus?",
+          "question_structure": {
+            "editable_question": "What does a synthetic reading prompt say about reported focus?",
+            "exposure_phenomenon": "synthetic reading prompt",
+            "outcome_target": "reported focus",
+            "population_context": "synthetic learners",
+            "question_type": "descriptive",
+            "topic": "attention"
+          },
+          "recoding_trace": [],
+          "references": [],
+          "review_flow": {},
+          "revision": 4,
+          "screening_decisions": [],
+          "sources": [
+            {
+              "citation": "",
+              "content_hash": "ffda0794c6bad62568540b6e0b06ea0a5502110b055c953ef94930db4c0571a7",
+              "id": "e98b43d1-b91f-4fdf-a4a5-16b6918b34b8",
+              "imported_at": "2026-10-23T15:01:55.684686+00:00",
+              "kind": "note",
+              "source_label": "Synthetic fixture; not a citation",
+              "tags": [],
+              "text": "Synthetic tutorial source only. Attention appears as a practice term; this is not a participant result or publication.",
+              "title": "Synthetic tutorial source",
+              "verified": false
+            }
+          ],
+          "study_type": "literature",
+          "title": "Synthetic beginner journey",
+          "tutorial_steps": [],
+          "updated_at": "2026-10-23T15:01:55.691626+00:00",
+          "variable_metadata": {},
+          "votes": []
+        }
+      },
+      "status": "ok"
+    },
+    {
+      "arguments": {
+        "field": "notebook",
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca"
+      },
+      "index": 10,
+      "operation": "ui.recovery.inspect",
+      "output": {
+        "base_revision": 4,
+        "conflict": false,
+        "current_revision": 4,
+        "field": "notebook",
+        "note": "Preview only; a recovery draft never overwrites saved work.",
+        "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+        "saved_text": "Summary note: this synthetic source contains a practice statement only; no scientific conclusion is claimed.",
+        "sha256": "5e463997e59779c6c5ab07ebe4f2472e8d3338128d692f63908936be34028583",
+        "text": "Unsaved synthetic addendum for crash-recovery demonstration.",
+        "updated_at": "2026-10-23T15:01:55.691626+00:00"
+      },
+      "status": "ok"
+    }
+  ],
+  "output_values": {
+    "export_sha256": "2515b1080714584dd03fa97bc65d4ed2ef759963613f51896153a3a86a98637a",
+    "recovery_sha256": "5e463997e59779c6c5ab07ebe4f2472e8d3338128d692f63908936be34028583",
+    "source_sha256": "ffda0794c6bad62568540b6e0b06ea0a5502110b055c953ef94930db4c0571a7"
+  },
+  "persistence_restart_state": {
+    "notebook_preserved": true,
+    "recovery_preview_preserved": true,
+    "same_project_id": true,
+    "source_count": 1
+  },
+  "project_id": "dea7c575-059f-4d59-8271-36aa0f96b3ca",
+  "schema_version": 1,
+  "screenshots": [
+    "workstreams/v2/ui/screenshots/researchweave-prototype-dashboard-light-900x620-100.png"
+  ],
+  "source_id": "e98b43d1-b91f-4fdf-a4a5-16b6918b34b8",
+  "synthetic_fixture": true
+}

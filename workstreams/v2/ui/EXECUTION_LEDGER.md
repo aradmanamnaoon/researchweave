@@ -60,3 +60,14 @@ Every unimplemented UX story remains open; see LIMITATIONS.md and NEXT_ACTION.md
 - UX-048 screenshot harness produced 60 real offscreen PNGs under `workstreams/v2/ui/screenshots/` across five major screens, three themes, narrow/desktop sizes and 100%/200% scale. Total observed evidence size: 719,127 bytes for 62 files including manifests.
 - UX-049 asset manifest records SHA-256, title, description, GPL-3.0-only license and original provenance for both shipped SVG assets; validation rejects scripts and external hrefs.
 - Focused validation for this slice: Ruff clean, strict Mypy clean, and 18 visualization/search/advanced-widget/demo/asset tests passed.
+
+## Milestone 7 · mandatory journey receipts and screening compatibility
+
+- Added `tests/v2/ui/test_journeys.py` and persisted all five required JSON receipts under `workstreams/v2/ui/journeys/`.
+- Journey 1 verifies a no-account/no-provider synthetic beginner flow, an injected validation failure, local export, recovery preview and restart persistence.
+- Journey 2 verifies project switching, paged data, a deterministic test-only regression adapter, source-linked evidence, manuscript persistence and workspace-preset restart state. The fake regression outputs are explicitly labeled non-scientific test values.
+- Journey 3 verifies the registered keyboard command map, command-palette routing, focusable/accessibly named controls, Unicode annotation persistence and local export. Native QTest key delivery is explicitly recorded as blocked because the Windows Qt offscreen platform crashes on the long key-event/modal sequence; no native keyboard success is claimed.
+- Journey 4 verifies mismatched approval rejection, malformed proposal rejection, stale approval rejection, explicit denial, zero file write, zero network activity and a persistent denial timeline event.
+- Journey 5 verifies dark → light → high-contrast preferences, 150% scale, persisted layout/preset state, corrupt settings fallback and intact project data.
+- The independent screening operations now mirror their latest outcome into the legacy `ui.review.*` read model for compatibility; the visible V2 Review screen continues to use the independent screening model.
+- Full UI coverage checkpoint after the five journeys: **95 passed**, combined line/branch coverage **76%**.
