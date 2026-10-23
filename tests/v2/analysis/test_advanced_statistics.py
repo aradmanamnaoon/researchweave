@@ -82,6 +82,32 @@ def test_repeated_measures_oracle(tmp_path: Path):
     assert result["n_subjects"] == 3
     assert result["df_num"] == pytest.approx(2)
     assert 0 <= result["p_value"] <= 1
+    diagnostic = result["sphericity"]
+    assert diagnostic["applicable"] is True
+    assert 0 < diagnostic["greenhouse_geisser_epsilon"] <= 1
+    assert diagnostic["corrected_df_num"] <= result["df_num"]
+    assert 0 <= diagnostic["corrected_p_value"] <= 1
+
+
+def test_type_three_factorial_uses_sum_contrasts_on_unbalanced_design(tmp_path: Path):
+    dataset = _dataset(
+        tmp_path,
+        "type3.csv",
+        "a,b,y\nA,L,1\nA,L,2\nA,H,4\nB,L,3\nB,H,8\nB,H,9\nB,H,10\n",
+    )
+    result = factorial_anova(dataset, "y", ["a", "b"], typ=3)
+    assert result["contrast_coding"] == "sum_to_zero"
+    import pandas as pd
+    import statsmodels.api as sm
+    import statsmodels.formula.api as smf
+
+    frame = pd.DataFrame(
+        [{"y": float(row["y"]), "f0": row["a"], "f1": row["b"]} for row in dataset.records]
+    )
+    oracle = sm.stats.anova_lm(smf.ols("y ~ C(f0, Sum) * C(f1, Sum)", data=frame).fit(), typ=3)
+    observed = {row["source"]: row for row in result["terms"]}
+    assert observed["a"]["f"] == pytest.approx(float(oracle.loc["C(f0, Sum)", "F"]))
+    assert observed["b"]["p_value"] == pytest.approx(float(oracle.loc["C(f1, Sum)", "PR(>F)"]))
 
 
 def test_mixed_effects_fixed_slope_reference(tmp_path: Path):

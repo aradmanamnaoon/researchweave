@@ -285,7 +285,11 @@ def factorial_anova(
         all(frame[f"f{i}"].nunique() >= 2 for i in range(len(factors))),
         "Every factor needs at least two observed levels",
     )
-    terms = " * ".join(f"C(f{i})" for i in range(len(factors)))
+    contrast = "sum_to_zero" if typ == 3 else "treatment"
+    coded_terms = [
+        f"C(f{i}, Sum)" if typ == 3 else f"C(f{i})" for i in range(len(factors))
+    ]
+    terms = " * ".join(coded_terms)
     try:
         fit = smf.ols(f"y ~ {terms}", data=frame).fit()
         require(
@@ -301,6 +305,7 @@ def factorial_anova(
             continue
         source = str(label)
         for index, factor in enumerate(factors):
+            source = source.replace(f"C(f{index}, Sum)", factor)
             source = source.replace(f"C(f{index})", factor)
         terms_out.append(
             {
@@ -314,6 +319,7 @@ def factorial_anova(
     return {
         "method": "factorial_anova",
         "type": typ,
+        "contrast_coding": contrast,
         "factors": factors,
         "terms": terms_out,
         "residual_df": float(fit.df_resid),
@@ -362,6 +368,79 @@ def repeated_measures_anova(
     except (ValueError, np.linalg.LinAlgError) as exc:
         raise AnalysisError("INVALID_INPUT", "Repeated-measures ANOVA failed") from exc
     table = result.anova_table.iloc[0]
+    n_subjects = int(frame["subject"].nunique())
+    sphericity: dict[str, Any] = {
+        "applicable": len(levels) > 2,
+        "mauchly_w": None,
+        "chi_square": None,
+        "df": None,
+        "p_value": None,
+        "greenhouse_geisser_epsilon": 1.0,
+        "corrected_df_num": float(table["Num DF"]),
+        "corrected_df_denom": float(table["Den DF"]),
+        "corrected_p_value": float(table["Pr > F"]),
+    }
+    warnings: list[str] = []
+    if len(levels) > 2:
+        wide = frame.pivot(index="subject", columns="within", values="outcome")[levels]
+        covariance = np.cov(wide.to_numpy(dtype=float), rowvar=False, ddof=1)
+        dimension = len(levels) - 1
+        # Orthonormal basis for the contrast subspace orthogonal to the all-ones
+        # vector. Sphericity is equality of eigenvalues in this subspace.
+        centered = np.eye(len(levels)) - np.ones((len(levels), len(levels))) / len(levels)
+        eigenvalues, eigenvectors = np.linalg.eigh(centered)
+        contrast_basis = eigenvectors[:, eigenvalues > 0.5].T
+        contrast_covariance = contrast_basis @ covariance @ contrast_basis.T
+        trace = float(np.trace(contrast_covariance))
+        trace_squared = float(np.trace(contrast_covariance @ contrast_covariance))
+        require(trace > 0 and trace_squared > 0, "Sphericity undefined for degenerate covariance")
+        epsilon = (trace * trace) / (dimension * trace_squared)
+        epsilon = float(min(1.0, max(1.0 / dimension, epsilon)))
+        determinant = float(np.linalg.det(contrast_covariance))
+        if determinant > 0:
+            w = determinant / ((trace / dimension) ** dimension)
+            w = float(min(1.0, max(np.finfo(float).tiny, w)))
+            correction = 1.0 - (
+                (2.0 * dimension * dimension + dimension + 2.0)
+                / (6.0 * dimension * max(n_subjects - 1, 1))
+            )
+            chi_square = float(-(n_subjects - 1) * correction * math.log(w))
+            mauchly_df = float(dimension * (dimension + 1) / 2 - 1)
+            mauchly_p = float(stats.chi2.sf(chi_square, mauchly_df)) if mauchly_df > 0 else None
+            sphericity.update(
+                {
+                    "mauchly_w": w,
+                    "chi_square": chi_square,
+                    "df": mauchly_df,
+                    "p_value": mauchly_p,
+                }
+            )
+        else:
+            warnings.append(
+                "Mauchly's statistic is undefined because the contrast covariance is singular"
+            )
+        corrected_df_num = epsilon * float(table["Num DF"])
+        corrected_df_denom = epsilon * float(table["Den DF"])
+        corrected_p = float(
+            stats.f.sf(float(table["F Value"]), corrected_df_num, corrected_df_denom)
+        )
+        sphericity.update(
+            {
+                "greenhouse_geisser_epsilon": epsilon,
+                "corrected_df_num": corrected_df_num,
+                "corrected_df_denom": corrected_df_denom,
+                "corrected_p_value": corrected_p,
+            }
+        )
+        if sphericity["p_value"] is not None and float(sphericity["p_value"]) < 0.05:
+            warnings.append(
+                "Mauchly screening rejects sphericity at alpha=0.05; review the "
+                "Greenhouse-Geisser corrected result"
+            )
+        warnings.append(
+            "Mauchly and Greenhouse-Geisser diagnostics are one-factor screening tools "
+            "and require design-aware interpretation"
+        )
     return {
         "method": "repeated_measures_anova",
         "statistic": float(table["F Value"]),
@@ -369,15 +448,11 @@ def repeated_measures_anova(
         "df_denom": float(table["Den DF"]),
         "p_value": float(table["Pr > F"]),
         "within_levels": levels,
-        "n_subjects": int(frame["subject"].nunique()),
+        "n_subjects": n_subjects,
         "n_used": len(frame),
         "n_excluded": len(dataset.records) - len(frame),
-        "warnings": [
-            "Sphericity correction is not estimated by this backend; "
-            "review when more than two levels"
-        ]
-        if len(levels) > 2
-        else [],
+        "sphericity": sphericity,
+        "warnings": warnings,
         "dataset_revision": dataset.revision,
     }
 

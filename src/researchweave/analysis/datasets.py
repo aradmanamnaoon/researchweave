@@ -356,8 +356,14 @@ def import_table(
             "dta": pyreadstat.read_dta,
             "xpt": pyreadstat.read_xport,
         }[kind]
+        readstat_options: dict[str, Any] = {"apply_value_formats": False}
+        if kind in {"sav", "zsav"}:
+            # Preserve SPSS user-missing values in the data so the dictionary can
+            # distinguish them from system missing values instead of silently
+            # converting them to NaN during import.
+            readstat_options["user_missing"] = True
         try:
-            frame, metadata = readstat(path, apply_value_formats=False)
+            frame, metadata = readstat(path, **readstat_options)
         except (ValueError, TypeError, OSError) as exc:
             raise AnalysisError("INVALID_INPUT", f"Could not parse {kind} source") from exc
         labels_by_name = getattr(metadata, "column_names_to_labels", {}) or {}
@@ -379,9 +385,16 @@ def import_table(
                 "missing_values": tuple(
                     [str(value) for value in (missing_user_values.get(name, []) or [])]
                     + [
-                        str(entry)
+                        (
+                            str(entry.get("lo"))
+                            if isinstance(entry, dict) and entry.get("lo") == entry.get("hi")
+                            else f"{entry.get('lo')}..{entry.get('hi')}"
+                            if isinstance(entry, dict)
+                            and "lo" in entry
+                            and "hi" in entry
+                            else str(entry)
+                        )
                         for entry in (missing_ranges.get(name, []) or [])
-                        if not isinstance(entry, dict)
                     ]
                 ),
                 "scale": (
@@ -455,6 +468,31 @@ def import_table(
             require(kind in readers, f"Unsupported import format: {kind}", "UNSUPPORTED_FORMAT")
             try:
                 frame = readers[kind]()
+                if kind == "ods":
+                    require(
+                        isinstance(frame, pd.DataFrame),
+                        "Workbook sheet selection did not resolve to one table",
+                    )
+                    selected_max_row = min(max_row or (len(frame) + 1), len(frame) + 1)
+                    selected_max_col = min(max_col or len(frame.columns), len(frame.columns))
+                    require(
+                        selected_max_row >= min_row and selected_max_col >= min_col,
+                        "Workbook range is empty",
+                    )
+                    require(
+                        selected_max_row - min_row + 1 <= MAX_ROWS + 1
+                        and selected_max_col - min_col + 1 <= MAX_COLUMNS,
+                        "Workbook range exceeds row/column budget",
+                        "RESOURCE_LIMIT",
+                    )
+                    # pandas already consumed row 1 as the header. Interpret
+                    # workbook row/column bounds with the same one-based semantics
+                    # as XLSX: row 1 is the header and data starts at row 2.
+                    start_data = max(min_row - 2, 0)
+                    stop_data = max(selected_max_row - 1, 0)
+                    start_col = min_col - 1
+                    stop_col = selected_max_col
+                    frame = frame.iloc[start_data:stop_data, start_col:stop_col].copy()
             except ImportError as exc:
                 raise AnalysisError(
                     "DEPENDENCY_MISSING", f"Reader for {kind} is not installed"
@@ -493,7 +531,7 @@ def import_table(
         "data_only": data_only if kind == "xlsx" else None,
         "range": (
             {"min_row": min_row, "max_row": max_row, "min_col": min_col, "max_col": max_col}
-            if kind == "xlsx"
+            if kind in {"xlsx", "ods"}
             else None
         ),
         "metadata_limitations": (

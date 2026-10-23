@@ -75,6 +75,41 @@ def test_readstat_preserves_labels_value_labels_and_measure(tmp_path: Path):
     assert stata.variables[0].value_labels["1"] == "Yes"
 
 
+def test_spss_user_missing_range_is_preserved_without_replacing_raw_values(tmp_path: Path):
+    frame = pd.DataFrame({"score": [1.0, 95.0, 97.0, 100.0]})
+    sav = tmp_path / "user_missing.sav"
+    pyreadstat.write_sav(
+        frame,
+        sav,
+        missing_ranges={"score": [{"lo": 95.0, "hi": 99.0}, 100.0]},
+    )
+    dataset = import_table(sav)
+    variable = dataset.variables[0]
+    assert [row["score"] for row in dataset.records] == [1.0, 95.0, 97.0, 100.0]
+    assert variable.missing_values == ("95.0..99.0", "100.0")
+
+
+def test_ods_range_semantics_apply_after_sheet_read(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path
+):
+    path = tmp_path / "book.ods"
+    path.write_bytes(b"synthetic-ods-placeholder")
+    source = pd.DataFrame({"id": ["a", "b", "c"], "value": [1, 2, 3], "extra": [9, 8, 7]})
+
+    def fake_read_excel(*args, **kwargs):
+        assert kwargs["sheet_name"] == "Raw"
+        assert kwargs["engine"] == "odf"
+        return source
+
+    monkeypatch.setattr(pd, "read_excel", fake_read_excel)
+    dataset = import_table(
+        path, format="ods", sheet="Raw", min_row=2, max_row=3, min_col=2, max_col=3
+    )
+    assert dataset.columns == ("value", "extra")
+    assert dataset.records == ({"value": 1, "extra": 9}, {"value": 2, "extra": 8})
+    assert dataset.operation["range"] == {"min_row": 2, "max_row": 3, "min_col": 2, "max_col": 3}
+
+
 def test_parquet_budget_checked_from_metadata_before_materialization(tmp_path: Path):
     path = tmp_path / "too_many.parquet"
     table = pa.table({"x": pa.array(range(MAX_ROWS + 1), type=pa.int32())})
