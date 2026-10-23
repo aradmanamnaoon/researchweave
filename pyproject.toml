@@ -1,0 +1,45 @@
+[build-system]
+requires = ["hatchling>=1.27,<2"]
+build-backend = "hatchling.build"
+
+[project]
+name = "researchweave"
+version = "0.1.0"
+description = "Local-first desktop foundation for reproducible research"
+readme = "README.md"
+requires-python = ">=3.12,<3.14"
+license = "GPL-3.0-only"
+dependencies = ["PyQt6>=6.8,<6.11", "pydantic>=2.10,<3", "platformdirs>=4.3,<5"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8,<10", "pytest-cov>=6,<8", "ruff>=0.12,<1", "mypy>=1.16,<2", "pre-commit>=4,<5", "pip-audit>=2.9,<3", "PyYAML>=6,<7", "detect-secrets>=1.5,<2"]
+
+[project.scripts]
+researchweave = "researchweave.app.main:main"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/researchweave"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = [".agents/skills"]
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP", "S"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**/*.py" = ["S101"]
+
+[tool.mypy]
+python_version = "3.12"
+strict = true
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--strict-markers"
+
+[tool.coverage.run]
+source = ["researchweave"]
+branch = true

@@ -1,0 +1,18 @@
+repos:
+  - repo: local
+    hooks:
+      - id: ruff
+        name: Ruff lint
+        entry: uv run --extra dev ruff check .
+        language: system
+        pass_filenames: false
+      - id: ruff-format
+        name: Ruff format verification
+        entry: uv run --extra dev ruff format --check .
+        language: system
+        pass_filenames: false
+      - id: skill-validation
+        name: Validate local skills
+        entry: uv run --extra dev python scripts/validate_skills.py
+        language: system
+        pass_filenames: false
