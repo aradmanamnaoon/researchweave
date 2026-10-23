@@ -1,73 +1,32 @@
-# UI worker execution ledger
+﻿# UI worker execution ledger
 
-| ID | Implementation | Status |
-| --- | --- | --- |
-| AUDIT-001 | Shared main baseline inspected, isolated worktree created | Done |
-| U1-001 | Theme tokens, accessible desktop shell and 17 screens | Implemented initial slice |
-| U2-001 | Project onboarding/create/open and local storage | Tested |
-| U3-001 | Sources, reader text, review and Unicode annotations | Tested facade; Qt partial |
-| U4-001 | Virtual table, CSV import and descriptive statistics | Tested |
-| U5-001 | Agent preview/deny, guarded export, cancellable job manager | Partial |
-| U6-001 | Palette, preferences, local settings recovery | Tested partial |
-| SOURCE_LAYOUT_VERIFIED | 8 real Python modules under owned source root | Disk verified; Git index evidence pending commit |
+Branch: `rebuild/v2-ui`. Worktree: `D:\coding\codex\researchweave-v2-ui`. No push or merge was performed.
 
-## Post-MVP milestone 2
+## Major implementation milestones
 
-- UI-RECOVERY-002: prevent loss of unsaved writing on project switch and close, with a blocking retry on save failures; test_unsaved_close_cancel_preserves_window.
-- UX-048: demo.py generates actual 1280x720 Qt screenshot, labeled prototype manifest and SHA-256 receipt; test_demo.py.
-- UX-037/040/041: contrast token audit and 100/150/200% scalable offscreen widget inspection; test_accessibility.py.
-- UX-012: actual selectable screening queue, reason entry and event-derived counts, with filter/selection tests.
-- UX-016/017: 250-row paged table + variable type and missingness descriptors; 10,000-row test.
-- UX-049: original SVG wordmark symbol and workflow diagram in assets/.
-- Local measured source: 10 production modules, 2,158 nonblank noncomment physical lines (upper bound incl. docstrings), 27 registered operations, 20 passing tests, 74% combined branch/line coverage. Target 5,500 meaningful lines and 80% coverage are NOT complete.
-- First local commit: c2e499db078a7d2693d3f21917b357c8d944850b. Second commit SHA: inspect Git log after second coherent commit.
+- `4d19876` — anchored evidence, PDF reader, descriptive charts, diagnostics and publication checks.
+- `67b11d6` / `17a0acf` — Unicode-safe offsets and independent screening/adjudication denial paths.
+- `617b7ef` — durable workflow contracts: extraction, variables, typed analysis, codebook, mixed methods, references, scoped AI actions, providers/privacy/integrations/notifications.
+- `c10d66b` — visible core research workflow screens, first-run demo, independent Review, PRISMA, localization and workspace presets.
+- `63f08e4` — evidence/claim search, categorical plots, SVG/PNG receipts, disabled notebook-execution contract, SVG asset manifest/tests and expanded screenshot harness.
+- `c0e6396` — five mandatory deterministic journey receipts and screening compatibility.
+- `f721f7d` — security/resource/performance acceptance evidence.
+- `bb18f6a` — atomic exports, read-only data filter/sort, six study-design families, contextual help, activity filtering, and job progress/retry.
+- `64d8443` — bounded Library sorting/paging and global-search paging.
 
-## Milestone 3: additional implemented and tested workflows
+## Final measured state before documentation commit
 
-- UX-004/005/015/043/044: editable methodology template forms with required-field validation, explicit human review caveat and persistent draft/reopen, research_guides.py and test_protocol_guidance.py.
-- UX-033/050: checksum and format verified, bounded data-only ZIP archive, preview/approval/restore to separate project, snapshots.py and test_snapshots.py. Rejects malformed/traversal entries and stale checksums.
-- UX-045: project-wide Unicode literal search across local source, coded evidence, draft manuscript/notes and protocol fields; test_global_search.py.
-- RECOVERY-003: previously unsaved protocol editor content protected on close by confirmation and guarded save; test_protocol_unsaved_close_guard.
-- Observed 35 passing Qt/offline tests, Ruff and Mypy clean; 75% combined coverage. Full UI story acceptance and 5,500-line target remain unfinished; limitations tracked in LIMITATIONS.md.
+- Production Python modules: **24**.
+- Meaningful production SLOC: **9,968**, excluding blank lines, full-line comments and AST-detected module/class/function docstrings.
+- Registered facade operations: **105**.
+- UI test suite: **133 passed**, **82%** branch-aware coverage.
+- Repository-wide test suite: **137 passed**.
+- Ruff, Mypy, compileall and `uv sync --extra dev`: passed.
+- UX matrix: **27 complete, 23 partial, 0 missing, 0 blocked**. Partial stories are native/external-integration gaps documented in the matrix, not TODO-only features.
+- Five required journey receipts exist under `workstreams/v2/ui/journeys/`.
+- 60 synthetic PROTOTYPE screenshots and two original SVG assets have integrity manifests.
+- Deterministic performance fixtures include 10k rows, 2k sources, long manuscript, 50k chart points, large recovery journal, ZIP bomb guard and cancellation; observed network calls: 0.
 
-Final measured milestone-3 snapshot: 13 production Python modules and 3,438 nonblank noncomment physical lines (includes docstrings, an upper bound on meaningful SLOC), 39 capability operations, and 39 passing full-suite tests. See CODE_METRICS.json for exact counting method. 
+## Scientific/safety position
 
-Every unimplemented UX story remains open; see LIMITATIONS.md and NEXT_ACTION.md. Baseline is af5c862; test outcomes in TEST_RESULTS.md.
-
-## Milestone 4: final local verification
-
-- Commit 4d19876 contains PDF reader, evidence/claims, descriptive graphics, diagnostics and publishing previews.
-- Crash recovery module includes atomic draft journaling, SHA-256 verification, revision conflict detection and restore-into-editor UI, with two additional regression tests.
-- Observed: 52 UI tests passed, Ruff/Mypy/compileall passed, combined branch/line coverage 78%.
-- Source layout: 19 production Python files under src/researchweave/ui, and 55 registered operations.
-- Measured 5,513 nonblank noncomment physical lines including docstrings. This is an upper bound and does not prove 5,500 meaningful SLOC.
-- SOURCE_LAYOUT_VERIFIED: owned source relative path src/researchweave/ui; verify latest tracked paths and SHA after local commit.
-
-## Milestone 5 · continuation after interrupted session
-
-- `text_offsets.py` maps Qt UTF-16 cursor selections into Python codepoints, guarding emoji and Persian text before evidence/coding mutations; `test_text_offsets.py` includes deliberate split-surrogate failure tests.
-- `screening.py` saves reviewer-specific decisions with a local blindness convenience barrier, duplicate-vote protection, exclusion rationales and independent adjudication; computes grounded screening counts with unavailable PRISMA stages left null. `test_screening.py` verifies re-open and denial paths. Aliases are not authenticated identities.
-- Recovery and close/save logic validated across 64 UI tests; static lint, Mypy (21 files), compileall pass; combined branch/line coverage is **78%**.
-- Source count: **21** Python production modules, **5,821** physical nonblank noncomment lines including docstrings (upper bound; not audited meaningful SLOC), **59** declared UI commands.
-- Incomplete: >=80% coverage goal; full 50-story UX matrix; production AI/domain integration, real multiuser authenticated screening, complete PRISMA, professional PDF source anchors, installers and screen-reader hardware tests.
-
-## Milestone 6 · durable workflows, visible research surfaces and evidence harness
-
-- Local commits `617b7ef` and `c10d66b` added durable extraction, variable metadata, typed analysis-result, codebook, mixed-method, reference, scoped agent approval/timeline, provider/privacy/integration/notification, localization and workspace-preset contracts plus visible Qt screens.
-- Visible Review uses independent `ui.screening.*` operations with local alias blinding, conflict state and separate adjudication; aliases remain explicitly unauthenticated.
-- Plot configuration supports descriptive histogram and categorical bar views with title/axis/unit configuration, accessible tables, SVG output and headless-safe PNG bytes. Code execution remains explicitly disabled with a typed sandbox integration contract.
-- Global literal search includes source-linked evidence and draft claims in addition to sources, annotations, protocol, manuscript and notes.
-- UX-048 screenshot harness produced 60 real offscreen PNGs under `workstreams/v2/ui/screenshots/` across five major screens, three themes, narrow/desktop sizes and 100%/200% scale. Total observed evidence size: 719,127 bytes for 62 files including manifests.
-- UX-049 asset manifest records SHA-256, title, description, GPL-3.0-only license and original provenance for both shipped SVG assets; validation rejects scripts and external hrefs.
-- Focused validation for this slice: Ruff clean, strict Mypy clean, and 18 visualization/search/advanced-widget/demo/asset tests passed.
-
-## Milestone 7 · mandatory journey receipts and screening compatibility
-
-- Added `tests/v2/ui/test_journeys.py` and persisted all five required JSON receipts under `workstreams/v2/ui/journeys/`.
-- Journey 1 verifies a no-account/no-provider synthetic beginner flow, an injected validation failure, local export, recovery preview and restart persistence.
-- Journey 2 verifies project switching, paged data, a deterministic test-only regression adapter, source-linked evidence, manuscript persistence and workspace-preset restart state. The fake regression outputs are explicitly labeled non-scientific test values.
-- Journey 3 verifies the registered keyboard command map, command-palette routing, focusable/accessibly named controls, Unicode annotation persistence and local export. Native QTest key delivery is explicitly recorded as blocked because the Windows Qt offscreen platform crashes on the long key-event/modal sequence; no native keyboard success is claimed.
-- Journey 4 verifies mismatched approval rejection, malformed proposal rejection, stale approval rejection, explicit denial, zero file write, zero network activity and a persistent denial timeline event.
-- Journey 5 verifies dark → light → high-contrast preferences, 150% scale, persisted layout/preset state, corrupt settings fallback and intact project data.
-- The independent screening operations now mirror their latest outcome into the legacy `ui.review.*` read model for compatibility; the visible V2 Review screen continues to use the independent screening model.
-- Full UI coverage checkpoint after the five journeys: **95 passed**, combined line/branch coverage **76%**.
+No fabricated citations/DOIs, research results, p-values/effects/CIs, PRISMA counts, provider availability or accessibility validation are claimed. Inferential analysis, network providers, code execution and sync remain unavailable unless a conforming external adapter/host is supplied. Reviewer aliases are not authenticated identities.

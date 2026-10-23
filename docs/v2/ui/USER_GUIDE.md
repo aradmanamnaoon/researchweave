@@ -1,28 +1,53 @@
-# ResearchWeave UI V2 · Local prototype guide
+﻿# ResearchWeave UI V2 user guide
 
-This is a desktop integration prototype, and it uses explicitly synthetic examples. It has no account requirement, sends no telemetry and makes no outside AI requests.
+ResearchWeave V2 is a local-first PyQt6 research workspace. It requires no account or AI provider for its core workflows, sends no telemetry by default, and labels built-in demonstration content as synthetic rather than research evidence.
 
-Start a project from the sidebar, provide a descriptive title and answerable research question, then use Library to add your own plain-text note. Search uses local text and a read-only reader. Select a paragraph in Reader and choose Code selected text to attach a keyword to its saved offsets. The Review screen records whether you include, exclude or remain unsure; an exclusion requires an explicit reason. These decisions are screening records, not a full PRISMA statement.
+## Getting started
 
-Data View accepts pasted CSV text with a header row. The grid is read-only and reports all rows from a bounded demonstration dataset. Statistics computes descriptive mean, median, minimum, maximum and sample standard deviation, excluding missing or nonnumeric cells. This is not an inferential analysis or causal claim.
+On first launch, use **Welcome** to create a project or the local synthetic demo. **Question** stores a structured topic, population/context, exposure/phenomenon, outcome/target, question type and editable question. **Protocol** offers six planning families: literature review, systematic review, quantitative observational, experiment, qualitative and mixed methods. Their cautions are planning guidance, not ethics approval, registration or validity certification.
 
-Notebook and Manuscript store drafts locally. Use Ctrl+S or the visible Save button. When switching projects or closing with edited writing, the application asks whether to save, discard or cancel. The Export screen previews a local Markdown, JSON or CSV output before asking for explicit confirmation. Existing export files are protected from overwrite.
+## Sources, evidence and screening
 
-Global commands: Ctrl+K opens the command palette; Ctrl+N creates a project; Ctrl+F focuses local library search; Ctrl+S saves the active text editor; Ctrl+1 and Ctrl+2 navigate to Dashboard and Library. Preferences offers light, dark and high-contrast themes, compact/comfortable density and 100/150/200% text scaling.
+**Library** searches local sources with bounded paging and sorting by title, source label or verification state. **Reader** is read-only and can capture exact Unicode-safe coded passages or evidence anchors. **PDF** opens a user-selected local file with integrity/navigation checks; invalid/encrypted/bounded failures are explicit and the application does not fake OCR.
 
-The Agent screen demonstrates proposed-action review and denial only; there is no configured AI execution. The Privacy screen states local-only policy. For advanced research methods and genuine PDFs, wait for composition-root integration with evidence and analysis domains.
+**Evidence** shows source-linked quotes, hashes, spans, notes and claims. **Review** uses independent reviewer aliases with peer-vote masking until the current reviewer has voted, explicit include/exclude/unsure decisions, required exclusion reasons, conflict handling and separate adjudication. Aliases are local labels, not authenticated users. **PRISMA** preserves unknown counts instead of manufacturing them; only locally recorded screening stages are automatically derivable.
 
-Reproduce a test capture from the UI worktree with:
+## Extraction, data and analysis
 
-Protocol is an editable research-design draft with four methodology templates; incomplete required fields trigger validation messages. Guidance explains basic research concepts and limitations in context. Global Search searches sources, coded excerpts, manuscript, notes and protocol only within the current project. It is literal text matching and does not establish citation credibility.
+**Extraction** creates versioned typed fields (text, integer, float, categorical, boolean, date and source-passage) and validated per-source records. **Data View** imports bounded CSV, uses a paged virtual table, supports local filtering/sorting and is explicitly read-only until provenance-preserving cell edits exist. CSV export neutralizes spreadsheet-formula prefixes.
 
-Backups provides a local project snapshot plan, a human confirmation before ZIP creation, a list of integrity-verified snapshots, and a separate human confirmation before restoring to a new project ID. Existing projects and backup archives are retained, and the archive contains no credentials. A backup is a project data snapshot, not a guaranteed copy of future large document attachments.
+**Variable View** stores explicit type/role/units/levels/missing-code/description metadata. **Statistics** performs real descriptive analysis locally. Inferential methods are unavailable unless a typed external scientific backend is supplied; the UI does not fabricate p-values, effects or confidence intervals. **Analysis Results** stores typed method/version/input/assumption/warning/uncertainty/diagnostic/provenance records. Plot controls create descriptive histogram/bar views with text alternatives plus SHA-receipted SVG/PNG bytes.
 
-    $env:QT_QPA_PLATFORM='offscreen'
-    uv run python -m researchweave.ui.demo --output ./prototype-artifacts --theme light --width 1280 --height 720
+## Qualitative, mixed methods and writing
 
-The generated PNG is a real Qt screenshot of a synthetic prototype; its manifest records capture settings, a SHA-256 digest and descriptive alt text. It does not depict the released application.
+**Qualitative** stores source-linked Unicode-safe annotations and memos. **Codebook** supports rules, non-color markers, merge conflict notes and recoding trace. **Mixed Methods** links qualitative and quantitative references while keeping units, groups and evidence origin explicit.
 
-Recovery lists draft copies of unsaved Notebook and Manuscript text. Select one to load into an editor without overwriting the saved project, then review and press Save. If the underlying project has changed, the UI asks before loading the draft. PDF Reader opens an explicitly selected local PDF. Evidence captures quotations with source hashes, and Publishing makes human review requirements visible.
+**References** is manual-first: citation metadata, DOI format and verification state are user-controlled; no DOI/authors/journal metadata are invented. **Manuscript** and **Notebook** save durable local drafts. Unsaved writing is journaled every 250 ms and project switch/close asks before losing edits. **Recovery** verifies draft hashes/revisions and restores into the editor for review rather than overwriting newer saved work.
 
-The independent screening service supports two separate local reviewer aliases, explicit exclusion reasons, conflict review and adjudication by a third alias; these identities are not authenticated. Its flow counts reflect only recorded local source screening, not all required PRISMA stages. Source highlighting in Reader now accounts for Qt UTF-16 positions when emoji and other supplementary Unicode symbols appear before selected text.
+## AI, privacy and approvals
+
+**Agent** stores structured proposed actions. Approval shows exact operation, target, changed fields/files, network destination, egress/destructive flags and a proposal fingerprint; a mismatched or stale approval cannot authorize another action. **Providers** records manual/local/cloud-API configuration and truthful disabled/credential/egress state. No consumer-subscription access or live model execution is implied.
+
+**Notebook code execution is disabled** because this workstream does not include a safe isolated Python/R runtime. The status panel lists the required process/time/resource/cancellation/provenance contract. **Privacy** reports offline/telemetry/provider scope/retention/audit information. **Integrations** are optional and disconnected unless a real external adapter is supplied.
+
+## Backups, exports and jobs
+
+**Backups** previews, creates and verifies bounded data-only ZIP snapshots and restores into a new project ID after approval. Traversal, symlink, decompression-ratio and checksum attacks are rejected. There is no remote sync backend and no silent upload.
+
+**Exports** previews Markdown/JSON/CSV, requires explicit local approval, refuses existing filenames, uses same-directory temporary files plus fsync and atomic no-overwrite commit, and returns SHA/source metadata receipts. Plot SVG/PNG generation is currently separate from the Export page file writer.
+
+**Jobs** shows process-local background state, progress, cancellation and retry for retained failed/canceled callbacks. Stale-generation results are suppressed. Durable cross-restart jobs require an external job runner.
+
+## Search, help and workspace
+
+**Search** provides local literal Unicode facets for sources, evidence, annotations, claims, protocol, manuscript and notebook with 100-result paging and keyboard list activation. Search snippets do not establish source credibility. **Help for this screen** and F1 route to contextual **Guidance**.
+
+Preferences provide light/dark/high-contrast themes, comfortable/compact density, 100/150/200% scaling, localization metadata and workspace presets. English is the only complete translation catalog; other locales fall back honestly while RTL metadata is preserved. Presets restore project/screen/panels/sizes/theme/density/scale/table settings and sanitize corrupt/off-screen geometry.
+
+## Shortcuts
+
+Ctrl+K command palette; Ctrl+N new project; Ctrl+F global search; Ctrl+L library search; Ctrl+S save active writing; Ctrl+Shift+A annotate selection; Ctrl+Shift+E focus Export; Ctrl+1 Dashboard; Ctrl+2 Library; F1 contextual guidance. Native end-to-end keyboard QA remains a release-validation item.
+
+## Evidence and limits
+
+The screenshot harness produces synthetic PROTOTYPE captures with SHA-256/alt text. Automated tests cover names, contrast, chart alternatives and scaling, but no NVDA/VoiceOver/Orca or native multi-OS/HiDPI validation is claimed. See `workstreams/v2/ui/LIMITATIONS.md`, `ACCESSIBILITY_LIMITATIONS.md`, `INTEGRATION_CONTRACTS.md`, and the 50-story acceptance matrix for exact boundaries.

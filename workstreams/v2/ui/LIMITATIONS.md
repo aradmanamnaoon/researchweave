@@ -1,11 +1,17 @@
-# Unimplemented or partial requirements
+﻿# Current limitations
 
-Current local demonstration does not meet the 5,500 meaningful source-line target, 80% coverage target, or all 50 UX stories. Missing: PDF rendering and citation anchoring, collaborative reviews and full PRISMA flow, advanced modelling/graphs, code notebook, mixed-method matrices, comprehensive agent/provider/sync screens, durable job history, advanced layout management, independent native accessibility verification, SVG kit and platform installers. Current statistics are descriptive only, synthetic demonstration records are labeled, and no scientific validity claims are made. Preview-only AI has no execution authority.
+The local ResearchWeave V2 UI now implements all independently feasible Worker 4 behavior, but several requirements remain intentionally **partial** because they depend on external backends or native validation.
 
-Future UI adapters must preserve explicit egress approval and accurate source provenance. Automated offscreen Qt tests do not establish actual NVDA/VoiceOver/Orca accessibility.
+- **Scientific inference:** descriptive statistics are real. No production regression/correlation/group-comparison backend is bundled; the typed adapter returns `DEPENDENCY_MISSING` rather than fabricating inference. The Journey 2 regression backend is deterministic test-only data and is explicitly labeled non-scientific.
+- **Notebook execution:** disabled because a safe subprocess/container host is unavailable. No `eval`, arbitrary `shell=True`, in-process untrusted interpreter or untrusted pickle path exists.
+- **AI/providers/integrations:** provider configuration, scoped proposals, approvals, denial and timeline state are local. No model/provider/network execution, consumer-subscription access, or fake availability is claimed.
+- **Review identity:** screening aliases are local convenience labels, not authenticated identities.
+- **PRISMA:** screening stages are event-derived; upstream search/dedup/retrieval counts require real source-system events and remain unknown unless explicitly entered.
+- **Sync:** backup/restore is local and integrity checked; no remote sync backend is bundled.
+- **Jobs:** progress/cancel/retry/stale-result protection works within the process. Durable restart recovery requires an external job runner because arbitrary callbacks cannot be safely serialized.
+- **PDF/manuscript:** local PDF integrity/navigation works, but professional text-coordinate search/highlight/page anchors and fully structured manuscript/evidence cross-navigation remain partial.
+- **Accessibility/platform:** automated names, contrast, chart alternatives, scaling and offscreen screenshot tests pass, but NVDA/VoiceOver/Orca and native multi-OS/HiDPI/multi-monitor behavior have not been observed.
+- **Keyboard:** deterministic command routing is tested; a long Windows Qt offscreen QTest key-event sequence crashes, so native end-to-end keyboard success is not claimed.
+- **Crash recovery:** 250 ms journals, hash verification and revision-conflict restore are tested; no separate-process forced-kill acceptance test was run.
 
-Current source count is 5,513 nonblank/noncomment physical lines including docstrings, an upper bound rather than audited meaningful SLOC. Combined coverage is 78%, below the 80% target. Recovery uses a 600-ms debounce, so immediate termination may preempt the latest keystrokes. PDF citations and full professional methods workflows remain incomplete.
-
-Milestone 5 reached 5,821 physical nonblank/noncomment source lines including docstrings; substantial code exists but the requested meaningful SLOC threshold has not been independently certified. Independent reviewer aliases provide a UI-level masking mechanism only, and cannot guarantee real reviewer independence, authentication or blindness. Only local screening-stage counts are calculated; complete PRISMA flow requires real upstream data. Real OS accessibility QA, release packaging and cross-worker production adapters remain outstanding.
-
-The latest UI adds method drafts, a searchable plain-language methodology glossary, local ZIP backups, and project-wide literal search. These are working offline slices, but multi-project querying, AI-assisted semantic retrieval, native Zotero/reference integration, research-grade citation linking and automatic study selection remain unimplemented. Backups store embedded small-project data only; the full future production database/large attachment archive format will need a separately versioned integration.
+Measured source size is **9,968 meaningful production SLOC** across **24 Python modules** using the documented AST/tokenize method; 105 facade operations are registered. Final UI coverage is **82%** with **133 UI tests passed**. These metrics do not remove the native/external limitations above.

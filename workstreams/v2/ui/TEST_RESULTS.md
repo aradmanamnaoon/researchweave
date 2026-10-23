@@ -1,66 +1,32 @@
-# Test results
+﻿# Final UI test results
 
-Environment: Windows, CPython 3.12.9, PyQt6 6.10.2, uv.
+Environment: Windows, CPython 3.12.9, PyQt6 6.10.2, `uv`, `QT_QPA_PLATFORM=offscreen` for Qt tests.
 
-- uv sync --extra dev: success.
-- uv run python -m compileall -q src/researchweave/ui: success.
-- uv run ruff check src/researchweave/ui tests/v2/ui: success.
-- uv run mypy src/researchweave/ui --follow-imports=silent: success.
-- QT_QPA_PLATFORM=offscreen uv run pytest -q tests/v2/ui: 8 passed.
-- Combined coverage previously measured at 68%, below requested >=80%.
-- Offscreen launch succeeded with 17 screens.
-- Physical screen reader, cross-platform, installer, screenshots and HiDPI visual proof: not tested.
+## Required gates
 
-## Second observed milestone
-
-- 20 UI V2 tests passed on Windows offscreen Qt.
-- Ruff and Mypy pass for all 10 production UI Python modules.
-- Qt screenshot captured as an actual PNG with synthetic example and SHA-256 receipt.
-- 10,000-row synthetic pagination test passed; 250 rows returned per page.
-- Automated theme/scale checks passed for light/dark/contrast and 100/150/200% application text scales.
-- Combined measured branch+line coverage: 74%, below requested >=80% threshold.
-- Native real-display 4K, Linux/macOS and screen-reader checks still pending.
-
-## Third observed milestone
-
-- Windows 11 / Python 3.12.9 / PyQt6 6.10.2, QT_QPA_PLATFORM=offscreen.
-- Ruff: all checks passed; Mypy: no issues in 13 production files.
-- pytest tests/v2/ui with branch and line coverage: 35 passed in 2.51s; 75% overall package coverage.
-- Backup creation/denial/reopen/restore and malformed ZIP tests passed.
-- Protocol-required-field, human approval caveat, draft persistence and unsaved close tests passed.
-- Unicode literal global search and UI destination navigation tests passed.
-- Manual NVDA and native multi-OS render tests unperformed; no claim of production UX sign-off.
-
-Repository-wide verification after milestone 3: QT_QPA_PLATFORM=offscreen uv run pytest -q passed, 39 tests in 2.33s. Ruff and Mypy passed. UI-only suite reported 35 tests and 75% combined coverage immediately before repository-wide run; exact coverage for all 39 tests is to be measured in the final gate.
-
-## Milestone 4 verification
-
-- Offscreen pytest UI coverage run: 52 passed in 4.64 seconds, combined 78% branch/line coverage.
-- Ruff, Mypy (19 source files) and compileall: pass.
-- Source: 19 Python modules, 5,513 physical nonblank noncomment lines including docstrings; 55 operations.
-- Real assistive technology, platform installers and shared-domain integration were not tested.
-
-## Milestone 5 observed gate
-
-- `QT_QPA_PLATFORM=offscreen uv run pytest -q tests/v2/ui --cov=researchweave.ui --cov-report=term`: **64 passed**, **78%** combined branch/line coverage.
-- `uv run ruff check src/researchweave/ui tests/v2/ui`: passed.
-- `uv run mypy src/researchweave/ui --follow-imports=silent`: passed (21 production Python files).
+- `uv sync --extra dev`: passed; 57 packages resolved/checked.
 - `uv run python -m compileall -q src/researchweave/ui`: passed.
-- Quantities in `CODE_METRICS.json` computed from the worker-owned source subtree.
+- `uv run ruff check src/researchweave/ui tests/v2/ui`: passed.
+- `uv run mypy src/researchweave/ui --follow-imports=silent`: passed; 24 production Python modules checked.
+- `uv run pytest -q tests/v2/ui --cov=researchweave.ui --cov-branch --cov-report=term-missing`: **133 passed**, **82%** total branch-aware package coverage.
+- `uv run pytest -q`: **137 passed**.
+- Facade smoke: 105 registered operations; offline health status `ok`.
 
-## Milestone 6 focused validation
+One coverage run immediately before the final successful run stalled after early output and was interrupted rather than counted as success. The same exact coverage command was rerun and completed normally with the 133/82% result above.
 
-- `uv run ruff check src/researchweave/ui ...`: passed for the changed visualization, search, demo, shell/facade and evidence tests.
-- `uv run mypy src/researchweave/ui --follow-imports=silent`: passed for all 24 production UI Python files at this checkpoint.
-- `QT_QPA_PLATFORM=offscreen uv run pytest -q tests/v2/ui/test_visualization.py tests/v2/ui/test_global_search.py tests/v2/ui/test_advanced_widgets.py tests/v2/ui/test_demo.py tests/v2/ui/test_assets.py`: **18 passed**.
-- Screenshot evidence generation: **60 PNG captures**, 5 major screens × 3 themes × 2 size classes × 2 scale factors, plus `capture-manifest.json` and `capture-matrix.json`; total 719,127 bytes for 62 files.
-- Screenshot fixture network calls observed: 0. Captures are explicitly labeled prototype/synthetic.
-- Native screen-reader and native multi-platform/DPI validation remain unperformed and are not claimed.
+## Focused acceptance evidence
 
-## Milestone 7 journey and coverage validation
+- Security/resource/shell surface slice: 36 passed before commit `f721f7d`.
+- Export/data/guidance/jobs slice: 41 passed before commit `bb18f6a`.
+- Final search/paging slice: 8 focused search/widget tests passed before commit `64d8443`.
+- Five mandatory journey tests passed and persisted their JSON receipts under `workstreams/v2/ui/journeys/`.
+- Screenshot harness: 60 real offscreen Qt PNGs across five major screens, three themes, narrow/desktop sizes and 100%/200% scale; manifests carry hashes/alt text/PROTOTYPE labeling.
+- Asset validation parses SVG title/description, verifies SHA-256/license/provenance and rejects script/external href content.
 
-- `QT_QPA_PLATFORM=offscreen uv run pytest -q tests/v2/ui/test_journeys.py`: **5 passed**.
-- Receipt generation with `RESEARCHWEAVE_JOURNEY_OUTPUT=workstreams/v2/ui/journeys`: **5 passed** and five JSON receipts written.
-- UTF-8 receipt verification confirmed `café` as codepoints `0x63 0x61 0x66 0xe9`; PowerShell's console preview can display the UTF-8 bytes incorrectly, but the JSON file content is correct.
-- `QT_QPA_PLATFORM=offscreen uv run pytest -q tests/v2/ui --cov=researchweave.ui --cov-branch --cov-report=term-missing`: **95 passed**, combined coverage **76%**.
-- Native keyboard QTest sequence: blocked by a Windows Qt offscreen platform process crash. Journey 3 therefore records deterministic keyboard command-routing/accessibility evidence and does not claim native key-event success.
+## Resource observations
+
+`PERFORMANCE_RESULTS.json` records deterministic local measurements: 10,000-row import/page, 2,000-source literal search, 210,011-character manuscript preview, 50,000-observation chart, and 160,000-character recovery journal. Additional tests cover ZIP-bomb rejection, cancellation, bounded/corrupt PDF behavior and narrow/200% offscreen layout. Network calls observed by these fixtures: **0**.
+
+## Platform checks deliberately not claimed
+
+No native NVDA, VoiceOver or Orca run; no native Linux/macOS render; no real multi-monitor/HiDPI hardware pass; no separate-process forced-crash recovery test. A long Windows Qt offscreen QTest keyboard sequence is unstable, so Journey 3 records deterministic command/focus/accessibility routing without claiming native key-event success.
