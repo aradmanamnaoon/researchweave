@@ -66,3 +66,30 @@ def test_invalid_or_excessive_pdf_fails_without_indexing(tmp_path):
         importer.ingest("paper", b"not a pdf")
     assert error.value.code == "UNSUPPORTED_FORMAT"
     index.close()
+
+
+def test_pdf_import_rollback_preserves_all_prior_page_evidence(tmp_path):
+    index = EvidenceIndex(tmp_path / "atomic.sqlite")
+    importer = OfflinePDFImporter(index)
+    original = make_pdf("Original evidence memory study", "Original evidence baseline study")
+    importer.ingest("paper", original)
+    first_anchor = index.query("memory")[0]
+    second_anchor = index.query("baseline")[0]
+    # SQLite injects a realistic write failure midway through the replacement.
+    index.connection.execute(
+        "CREATE TRIGGER deny_second_page BEFORE INSERT ON chunks "
+        "WHEN NEW.source_id='pdf:paper:page:2' "
+        "BEGIN SELECT RAISE(ABORT,'synthetic interrupted import'); END"
+    )
+    changed = make_pdf("Revised experiment statistics", "Revised experiment methods")
+    with pytest.raises(AIError) as error:
+        importer.ingest("paper", changed)
+    assert error.value.code == "STORAGE_FAILURE"
+    assert index.verify(first_anchor)
+    assert index.verify(second_anchor)
+    assert index.query("revised") == []
+    index.close()
+    reopened = EvidenceIndex(tmp_path / "atomic.sqlite")
+    assert reopened.verify(first_anchor)
+    assert reopened.verify(second_anchor)
+    reopened.close()

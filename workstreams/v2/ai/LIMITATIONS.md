@@ -12,7 +12,7 @@ Durable project-level token budgets and reservations exist as a separate host se
 
 Cryptography and OS keyring adapters have been exercised with the installed optional libraries and synthetic fixtures. They are not yet wired into the main facade or packaged as canonical project extras. Encrypted backup does not imply complete cloud sync: ETag/CAS, cross-process coordination, metadata confidentiality, platform keyring availability and credential lifecycle controls must still be assessed during integration.
 
-PDF extraction accepts text-layer PDFs with a page and byte budget; scanned pages require separate OCR and text extraction cannot certify document truth. Re-indexing multiple PDF pages currently commits page by page, so interrupted multi-page updates may temporarily expose a partial set of refreshed page anchors; atomic batch replacement remains an integration task. The five domain journeys are headless and use deterministic fake provider transports; no real GUI, hosted AI account or consumer subscription path has been verified.
+PDF extraction accepts text-layer PDFs with a page and byte budget; scanned pages require separate OCR and text extraction cannot certify document truth. Multi-page source replacement now commits within a single local SQLite transaction and has a deliberately injected mid-write failure test. The five domain journeys are headless and use deterministic fake provider transports; no real GUI, hosted AI account or consumer subscription path has been verified.
 
 No live hosted model, real user files, or external network was used during tests. Do not enable experimental remote transport in a sensitive production installation until DNS rebinding, proxy handling, cancellation, audit and credential storage are completed.
 

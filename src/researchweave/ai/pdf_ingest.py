@@ -104,18 +104,18 @@ class OfflinePDFImporter:
                 (len(source_prefix), source_prefix),
             )
         ]
-        source_ids: list[str] = []
+        new_sources: dict[str, tuple[str, str]] = {}
         warnings: list[str] = []
         for page in pages:
             if not page.text.strip():
                 warnings.append(f"Page {page.page_number} has no extractable text")
                 continue
             source_id = f"{source_prefix}{page.page_number}"
-            self.index.ingest(source_id, page.text, classification)
-            source_ids.append(source_id)
-        for old_id in existing:
-            if old_id not in source_ids:
-                self.index.delete(old_id)
+            new_sources[source_id] = (page.text, classification)
+        source_ids = list(new_sources)
+        remove_ids = [old_id for old_id in existing if old_id not in new_sources]
+        if new_sources or remove_ids:
+            self.index.ingest_many(new_sources, remove_ids=remove_ids)
         return PDFReceipt(
             document_id,
             hashlib.sha256(pdf_bytes).hexdigest(),
