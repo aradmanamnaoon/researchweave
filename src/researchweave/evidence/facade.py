@@ -54,6 +54,10 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "library.index_rebuild": ("local-write", ("project_id",), "Rebuild local search cache"),
     "library.index_health": ("read", ("project_id",), "Inspect search cache state"),
     "reference.validate": ("read", ("project_id", "reference_id"), "Inspect DOI syntax"),
+    "reference.merge": ("local-write", ("project_id", "canonical_id", "duplicate_id", "rationale"),
+                        "Record reversible user-reviewed reference identity merge"),
+    "reference.unmerge": ("local-write", ("project_id", "duplicate_id", "rationale"),
+                          "Undo reference alias while retaining original metadata"),
     "evidence.anchor": ("local-write", ("project_id", "source_id", "quote", "start", "end"),
                         "Record exact quote anchor"),
     "evidence.note": ("local-write", ("project_id", "source_id", "title", "body"),
@@ -348,6 +352,13 @@ class EvidenceFacade:
                 return LocalIndex(store).diagnostics()
             if operation == "reference.validate":
                 return library.validate_reference(_value(args, "reference_id", str))
+            if operation == "reference.merge":
+                return library.merge_references(_value(args, "canonical_id", str),
+                    _value(args, "duplicate_id", str), _value(args, "rationale", str),
+                    expected_revision=expected)
+            if operation == "reference.unmerge":
+                return library.unmerge_reference(_value(args, "duplicate_id", str),
+                    _value(args, "rationale", str), expected_revision=expected)
             if operation == "evidence.anchor":
                 return library.add_anchor(_value(args, "source_id", str),
                     _value(args, "quote", str), _value(args, "start", int),

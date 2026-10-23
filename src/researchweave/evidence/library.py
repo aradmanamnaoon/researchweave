@@ -36,6 +36,62 @@ class LibraryService:
                                 "Choose an available reference from the library.")
         return reference_from_row(row)
 
+    def merge_references(self, canonical_id: str, duplicate_id: str, rationale: str, *,
+                         expected_revision: int | None = None) -> dict[str, Any]:
+        """Record an explicit, reversible identity decision without deleting source data.
+
+        The reviewer owns the decision; title similarity never authorizes a merge.
+        Original raw records and every relationship remain addressable.
+        """
+        require(canonical_id != duplicate_id, "Cannot merge a reference with itself")
+        require(bool(rationale.strip()) and len(rationale) <= 2000,
+                "An explicit reviewer rationale is required")
+
+        def insert(conn: Any) -> None:
+            for identifier in (canonical_id, duplicate_id):
+                require(conn.execute("SELECT 1 FROM reference WHERE id=?",
+                                     (identifier,)).fetchone() is not None,
+                        "Reference is missing", "NOT_FOUND")
+            require(conn.execute("SELECT 1 FROM reference_alias WHERE original_id=?",
+                                 (canonical_id,)).fetchone() is None,
+                    "Canonical reference itself is an alias", "CONFLICT")
+            require(conn.execute("SELECT 1 FROM reference_alias WHERE original_id=?",
+                                 (duplicate_id,)).fetchone() is None,
+                    "Reference is already merged", "CONFLICT")
+            require(conn.execute("SELECT 1 FROM reference_alias WHERE canonical_id=?",
+                                 (duplicate_id,)).fetchone() is None,
+                    "Reference is canonical for existing aliases", "CONFLICT")
+            conn.execute("INSERT INTO reference_alias VALUES (?,?,?)",
+                         (duplicate_id, canonical_id, rationale.strip()))
+
+        _, revision = self.store.mutate("reference.merge",
+                                        {"canonical_id": canonical_id,
+                                         "duplicate_id": duplicate_id,
+                                         "rationale": rationale.strip()}, insert,
+                                        expected_revision=expected_revision)
+        return {"canonical_id": canonical_id, "alias_id": duplicate_id,
+                "reversible": True, "revision": revision}
+
+    def unmerge_reference(self, duplicate_id: str, rationale: str, *,
+                          expected_revision: int | None = None) -> dict[str, Any]:
+        """Undo a previously recorded canonical mapping, preserving audit history."""
+        require(bool(rationale.strip()) and len(rationale) <= 2000,
+                "Undo rationale is required")
+
+        def remove(conn: Any) -> str:
+            row = conn.execute("SELECT canonical_id FROM reference_alias WHERE original_id=?",
+                               (duplicate_id,)).fetchone()
+            require(row is not None, "Reference has no active merge", "NOT_FOUND")
+            conn.execute("DELETE FROM reference_alias WHERE original_id=?", (duplicate_id,))
+            return str(row[0])
+
+        canonical, revision = self.store.mutate("reference.unmerge",
+                                               {"alias_id": duplicate_id,
+                                                "rationale": rationale.strip()}, remove,
+                                               expected_revision=expected_revision)
+        return {"alias_id": duplicate_id, "previous_canonical_id": canonical,
+                "reverted": True, "revision": revision}
+
     def import_bibliography(self, data: bytes, format_name: str, *,
                             expected_revision: int | None = None) -> dict[str, Any]:
         records = parse_bibliography(data, format_name)

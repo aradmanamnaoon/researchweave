@@ -11,6 +11,7 @@
 | RE-009, RE-010 | Question checklist, append-only protocol amendments; protocols.py | Implemented; no full study-design wizard |
 | RE-011, RE-012 | Four citation parsers and syntax-only DOI checks; bibliography.py, library.py | Partial; provider-based identity verification absent |
 | RE-013 | Duplicate candidate scoring, no unsafe auto-merge | Partial; reversible merge absent |
+| RE-013-REVERSIBLE | `reference.merge` and `reference.unmerge` preserve raw records in `reference` and store reviewer decisions in `reference_alias` with event hashes; library.py, facade.py, test_reference_merge.py | 2 new focused tests passed; richer conflict metadata and alias-aware result filtering still pending |
 | RE-018, RE-019 | Basic reference library and literal local search | Partial; FTS and collections absent |
 | RE-019 | Rebuildable SQLite FTS5 index with phrase search; search_index.py; test_fts_and_typed_extraction_roundtrip | Implemented with explicit cache rebuild |
 | RE-030, RE-033 | Typed missingness, units, bounds and persisted extraction matrix; extraction.py; test_fts_and_typed_extraction_roundtrip | Partial; full UI and forms pending |
