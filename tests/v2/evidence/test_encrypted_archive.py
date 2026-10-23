@@ -4,6 +4,7 @@ from pathlib import Path
 
 import pytest
 
+import researchweave.evidence.encrypted_archive as encrypted_archive
 from researchweave.evidence.encrypted_archive import (
     encrypt_project_archive,
     restore_encrypted_archive,
@@ -87,3 +88,24 @@ def test_encrypted_archive_rejects_authenticated_header_substitution(tmp_path: P
     with pytest.raises(EvidenceError) as mismatch:
         verify_encrypted_archive(substituted, "same-password")
     assert mismatch.value.code == "AUTHENTICATION_FAILED"
+
+
+def test_interrupted_encrypted_export_leaves_no_partial_destination_or_temp_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    source = tmp_path / "source"
+    destination = tmp_path / "interrupted.rwproj.enc"
+    original_replace = encrypted_archive.os.replace
+
+    def interrupted_replace(staged: str | Path, target: str | Path) -> None:
+        if Path(target) == destination:
+            raise OSError("synthetic encrypted export interruption")
+        original_replace(staged, target)
+
+    monkeypatch.setattr(encrypted_archive.os, "replace", interrupted_replace)
+    with _project(source) as store:
+        with pytest.raises(OSError, match="synthetic encrypted export interruption"):
+            encrypt_project_archive(store, destination, "password")
+    assert not destination.exists()
+    assert not list(tmp_path.glob(".rw-encrypted-*.tmp"))
+    assert not list(tmp_path.glob(".rw-plain-*.rwproj"))
