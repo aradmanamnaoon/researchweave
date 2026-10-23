@@ -6,8 +6,10 @@ import csv
 import hashlib
 import io
 import json
+import os
 import re
 import statistics
+import tempfile
 from collections.abc import Callable, Mapping
 from dataclasses import asdict, replace
 from pathlib import Path
@@ -338,6 +340,14 @@ class UIFacade:
             "offset": {"type": "integer", "minimum": 0},
             "limit": {"type": "integer", "minimum": 1, "maximum": 500},
         }
+        schemas["ui.dataset.page"] |= {
+            "dataset_id": string,
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 1000},
+            "filter_text": string,
+            "sort_column": string,
+            "sort_desc": {"type": "boolean"},
+        }
         schemas["ui.extraction.schema.update"] |= {
             "title": string, "fields": {"type": "array"},
         }
@@ -382,6 +392,11 @@ class UIFacade:
         }
         schemas["ui.notification.dismiss"] |= {"notification_id": string}
         schemas["ui.prisma.update"] |= {"flow": {"type": "object"}}
+        schemas["ui.activity.list"] |= {
+            "operation_filter": string,
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+        }
         schemas["ui.workspace.preset.save"] = {"preset": {"type": "object"}}
         schemas["ui.workspace.preset.delete"] = {"preset_id": string}
         return schemas
@@ -1066,10 +1081,40 @@ class UIFacade:
         dataset = _dataset(project, _string(args, "dataset_id", 36))
         offset = _integer(args, "offset", maximum=MAX_ROWS)
         limit = _integer(args, "limit", minimum=1, maximum=1000, default=250)
-        return {"dataset_id": dataset.id, "columns": list(dataset.columns),
-                "rows": [list(row) for row in dataset.rows[offset:offset + limit]],
-                "total": len(dataset.rows), "offset": offset, "limit": limit,
-                "origin": dataset.origin, "revision": project.revision}
+        filter_text = _string(args, "filter_text", 200, required=False)
+        sort_column = _string(args, "sort_column", 200, required=False)
+        sort_desc = bool(args.get("sort_desc", False))
+        rows = list(dataset.rows)
+        if filter_text:
+            needle = filter_text.casefold()
+            rows = [
+                row for row in rows
+                if any(needle in str(cell).casefold() for cell in row)
+            ]
+        if sort_column:
+            if sort_column not in dataset.columns:
+                raise UIError(
+                    "INVALID_INPUT",
+                    "Dataset sort column was not found.",
+                    "Choose one of the visible dataset columns.",
+                )
+            index = dataset.columns.index(sort_column)
+            rows.sort(key=lambda row: str(row[index]).casefold(), reverse=sort_desc)
+        return {
+            "dataset_id": dataset.id,
+            "columns": list(dataset.columns),
+            "rows": [list(row) for row in rows[offset:offset + limit]],
+            "total": len(rows),
+            "dataset_total": len(dataset.rows),
+            "offset": offset,
+            "limit": limit,
+            "filter_text": filter_text,
+            "sort_column": sort_column,
+            "sort_desc": sort_desc,
+            "read_only": True,
+            "origin": dataset.origin,
+            "revision": project.revision,
+        }
 
     def _do_ui_dataset_variables(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
@@ -1484,7 +1529,7 @@ class UIFacade:
         project = _required_project(args, self.store)
         offset = _integer(args, "offset", maximum=1000)
         limit = _integer(args, "limit", minimum=1, maximum=500, default=100)
-        operation = _string(args, "operation", 200, required=False)
+        operation = _string(args, "operation_filter", 200, required=False)
         events = [
             asdict(item) for item in project.activity
             if not operation or item.operation == operation
@@ -1587,12 +1632,31 @@ class UIFacade:
 
     def _do_ui_export_preview(self, args: Mapping[str, Any]) -> dict[str, Any]:
         name, content = self._export_payload(args)
-        return {"filename": name, "bytes": len(content.encode("utf-8")),
-                "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
-                "destination": str(self.export_root / name), "confirmation_required": True}
+        project = _required_project(args, self.store)
+        encoded = content.encode("utf-8")
+        return {
+            "filename": name,
+            "format": Path(name).suffix.lower().lstrip(".") or "markdown",
+            "bytes": len(encoded),
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "destination": str(self.export_root / name),
+            "confirmation_required": True,
+            "collision_policy": "refuse-existing",
+            "atomic_write": True,
+            "source_metadata": {
+                "project_id": project.id,
+                "project_revision": project.revision,
+                "dataset_id": (
+                    project.datasets[0].id
+                    if name.endswith(".csv") and project.datasets
+                    else ""
+                ),
+            },
+        }
 
     def _do_ui_export_write(self, args: Mapping[str, Any]) -> dict[str, Any]:
         name, content = self._export_payload(args)
+        project = _required_project(args, self.store)
         if self.export_authorizer is None or not self.export_authorizer(name):
             raise UIError("NEEDS_APPROVAL", "Export needs explicit local user approval.",
                           "Review the export preview and approve in the desktop dialog.")
@@ -1604,15 +1668,51 @@ class UIFacade:
             raise UIError("CONFLICT", "An export with this name already exists.",
                           "Choose a different filename to preserve existing work.")
         self.export_root.mkdir(parents=True, exist_ok=True)
+        encoded = content.encode("utf-8")
+        temporary: Path | None = None
         try:
-            with destination.open("x", encoding="utf-8", newline="") as stream:
-                stream.write(content)
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=self.export_root,
+                prefix=f".{name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(encoded)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.link(temporary, destination)
         except FileExistsError as exc:
             raise UIError("CONFLICT", "Export filename was taken.",
                           "Choose a new name and retry.") from exc
-        return {"filename": name, "path": str(destination),
-                "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
-                "bytes": len(content.encode("utf-8"))}
+        except OSError as exc:
+            raise UIError(
+                "WRITE_FAILED",
+                "Export could not be committed atomically.",
+                "Check the local export folder and retry; existing files were not overwritten.",
+            ) from exc
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return {
+            "filename": name,
+            "format": Path(name).suffix.lower().lstrip(".") or "markdown",
+            "path": str(destination),
+            "sha256": hashlib.sha256(encoded).hexdigest(),
+            "bytes": len(encoded),
+            "collision_policy": "refuse-existing",
+            "atomic_write": True,
+            "source_metadata": {
+                "project_id": project.id,
+                "project_revision": project.revision,
+                "dataset_id": (
+                    project.datasets[0].id
+                    if name.endswith(".csv") and project.datasets
+                    else ""
+                ),
+            },
+        }
 
     def _do_ui_backup_plan(self, args: Mapping[str, Any]) -> dict[str, Any]:
         return self.snapshots.plan(_string(args, "project_id", 36))

@@ -47,13 +47,16 @@ class Job:
     task_id: str
     generation: int
     stop: Event
+    callback: Callable[[Event], Any]
     state: str = "queued"
+    progress: int = 0
 
 
 class JobManager(QObject):
     result = pyqtSignal(str, object)
     error = pyqtSignal(str, str)
     changed = pyqtSignal(str, str)
+    progress = pyqtSignal(str, int)
 
     def __init__(self, max_workers: int = 2) -> None:
         super().__init__()
@@ -70,11 +73,26 @@ class JobManager(QObject):
         if task_id in self.jobs and self.jobs[task_id].state in ("queued", "running"):
             return False
         stop = Event()
-        job = Job(task_id, self.generation, stop, "running")
+        job = Job(task_id, self.generation, stop, callback, "running", 0)
         self.jobs[task_id] = job
         self.pool.start(_Task(task_id, job.generation, stop, callback, self.signals))
         self.changed.emit(task_id, "running")
         return True
+
+    def set_progress(self, task_id: str, percent: int) -> bool:
+        job = self.jobs.get(task_id)
+        if job is None or job.state not in ("queued", "running", "cancelling"):
+            return False
+        bounded = max(0, min(100, int(percent)))
+        job.progress = bounded
+        self.progress.emit(task_id, bounded)
+        return True
+
+    def retry(self, task_id: str) -> bool:
+        job = self.jobs.get(task_id)
+        if job is None or job.state not in ("failed", "cancelled"):
+            return False
+        return self.submit(task_id, job.callback)
 
     def cancel(self, task_id: str) -> None:
         if task_id in self.jobs:
@@ -93,6 +111,8 @@ class JobManager(QObject):
     def _finished(self, task_id: str, generation: int, value: object) -> None:
         if self._current(task_id, generation):
             self.jobs[task_id].state = "completed"
+            self.jobs[task_id].progress = 100
+            self.progress.emit(task_id, 100)
             self.changed.emit(task_id, "completed")
             self.result.emit(task_id, value)
 

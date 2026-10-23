@@ -69,6 +69,32 @@ def test_worker_error_translation(qt_app) -> None:
     assert len(events) == 1
     assert "private credential" not in str(events)
     assert manager.jobs["failure"].state == "failed"
+    assert manager.retry("failure") is True
+    retry_events = wait_for(manager.error)
+    assert len(retry_events) == 1
+
+
+def test_progress_is_bounded_and_terminal_completion_is_100(qt_app) -> None:
+    manager = JobManager(max_workers=1)
+    release = Event()
+    progress = []
+    manager.progress.connect(lambda key, value: progress.append((key, value)))
+
+    def work(stop):
+        release.wait(0.5)
+        return "done"
+
+    assert manager.submit("progress", work)
+    assert manager.set_progress("progress", -5)
+    assert manager.set_progress("progress", 55)
+    assert manager.set_progress("progress", 500)
+    release.set()
+    assert wait_for(manager.result)
+    assert ("progress", 0) in progress
+    assert ("progress", 55) in progress
+    assert progress[-1] == ("progress", 100)
+    assert manager.jobs["progress"].progress == 100
+    assert manager.set_progress("missing", 10) is False
 
 
 def test_old_generation_result_does_not_overwrite(qt_app) -> None:

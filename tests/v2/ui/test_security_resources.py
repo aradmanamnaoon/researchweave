@@ -424,6 +424,10 @@ def test_csv_export_neutralizes_spreadsheet_formulas_and_collision(tmp_path: Pat
         {"project_id": created["project_id"], "filename": "safe.csv"},
     )
     assert written["status"] == "ok", written
+    assert written["data"]["atomic_write"] is True
+    assert written["data"]["collision_policy"] == "refuse-existing"
+    assert written["data"]["source_metadata"]["project_id"] == created["project_id"]
+    assert written["data"]["source_metadata"]["dataset_id"] == imported["data"]["dataset_id"]
     content = Path(written["data"]["path"]).read_text(encoding="utf-8")
     assert "'=2+3" in content
     assert "'+cmd" in content
@@ -434,3 +438,4 @@ def test_csv_export_neutralizes_spreadsheet_formulas_and_collision(tmp_path: Pat
         {"project_id": created["project_id"], "filename": "safe.csv"},
     )
     assert second["error"]["code"] == "CONFLICT"
+    assert not list((tmp_path / "exports").glob("*.tmp"))

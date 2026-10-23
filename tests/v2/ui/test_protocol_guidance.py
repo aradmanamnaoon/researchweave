@@ -31,12 +31,21 @@ def _ok(facade, action, **args):
 
 def test_study_templates_have_required_fields_and_no_fake_approval() -> None:
     records = list_templates()
-    assert len(records) == 4
+    assert len(records) >= 6
     assert all(record["synthetic"] is True for record in records)
+    families = {str(record["family"]) for record in records}
+    assert {
+        "literature",
+        "systematic-review",
+        "observational",
+        "experiment",
+        "qualitative",
+        "mixed",
+    } <= families
     for record in records:
-        assert record["family"] in ("literature", "qualitative", "quantitative", "mixed")
         assert record["workflow"]
         assert record["fields"]
+        assert record["cautions"]
         draft = blank_protocol(str(record["id"]))
         assert draft["status"] == "draft"
         assert not protocol_completion(str(record["id"]), draft["values"])[

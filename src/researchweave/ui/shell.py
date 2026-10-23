@@ -216,7 +216,7 @@ class ResearchWindow(QMainWindow):
         self._shortcut("Ctrl+2", lambda: self.navigate("Library"))
         self._shortcut("Ctrl+L", self.focus_library_search)
         self._shortcut("Ctrl+Shift+E", self.focus_export)
-        self._shortcut("F1", lambda: self.navigate("Shortcuts"))
+        self._shortcut("F1", self.open_context_help)
 
     def _shortcut(self, keys: str, callback: Callable[..., Any]) -> None:
         action = QAction(keys, self)
@@ -234,6 +234,11 @@ class ResearchWindow(QMainWindow):
         summary.setWordWrap(True)
         summary.setObjectName("muted")
         layout.addWidget(summary)
+        if name not in ("Guidance", "Shortcuts"):
+            layout.addWidget(button(
+                "Help for this screen",
+                lambda _checked=False, screen=name: self.open_context_help(screen),
+            ))
         self.pages.addWidget(page)
         page.setAccessibleName(f"{name} workspace")
         return layout
@@ -551,10 +556,29 @@ class ResearchWindow(QMainWindow):
 
         layout = self._page("Data View", "Import a small local CSV; cells stay in a virtual table.")
         layout.addWidget(button("Import CSV text", self.import_csv, primary=True))
+        self.data_mode = QLabel(
+            "Read-only preview · edits are disabled until provenance-preserving editing exists."
+        )
+        self.data_mode.setWordWrap(True)
+        named(self.data_mode, "Dataset editing mode")
+        layout.addWidget(self.data_mode)
         self.dataset_picker = QComboBox()
         named(self.dataset_picker, "Active dataset")
         self.dataset_picker.currentIndexChanged.connect(self._selected_dataset)
         layout.addWidget(self.dataset_picker)
+        data_controls = QHBoxLayout()
+        self.data_filter = QLineEdit()
+        self.data_filter.setPlaceholderText("Filter dataset rows")
+        named(self.data_filter, "Dataset text filter")
+        self.data_sort = QComboBox()
+        self.data_sort.addItem("No sort", "")
+        named(self.data_sort, "Dataset sort column")
+        self.data_sort_desc = QCheckBox("Descending")
+        data_controls.addWidget(self.data_filter)
+        data_controls.addWidget(self.data_sort)
+        data_controls.addWidget(self.data_sort_desc)
+        data_controls.addWidget(button("Apply data view", self.apply_data_view))
+        layout.addLayout(data_controls)
         self.data_table = QTableView()
         named(self.data_table, "Dataset grid with labeled column and row headers")
         self.data_model = ResearchTableModel()
@@ -968,8 +992,14 @@ class ResearchWindow(QMainWindow):
         self.job_list = QListWidget()
         named(self.job_list, "Background job statuses")
         layout.addWidget(self.job_list)
-        layout.addWidget(button("Cancel selected job", self.cancel_job))
+        job_actions = QHBoxLayout()
+        job_actions.addWidget(button("Cancel selected job", self.cancel_job))
+        job_actions.addWidget(button("Retry selected failed/cancelled job", self.retry_job))
+        layout.addLayout(job_actions)
         self.jobs.changed.connect(lambda key, state: self.job_list.addItem(f"{key}: {state}"))
+        self.jobs.progress.connect(
+            lambda key, percent: self.job_list.addItem(f"{key}: progress {percent}%")
+        )
 
         layout = self._page(
             "Notifications",
@@ -1077,10 +1107,30 @@ class ResearchWindow(QMainWindow):
         self.refresh_localization()
         self.refresh_workspace_presets()
 
-        layout = self._page("Activity", "Local operation history for the current project.")
+        layout = self._page(
+            "Activity",
+            "Local operation history for the current project. Actor labels are not authenticated "
+            "identities.",
+        )
+        activity_controls = QHBoxLayout()
+        self.activity_operation = QLineEdit()
+        self.activity_operation.setPlaceholderText("Exact operation filter, e.g. ui.source.add")
+        named(self.activity_operation, "Activity operation filter")
+        self.activity_limit = QComboBox()
+        for value in (25, 50, 100, 250):
+            self.activity_limit.addItem(str(value), value)
+        self.activity_limit.setCurrentText("100")
+        named(self.activity_limit, "Activity result limit")
+        activity_controls.addWidget(self.activity_operation)
+        activity_controls.addWidget(self.activity_limit)
+        activity_controls.addWidget(button("Apply activity filter", self.refresh_activity))
+        layout.addLayout(activity_controls)
         self.activity_list = QListWidget()
         named(self.activity_list, "Project activity audit")
         layout.addWidget(self.activity_list)
+        self.activity_status = QLabel("Activity records are local provenance, not authentication.")
+        self.activity_status.setWordWrap(True)
+        layout.addWidget(self.activity_status)
 
         layout = self._page("About", "Original, free and open-source research workspace.")
         layout.addWidget(QLabel("ResearchWeave UI V2 · GPL-3.0-only · local demo"))
@@ -1195,6 +1245,36 @@ class ResearchWindow(QMainWindow):
         dialog = CommandPalette(self)
         dialog.query.setFocus()
         dialog.exec()
+
+    def open_context_help(self, screen: str | None = None) -> None:
+        current = screen or self.page_heading.text()
+        query_map = {
+            "Question": "research question",
+            "Protocol": "research question",
+            "Library": "primary source",
+            "Reader": "primary source",
+            "PDF": "primary source",
+            "Evidence": "evidence",
+            "Review": "screening",
+            "PRISMA": "screening",
+            "Extraction": "variable",
+            "Data View": "sample",
+            "Variable View": "variable",
+            "Statistics": "confidence interval",
+            "Analysis Results": "confidence interval",
+            "Qualitative": "qualitative",
+            "Codebook": "qualitative",
+            "Mixed Methods": "mixed",
+            "Manuscript": "evidence",
+            "References": "primary source",
+            "Privacy": "privacy",
+            "Exports": "evidence",
+            "Recovery": "recovery",
+        }
+        self.navigate("Guidance")
+        self.help_query.setText(query_map.get(current, current))
+        self.refresh_guidance()
+        self.help_query.setFocus()
 
     def command_entries(self) -> list[dict[str, Any]]:
         project_required = bool(self.project_id)
@@ -2203,12 +2283,17 @@ class ResearchWindow(QMainWindow):
             return
         self.current_dataset_id = self.dataset_picker.itemData(index)
         self.data_offset = 0
+        self.data_filter.clear()
+        self.data_sort.blockSignals(True)
+        self.data_sort.clear()
+        self.data_sort.addItem("No sort", "")
         self.load_data_page()
         self.variable_list.clear()
         self.variable_picker.clear()
         response = self._call("ui.dataset.variables", dataset_id=self.current_dataset_id)
         if response is not None:
             for variable in response["variables"]:
+                self.data_sort.addItem(variable["name"], variable["name"])
                 item = QListWidgetItem(
                     f"{variable['name']} · {variable['inferred_type']} · "
                     f"missing {variable['missing_n']} / {response['total_rows']}"
@@ -2216,6 +2301,7 @@ class ResearchWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, variable["name"])
                 self.variable_list.addItem(item)
                 self.variable_picker.addItem(variable["name"])
+        self.data_sort.blockSignals(False)
         methods = self._call("ui.analysis.methods")
         if methods is not None:
             self.analysis_method.clear()
@@ -2232,6 +2318,9 @@ class ResearchWindow(QMainWindow):
         response = self._call(
             "ui.dataset.page", dataset_id=self.current_dataset_id,
             offset=self.data_offset, limit=self.data_page_size,
+            filter_text=self.data_filter.text(),
+            sort_column=str(self.data_sort.currentData() or ""),
+            sort_desc=self.data_sort_desc.isChecked(),
         )
         if response is None:
             return
@@ -2239,9 +2328,19 @@ class ResearchWindow(QMainWindow):
         self.data_model.set_records(response["columns"], response["rows"])
         beginning = self.data_offset + 1 if self.data_total else 0
         last = min(self.data_offset + len(response["rows"]), self.data_total)
-        self.data_page_status.setText(
-            f"Rows {beginning}–{last} of {self.data_total} · synthetic or imported data"
+        filter_note = (
+            f" · filtered from {response['dataset_total']}"
+            if response["dataset_total"] != response["total"]
+            else ""
         )
+        self.data_page_status.setText(
+            f"Rows {beginning}–{last} of {self.data_total}{filter_note} · read-only · "
+            "synthetic or imported data"
+        )
+
+    def apply_data_view(self) -> None:
+        self.data_offset = 0
+        self.load_data_page()
 
     def previous_data_page(self) -> None:
         if self.data_offset > 0:
@@ -3053,6 +3152,17 @@ class ResearchWindow(QMainWindow):
         if selected:
             self.jobs.cancel(selected.text().split(": ", 1)[0])
 
+    def retry_job(self) -> None:
+        selected = self.job_list.currentItem()
+        if selected is None:
+            self._set_status("Select a failed or cancelled job first.")
+            return
+        task_id = selected.text().split(": ", 1)[0]
+        if self.jobs.retry(task_id):
+            self._set_status(f"{task_id}: retry started")
+        else:
+            self._set_status("Only failed or cancelled jobs with a retained callback can retry.")
+
     def save_preferences(self) -> None:
         try:
             locale = Localizer(self.locale_entry.text()).normalized_locale
@@ -3196,12 +3306,22 @@ class ResearchWindow(QMainWindow):
     def refresh_activity(self) -> None:
         self.activity_list.clear()
         if self.project_id:
-            value = self._call("ui.activity.list")
+            value = self._call(
+                "ui.activity.list",
+                operation_filter=self.activity_operation.text().strip(),
+                limit=int(self.activity_limit.currentData() or 100),
+            )
             if value:
                 for event in value["events"]:
-                    self.activity_list.addItem(
+                    item = QListWidgetItem(
                         f"{event['sequence']} · {event['operation']} · {event['timestamp']}"
                     )
+                    item.setData(Qt.ItemDataRole.UserRole, event)
+                    self.activity_list.addItem(item)
+                self.activity_status.setText(
+                    f"Showing {len(value['events'])} of {value['total']} matching local events. "
+                    f"{value['limitation']}"
+                )
 
     def _refresh_templates(self) -> None:
         response = self._call("ui.templates.list")

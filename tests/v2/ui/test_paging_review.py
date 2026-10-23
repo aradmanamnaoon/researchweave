@@ -39,6 +39,31 @@ def test_dataset_page_and_variable_missingness(tmp_path: Path) -> None:
     assert len(first["rows"]) == 250
     assert middle["rows"][0] == ["250", "c1"]
     assert len(first["rows"]) < first["total"]
+    filtered = _ok(
+        facade,
+        "ui.dataset.page",
+        project_id=project["project_id"],
+        dataset_id=dataset["dataset_id"],
+        offset=0,
+        limit=50,
+        filter_text="c2",
+        sort_column="score",
+        sort_desc=True,
+    )
+    assert filtered["read_only"] is True
+    assert filtered["dataset_total"] == 10_000
+    assert filtered["total"] < filtered["dataset_total"]
+    assert all("c2" in row for row in filtered["rows"])
+    assert filtered["rows"][0][0] >= filtered["rows"][-1][0]
+    invalid_sort = facade.execute(
+        "ui.dataset.page",
+        {
+            "project_id": project["project_id"],
+            "dataset_id": dataset["dataset_id"],
+            "sort_column": "missing-column",
+        },
+    )
+    assert invalid_sort["error"]["code"] == "INVALID_INPUT"
     columns = _ok(facade, "ui.dataset.variables",
                   project_id=project["project_id"], dataset_id=dataset["dataset_id"])
     assert columns["variables"][0]["inferred_type"] == "numeric"

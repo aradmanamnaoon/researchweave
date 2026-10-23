@@ -126,6 +126,14 @@ def test_codebook_mixed_references_and_activity_surfaces(
     shell.navigate("Activity")
     shell.refresh_activity()
     assert shell.activity_list.count() >= 6
+    shell.activity_operation.setText("ui.reference.upsert")
+    shell.refresh_activity()
+    assert shell.activity_list.count() == 1
+    assert "not authenticated" in shell.activity_status.text()
+    shell.navigate("References")
+    shell.open_context_help()
+    assert shell.page_heading.text() == "Guidance"
+    assert shell.help_query.text() == "primary source"
     shell.close()
 
 
