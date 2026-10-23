@@ -905,8 +905,8 @@ class EvidenceFacade:
             if operation == "reference.provider_identity":
                 reference = library.get_reference(_value(args, "reference_id", str))
                 require(bool(reference.doi), "Reference has no valid DOI", "INVALID_INPUT")
-                catalog_result = self.catalog.search(_value(args, "provider", str),
-                                                     str(reference.doi), limit=10)
+                catalog_result = self.catalog.lookup_doi(
+                    _value(args, "provider", str), str(reference.doi))
                 return reconcile_catalog_candidates(
                     reference, catalog_result["records"],
                     provider=str(catalog_result["provider"]),

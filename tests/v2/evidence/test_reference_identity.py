@@ -56,6 +56,7 @@ def test_facade_offline_refusal_local_comparison_and_network_provenance(tmp_path
                 "DOI": "10.1000/abc", "title": ["Study of memory"],
                 "author": [{"given": "Ada", "family": "Doe"}],
                 "published": {"date-parts": [[2024]]},
+                "relation": {"is-corrected-by": [{"id": "10.1000/correction"}]},
             }]}}).encode())
 
     workspace = tmp_path / "projects"
@@ -86,6 +87,27 @@ def test_facade_offline_refusal_local_comparison_and_network_provenance(tmp_path
     assert checked["status"] == "ok", checked
     assert checked["data"]["identity"] == "bibliographic_consistency"
     assert checked["data"]["catalog_presence"] == "reported"
+    assert checked["data"]["candidates"][0]["retraction_and_correction"][
+        "correction"] == "provider_reported"
     assert not checked["data"]["verified_scientific_claims"]
     assert facade.execute("project.open", {"project_id": project_id}, {})[
         "data"]["revision"] == 1
+
+
+def test_provider_lookup_filters_nearby_but_wrong_dois():
+    class Transport:
+        def get(self, url, *, headers, timeout):
+            return HTTPResponse(200, json.dumps({"message": {"items": [
+                {"DOI": "10.1000/other", "title": ["Nearby record"]},
+                {"DOI": "10.1000/abc", "title": ["Requested record"],
+                 "relation": {"is-retracted-by": [{"id": "10.1000/retraction"}]}},
+            ]}}).encode())
+
+    from researchweave.evidence.discovery import CatalogClient
+
+    result = CatalogClient(Transport(), offline=False).lookup_doi("crossref", "10.1000/ABC")
+    assert result["catalog_presence"] == "reported"
+    assert len(result["records"]) == 1
+    assert result["records"][0]["doi"] == "10.1000/abc"
+    assert result["records"][0]["is_retracted"] is True
+    assert not result["scientific_claims_verified"] and not result["paper_read"]

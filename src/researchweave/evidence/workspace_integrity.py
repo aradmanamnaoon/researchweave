@@ -80,7 +80,7 @@ def _project_report(path: Path) -> dict[str, Any]:
             "path": path.name,
             "project_id": None,
             "ok": False,
-            "issues": [{"code": exc.code, "message": exc.message}],
+            "issues": [{"code": exc.code, "message": str(exc)}],
             "recovery_snapshots": [],
         }
     except (OSError, sqlite3.Error, ValueError) as exc:

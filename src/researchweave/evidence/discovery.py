@@ -15,7 +15,7 @@ import urllib.parse
 import urllib.request
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass, field
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 
 from .bibliography import normalize_doi
 from .errors import EvidenceError, require
@@ -115,6 +115,22 @@ def _authors_crossref(item: Mapping[str, Any]) -> list[str]:
     return output
 
 
+def _crossref_editorial_flags(item: Mapping[str, Any]) -> tuple[bool, bool]:
+    """Normalize only explicit Crossref editorial relation/type signals."""
+    relation = item.get("relation", {})
+    keys = {str(key).casefold() for key in relation} if isinstance(relation, dict) else set()
+    kind = _single_string(item.get("type")).casefold()
+    subtype = _single_string(item.get("subtype")).casefold()
+    is_retracted = (
+        "retraction" in kind or "retraction" in subtype
+        or bool(keys & {"is-retracted-by", "retracts"})
+    )
+    is_corrected = bool(keys & {
+        "is-corrected-by", "corrects", "is-updated-by", "updates",
+    }) or "correction" in kind or "correction" in subtype
+    return is_retracted, is_corrected
+
+
 def _crossref(data: Mapping[str, Any]) -> list[dict[str, Any]]:
     message = data.get("message", {})
     if not isinstance(message, dict):
@@ -132,12 +148,15 @@ def _crossref(data: Mapping[str, Any]) -> list[dict[str, Any]]:
         date_parts = years.get("date-parts", [])
         published = (date_parts[0][0] if isinstance(date_parts, list) and date_parts and
                      isinstance(date_parts[0], list) and date_parts[0] else None)
+        retracted, corrected = _crossref_editorial_flags(item)
         records.append({"title": _single_string(item.get("title")),
                         "authors": _authors_crossref(item),
                         "doi": normalize_doi(_single_string(item.get("DOI"))),
                         "year": _year(published), "pmid": None,
                         "provider_id": _single_string(item.get("DOI")),
-                        "kind": _single_string(item.get("type"))})
+                        "kind": _single_string(item.get("type")),
+                        "is_retracted": retracted,
+                        "is_corrected": corrected})
     return records
 
 
@@ -162,7 +181,9 @@ def _openalex(data: Mapping[str, Any]) -> list[dict[str, Any]]:
                         "authors": authors, "year": _year(item.get("publication_year")),
                         "doi": normalize_doi(_single_string(item.get("doi"))),
                         "pmid": None, "provider_id": _single_string(item.get("id")),
-                        "kind": _single_string(item.get("type"))})
+                        "kind": _single_string(item.get("type")),
+                        "is_retracted": item.get("is_retracted") is True,
+                        "is_corrected": False})
     return records
 
 
@@ -176,13 +197,18 @@ def _europepmc(data: Mapping[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(item, dict):
             continue
         raw_author = _single_string(item.get("authorString"))
+        pub_type = _single_string(item.get("pubType"))
         records.append({"title": _single_string(item.get("title")),
                         "authors": [raw_author] if raw_author else [],
                         "year": _year(item.get("pubYear")),
                         "doi": normalize_doi(_single_string(item.get("doi"))),
                         "pmid": _single_string(item.get("pmid")) or None,
                         "provider_id": _single_string(item.get("id")),
-                        "kind": _single_string(item.get("pubType"))})
+                        "kind": pub_type,
+                        "is_retracted": item.get("isRetracted") is True
+                        or item.get("isWithdrawn") is True,
+                        "is_corrected": "correction" in pub_type.casefold()
+                        or "erratum" in pub_type.casefold()})
     return records
 
 
@@ -204,11 +230,20 @@ def _pubmed(data: Mapping[str, Any]) -> list[dict[str, Any]]:
                    if isinstance(author, dict) and isinstance(author.get("name"), str)]
         dois = [a.get("value", "") for a in item.get("articleids", [])[:100]
                 if isinstance(a, dict) and a.get("idtype") == "doi"]
+        pub_types = [str(value) for value in item.get("pubtype", [])[:100]
+                     if isinstance(value, str)]
+        lowered_types = {value.casefold() for value in pub_types}
         records.append({"title": _single_string(item.get("title")), "authors": authors,
                         "year": _year(item.get("pubdate")),
                         "doi": normalize_doi(dois[0]) if dois else None,
                         "pmid": uid, "provider_id": uid,
-                        "kind": "pubmed-summary"})
+                        "kind": "pubmed-summary",
+                        "is_retracted": bool(lowered_types & {
+                            "retracted publication", "retraction of publication",
+                        }),
+                        "is_corrected": bool(lowered_types & {
+                            "published erratum", "corrected and republished article",
+                        })})
     return records
 
 
@@ -345,6 +380,38 @@ class CatalogClient:
                   "license_note": "Identifier metadata is not proof of full-text availability"}
         self.cache[cache_key] = result
         return result
+
+    def lookup_doi(self, provider: str, doi: str) -> dict[str, Any]:
+        """Return only provider records whose normalized DOI exactly matches input.
+
+        A search result that does not contain the requested DOI is never treated
+        as identifier existence. Absence from one bounded query also does not
+        prove that a DOI does not exist.
+        """
+        normalized = normalize_doi(doi)
+        require(normalized is not None, "Valid DOI syntax required for provider lookup")
+        exact_doi = cast(str, normalized)
+        result = self.search(provider, exact_doi, limit=10, use_cache=True)
+        exact = [record for record in result["records"]
+                 if normalize_doi(record.get("doi") if
+                 isinstance(record.get("doi"), str) else None) == exact_doi]
+        return {
+            "provider": provider,
+            "doi": exact_doi,
+            "catalog_presence": "reported" if exact else "not_observed",
+            "records": exact,
+            "candidate_count": len(exact),
+            "raw_response_sha256": list(result["raw_response_sha256"]),
+            "network_hosts": list(result["network_hosts"]),
+            "fetched_at_utc": result["fetched_at_utc"],
+            "scientific_claims_verified": False,
+            "paper_read": False,
+            "warning": (
+                "Exact DOI returned by provider; verify editorial notices and original source."
+                if exact else
+                "Bounded provider lookup did not return the DOI; this does not prove nonexistence."
+            ),
+        }
 
     def search_pages(
         self,
