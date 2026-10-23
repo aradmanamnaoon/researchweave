@@ -27,7 +27,10 @@ class PublishingService:
 
     def bibliography(self, manuscript_id: str, style: str = "plain") -> dict[str, Any]:
         """A transparent limited renderer; no claim of complete CSL compliance."""
-        require(style in {"plain", "numbered"}, "Unsupported style; use plain or numbered")
+        require(
+            style in {"plain", "numbered", "apa-basic", "harvard-basic", "vancouver-basic"},
+            "Unsupported bibliography style",
+        )
         sections = self.writing.sections(manuscript_id)
         require(bool(sections), "Manuscript not found", "NOT_FOUND")
         keys: dict[str, str] = {}
@@ -48,10 +51,16 @@ class PublishingService:
             ref = self.library.get_reference(ref_id)
             authors = ", ".join(ref.authors) if ref.authors else "[authors unavailable]"
             year = str(ref.year) if ref.year is not None else "[year unavailable]"
-            citation = f"{authors} ({year}). {ref.title}."
-            if ref.doi:
-                citation += f" https://doi.org/{ref.doi}"
-            if style == "numbered":
+            doi_text = f" https://doi.org/{ref.doi}" if ref.doi else ""
+            if style == "apa-basic":
+                citation = f"{authors} ({year}). {ref.title}.{doi_text}"
+            elif style == "harvard-basic":
+                citation = f"{authors} ({year}) {ref.title}.{doi_text}"
+            elif style == "vancouver-basic":
+                citation = f"{authors}. {ref.title}. {year}.{doi_text}"
+            else:
+                citation = f"{authors} ({year}). {ref.title}.{doi_text}"
+            if style in {"numbered", "vancouver-basic"}:
                 citation = f"[{index}] {citation}"
             entries.append(
                 {
@@ -67,6 +76,12 @@ class PublishingService:
             "style": style,
             "entries": entries,
             "complete_csl_style": False,
+            "style_fidelity": (
+                "basic deterministic rendering; not a complete CSL implementation"
+                if style not in {"plain", "numbered"}
+                else "researchweave basic style"
+            ),
+            "missing_metadata_preserved_as_placeholders": True,
             "text": "\n".join(str(row["text"]) for row in entries) + "\n",
         }
 
