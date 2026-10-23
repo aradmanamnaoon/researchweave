@@ -136,12 +136,15 @@ class ResearchWindow(QMainWindow):
         self.current_source_id = ""
         self.current_dataset_id = ""
         self._editor_loading = False
+        self._screen_focus: dict[str, QWidget] = {}
         self.protocol_fields: dict[str, QPlainTextEdit] = {}
         self.extraction_pending_fields: list[dict[str, Any]] = []
         self.extraction_value_widgets: dict[str, QWidget] = {}
         self.jobs = JobManager()
         self.jobs.error.connect(lambda _key, message: self._set_status(message))
         self.jobs.changed.connect(lambda key, state: self._set_status(f"{key}: {state}"))
+        self.jobs.changed.connect(lambda _key, _state: self._refresh_dashboard_if_visible())
+        self.jobs.progress.connect(lambda _key, _value: self._refresh_dashboard_if_visible())
         self.setWindowTitle("ResearchWeave · Local research desktop")
         self.setMinimumSize(760, 490)
         self.resize(max(760, self.prefs.window_width), max(490, self.prefs.window_height))
@@ -273,6 +276,7 @@ class ResearchWindow(QMainWindow):
         self.dashboard = QLabel("Choose a project or create a new one.")
         self.dashboard.setWordWrap(True)
         layout.addWidget(self.dashboard)
+        layout.addWidget(button("Refresh dashboard", self.refresh_dashboard))
         layout.addWidget(button("Create research project", self.create_project, primary=True))
         layout.addWidget(button("Add a source", self.import_source))
         layout.addWidget(button("Build a research protocol", lambda: self.navigate("Protocol")))
@@ -1295,6 +1299,15 @@ class ResearchWindow(QMainWindow):
     def navigate(self, name: str) -> None:
         if name not in SCREENS:
             return
+        current_name = self.page_heading.text()
+        focused = QApplication.focusWidget()
+        if (
+            current_name in SCREENS
+            and isinstance(focused, QWidget)
+            and self.isAncestorOf(focused)
+            and focused is not self.nav
+        ):
+            self._screen_focus[current_name] = focused
         index = SCREENS.index(name)
         self.pages.setCurrentIndex(index)
         self.page_heading.setText(name)
@@ -1357,6 +1370,16 @@ class ResearchWindow(QMainWindow):
             if name == "Statistics":
                 self.refresh_plot_configs()
         self.prefs.selected_screen = name
+        QTimer.singleShot(0, lambda screen=name: self._restore_screen_focus(screen))
+
+    def _restore_screen_focus(self, screen: str) -> None:
+        widget = self._screen_focus.get(screen)
+        if widget is not None and widget.isEnabled():
+            widget.setFocus(Qt.FocusReason.OtherFocusReason)
+
+    def _refresh_dashboard_if_visible(self) -> None:
+        if self.page_heading.text() == "Dashboard" and self.project_id:
+            self.refresh_dashboard()
 
     def show_palette(self) -> None:
         dialog = CommandPalette(self)
@@ -2021,11 +2044,19 @@ class ResearchWindow(QMainWindow):
         if not self.project_id:
             self.dashboard.setText("Choose a project or create a new one.")
             return
+        self.dashboard.setText("Loading local project state…")
         response = self._call("ui.project.dashboard")
         if response is None:
+            self.dashboard.setText(
+                "Dashboard could not load. Review the status message, then use Refresh dashboard."
+            )
             return
         screening = response["screening"]
         states = screening["status_counts"]
+        jobs = [
+            f"{job.task_id}: {job.state} ({job.progress}%)"
+            for job in self.jobs.jobs.values()
+        ]
         self.dashboard.setText(
             f"{response['title']}\n\nResearch question: {response['question']}\n"
             f"Sources: {response['source_count']} · datasets: {response['dataset_count']}\n"
@@ -2033,6 +2064,7 @@ class ResearchWindow(QMainWindow):
             f"{screening['screened_with_final_outcome']} final outcomes\n"
             f"Writing: {response['draft']['manuscript_characters']} manuscript characters · "
             f"{response['draft']['notebook_characters']} note characters\n\n"
+            f"Jobs: {'; '.join(jobs) if jobs else 'none running or retained'}\n"
             f"Next: {'; '.join(response['next_steps'])}\n"
             f"Warnings: {'; '.join(response['warnings']) or 'none'}"
         )

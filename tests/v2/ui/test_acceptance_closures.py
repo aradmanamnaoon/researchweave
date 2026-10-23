@@ -572,3 +572,26 @@ def test_visible_deviation_retry_overlap_and_export_folder(
     assert shell.export_directory.text() == str(destination.resolve())
     assert notification["notification"]["id"]
     shell.close()
+
+
+def test_dashboard_surfaces_retained_job_state(tmp_path: Path) -> None:
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
+    facade = build_ui_facade(tmp_path)
+    pid, _revision = create_project(facade)
+    shell = build_ui_shell(fake_services=facade)
+    shell.open_project(pid)
+    shell.show()
+    app.processEvents()
+
+    assert shell.jobs.submit("dashboard-job", lambda _stop: "done")
+    for _ in range(100):
+        app.processEvents()
+        if shell.jobs.jobs["dashboard-job"].state == "completed":
+            break
+    shell.navigate("Dashboard")
+    shell.refresh_dashboard()
+    assert "dashboard-job: completed (100%)" in shell.dashboard.text()
+    assert "Loading local project state" not in shell.dashboard.text()
+    shell.close()
