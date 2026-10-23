@@ -340,6 +340,13 @@ class UIFacade:
             "offset": {"type": "integer", "minimum": 0},
             "limit": {"type": "integer", "minimum": 1, "maximum": 500},
         }
+        schemas["ui.source.search"] |= {
+            "query": string,
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+            "sort_by": string,
+            "sort_desc": {"type": "boolean"},
+        }
         schemas["ui.dataset.page"] |= {
             "dataset_id": string,
             "offset": {"type": "integer", "minimum": 0},
@@ -718,14 +725,34 @@ class UIFacade:
         query = _string(args, "query", 200, required=False).casefold()
         limit = _integer(args, "limit", minimum=1, maximum=500, default=50)
         offset = _integer(args, "offset", maximum=5000)
+        sort_by = _string(args, "sort_by", 30, required=False) or "title"
+        sort_desc = bool(args.get("sort_desc", False))
+        if sort_by not in {"title", "source_label", "verified"}:
+            raise UIError(
+                "INVALID_INPUT",
+                "Unknown source sort field.",
+                "Sort by title, source label or verification state.",
+            )
         matches = [item for item in project.sources
                    if query in (item.title + " " + item.text[:1000] + " " +
                                 " ".join(item.tags)).casefold()]
+        if sort_by == "verified":
+            matches.sort(
+                key=lambda item: (item.verified, item.title.casefold()),
+                reverse=sort_desc,
+            )
+        else:
+            matches.sort(
+                key=lambda item: str(getattr(item, sort_by)).casefold(),
+                reverse=sort_desc,
+            )
         return {"total": len(matches), "sources": [
             {"id": item.id, "title": item.title, "kind": item.kind,
              "source_label": item.source_label, "verified": item.verified,
              "content_hash": item.content_hash}
-            for item in matches[offset:offset + limit]], "revision": project.revision}
+            for item in matches[offset:offset + limit]],
+            "offset": offset, "limit": limit, "sort_by": sort_by,
+            "sort_desc": sort_desc, "revision": project.revision}
 
     def _do_ui_source_get(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)

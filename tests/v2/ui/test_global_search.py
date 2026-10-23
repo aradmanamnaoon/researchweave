@@ -115,3 +115,69 @@ def test_search_result_qt_navigation(tmp_path: Path) -> None:
     assert "synthetic attention" in window.reader_text.toPlainText()
     assert window.page_heading.text() == "Reader"
     window.close()
+
+
+def test_library_and_global_search_paging_and_sorting(tmp_path: Path) -> None:
+    app = QApplication.instance()
+    if not isinstance(app, QApplication):
+        app = QApplication([])
+    facade = build_ui_facade(tmp_path)
+    created = _ok(
+        facade,
+        "ui.project.create",
+        title="Paged search",
+        question="How are sources paged?",
+        study_type="literature",
+    )
+    pid = created["project_id"]
+    revision = created["revision"]
+    for index in range(105):
+        added = _ok(
+            facade,
+            "ui.source.add",
+            project_id=pid,
+            expected_revision=revision,
+            title=f"Source {104 - index:03d}",
+            text=f"needle synthetic source {index}",
+            source_label="Synthetic paging fixture",
+        )
+        revision = added["revision"]
+    first = _ok(
+        facade,
+        "ui.source.search",
+        project_id=pid,
+        query="needle",
+        offset=0,
+        limit=100,
+        sort_by="title",
+    )
+    second = _ok(
+        facade,
+        "ui.source.search",
+        project_id=pid,
+        query="needle",
+        offset=100,
+        limit=100,
+        sort_by="title",
+    )
+    assert first["total"] == 105
+    assert len(first["sources"]) == 100
+    assert len(second["sources"]) == 5
+    assert first["sources"][0]["title"] == "Source 000"
+
+    window = build_ui_shell(fake_services=facade)
+    window.open_project(pid)
+    window.navigate("Library")
+    window.search.setText("needle")
+    assert window.library_list.count() == 100
+    window.next_library_page()
+    assert window.library_list.count() == 5
+    assert "101–105" in window.library_status.text()
+    window.navigate("Search")
+    window.global_query.setText("needle")
+    window.search_global()
+    assert window.global_results.count() == 100
+    window.next_global_page()
+    assert window.global_results.count() == 5
+    assert "101–105" in window.global_summary.text()
+    window.close()

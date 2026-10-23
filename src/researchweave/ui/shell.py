@@ -333,10 +333,17 @@ class ResearchWindow(QMainWindow):
         named(self.global_results, "Project-wide search results")
         self.global_results.itemActivated.connect(lambda item: self.open_search_result(item))
         layout.addWidget(self.global_results)
-        layout.addWidget(button("Open selected result", self.open_selected_search))
+        global_actions = QHBoxLayout()
+        global_actions.addWidget(button("Previous search page", self.previous_global_page))
+        global_actions.addWidget(button("Open selected result", self.open_selected_search))
+        global_actions.addWidget(button("Next search page", self.next_global_page))
+        layout.addLayout(global_actions)
         self.global_summary = QLabel("All searches remain inside the current project.")
         self.global_summary.setWordWrap(True)
         layout.addWidget(self.global_summary)
+        self.global_offset = 0
+        self.global_page_size = 100
+        self.global_total = 0
 
         layout = self._page(
             "Protocol",
@@ -370,11 +377,31 @@ class ResearchWindow(QMainWindow):
         named(self.search, "Search this project's sources")
         self.search.textChanged.connect(self.search_sources)
         layout.addWidget(self.search)
+        library_controls = QHBoxLayout()
+        self.library_sort = QComboBox()
+        self.library_sort.addItem("Title", "title")
+        self.library_sort.addItem("Source label", "source_label")
+        self.library_sort.addItem("Verification", "verified")
+        named(self.library_sort, "Library sort field")
+        self.library_sort_desc = QCheckBox("Descending")
+        library_controls.addWidget(self.library_sort)
+        library_controls.addWidget(self.library_sort_desc)
+        library_controls.addWidget(button("Apply library sort", self.reset_library_page))
+        layout.addLayout(library_controls)
         layout.addWidget(button("Import source text", self.import_source, primary=True))
         self.library_list = QListWidget()
         named(self.library_list, "Sources in current project")
         self.library_list.itemSelectionChanged.connect(self.select_source)
         layout.addWidget(self.library_list)
+        library_pager = QHBoxLayout()
+        library_pager.addWidget(button("Previous source page", self.previous_library_page))
+        self.library_status = QLabel("No sources loaded")
+        library_pager.addWidget(self.library_status)
+        library_pager.addWidget(button("Next source page", self.next_library_page))
+        layout.addLayout(library_pager)
+        self.library_offset = 0
+        self.library_page_size = 100
+        self.library_total = 0
 
         layout = self._page("Reader", "Read selected source text and inspect its provenance.")
         self.reader_meta = QLabel("Choose an item from Library.")
@@ -1375,6 +1402,10 @@ class ResearchWindow(QMainWindow):
         self.export_name.setFocus()
 
     def search_global(self) -> None:
+        self.global_offset = 0
+        self._load_global_page()
+
+    def _load_global_page(self) -> None:
         self.global_results.clear()
         if not self.project_id:
             self.global_summary.setText("Open a local project to search.")
@@ -1386,7 +1417,9 @@ class ResearchWindow(QMainWindow):
         kind = self.global_kind.currentText()
         response = self._call(
             "ui.search.global", query=query,
-            kind="" if kind == "All" else kind, limit=500,
+            kind="" if kind == "All" else kind,
+            offset=self.global_offset,
+            limit=self.global_page_size,
         )
         if response is None:
             return
@@ -1396,11 +1429,24 @@ class ResearchWindow(QMainWindow):
             )
             item.setData(Qt.ItemDataRole.UserRole, hit)
             self.global_results.addItem(item)
+        self.global_total = response["total"]
+        start = self.global_offset + 1 if self.global_total else 0
+        end = min(self.global_offset + len(response["hits"]), self.global_total)
         self.global_summary.setText(
-            f"{response['total']} matching artifacts · "
+            f"Showing {start}–{end} of {response['total']} matching artifacts · "
             f"{response['search_method']}.\n"
             "Excerpts are unverified until checked against their original record."
         )
+
+    def previous_global_page(self) -> None:
+        if self.global_offset > 0:
+            self.global_offset = max(0, self.global_offset - self.global_page_size)
+            self._load_global_page()
+
+    def next_global_page(self) -> None:
+        if self.global_offset + self.global_page_size < self.global_total:
+            self.global_offset += self.global_page_size
+            self._load_global_page()
 
     def open_selected_search(self) -> None:
         selected = self.global_results.currentItem()
@@ -1682,11 +1728,23 @@ class ResearchWindow(QMainWindow):
             self.navigate("Library")
 
     def search_sources(self, query: str = "") -> None:
+        self.library_offset = 0
+        self._load_library_page()
+
+    def _load_library_page(self) -> None:
         if not self.project_id:
             return
-        value = self._call("ui.source.search", query=self.search.text(), limit=500)
+        value = self._call(
+            "ui.source.search",
+            query=self.search.text(),
+            offset=self.library_offset,
+            limit=self.library_page_size,
+            sort_by=str(self.library_sort.currentData() or "title"),
+            sort_desc=self.library_sort_desc.isChecked(),
+        )
         if value is None:
             return
+        self.library_total = value["total"]
         self.library_list.clear()
         for source in value["sources"]:
             from PyQt6.QtWidgets import QListWidgetItem
@@ -1694,7 +1752,26 @@ class ResearchWindow(QMainWindow):
             item = QListWidgetItem(f"{source['title']} · {source['source_label']}")
             item.setData(Qt.ItemDataRole.UserRole, source["id"])
             self.library_list.addItem(item)
+        start = self.library_offset + 1 if self.library_total else 0
+        end = min(self.library_offset + len(value["sources"]), self.library_total)
+        self.library_status.setText(
+            f"Sources {start}–{end} of {self.library_total} · sorted by {value['sort_by']}"
+        )
         self._set_status(f"{value['total']} matching sources")
+
+    def reset_library_page(self) -> None:
+        self.library_offset = 0
+        self._load_library_page()
+
+    def previous_library_page(self) -> None:
+        if self.library_offset > 0:
+            self.library_offset = max(0, self.library_offset - self.library_page_size)
+            self._load_library_page()
+
+    def next_library_page(self) -> None:
+        if self.library_offset + self.library_page_size < self.library_total:
+            self.library_offset += self.library_page_size
+            self._load_library_page()
 
     def select_source(self) -> None:
         selected = self.library_list.currentItem()
