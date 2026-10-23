@@ -23,7 +23,13 @@ from .advanced_statistics import (
     wilcoxon_paired,
 )
 from .authorization import CapabilityIssuer, HostCapability, HostPaths
-from .data_ops import case_selection, frequency_weighted_mean, missingness, recode_missing
+from .data_ops import (
+    analytic_weighted_mean,
+    case_selection,
+    frequency_weighted_mean,
+    missingness,
+    recode_missing,
+)
 from .datasets import (
     DatasetStore,
     data_view,
@@ -42,7 +48,7 @@ from .effects import (
     rank_biserial_from_mann_whitney,
 )
 from .errors import AnalysisError, require
-from .generalized import logistic_regression, poisson_regression
+from .generalized import logistic_regression, negative_binomial_regression, poisson_regression
 from .inference import (
     bootstrap_mean,
     contingency,
@@ -86,7 +92,15 @@ from .recommendations import recommend_from_mapping
 from .runtime import RuntimeAuthorizer, run_script
 from .scale_scoring import ScaleDefinition, item_total_diagnostics, score_scale
 from .schemas import RESULT_SCHEMA, schema_for, validate_arguments
-from .statistics import correlation, describe, frequency_table, reliability, t_test
+from .statistics import (
+    correlation,
+    correlation_matrix,
+    describe,
+    frequency_table,
+    grouped_describe,
+    reliability,
+    t_test,
+)
 from .survey import design_weighted_mean, survey_proportions
 from .survival import cox_proportional_hazards, kaplan_meier, logrank_test
 from .time_series import (
@@ -143,6 +157,7 @@ class AnalysisFacade:
             "dataset.simple_impute": "local-write",
             "dataset.multiple_impute": "local-write",
             "statistics.weighted_mean": "read",
+            "statistics.analytic_weighted_mean": "read",
             "statistics.available_case": "read",
             "statistics.recommend": "read",
             "statistics.effect_independent": "read",
@@ -152,13 +167,16 @@ class AnalysisFacade:
             "statistics.effect_correlation": "read",
             "statistics.describe": "read",
             "statistics.frequency": "read",
+            "statistics.grouped_describe": "read",
             "statistics.test": "read",
             "statistics.correlate": "read",
+            "statistics.correlation_matrix": "read",
             "statistics.psychometric": "read",
             "statistics.reliability_diagnostics": "read",
             "statistics.model": "read",
             "statistics.logistic": "read",
             "statistics.poisson": "read",
+            "statistics.negative_binomial": "read",
             "statistics.meta": "read",
             "statistics.meta_random": "read",
             "statistics.egger": "read",
@@ -541,6 +559,8 @@ class AnalysisFacade:
                 data = describe(obj, str(arguments["column"]))
             elif operation == "statistics.frequency":
                 data = frequency_table(obj, str(arguments["column"]))
+            elif operation == "statistics.grouped_describe":
+                data = grouped_describe(obj, str(arguments["column"]), str(arguments["group"]))
             elif operation == "statistics.available_case":
                 data = available_case_covariance(obj, list(arguments["columns"]))
             elif operation == "statistics.distribution":
@@ -549,6 +569,10 @@ class AnalysisFacade:
                 data = missingness(obj, by=arguments.get("by"))
             elif operation == "statistics.weighted_mean":
                 data = frequency_weighted_mean(
+                    obj, str(arguments["column"]), str(arguments["weight"])
+                )
+            elif operation == "statistics.analytic_weighted_mean":
+                data = analytic_weighted_mean(
                     obj, str(arguments["column"]), str(arguments["weight"])
                 )
             elif operation == "statistics.test":
@@ -562,6 +586,13 @@ class AnalysisFacade:
                     str(arguments["y"]),
                     str(arguments.get("method", "pearson")),
                 ).as_json()
+            elif operation == "statistics.correlation_matrix":
+                data = correlation_matrix(
+                    obj,
+                    list(arguments["columns"]),
+                    method=str(arguments.get("method", "pearson")),
+                    adjustment=str(arguments.get("adjustment", "holm")),
+                )
             elif operation == "statistics.psychometric":
                 data = reliability(
                     obj, list(arguments["columns"]), **dict(arguments.get("options", {}))
@@ -582,6 +613,7 @@ class AnalysisFacade:
                     str(arguments["outcome"]),
                     list(arguments["predictors"]),
                     robust=str(arguments.get("covariance", "nonrobust")),
+                    cluster_group=arguments.get("cluster_group"),
                 ).as_json()
             elif operation == "statistics.logistic":
                 data = logistic_regression(
@@ -595,6 +627,14 @@ class AnalysisFacade:
                     obj,
                     str(arguments["outcome"]),
                     list(arguments["predictors"]),
+                    offset=arguments.get("offset"),
+                ).as_json()
+            elif operation == "statistics.negative_binomial":
+                data = negative_binomial_regression(
+                    obj,
+                    str(arguments["outcome"]),
+                    list(arguments["predictors"]),
+                    alpha=float(arguments.get("alpha", 1.0)),
                     offset=arguments.get("offset"),
                 ).as_json()
             elif operation == "statistics.contingency":

@@ -275,6 +275,47 @@ def frequency_weighted_mean(dataset: Dataset, column: str, weight: str) -> dict[
     }
 
 
+def analytic_weighted_mean(dataset: Dataset, column: str, weight: str) -> dict[str, Any]:
+    """Analytic-weight mean with Kish effective N and reliability-weight variance."""
+
+    require(column in dataset.columns and weight in dataset.columns, "Unknown weighted variable")
+    require(column != weight, "Outcome and analytic weight must differ")
+    pairs = [
+        (finite_number(row[column], name=column), finite_number(row[weight], name=weight))
+        for row in dataset.records
+        if row[column] is not None and row[weight] is not None
+    ]
+    require(len(pairs) >= 2, "At least two complete weighted observations required")
+    weights = [value for _, value in pairs]
+    require(all(value > 0 for value in weights), "Analytic weights must be positive")
+    sum_w = sum(weights)
+    sum_w2 = sum(value * value for value in weights)
+    mean = sum(value * w for value, w in pairs) / sum_w
+    denominator = sum_w - sum_w2 / sum_w
+    require(denominator > 0, "Analytic-weight variance denominator is nonpositive")
+    variance = sum(w * (value - mean) ** 2 for value, w in pairs) / denominator
+    effective_n = sum_w * sum_w / sum_w2
+    standard_error = (variance / effective_n) ** 0.5
+    return {
+        "column": column,
+        "weight": weight,
+        "weight_semantics": "analytic_reliability",
+        "mean": mean,
+        "weighted_variance": variance,
+        "standard_error": standard_error,
+        "kish_effective_n": effective_n,
+        "sum_weights": sum_w,
+        "n_total": len(dataset.records),
+        "n_used": len(pairs),
+        "n_excluded": len(dataset.records) - len(pairs),
+        "warning": (
+            "Analytic weights are not probability/survey weights and do not encode "
+            "a sampling design"
+        ),
+        "revision": dataset.revision,
+    }
+
+
 def aggregate_groups(
     dataset: Dataset,
     *,

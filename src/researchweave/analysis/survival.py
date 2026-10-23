@@ -249,6 +249,23 @@ def cox_proportional_hazards(
     coefficients = np.asarray(fitted.params, dtype=float)
     require(bool(np.all(np.isfinite(coefficients))), "Cox estimated non-finite coefficients")
     require(bool(np.all(np.isfinite(fitted.bse))), "Cox standard errors undefined")
+    intervals = np.asarray(fitted.conf_int(), dtype=float)
+    schoenfeld = np.asarray(fitted.schoenfeld_residuals, dtype=float)
+    diagnostics: dict[str, dict[str, float | None]] = {}
+    for index, predictor in enumerate(predictors):
+        valid = np.isfinite(schoenfeld[:, index]) & (statuses == 1)
+        if (
+            int(valid.sum()) >= 3
+            and np.ptp(times[valid]) > 0
+            and np.ptp(schoenfeld[valid, index]) > 0
+        ):
+            tested = stats.spearmanr(times[valid], schoenfeld[valid, index])
+            diagnostics[predictor] = {
+                "schoenfeld_time_spearman": float(tested.statistic),
+                "p_value": float(tested.pvalue),
+            }
+        else:
+            diagnostics[predictor] = {"schoenfeld_time_spearman": None, "p_value": None}
     return {
         "method": "cox_ph_breslow",
         "source_revision": dataset.revision,
@@ -261,6 +278,16 @@ def cox_proportional_hazards(
         "hazard_ratios": dict(zip(predictors, np.exp(coefficients).tolist(), strict=True)),
         "standard_errors": dict(zip(predictors, map(float, fitted.bse), strict=True)),
         "p_values": dict(zip(predictors, map(float, fitted.pvalues), strict=True)),
+        "log_hazard_confidence_intervals_95": dict(
+            zip(predictors, intervals.tolist(), strict=True)
+        ),
+        "hazard_ratio_confidence_intervals_95": dict(
+            zip(predictors, np.exp(intervals).tolist(), strict=True)
+        ),
+        "proportional_hazards_diagnostics": diagnostics,
         "tie_method": "breslow",
-        "warning": "Proportional-hazards assumption must be checked; results are associations",
+        "warning": (
+            "Schoenfeld residual time correlations are screening diagnostics; proportional-hazards "
+            "assumptions require design-aware review and results remain associations"
+        ),
     }

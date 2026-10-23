@@ -186,3 +186,78 @@ def poisson_regression(
         ),
         versions=runtime_versions(),
     )
+
+
+def negative_binomial_regression(
+    dataset: Dataset,
+    outcome: str,
+    predictors: list[str],
+    *,
+    alpha: float = 1.0,
+    offset: str | None = None,
+) -> ScientificResult:
+    """NB2 GLM with analyst-declared dispersion alpha and optional exposure offset."""
+
+    import statsmodels.api as sm
+
+    alpha = finite_number(alpha, name="negative-binomial alpha")
+    require(alpha > 0, "Negative-binomial alpha must be positive")
+    x, y, excluded = design_matrix(dataset, outcome, predictors)
+    require(
+        bool(np.all(y >= 0)) and bool(np.all(np.floor(y) == y)) and bool(np.any(y > 0)),
+        "Negative-binomial outcome must be nonnegative integer counts with at least one event",
+    )
+    log_offset = None
+    if offset is not None:
+        require(
+            offset in dataset.columns and offset != outcome and offset not in predictors,
+            "Invalid exposure column",
+        )
+        columns = [outcome, *predictors, offset]
+        complete = [row for row in dataset.records if all(row[col] is not None for col in columns)]
+        require(
+            len(complete) > len(predictors) + 2, "Insufficient cases after exposure missingness"
+        )
+        x = np.asarray([[1.0, *[finite_number(row[c]) for c in predictors]] for row in complete])
+        y = np.asarray([finite_number(row[outcome]) for row in complete])
+        exposure = np.asarray([finite_number(row[offset]) for row in complete])
+        require(bool(np.all(exposure > 0)), "Exposures must be positive")
+        log_offset = np.log(exposure)
+        excluded = len(dataset.records) - len(complete)
+    try:
+        fitted = sm.GLM(
+            y,
+            x,
+            family=sm.families.NegativeBinomial(alpha=alpha),
+            offset=log_offset,
+        ).fit(maxiter=200)
+    except (ValueError, np.linalg.LinAlgError, OverflowError) as exc:
+        raise AnalysisError("INVALID_INPUT", "Negative-binomial GLM fitting failed") from exc
+    require(bool(fitted.converged), "Negative-binomial GLM failed to converge")
+    names = ["intercept", *predictors]
+    details = {
+        "coefficients": dict(zip(names, map(float, fitted.params), strict=True)),
+        "rate_ratios": dict(zip(names, np.exp(fitted.params).tolist(), strict=True)),
+        "confidence_intervals": dict(zip(names, fitted.conf_int().tolist(), strict=True)),
+        "p_values": dict(zip(names, map(float, fitted.pvalues), strict=True)),
+        "deviance": float(fitted.deviance),
+        "aic": float(fitted.aic),
+        "alpha": alpha,
+        "variance_function": "mu + alpha * mu^2",
+        "exposure_column": offset,
+        "converged": bool(fitted.converged),
+        "missing_policy": "complete_case",
+    }
+    return ScientificResult(
+        "negative_binomial_nb2_glm",
+        dataset.revision,
+        len(dataset.records),
+        len(y),
+        excluded,
+        details=details,
+        assumptions=(
+            "NB2 conditional variance specification with analyst-declared alpha",
+            "Independent units unless the sampling design is modeled separately",
+        ),
+        versions=runtime_versions(),
+    )

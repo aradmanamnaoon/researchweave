@@ -126,6 +126,7 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "dataset.simple_impute": _schema({**IDENTITY, "column": S, "strategy": S}),
     "dataset.multiple_impute": _schema({**IDENTITY, "columns": AS, "seed": INT}, {"m": INT}),
     "statistics.weighted_mean": _schema({**IDENTITY, "column": S, "weight": S}),
+    "statistics.analytic_weighted_mean": _schema({**IDENTITY, "column": S, "weight": S}),
     "statistics.available_case": _schema({**IDENTITY, "columns": AS}),
     "statistics.recommend": _schema(
         {"outcome_type": S},
@@ -152,8 +153,12 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "statistics.effect_correlation": _schema({"r": N, "n": INT}),
     "statistics.describe": _schema({**IDENTITY, "column": S}),
     "statistics.frequency": _schema({**IDENTITY, "column": S}),
+    "statistics.grouped_describe": _schema({**IDENTITY, "column": S, "group": S}),
     "statistics.test": _schema({**IDENTITY, "outcome": S}, {"options": OBJ}),
     "statistics.correlate": _schema({**IDENTITY, "x": S, "y": S}, {"method": S}),
+    "statistics.correlation_matrix": _schema(
+        {**IDENTITY, "columns": AS}, {"method": S, "adjustment": S}
+    ),
     "statistics.psychometric": _schema({**IDENTITY, "columns": AS}, {"options": OBJ}),
     "statistics.reliability_diagnostics": _schema(
         {**IDENTITY, "columns": AS},
@@ -165,11 +170,17 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
             "seed": INT,
         },
     ),
-    "statistics.model": _schema({**IDENTITY, "outcome": S, "predictors": AS}, {"covariance": S}),
+    "statistics.model": _schema(
+        {**IDENTITY, "outcome": S, "predictors": AS},
+        {"covariance": S, "cluster_group": SN},
+    ),
     "statistics.logistic": _schema(
         {**IDENTITY, "outcome": S, "predictors": AS}, {"max_iterations": INT}
     ),
     "statistics.poisson": _schema({**IDENTITY, "outcome": S, "predictors": AS}, {"offset": SN}),
+    "statistics.negative_binomial": _schema(
+        {**IDENTITY, "outcome": S, "predictors": AS}, {"offset": SN, "alpha": N}
+    ),
     "statistics.meta": _schema({"studies": A}, {"model": S}),
     "statistics.meta_random": _schema({"studies": A}, {"tau_method": S, "hartung_knapp": B}),
     "statistics.egger": _schema({"studies": A}),

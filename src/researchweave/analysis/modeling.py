@@ -12,12 +12,24 @@ from .models import Dataset, ScientificResult, finite_number, runtime_versions
 
 
 def linear_regression(
-    dataset: Dataset, outcome: str, predictors: list[str], *, robust: str = "nonrobust"
+    dataset: Dataset,
+    outcome: str,
+    predictors: list[str],
+    *,
+    robust: str = "nonrobust",
+    cluster_group: str | None = None,
 ) -> ScientificResult:
     """Fit OLS with explicit complete-case accounting and singularity rejection."""
     import statsmodels.api as sm
 
-    require(robust in ("nonrobust", "HC0", "HC1", "HC2", "HC3"), "Unknown covariance type")
+    require(
+        robust in ("nonrobust", "HC0", "HC1", "HC2", "HC3", "cluster"),
+        "Unknown covariance type",
+    )
+    require(
+        (robust == "cluster") == (cluster_group is not None),
+        "Cluster covariance requires exactly one cluster_group",
+    )
     require(
         outcome in dataset.columns and predictors and len(set(predictors)) == len(predictors),
         "Outcome and distinct predictors required",
@@ -26,13 +38,19 @@ def linear_regression(
         outcome not in predictors and all(c in dataset.columns for c in predictors),
         "Predictor selection invalid",
     )
-    columns = [outcome, *predictors]
+    columns = [outcome, *predictors, *([cluster_group] if cluster_group else [])]
+    require(cluster_group is None or cluster_group in dataset.columns, "Unknown cluster group")
     complete = [row for row in dataset.records if all(row[c] is not None for c in columns)]
     require(len(complete) > len(predictors) + 1, "Insufficient residual degrees of freedom")
     y = np.asarray([finite_number(row[outcome]) for row in complete])
     x = np.asarray([[1.0, *[finite_number(row[c]) for c in predictors]] for row in complete])
     require(np.linalg.matrix_rank(x) == x.shape[1], "Singular design matrix")
-    fit = sm.OLS(y, x).fit(cov_type=robust)
+    if robust == "cluster":
+        groups = np.asarray([str(row[cluster_group]) for row in complete], dtype=object)
+        require(len(np.unique(groups)) >= 2, "Cluster covariance requires at least two clusters")
+        fit = sm.OLS(y, x).fit(cov_type="cluster", cov_kwds={"groups": groups})
+    else:
+        fit = sm.OLS(y, x).fit(cov_type=robust)
     coefficients = {
         name: float(value)
         for name, value in zip(["intercept", *predictors], fit.params, strict=True)
@@ -56,6 +74,7 @@ def linear_regression(
         "fitted": fit.fittedvalues.tolist(),
         "leverage": leverage.tolist(),
         "covariance": robust,
+        "cluster_group": cluster_group,
         "missing_policy": "complete_case",
     }
     return ScientificResult(

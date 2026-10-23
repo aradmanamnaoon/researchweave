@@ -88,10 +88,15 @@ def import_csv(
     encoding: str = "utf-8-sig",
     delimiter: str | None = None,
     decimal: str = ".",
+    grouping: str | None = None,
     missing: tuple[str, ...] = ("",),
     dataset_id: str | None = None,
 ) -> Dataset:
     require(decimal in (".", ","), "decimal must be dot or comma")
+    require(
+        grouping is None or (len(grouping) == 1 and grouping != decimal),
+        "Invalid grouping separator",
+    )
     require(path.is_file(), "Import source does not exist", "NOT_FOUND")
     require(
         path.stat().st_size <= MAX_BYTES, "Source exceeds configured byte budget", "RESOURCE_LIMIT"
@@ -142,10 +147,13 @@ def import_csv(
             raw = row[column]
             if raw in missing:
                 normalized[column] = None
-            elif decimal == "," and _DECIMAL_COMMA.fullmatch(raw.strip()):
-                normalized[column] = raw.strip().replace(",", ".")
             else:
-                normalized[column] = raw
+                candidate = raw.strip()
+                if grouping is not None:
+                    candidate = candidate.replace(grouping, "")
+                if decimal == "," and _DECIMAL_COMMA.fullmatch(candidate):
+                    candidate = candidate.replace(",", ".")
+                normalized[column] = candidate if candidate != raw.strip() else raw
         rows.append(normalized)
     variables = tuple(Variable(name=c, missing_values=missing) for c in columns)
     source_hash = hashlib.sha256(content).hexdigest()
@@ -156,6 +164,7 @@ def import_csv(
         "encoding": encoding,
         "delimiter": delimiter,
         "decimal": decimal,
+        "grouping": grouping,
         "missing": list(missing),
     }
     revision = digest(

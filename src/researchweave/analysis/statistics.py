@@ -104,6 +104,101 @@ def frequency_table(dataset: Dataset, column: str) -> dict[str, Any]:
     }
 
 
+def grouped_describe(dataset: Dataset, column: str, group: str) -> dict[str, Any]:
+    """Numeric descriptives by explicit observed group with denominator accounting."""
+
+    require(column in dataset.columns and group in dataset.columns, "Unknown grouped variable")
+    require(column != group, "Group and outcome must differ")
+    levels = sorted({str(row[group]) for row in dataset.records if row[group] is not None})
+    require(1 <= len(levels) <= 1000, "Invalid group count", "RESOURCE_LIMIT")
+    output = []
+    for level in levels:
+        values = [
+            finite_number(row[column], name=column)
+            for row in dataset.records
+            if row[group] is not None and str(row[group]) == level and row[column] is not None
+        ]
+        if not values:
+            output.append({"level": level, "n_valid": 0, "mean": None, "sd_sample": None})
+            continue
+        array = np.asarray(values, dtype=float)
+        output.append(
+            {
+                "level": level,
+                "n_valid": len(values),
+                "mean": float(np.mean(array)),
+                "median": float(np.median(array)),
+                "sd_sample": float(np.std(array, ddof=1)) if len(values) > 1 else None,
+                "q1": float(np.percentile(array, 25)),
+                "q3": float(np.percentile(array, 75)),
+            }
+        )
+    return {
+        "column": column,
+        "group": group,
+        "groups": output,
+        "n_total": len(dataset.records),
+        "dataset_revision": dataset.revision,
+    }
+
+
+def correlation_matrix(
+    dataset: Dataset,
+    columns: list[str],
+    *,
+    method: str = "pearson",
+    adjustment: str = "holm",
+) -> dict[str, Any]:
+    """Pairwise correlation matrix with corrected p-values and per-cell denominators."""
+
+    from .modeling import adjust_pvalues
+
+    require(
+        2 <= len(columns) <= 100 and len(set(columns)) == len(columns),
+        "Use 2..100 distinct columns",
+    )
+    require(all(column in dataset.columns for column in columns), "Unknown correlation column")
+    require(method in {"pearson", "spearman", "kendall"}, "Unsupported correlation")
+    raw_p: list[float] = []
+    cells: list[tuple[int, int, ScientificResult]] = []
+    matrix: list[list[float | None]] = [[None for _ in columns] for _ in columns]
+    denominators: list[list[int]] = [[0 for _ in columns] for _ in columns]
+    for index in range(len(columns)):
+        matrix[index][index] = 1.0
+        denominators[index][index] = sum(row[columns[index]] is not None for row in dataset.records)
+        for other in range(index + 1, len(columns)):
+            result = correlation(dataset, columns[index], columns[other], method)
+            value = float(result.estimate)
+            matrix[index][other] = matrix[other][index] = value
+            denominators[index][other] = denominators[other][index] = result.n_used
+            raw_p.append(float(result.p_value))
+            cells.append((index, other, result))
+    adjusted = adjust_pvalues(raw_p, method=adjustment) if raw_p else []
+    tests = []
+    for (index, other, result), adjusted_p in zip(cells, adjusted, strict=True):
+        tests.append(
+            {
+                "first": columns[index],
+                "second": columns[other],
+                "estimate": result.estimate,
+                "p_value": result.p_value,
+                "adjusted_p_value": adjusted_p,
+                "n_used": result.n_used,
+                "details": result.details,
+            }
+        )
+    return {
+        "method": method,
+        "columns": columns,
+        "correlation": matrix,
+        "pairwise_n": denominators,
+        "tests": tests,
+        "multiplicity_method": adjustment,
+        "family_definition": "all unique pairwise correlations among declared columns",
+        "dataset_revision": dataset.revision,
+    }
+
+
 def t_test(
     dataset: Dataset,
     outcome: str,
