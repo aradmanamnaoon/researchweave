@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .errors import EvidenceError, require
 from .project_format import archive_project, restore_archive, verify_archive
@@ -14,7 +14,7 @@ MAX_SNAPSHOTS = 20
 
 
 def _snapshot_dir(store: ProjectStore) -> Path:
-    directory = store.root / ".recovery"
+    directory = Path(store.root) / ".recovery"
     directory.mkdir(exist_ok=True)
     require(directory.is_dir() and not directory.is_symlink(),
             "Recovery directory is unsafe", "INTEGRITY_FAILURE")
@@ -66,6 +66,39 @@ def list_recovery_snapshots(store: ProjectStore) -> list[dict[str, Any]]:
     return snapshots
 
 
+def recovery_journal(store: ProjectStore, *, after_revision: int | None = None) -> dict[str, Any]:
+    """Expose durable event-ledger edits newer than a recovery snapshot."""
+    current_revision = store.info().revision
+    if after_revision is None:
+        verified = [item for item in list_recovery_snapshots(store) if item.get("ok")]
+        latest = max(verified, key=lambda row: int(row["revision"]), default=None)
+        base_revision = int(latest["revision"]) if latest is not None else 0
+    else:
+        require(
+            type(after_revision) is int and 0 <= after_revision <= current_revision,
+            "Recovery journal revision is outside the project history",
+        )
+        base_revision = after_revision
+    rows = store.conn.execute(
+        "SELECT sequence,request_id,operation,actor,payload_hash AS payload_digest,"
+        "previous_hash AS predecessor_hash,event_hash,timestamp AS recorded_at "
+        "FROM events WHERE sequence>? ORDER BY sequence",
+        (base_revision,),
+    ).fetchall()
+    entries = [dict(row) for row in rows]
+    return {
+        "project_id": store.info().id,
+        "base_revision": base_revision,
+        "current_revision": current_revision,
+        "entries": entries,
+        "count": len(entries),
+        "all_entries_committed": True,
+        "replay_required_for_current_workspace": False,
+        "network_queries": 0,
+        "writes": 0,
+    }
+
+
 def recovery_status(store: ProjectStore, *, now: str | None = None,
                     max_age_minutes: int = 15) -> dict[str, Any]:
     """Tell a trusted host whether a recovery snapshot is due, without writing.
@@ -98,6 +131,7 @@ def recovery_status(store: ProjectStore, *, now: str | None = None,
     revision_changed = latest_revision != current_revision
     age_due = age_minutes is not None and age_minutes >= max_age_minutes
     due = latest is None or revision_changed or age_due
+    journal = recovery_journal(store, after_revision=latest_revision or 0)
     reasons = []
     if latest is None:
         reasons.append("no_verified_snapshot")
@@ -113,6 +147,15 @@ def recovery_status(store: ProjectStore, *, now: str | None = None,
         "latest_snapshot_age_minutes": age_minutes,
         "max_age_minutes": max_age_minutes,
         "autosave_due": due,
+        "committed_edits_since_snapshot": journal["count"],
+        "journal": journal["entries"],
+        "unsaved_to_recovery_snapshot": bool(journal["entries"]),
+        "unsaved_message": (
+            f"{journal['count']} committed edit(s) are durable in the current project but are "
+            "not included in the latest verified recovery snapshot."
+            if journal["entries"]
+            else "All committed edits are included in the latest verified recovery snapshot."
+        ),
         "reasons": reasons,
         "network_queries": 0,
         "writes": 0,
@@ -134,4 +177,4 @@ def restore_recovery_snapshot(
     verified = verify_archive(path)
     require(verified["project_id"] == store.info().id,
             "Recovery snapshot belongs to another project", "CONFLICT")
-    return restore_archive(path, destination)
+    return cast(dict[str, Any], restore_archive(path, destination))

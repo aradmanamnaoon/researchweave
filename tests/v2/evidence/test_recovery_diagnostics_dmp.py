@@ -14,6 +14,8 @@ from researchweave.evidence.library import LibraryService
 from researchweave.evidence.recovery import (
     create_recovery_snapshot,
     list_recovery_snapshots,
+    recovery_journal,
+    recovery_status,
     restore_recovery_snapshot,
 )
 from researchweave.evidence.storage import ProjectStore
@@ -76,6 +78,21 @@ def test_interrupted_recovery_export_preserves_verified_prior_snapshot(
         listed = list_recovery_snapshots(store)
         assert [item["snapshot"] for item in listed] == [prior["snapshot"]]
         assert listed[0]["ok"] is True
+        journal = recovery_journal(store)
+        assert journal["base_revision"] == 1
+        assert journal["current_revision"] == 2
+        assert journal["count"] == 1
+        assert journal["entries"][0]["operation"] == "library.import"
+        status = recovery_status(store)
+        assert status["unsaved_to_recovery_snapshot"] is True
+        assert status["committed_edits_since_snapshot"] == 1
+        assert "durable in the current project" in status["unsaved_message"]
+
+    with ProjectStore(root) as reopened:
+        journal = recovery_journal(reopened)
+        assert journal["count"] == 1
+        assert journal["entries"][0]["sequence"] == 2
+        assert reopened.audit()["ok"]
 
 
 def test_library_diagnostics_is_read_only_and_actionable(tmp_path: Path) -> None:

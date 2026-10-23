@@ -61,6 +61,7 @@ from .publishing import PublishingService
 from .recovery import (
     create_recovery_snapshot,
     list_recovery_snapshots,
+    recovery_journal,
     recovery_status,
     restore_recovery_snapshot,
 )
@@ -116,6 +117,9 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
         "read", ("project_id",), "List and verify local recovery snapshots"),
     "project.recovery_status": (
         "read", ("project_id",), "Report whether host-driven recovery autosave is due"),
+    "project.recovery_journal": (
+        "read", ("project_id",),
+        "List committed hash-chained edits newer than the selected recovery revision"),
     "project.recovery_restore": (
         "local-write", ("project_id", "snapshot"),
         "Restore recovery snapshot to a fresh project copy"),
@@ -878,6 +882,13 @@ class EvidenceFacade:
                     now=now,
                     max_age_minutes=int(args.get("max_age_minutes", 15)),
                 )
+            if operation == "project.recovery_journal":
+                after_revision = args.get("after_revision")
+                require(
+                    after_revision is None or type(after_revision) is int,
+                    "Invalid recovery journal revision",
+                )
+                return recovery_journal(store, after_revision=after_revision)
             if operation == "project.recovery_restore":
                 recovery_root = self.workspace_root / "recovery-restores"
                 recovery_root.mkdir(exist_ok=True)
