@@ -1,0 +1,8 @@
+# AI subsystem architecture
+
+`AIFacade` presents namespaced operations, while `ProviderRegistry` controls model endpoints through `EgressPolicy`, `EvidenceIndex` persists source-bound text chunks in SQLite, and `AgentRuntime` persists ordered plans and receipts. `ApprovalIssuer` signs an exact project/operation/argument digest with an independent host-owned HMAC key; neither content nor model output creates this authorization.
+
+Local retrieval remains usable with zero model or internet connectivity. Provider HTTP requests are bounded and endpoint restricted. SQL databases stay within a host supplied existing project directory. Integrator must implement a trusted composition root and inject a persisted host approval issuer into agent runtime for effects.
+
+**Known security limitations:** DNS responses for non-literal remote hostnames have not yet been validated against private ranges, and Python's default proxy handling is not disabled. Therefore the current remote HTTP adapter must **not be enabled for untrusted endpoint configuration or production sensitive-data egress**. Remote provider support is an experimental interface with fake-transport tests only. Agent side-effect callbacks are synchronous; interrupted execution after callback and before receipt persistence may replay effects. Only idempotent callbacks are safe until atomic operation coordination is implemented.
+
