@@ -196,6 +196,85 @@ def two_proportion_power(
     )
 
 
+def two_proportion_required(
+    *,
+    p1: float,
+    p2: float,
+    target_power: float = 0.8,
+    ratio: float = 1,
+    alpha: float = 0.05,
+) -> PowerEstimate:
+    """Required n1 for the supported normal-approximation two-proportion design."""
+
+    from statsmodels.stats.proportion import proportion_effectsize
+
+    p1 = finite_number(p1, name="p1")
+    p2 = finite_number(p2, name="p2")
+    ratio = finite_number(ratio, name="ratio")
+    target_power = finite_number(target_power, name="target power")
+    require(0 <= p1 <= 1 and 0 <= p2 <= 1 and p1 != p2, "Distinct proportions required")
+    require(0 < alpha < 1 and 0 < target_power < 1 and ratio > 0, "Invalid planning inputs")
+    effect = abs(float(proportion_effectsize(p1, p2)))
+    try:
+        continuous = float(
+            NormalIndPower().solve_power(
+                effect_size=effect,
+                power=target_power,
+                alpha=alpha,
+                ratio=ratio,
+                alternative="two-sided",
+            )
+        )
+    except (ValueError, OverflowError) as exc:
+        raise AnalysisError("INVALID_INPUT", "Cannot solve proportion sample size") from exc
+    require(
+        math.isfinite(continuous) and continuous <= 10_000_000,
+        "Required sample exceeds planning budget",
+        "RESOURCE_LIMIT",
+    )
+    n1 = max(2, math.ceil(continuous))
+    n2 = max(2, math.ceil(n1 * ratio))
+    achieved = two_proportion_power(p1=p1, p2=p2, n_group1=n1, ratio=n2 / n1, alpha=alpha)
+    return PowerEstimate(
+        achieved.family,
+        achieved.alternative,
+        alpha,
+        effect,
+        achieved.power,
+        float(n1),
+        float(n2),
+        n2 / n1,
+        "Approximate prospective planning; assumed proportions must be justified",
+    )
+
+
+def mean_precision_required(
+    *,
+    assumed_sd: float,
+    margin: float,
+    confidence: float = 0.95,
+) -> dict[str, float | int | str]:
+    """Normal-theory initial sample size for a target two-sided mean-CI half-width."""
+
+    sd = finite_number(assumed_sd, name="assumed SD")
+    half_width = finite_number(margin, name="margin")
+    require(sd > 0 and half_width > 0, "Positive SD and margin required")
+    require(0.5 < confidence < 1, "Confidence must lie in (0.5,1)")
+    z = float(stats.norm.ppf(0.5 + confidence / 2))
+    n = max(2, math.ceil((z * sd / half_width) ** 2))
+    return {
+        "family": "mean_precision_normal_initial",
+        "assumed_sd": sd,
+        "target_half_width": half_width,
+        "confidence": confidence,
+        "required_n": n,
+        "normal_approximation_half_width": z * sd / math.sqrt(n),
+        "limitation": (
+            "Initial normal-theory planning; small samples should iterate using a t critical value"
+        ),
+    }
+
+
 def confidence_interval_mean(values: list[float], *, alpha: float = 0.05) -> dict[str, float | int]:
     """Two-sided Student t interval from raw IID numeric observations."""
     require(0 < alpha < 1, "Alpha outside range")

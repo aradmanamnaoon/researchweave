@@ -73,13 +73,20 @@ from .multivariate import (
     principal_components,
 )
 from .plots import render_plot
-from .power import two_sample_t_power, two_sample_t_required
+from .power import (
+    mean_precision_required,
+    one_sample_t_power,
+    two_proportion_power,
+    two_proportion_required,
+    two_sample_t_power,
+    two_sample_t_required,
+)
 from .psychometrics import reliability_diagnostics
 from .recommendations import recommend_from_mapping
 from .runtime import RuntimeAuthorizer, run_script
 from .scale_scoring import ScaleDefinition, item_total_diagnostics, score_scale
 from .schemas import RESULT_SCHEMA, schema_for, validate_arguments
-from .statistics import correlation, describe, reliability, t_test
+from .statistics import correlation, describe, frequency_table, reliability, t_test
 from .survey import design_weighted_mean, survey_proportions
 from .survival import cox_proportional_hazards, kaplan_meier, logrank_test
 from .time_series import (
@@ -144,6 +151,7 @@ class AnalysisFacade:
             "statistics.effect_anova": "read",
             "statistics.effect_correlation": "read",
             "statistics.describe": "read",
+            "statistics.frequency": "read",
             "statistics.test": "read",
             "statistics.correlate": "read",
             "statistics.psychometric": "read",
@@ -178,6 +186,10 @@ class AnalysisFacade:
             "statistics.cluster_validation": "read",
             "statistics.power": "read",
             "statistics.required_n": "read",
+            "statistics.power_one_sample": "read",
+            "statistics.power_proportion": "read",
+            "statistics.required_n_proportion": "read",
+            "statistics.required_n_precision": "read",
             "statistics.diagnostics": "read",
             "statistics.vif": "read",
             "statistics.score_scale": "read",
@@ -359,14 +371,29 @@ class AnalysisFacade:
                 iterations=int(arguments.get("iterations", 10_000)),
                 alternative=str(arguments.get("alternative", "two-sided")),
             )
-        elif operation in ("statistics.power", "statistics.required_n"):
+        elif operation in (
+            "statistics.power",
+            "statistics.required_n",
+            "statistics.power_one_sample",
+            "statistics.power_proportion",
+            "statistics.required_n_proportion",
+            "statistics.required_n_precision",
+        ):
             from dataclasses import asdict
 
             options = dict(arguments)
             if operation == "statistics.power":
                 data = asdict(two_sample_t_power(**options))
-            else:
+            elif operation == "statistics.required_n":
                 data = asdict(two_sample_t_required(**options))
+            elif operation == "statistics.power_one_sample":
+                data = asdict(one_sample_t_power(**options))
+            elif operation == "statistics.power_proportion":
+                data = asdict(two_proportion_power(**options))
+            elif operation == "statistics.required_n_proportion":
+                data = asdict(two_proportion_required(**options))
+            else:
+                data = mean_precision_required(**options)
         elif operation == "statistics.fleiss":
             data = fleiss_agreement(list(arguments["rating_counts"]))
         elif operation == "statistics.icc":
@@ -512,6 +539,8 @@ class AnalysisFacade:
             obj = self._dataset(arguments)
             if operation == "statistics.describe":
                 data = describe(obj, str(arguments["column"]))
+            elif operation == "statistics.frequency":
+                data = frequency_table(obj, str(arguments["column"]))
             elif operation == "statistics.available_case":
                 data = available_case_covariance(obj, list(arguments["columns"]))
             elif operation == "statistics.distribution":

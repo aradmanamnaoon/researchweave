@@ -151,6 +151,7 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     ),
     "statistics.effect_correlation": _schema({"r": N, "n": INT}),
     "statistics.describe": _schema({**IDENTITY, "column": S}),
+    "statistics.frequency": _schema({**IDENTITY, "column": S}),
     "statistics.test": _schema({**IDENTITY, "outcome": S}, {"options": OBJ}),
     "statistics.correlate": _schema({**IDENTITY, "x": S, "y": S}, {"method": S}),
     "statistics.psychometric": _schema({**IDENTITY, "columns": AS}, {"options": OBJ}),
@@ -218,6 +219,14 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
         {"effect": N},
         {"target_power": N, "ratio": N, "alpha": N, "alternative": S},
     ),
+    "statistics.power_one_sample": _schema({"effect": N, "n": INT}, {"alpha": N, "alternative": S}),
+    "statistics.power_proportion": _schema(
+        {"p1": N, "p2": N, "n_group1": INT}, {"ratio": N, "alpha": N}
+    ),
+    "statistics.required_n_proportion": _schema(
+        {"p1": N, "p2": N}, {"target_power": N, "ratio": N, "alpha": N}
+    ),
+    "statistics.required_n_precision": _schema({"assumed_sd": N, "margin": N}, {"confidence": N}),
     "statistics.diagnostics": _schema({**IDENTITY, "outcome": S, "predictors": AS}),
     "statistics.vif": _schema({**IDENTITY, "predictors": AS}),
     "statistics.score_scale": _schema({**IDENTITY, "scale": OBJ}, {"row_id": SN}),

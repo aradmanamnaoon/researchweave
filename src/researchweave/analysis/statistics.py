@@ -26,19 +26,80 @@ def describe(dataset: Dataset, column: str) -> dict[str, Any]:
     values, missing = numeric(dataset, column)
     n = len(values)
     require(n > 0, "No valid observations")
+    mean = float(np.mean(values))
+    median = float(np.median(values))
+    sd = float(np.std(values, ddof=1)) if n > 1 else None
+    sem = sd / math.sqrt(n) if sd is not None else None
+    mean_ci = None
+    if sem is not None:
+        cutoff = float(stats.t.ppf(0.975, n - 1))
+        mean_ci = [mean - cutoff * sem, mean + cutoff * sem]
+    mad = float(np.median(np.abs(values - median)))
+    skewness = float(stats.skew(values, bias=False)) if n >= 3 and np.ptp(values) > 0 else None
+    kurtosis = (
+        float(stats.kurtosis(values, fisher=True, bias=False))
+        if n >= 4 and np.ptp(values) > 0
+        else None
+    )
     return {
         "column": column,
         "n_total": len(dataset.records),
         "n_valid": n,
         "n_missing": missing,
-        "mean": float(np.mean(values)),
-        "median": float(np.median(values)),
-        "sd_sample": float(np.std(values, ddof=1)) if n > 1 else None,
+        "mean": mean,
+        "median": median,
+        "sd_sample": sd,
+        "standard_error_mean": sem,
+        "mean_confidence_interval_95": mean_ci,
         "min": float(np.min(values)),
         "max": float(np.max(values)),
         "q1": float(np.percentile(values, 25)),
         "q3": float(np.percentile(values, 75)),
+        "iqr": float(np.percentile(values, 75) - np.percentile(values, 25)),
+        "median_absolute_deviation": mad,
+        "skewness_bias_corrected": skewness,
+        "excess_kurtosis_bias_corrected": kurtosis,
         "ddof": 1,
+        "dataset_revision": dataset.revision,
+    }
+
+
+def frequency_table(dataset: Dataset, column: str) -> dict[str, Any]:
+    """Categorical counts and percentages with explicit missing denominator."""
+
+    require(column in dataset.columns, "Unknown variable", "NOT_FOUND")
+    variable = next(value for value in dataset.variables if value.name == column)
+    missing_codes = set(variable.missing_values)
+    counts: dict[str, int] = {}
+    missing = 0
+    for row in dataset.records:
+        value = row[column]
+        if value is None or str(value) in missing_codes:
+            missing += 1
+            continue
+        label = str(value)
+        counts[label] = counts.get(label, 0) + 1
+    valid = sum(counts.values())
+    require(valid > 0, "No valid categorical observations")
+    order = list(variable.category_order)
+    observed = sorted(set(counts) - set(order))
+    levels = [*order, *observed]
+    return {
+        "column": column,
+        "n_total": len(dataset.records),
+        "n_valid": valid,
+        "n_missing": missing,
+        "levels": [
+            {
+                "value": level,
+                "label": variable.value_labels.get(level, level),
+                "count": counts.get(level, 0),
+                "percent_valid": counts.get(level, 0) / valid * 100,
+                "percent_total": counts.get(level, 0) / len(dataset.records) * 100,
+            }
+            for level in levels
+            if counts.get(level, 0) > 0 or level in order
+        ],
         "dataset_revision": dataset.revision,
     }
 
@@ -183,6 +244,17 @@ def correlation(dataset: Dataset, x: str, y: str, method: str = "pearson") -> Sc
         "kendall": stats.kendalltau,
     }[method]
     output = function(a, b)
+    details: dict[str, Any] = {"variables": [x, y], "missing_policy": "pairwise"}
+    if method == "pearson" and len(pairs) >= 4 and abs(float(output.statistic)) < 1:
+        fisher = math.atanh(float(output.statistic))
+        se = 1 / math.sqrt(len(pairs) - 3)
+        cutoff = float(stats.norm.ppf(0.975))
+        details["fisher_z_confidence_interval_95"] = [
+            math.tanh(fisher - cutoff * se),
+            math.tanh(fisher + cutoff * se),
+        ]
+    else:
+        details["confidence_interval"] = None
     return ScientificResult(
         method,
         dataset.revision,
@@ -192,7 +264,7 @@ def correlation(dataset: Dataset, x: str, y: str, method: str = "pearson") -> Sc
         float(output.statistic),
         float(output.statistic),
         float(output.pvalue),
-        details={"variables": [x, y], "missing_policy": "pairwise"},
+        details=details,
         assumptions=("Independence and sampling design must be reviewed",),
         versions=runtime_versions(),
     )

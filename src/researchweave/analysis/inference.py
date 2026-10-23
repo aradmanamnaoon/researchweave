@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from itertools import combinations
 from typing import Any
@@ -46,16 +47,42 @@ def contingency(
     fisher: dict[str, float] | None = None
     if counts.shape == (2, 2):
         odds, exact_p = stats.fisher_exact(counts)
-        fisher = {"odds_ratio": float(odds), "two_sided_p": float(exact_p)}
+        corrected = counts.astype(float)
+        used_correction = bool(np.any(corrected == 0))
+        if used_correction:
+            corrected += 0.5
+        log_odds = float(
+            np.log((corrected[0, 0] * corrected[1, 1]) / (corrected[0, 1] * corrected[1, 0]))
+        )
+        log_se = float(np.sqrt(np.sum(1 / corrected)))
+        cutoff = float(stats.norm.ppf(0.975))
+        fisher = {
+            "odds_ratio": float(odds),
+            "two_sided_p": float(exact_p),
+            "odds_ratio_ci_95": [
+                float(np.exp(log_odds - cutoff * log_se)),
+                float(np.exp(log_odds + cutoff * log_se)),
+            ],
+            "zero_cell_correction_for_ci": used_correction,
+        }
+    n = counts.sum()
+    row_totals = counts.sum(axis=1, keepdims=True)
+    column_totals = counts.sum(axis=0, keepdims=True)
+    phi2 = float(chi.statistic / n)
+    cramer_v = math.sqrt(phi2 / max(1, min(counts.shape[0] - 1, counts.shape[1] - 1)))
     return {
         "variables": [first, second],
         "row_levels": labels_a,
         "column_levels": labels_b,
         "counts": counts.tolist(),
         "expected": chi.expected_freq.tolist(),
+        "row_percent": (counts / row_totals * 100).tolist(),
+        "column_percent": (counts / column_totals * 100).tolist(),
+        "total_percent": (counts / n * 100).tolist(),
         "chi_squared": float(chi.statistic),
         "df": int(chi.dof),
         "p_value": float(chi.pvalue),
+        "cramers_v": cramer_v,
         "fisher_2x2": fisher,
         "n_total": len(dataset.records),
         "n_used": len(rows),
