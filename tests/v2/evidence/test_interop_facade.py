@@ -48,6 +48,15 @@ def test_facade_migration_loss_audit_preview_import_reopen_undo(tmp_path: Path) 
     assert imported["data"]["receipt"]["imported"] == 1
     assert imported["data"]["receipt"]["skipped"] == 1
 
+    exported = facade.execute(
+        "migration.zotero_export",
+        {"project_id": project_id, "batch_id": batch_id},
+        {},
+    )
+    assert exported["status"] == "ok"
+    assert exported["data"]["exact_original_export"] is True
+    assert exported["data"]["sha256"] == preview["data"]["source_sha256"]
+
     reopened = build_evidence_facade(workspace, allow_local_writes=True)
     receipt = reopened.execute(
         "migration.interop_receipt",

@@ -370,6 +370,9 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "migration.zotero_import": (
         "local-write", ("project_id", "data_base64"),
         "Import Zotero CSL-JSON with explicit fidelity receipt"),
+    "migration.zotero_export": (
+        "read", ("project_id", "batch_id"),
+        "Export exact preserved Zotero CSL-JSON with mapping receipt"),
     "migration.obsidian_preview": (
         "read", ("files",), "Preview sanitized Obsidian vault Markdown mapping"),
     "migration.obsidian_import": (
@@ -1396,6 +1399,8 @@ class EvidenceFacade:
             interop = InteroperabilityService(store)
             if operation == "migration.zotero_import":
                 return interop.import_zotero(_bytes(args), expected_revision=expected)
+            if operation == "migration.zotero_export":
+                return interop.export_zotero(_value(args, "batch_id", str))
             if operation == "migration.obsidian_import":
                 return interop.import_obsidian(_vault_records(args), expected_revision=expected)
             if operation == "migration.obsidian_export":

@@ -65,12 +65,32 @@ def test_zotero_export_preview_import_receipt_reopen_and_undo(tmp_path: Path) ->
         assert store.get_object(receipt["raw_digest"]) == data
     with ProjectStore(root) as reopened:
         service = InteroperabilityService(reopened)
+        exported = service.export_zotero(batch_id)
+        assert exported["sha256"] == preview["source_sha256"]
+        assert exported["exact_original_export"] is True
+        assert exported["attachment_bytes_reconstructed"] is False
+        assert __import__("base64").b64decode(exported["data_base64"]) == data
+        assert exported["mappings"][0]["source_record_id"] == "Z1"
+        assert exported["mappings"][0]["preserved_mapping"]["collections"] == [
+            "systematic-review"
+        ]
+        assert exported["mappings"][0]["preserved_mapping"]["notes"] == [
+            "screen manually"
+        ]
+        assert exported["mappings"][0]["preserved_mapping"]["attachments"][0][
+            "title"
+        ] == "PDF"
         assert service.receipt(batch_id)["undone"] is False
         undone = service.undo(batch_id)
         assert undone["removed_references"] == 1
     with ProjectStore(root) as reopened:
         assert reopened.conn.execute("SELECT COUNT(*) FROM reference").fetchone()[0] == 0
-        assert InteroperabilityService(reopened).receipt(batch_id)["undone"] is True
+        service = InteroperabilityService(reopened)
+        assert service.receipt(batch_id)["undone"] is True
+        exported = service.export_zotero(batch_id)
+        assert exported["undone"] is True
+        assert exported["mappings"][0]["destination_present"] is False
+        assert __import__("base64").b64decode(exported["data_base64"]) == data
         assert reopened.audit()["ok"]
 
 

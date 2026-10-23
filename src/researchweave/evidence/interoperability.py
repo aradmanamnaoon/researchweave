@@ -336,6 +336,74 @@ class InteroperabilityService:
             "receipt": receipt,
         }
 
+    def export_zotero(self, batch_id: str) -> dict[str, Any]:
+        """Return exact preserved user-owned Zotero CSL-JSON with mapping audit.
+
+        Attachment bytes absent from the original CSL-JSON are never
+        reconstructed. Current ResearchWeave reference edits are reported
+        alongside the original mapping but are not silently written into the
+        preserved source export.
+        """
+        batch = self.store.conn.execute(
+            "SELECT * FROM interop_batches WHERE id=? AND adapter='zotero-csl-json-v1'",
+            (batch_id,),
+        ).fetchone()
+        require(batch is not None, "Zotero migration batch not found", "NOT_FOUND")
+        raw = self.store.get_object(str(batch["raw_digest"]))
+        digest = sha256(raw)
+        require(digest == batch["source_sha256"],
+                "Preserved Zotero export checksum mismatch", "INTEGRITY_FAILURE")
+        mappings: list[dict[str, Any]] = []
+        for row in self.store.conn.execute(
+            "SELECT source_record_id,destination_id,mapping_json,loss_json "
+            "FROM interop_records WHERE batch_id=? AND kind='reference' "
+            "ORDER BY source_record_id",
+            (batch_id,),
+        ):
+            mapping = json.loads(row["mapping_json"])
+            loss = json.loads(row["loss_json"])
+            require(isinstance(mapping, dict), "Invalid Zotero mapping receipt",
+                    "INTEGRITY_FAILURE")
+            require(isinstance(loss, list), "Invalid Zotero loss receipt",
+                    "INTEGRITY_FAILURE")
+            current = self.store.conn.execute(
+                "SELECT id,title,authors_json,year,doi,kind,status FROM reference WHERE id=?",
+                (row["destination_id"],),
+            ).fetchone()
+            mappings.append({
+                "source_record_id": row["source_record_id"],
+                "destination_id": row["destination_id"],
+                "destination_present": current is not None,
+                "current_reference": ({
+                    "id": current["id"],
+                    "title": current["title"],
+                    "authors": json.loads(current["authors_json"]),
+                    "year": current["year"],
+                    "doi": current["doi"],
+                    "kind": current["kind"],
+                    "status": current["status"],
+                } if current is not None else None),
+                "preserved_mapping": mapping,
+                "information_loss": loss,
+            })
+        return {
+            "adapter": "zotero-csl-json-v1",
+            "batch_id": batch_id,
+            "data_base64": base64.b64encode(raw).decode("ascii"),
+            "sha256": digest,
+            "bytes": len(raw),
+            "exact_original_export": True,
+            "undone": batch["undone_at"] is not None,
+            "mappings": mappings,
+            "raw_input_preserved": True,
+            "current_reference_metadata_applied_to_export": False,
+            "attachment_bytes_reconstructed": False,
+            "warning": (
+                "Exact preserved CSL-JSON; missing attachment bytes are not synthesized "
+                "and current metadata is not silently written into the original export."
+            ),
+        }
+
     def import_obsidian(
         self, records: list[VaultRecord], *, expected_revision: int | None = None
     ) -> dict[str, Any]:
