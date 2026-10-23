@@ -441,6 +441,44 @@ def repeated_measures_anova(
             "Mauchly and Greenhouse-Geisser diagnostics are one-factor screening tools "
             "and require design-aware interpretation"
         )
+    wide = frame.pivot(index="subject", columns="within", values="outcome")[levels]
+    contrasts: list[dict[str, Any]] = []
+    raw_pvalues: list[float] = []
+    for first_index, first in enumerate(levels):
+        for second in levels[first_index + 1 :]:
+            differences = wide[first].to_numpy(dtype=float) - wide[second].to_numpy(dtype=float)
+            require(
+                np.std(differences, ddof=1) > 0,
+                "Repeated contrast has zero difference variance",
+            )
+            tested = stats.ttest_rel(wide[first], wide[second])
+            mean_difference = float(np.mean(differences))
+            standard_error = float(stats.sem(differences))
+            critical = float(stats.t.ppf(0.975, df=n_subjects - 1))
+            p_value = float(tested.pvalue)
+            raw_pvalues.append(p_value)
+            contrasts.append(
+                {
+                    "first": first,
+                    "second": second,
+                    "mean_difference": mean_difference,
+                    "standard_error": standard_error,
+                    "t": float(tested.statistic),
+                    "df": n_subjects - 1,
+                    "p_value": p_value,
+                    "confidence_interval_95": [
+                        mean_difference - critical * standard_error,
+                        mean_difference + critical * standard_error,
+                    ],
+                    "cohen_dz": mean_difference / float(np.std(differences, ddof=1)),
+                }
+            )
+    if contrasts:
+        from .modeling import adjust_pvalues
+
+        adjusted = adjust_pvalues(raw_pvalues, method="holm")
+        for row, corrected in zip(contrasts, adjusted, strict=True):
+            row["holm_adjusted_p"] = float(corrected)
     return {
         "method": "repeated_measures_anova",
         "statistic": float(table["F Value"]),
@@ -452,6 +490,8 @@ def repeated_measures_anova(
         "n_used": len(frame),
         "n_excluded": len(dataset.records) - len(frame),
         "sphericity": sphericity,
+        "pairwise_within_subject_contrasts": contrasts,
+        "contrast_multiplicity": "holm",
         "warnings": warnings,
         "dataset_revision": dataset.revision,
     }
@@ -487,10 +527,13 @@ def ancova(
         rows.append(record)
     frame = pd.DataFrame(rows)
     require(len(frame) >= 5 and frame["group"].nunique() >= 2, "Insufficient ANCOVA observations")
-    main = " + ".join(["C(group)", *[f"x{i}" for i in range(len(covariates))]])
+    group_term = "C(group, Sum)" if typ == 3 else "C(group)"
+    main = " + ".join([group_term, *[f"x{i}" for i in range(len(covariates))]])
     formula = f"y ~ {main}"
     if include_slope_interactions:
-        formula += " + " + " + ".join(f"C(group):x{i}" for i in range(len(covariates)))
+        formula += " + " + " + ".join(
+            f"{group_term}:x{i}" for i in range(len(covariates))
+        )
     try:
         fit = smf.ols(formula, data=frame).fit()
         require(
@@ -504,7 +547,7 @@ def ancova(
     for label, values in table.iterrows():
         if label == "Residual":
             continue
-        source = str(label).replace("C(group)", factor)
+        source = str(label).replace("C(group, Sum)", factor).replace("C(group)", factor)
         for index, covariate in enumerate(covariates):
             source = source.replace(f"x{index}", covariate)
         entries.append(
@@ -516,13 +559,89 @@ def ancova(
                 "p_value": float(values["PR(>F)"]),
             }
         )
+    from patsy import dmatrix
+
+    group_levels = sorted(frame["group"].unique())
+    covariate_means = {
+        f"x{index}": float(frame[f"x{index}"].mean()) for index in range(len(covariates))
+    }
+    reference_rows = pd.DataFrame(
+        [{"group": level, **covariate_means} for level in group_levels]
+    )
+    right_hand_side = formula.split("~", maxsplit=1)[1]
+    reference_matrix = dmatrix(right_hand_side, reference_rows, return_type="dataframe")
+    require(
+        list(reference_matrix.columns) == list(fit.model.exog_names),
+        "Adjusted ANCOVA design differs from fitted model",
+        "INTEGRITY_FAILURE",
+    )
+    reference_design = np.asarray(reference_matrix, dtype=float)
+    beta = np.asarray(fit.params, dtype=float)
+    covariance = np.asarray(fit.cov_params(), dtype=float)
+    adjusted_means: list[dict[str, Any]] = []
+    critical = float(stats.t.ppf(0.975, df=float(fit.df_resid)))
+    for index, level in enumerate(group_levels):
+        vector = reference_design[index]
+        estimate = float(vector @ beta)
+        standard_error = float(math.sqrt(max(0.0, vector @ covariance @ vector)))
+        adjusted_means.append(
+            {
+                "level": level,
+                "estimate": estimate,
+                "standard_error": standard_error,
+                "confidence_interval_95": [
+                    estimate - critical * standard_error,
+                    estimate + critical * standard_error,
+                ],
+            }
+        )
+    pairwise: list[dict[str, Any]] = []
+    pairwise_p: list[float] = []
+    for first_index, first in enumerate(group_levels):
+        for second_index in range(first_index + 1, len(group_levels)):
+            second = group_levels[second_index]
+            contrast = reference_design[first_index] - reference_design[second_index]
+            estimate = float(contrast @ beta)
+            standard_error = float(math.sqrt(max(0.0, contrast @ covariance @ contrast)))
+            require(standard_error > 0, "Adjusted ANCOVA contrast has zero uncertainty")
+            t_value = estimate / standard_error
+            p_value = float(2 * stats.t.sf(abs(t_value), df=float(fit.df_resid)))
+            pairwise_p.append(p_value)
+            pairwise.append(
+                {
+                    "first": first,
+                    "second": second,
+                    "estimate": estimate,
+                    "standard_error": standard_error,
+                    "t": t_value,
+                    "df": float(fit.df_resid),
+                    "p_value": p_value,
+                    "confidence_interval_95": [
+                        estimate - critical * standard_error,
+                        estimate + critical * standard_error,
+                    ],
+                }
+            )
+    if pairwise:
+        from .modeling import adjust_pvalues
+
+        adjusted = adjust_pvalues(pairwise_p, method="holm")
+        for row, corrected in zip(pairwise, adjusted, strict=True):
+            row["holm_adjusted_p"] = float(corrected)
     return {
         "method": "ancova",
         "type": typ,
+        "contrast_coding": "sum_to_zero" if typ == 3 else "treatment",
         "factor": factor,
         "covariates": covariates,
         "slope_interactions": include_slope_interactions,
         "terms": entries,
+        "adjustment_point": {
+            covariate: covariate_means[f"x{index}"] for index, covariate in enumerate(covariates)
+        },
+        "adjusted_group_means": adjusted_means,
+        "adjusted_pairwise_contrasts": pairwise,
+        "contrast_multiplicity": "holm",
         "residual_df": float(fit.df_resid),
         "n_used": len(frame),
         "n_excluded": len(dataset.records) - len(frame),

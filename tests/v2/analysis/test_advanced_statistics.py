@@ -87,6 +87,14 @@ def test_repeated_measures_oracle(tmp_path: Path):
     assert 0 < diagnostic["greenhouse_geisser_epsilon"] <= 1
     assert diagnostic["corrected_df_num"] <= result["df_num"]
     assert 0 <= diagnostic["corrected_p_value"] <= 1
+    contrasts = result["pairwise_within_subject_contrasts"]
+    assert len(contrasts) == 3
+    assert all(row["holm_adjusted_p"] >= row["p_value"] for row in contrasts)
+    first = next(row for row in contrasts if row["first"] == "t1" and row["second"] == "t2")
+    wide = np.asarray([[1, 2], [2, 4], [3, 5]], dtype=float)
+    oracle = stats.ttest_rel(wide[:, 0], wide[:, 1])
+    assert first["t"] == pytest.approx(oracle.statistic)
+    assert first["p_value"] == pytest.approx(oracle.pvalue)
 
 
 def test_type_three_factorial_uses_sum_contrasts_on_unbalanced_design(tmp_path: Path):
@@ -108,6 +116,23 @@ def test_type_three_factorial_uses_sum_contrasts_on_unbalanced_design(tmp_path: 
     observed = {row["source"]: row for row in result["terms"]}
     assert observed["a"]["f"] == pytest.approx(float(oracle.loc["C(f0, Sum)", "F"]))
     assert observed["b"]["p_value"] == pytest.approx(float(oracle.loc["C(f1, Sum)", "PR(>F)"]))
+
+
+def test_ancova_reports_adjusted_means_and_covariance_based_contrast(tmp_path: Path):
+    dataset = _dataset(
+        tmp_path,
+        "ancova_adjusted.csv",
+        "group,x,y\nA,1,5\nA,2,7\nA,3,8\nA,4,10\nB,2,8\nB,3,10\nB,4,12\nB,5,14\n",
+    )
+    result = ancova(dataset, "y", "group", ["x"], typ=3)
+    assert result["contrast_coding"] == "sum_to_zero"
+    assert result["adjustment_point"]["x"] == pytest.approx(3.0)
+    means = {row["level"]: row for row in result["adjusted_group_means"]}
+    assert set(means) == {"A", "B"}
+    contrast = result["adjusted_pairwise_contrasts"][0]
+    assert contrast["estimate"] == pytest.approx(means["A"]["estimate"] - means["B"]["estimate"])
+    assert contrast["standard_error"] > 0
+    assert 0 <= contrast["p_value"] <= contrast["holm_adjusted_p"] <= 1
 
 
 def test_mixed_effects_fixed_slope_reference(tmp_path: Path):
