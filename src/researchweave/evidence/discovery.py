@@ -24,6 +24,8 @@ from .models import now_utc, sha256
 MAX_RESPONSE_BYTES = 2 * 1024 * 1024
 MAX_QUERY_LENGTH = 500
 MAX_RESULTS = 50
+MAX_PAGED_RESULTS = 200
+MAX_PAGES = 10
 MAX_TIMEOUT_SECONDS = 20.0
 HOSTS = {
     "crossref": ("api.crossref.org", "/works"),
@@ -343,3 +345,229 @@ class CatalogClient:
                   "license_note": "Identifier metadata is not proof of full-text availability"}
         self.cache[cache_key] = result
         return result
+
+    def search_pages(
+        self,
+        provider: str,
+        query: str,
+        *,
+        total_limit: int = 100,
+        page_size: int = 25,
+    ) -> dict[str, Any]:
+        """Fetch several bounded provider pages within one explicit remote operation."""
+        require(provider in HOSTS, "Unsupported catalog provider", "UNSUPPORTED_FORMAT")
+        require(bool(query.strip()) and len(query) <= MAX_QUERY_LENGTH,
+                "Research query must be between 1 and 500 characters")
+        require(
+            type(total_limit) is int and 1 <= total_limit <= MAX_PAGED_RESULTS,
+            "Total result limit must be 1..200",
+        )
+        require(type(page_size) is int and 1 <= page_size <= MAX_RESULTS,
+                "Page size must be 1..50")
+        if self.offline or self.transport is None:
+            raise EvidenceError(
+                "OFFLINE_DENIED",
+                "Remote catalog pagination needs approval",
+                "Use offline references or allow provider access through host.",
+            )
+        instant = self.clock()
+        if instant < self.cooldown_until.get(provider, float("-inf")):
+            raise EvidenceError(
+                "RATE_LIMITED",
+                "Provider requested cooldown",
+                "Retry after the provider's Retry-After interval.",
+            )
+        previous = self.last_request.get(provider)
+        if previous is not None and instant - previous < self.min_interval_seconds:
+            raise EvidenceError(
+                "RATE_LIMITED",
+                "Provider cooldown has not elapsed",
+                "Wait for the provider's rate window before retrying.",
+            )
+        self.last_request[provider] = instant
+        headers: dict[str, str] = {
+            "Accept": "application/json",
+            "Accept-Encoding": "identity",
+            "User-Agent": "ResearchWeave/0.1 (opt-in metadata lookup)",
+        }
+        if provider == "openalex" and self.openalex_key:
+            headers["Authorization"] = f"Bearer {self.openalex_key}"
+        host, endpoint = HOSTS[provider]
+        records: list[dict[str, Any]] = []
+        response_hashes: list[str] = []
+        pages: list[dict[str, Any]] = []
+        token: str | int | None = "*" if provider in {"crossref", "openalex"} else 0
+        seen: set[str] = set()
+        for page_index in range(MAX_PAGES):
+            remaining = total_limit - len(records)
+            if remaining <= 0:
+                break
+            size = min(page_size, remaining)
+            if provider == "crossref":
+                params = {
+                    "query.bibliographic": query,
+                    "rows": str(size),
+                    "cursor": str(token),
+                }
+                if self.contact_email:
+                    params["mailto"] = self.contact_email
+            elif provider == "openalex":
+                params = {"search": query, "per_page": str(size), "cursor": str(token)}
+            elif provider == "europepmc":
+                if not isinstance(token, int):
+                    raise EvidenceError(
+                        "INTERNAL_ERROR",
+                        "Europe PMC pagination token is invalid",
+                        "Restart the paged search.",
+                    )
+                params = {
+                    "query": query,
+                    "format": "json",
+                    "pageSize": str(size),
+                    "resultType": "lite",
+                    "page": str(token + 1),
+                }
+            else:
+                if not isinstance(token, int):
+                    raise EvidenceError(
+                        "INTERNAL_ERROR",
+                        "PubMed pagination token is invalid",
+                        "Restart the paged search.",
+                    )
+                params = {
+                    "db": "pubmed",
+                    "term": query,
+                    "retmode": "json",
+                    "retmax": str(size),
+                    "retstart": str(token),
+                }
+            payload, digest = self._call(provider, endpoint, params, headers)
+            response_hashes.append(digest)
+            if provider == "pubmed":
+                search_block = payload.get("esearchresult", {})
+                uids = (
+                    search_block.get("idlist", [])
+                    if isinstance(search_block, dict)
+                    else []
+                )
+                require(
+                    isinstance(uids, list)
+                    and len(uids) <= size
+                    and all(isinstance(uid, str) and uid.isdigit() for uid in uids),
+                    "Invalid PubMed identifier list",
+                    "PROVIDER_UNAVAILABLE",
+                )
+                if uids:
+                    payload, summary_hash = self._call(
+                        provider,
+                        "/entrez/eutils/esummary.fcgi",
+                        {"db": "pubmed", "id": ",".join(uids), "retmode": "json"},
+                        headers,
+                    )
+                    response_hashes.append(summary_hash)
+                else:
+                    payload = {"result": {"uids": []}}
+            try:
+                page_records = PARSERS[provider](payload)
+            except (ValueError, TypeError, KeyError, IndexError) as exc:
+                raise EvidenceError(
+                    "PROVIDER_UNAVAILABLE",
+                    "Malformed metadata record",
+                    "Retry or inspect an exported provider response.",
+                ) from exc
+            added = 0
+            for record in page_records:
+                identity = (
+                    record.get("provider_id")
+                    or record.get("doi")
+                    or f"{record.get('title')}|{record.get('year')}"
+                )
+                identity_key = str(identity)
+                if identity_key in seen:
+                    continue
+                seen.add(identity_key)
+                records.append({
+                    **record,
+                    "provider": provider,
+                    "metadata_status": "unverified",
+                    "full_text_access": "unknown",
+                })
+                added += 1
+                if len(records) >= total_limit:
+                    break
+            pages.append({
+                "page": page_index + 1,
+                "returned": len(page_records),
+                "added": added,
+            })
+            if provider == "crossref":
+                message = payload.get("message", {})
+                next_token = (
+                    message.get("next-cursor")
+                    if isinstance(message, dict)
+                    else None
+                )
+                token = next_token if isinstance(next_token, str) and next_token else None
+            elif provider == "openalex":
+                meta = payload.get("meta", {})
+                next_token = meta.get("next_cursor") if isinstance(meta, dict) else None
+                token = next_token if isinstance(next_token, str) and next_token else None
+            elif provider == "europepmc":
+                if not isinstance(token, int):
+                    raise EvidenceError(
+                        "INTERNAL_ERROR",
+                        "Europe PMC pagination token is invalid",
+                        "Restart the paged search.",
+                    )
+                token = token + 1 if len(page_records) == size else None
+            else:
+                if not isinstance(token, int):
+                    raise EvidenceError(
+                        "INTERNAL_ERROR",
+                        "PubMed pagination token is invalid",
+                        "Restart the paged search.",
+                    )
+                token = token + size if len(page_records) == size else None
+            if token is None or not page_records:
+                break
+        return {
+            "provider": provider,
+            "query": query,
+            "records": records,
+            "count": len(records),
+            "pages": pages,
+            "page_count": len(pages),
+            "truncated": len(records) >= total_limit,
+            "raw_response_sha256": response_hashes,
+            "network_hosts": [host],
+            "scientific_claims_verified": False,
+            "fetched_at_utc": now_utc(),
+        }
+
+    def search_batch(
+        self,
+        provider: str,
+        queries: list[str],
+        *,
+        limit: int = 20,
+    ) -> dict[str, Any]:
+        """Run bounded independent searches while retaining structured partial failures."""
+        require(0 < len(queries) <= 20, "Batch must contain 1 to 20 queries")
+        require(len(queries) == len(set(queries)), "Batch queries must be unique")
+        successes: list[dict[str, Any]] = []
+        failures: list[dict[str, Any]] = []
+        for query in queries:
+            try:
+                successes.append(self.search(provider, query, limit=limit))
+            except EvidenceError as exc:
+                failures.append({"query": query, "error": exc.to_dict()})
+        return {
+            "provider": provider,
+            "requested": len(queries),
+            "succeeded": len(successes),
+            "failed": len(failures),
+            "results": successes,
+            "failures": failures,
+            "partial": bool(successes and failures),
+            "scientific_claims_verified": False,
+        }

@@ -152,3 +152,76 @@ def test_malformed_provider_records_are_structured_failure() -> None:
     with pytest.raises(EvidenceError) as error:
         client.search("crossref", "synthetic")
     assert error.value.code == "PROVIDER_UNAVAILABLE"
+
+
+def test_crossref_cursor_pagination_deduplicates_and_stops() -> None:
+    first = fixture({
+        "message": {
+            "items": [
+                {"title": ["First"], "DOI": "10.1000/one"},
+                {"title": ["Duplicate"], "DOI": "10.1000/shared"},
+            ],
+            "next-cursor": "cursor-2",
+        }
+    })
+    second = fixture({
+        "message": {
+            "items": [
+                {"title": ["Duplicate"], "DOI": "10.1000/shared"},
+                {"title": ["Second"], "DOI": "10.1000/two"},
+            ]
+        }
+    })
+    transport = FixtureTransport(first, second)
+    client = CatalogClient(transport, offline=False, min_interval_seconds=0)
+    result = client.search_pages(
+        "crossref", "synthetic evidence", total_limit=10, page_size=2
+    )
+    assert [record["doi"] for record in result["records"]] == [
+        "10.1000/one",
+        "10.1000/shared",
+        "10.1000/two",
+    ]
+    assert result["page_count"] == 2
+    assert parse_qs(urlsplit(transport.calls[0][0]).query)["cursor"] == ["*"]
+    assert parse_qs(urlsplit(transport.calls[1][0]).query)["cursor"] == ["cursor-2"]
+
+
+def test_pubmed_pagination_uses_retstart_and_summary_per_page() -> None:
+    responses = [
+        fixture({"esearchresult": {"idlist": ["1", "2"]}}),
+        fixture({"result": {
+            "uids": ["1", "2"],
+            "1": {"title": "One", "pubdate": "2024", "authors": [], "articleids": []},
+            "2": {"title": "Two", "pubdate": "2024", "authors": [], "articleids": []},
+        }}),
+        fixture({"esearchresult": {"idlist": ["3"]}}),
+        fixture({"result": {
+            "uids": ["3"],
+            "3": {"title": "Three", "pubdate": "2024", "authors": [], "articleids": []},
+        }}),
+    ]
+    transport = FixtureTransport(*responses)
+    client = CatalogClient(transport, offline=False, min_interval_seconds=0)
+    result = client.search_pages("pubmed", "synthetic", total_limit=5, page_size=2)
+    assert [record["pmid"] for record in result["records"]] == ["1", "2", "3"]
+    search_calls = [
+        call for call in transport.calls if "esearch.fcgi" in call[0]
+    ]
+    assert parse_qs(urlsplit(search_calls[0][0]).query)["retstart"] == ["0"]
+    assert parse_qs(urlsplit(search_calls[1][0]).query)["retstart"] == ["2"]
+
+
+def test_batch_search_preserves_success_when_an_independent_query_fails() -> None:
+    transport = FixtureTransport(
+        fixture({"results": [{"id": "W1", "title": "First"}]}),
+        HTTPResponse(503, b"down"),
+    )
+    client = CatalogClient(transport, offline=False, min_interval_seconds=0)
+    result = client.search_batch("openalex", ["first", "second"], limit=3)
+    assert result["succeeded"] == 1
+    assert result["failed"] == 1
+    assert result["partial"] is True
+    assert result["results"][0]["query"] == "first"
+    assert result["failures"][0]["query"] == "second"
+    assert result["failures"][0]["error"]["code"] == "PROVIDER_UNAVAILABLE"
