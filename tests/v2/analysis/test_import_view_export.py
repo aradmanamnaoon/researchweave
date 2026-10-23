@@ -1,3 +1,4 @@
+from datetime import datetime
 from pathlib import Path
 
 import pandas as pd
@@ -223,3 +224,66 @@ def test_variable_dictionary_extended_metadata_survives_restart(tmp_path: Path):
     assert variable.category_order == ("1", "2", "3", "4", "5")
     with pytest.raises(AnalysisError, match="allowed range is inverted"):
         set_variable(dataset, "score", allowed_min=5, allowed_max=1)
+
+
+def test_stata_endianness_and_types_against_independent_pandas_reader(tmp_path: Path):
+    frame = pd.DataFrame({"integer": [1, 2], "decimal": [1.25, 2.5], "group": ["A", "B"]})
+    for byteorder in ("<", ">"):
+        path = tmp_path / ("little.dta" if byteorder == "<" else "big.dta")
+        frame.to_stata(path, write_index=False, byteorder=byteorder, version=118)
+        independent = pd.read_stata(path, convert_categoricals=False)
+        imported = import_table(path)
+        assert list(imported.columns) == list(independent.columns)
+        assert [row["integer"] for row in imported.records] == independent["integer"].tolist()
+        assert [row["decimal"] for row in imported.records] == independent["decimal"].tolist()
+        assert [row["group"] for row in imported.records] == independent["group"].tolist()
+        assert imported.variables[0].dtype == "number"
+        assert imported.variables[2].dtype == "text"
+
+
+def test_sas_transport_numeric_and_text_against_independent_reader(tmp_path: Path):
+    path = tmp_path / "typed.xpt"
+    frame = pd.DataFrame({"AGE": [21.0, 35.0], "GROUP": ["A", "B"]})
+    pyreadstat.write_xport(frame, path, file_format_version=5)
+    independent = pd.read_sas(path, format="xport", encoding="utf-8")
+    imported = import_table(path)
+    assert [row["AGE"] for row in imported.records] == independent["AGE"].tolist()
+    assert [row["GROUP"] for row in imported.records] == independent["GROUP"].tolist()
+    assert [variable.dtype for variable in imported.variables] == ["number", "text"]
+
+
+def test_xlsx_date_formula_and_corruption_are_explicit(tmp_path: Path):
+    path = tmp_path / "dates.xlsx"
+    workbook = Workbook()
+    sheet = workbook.active
+    sheet.append(["date", "score", "derived"])
+    sheet.append([datetime(2024, 2, 29), 5, "=B2*2"])
+    workbook.save(path)
+    formula = import_table(path, data_only=False)
+    cached = import_table(path, data_only=True)
+    assert formula.records[0]["date"].startswith("2024-02-29")
+    assert formula.records[0]["derived"] == "=B2*2"
+    assert cached.records[0]["derived"] is None
+    assert formula.source_hash == cached.source_hash
+    assert formula.revision != cached.revision
+    invalid = tmp_path / "broken.xlsx"
+    invalid.write_bytes(b"not a ZIP spreadsheet")
+    with pytest.raises(AnalysisError, match="Could not parse xlsx"):
+        import_table(invalid)
+
+
+def test_parquet_nullable_schema_and_metadata_fixture(tmp_path: Path):
+    path = tmp_path / "nullable.parquet"
+    schema = pa.schema(
+        [pa.field("nullable", pa.int64(), nullable=True), pa.field("text", pa.string())],
+        metadata={b"source": b"synthetic-fixture", b"schema_version": b"2"},
+    )
+    table = pa.Table.from_arrays(
+        [pa.array([None, 2], type=pa.int64()), pa.array(["x", None])], schema=schema
+    )
+    pq.write_table(table, path)
+    imported = import_table(path)
+    assert imported.records == ({"nullable": None, "text": "x"}, {"nullable": 2, "text": None})
+    assert [v.dtype for v in imported.variables] == ["number", "text"]
+    assert imported.source_hash
+    assert pq.read_schema(path).metadata[b"schema_version"] == b"2"

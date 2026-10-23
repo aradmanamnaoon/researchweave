@@ -12,6 +12,7 @@ from collections.abc import Callable
 from dataclasses import replace
 from pathlib import Path
 from typing import Any, Literal, cast
+from zipfile import BadZipFile
 
 from .errors import AnalysisError, require
 from .models import Dataset, Variable, canonical_json, digest, utc_now
@@ -357,7 +358,9 @@ def import_table(
             "dta": pyreadstat.read_dta,
             "xpt": pyreadstat.read_xport,
         }[kind])
-        readstat_options: dict[str, Any] = {"apply_value_formats": False}
+        readstat_options: dict[str, Any] = (
+            {} if kind == "xpt" else {"apply_value_formats": False}
+        )
         if kind in {"sav", "zsav"}:
             # Preserve SPSS user-missing values in the data so the dictionary can
             # distinguish them from system missing values instead of silently
@@ -463,7 +466,7 @@ def import_table(
                 frame = pd.DataFrame(values[1:], columns=header)
             except AnalysisError:
                 raise
-            except (ValueError, TypeError, OSError, KeyError) as exc:
+            except (ValueError, TypeError, OSError, KeyError, BadZipFile) as exc:
                 raise AnalysisError("INVALID_INPUT", "Could not parse xlsx source") from exc
         else:
             require(kind in readers, f"Unsupported import format: {kind}", "UNSUPPORTED_FORMAT")
