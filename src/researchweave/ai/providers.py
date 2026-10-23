@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol
 from urllib.error import HTTPError, URLError
 from urllib.request import HTTPRedirectHandler, Request, build_opener
@@ -19,7 +19,7 @@ class HTTPTransport(Protocol):
 
 class URLTransport:
     def send(self, url: str, headers: Mapping[str, str], payload: bytes, timeout: float) -> bytes:
-        request = Request(url, data=payload, headers=dict(headers), method="POST")
+        request = Request(url, data=payload, headers=dict(headers), method="POST")  # noqa: S310
         try:
             with build_opener(_NoRedirect).open(request, timeout=timeout) as response:
                 if response.geturl() != url:
@@ -27,7 +27,7 @@ class URLTransport:
                 result = response.read(2_000_001)
                 if len(result) > 2_000_000:
                     raise AIError("RESOURCE_LIMIT", "Provider response exceeds limit")
-                return result
+                return bytes(result)
         except HTTPError as exc:
             code = {401: "PERMISSION_DENIED", 403: "PERMISSION_DENIED", 429: "RATE_LIMITED"}.get(
                 exc.code, "PROVIDER_UNAVAILABLE"
@@ -38,7 +38,9 @@ class URLTransport:
 
 
 class _NoRedirect(HTTPRedirectHandler):
-    def redirect_request(self, req, fp, code, msg, headers, newurl):
+    def redirect_request(
+        self, req: Request, fp: Any, code: int, msg: str, headers: Any, newurl: str
+    ) -> None:
         raise AIError("PERMISSION_DENIED", "Provider redirects are forbidden")
 
 
@@ -48,7 +50,7 @@ class ProviderProfile:
     model: str
     endpoint: str
     local: bool = False
-    credential: str | None = None
+    credential: str | None = field(default=None, repr=False)
 
 
 class ProviderRegistry:

@@ -26,10 +26,14 @@ class EvidenceIndex:
         self.connection = sqlite3.connect(path)
         self.connection.execute("PRAGMA foreign_keys=ON")
         self.connection.execute(
-            "CREATE TABLE IF NOT EXISTS sources (id TEXT PRIMARY KEY, digest TEXT NOT NULL, classification TEXT NOT NULL)"
+            "CREATE TABLE IF NOT EXISTS sources ("
+            "id TEXT PRIMARY KEY, digest TEXT NOT NULL, classification TEXT NOT NULL)"
         )
         self.connection.execute(
-            "CREATE TABLE IF NOT EXISTS chunks (id TEXT PRIMARY KEY, source_id TEXT NOT NULL REFERENCES sources(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, body TEXT NOT NULL, digest TEXT NOT NULL)"
+            "CREATE TABLE IF NOT EXISTS chunks ("
+            "id TEXT PRIMARY KEY, source_id TEXT NOT NULL "
+            "REFERENCES sources(id) ON DELETE CASCADE, ordinal INTEGER NOT NULL, "
+            "body TEXT NOT NULL, digest TEXT NOT NULL)"
         )
         self.connection.execute("CREATE INDEX IF NOT EXISTS chunk_source ON chunks(source_id)")
         self.connection.commit()
@@ -55,7 +59,9 @@ class EvidenceIndex:
         pieces = self._chunks(content)
         with self.connection:
             self.connection.execute(
-                "INSERT INTO sources(id,digest,classification) VALUES(?,?,?) ON CONFLICT(id) DO UPDATE SET digest=excluded.digest,classification=excluded.classification",
+                "INSERT INTO sources(id,digest,classification) VALUES(?,?,?) "
+                "ON CONFLICT(id) DO UPDATE SET digest=excluded.digest, "
+                "classification=excluded.classification",
                 (source_id, digest, classification),
             )
             self.connection.execute("DELETE FROM chunks WHERE source_id=?", (source_id,))
@@ -89,7 +95,8 @@ class EvidenceIndex:
         if not terms or len(text) > 5_000 or not 1 <= limit <= 100:
             raise AIError("INVALID_INPUT", "Invalid search query or limit")
         rows = self.connection.execute(
-            "SELECT c.id,c.source_id,c.body,c.digest,s.classification FROM chunks c JOIN sources s ON c.source_id=s.id"
+            "SELECT c.id,c.source_id,c.body,c.digest,s.classification "
+            "FROM chunks c JOIN sources s ON c.source_id=s.id"
         ).fetchall()
         scored: list[EvidenceHit] = []
         for identifier, source, body, digest, classification in rows:

@@ -113,11 +113,20 @@ def test_agent_requires_host_signed_exact_approval(tmp_path):
 
 
 def test_facade_roundtrip_and_no_ai_fallback(tmp_path):
-    facade = build_ai_facade(tmp_path)
+    issuer = ApprovalIssuer(b"a" * 32)
+    facade = build_ai_facade(tmp_path, issuer=issuer)
     assert facade.execute("provider.list", {}, {})["data"] == []
+    arguments = {"source_id": "note", "content": "Persian neuroscience نورون"}
     assert (
-        facade.execute(
-            "retrieval.ingest", {"source_id": "note", "content": "Persian neuroscience نورون"}, {}
+        facade.execute("retrieval.ingest", arguments, {"project_id": "p"})["error"]["code"]
+        == "NEEDS_APPROVAL"
+    )
+    approval = issuer.issue(
+        "p", "retrieval.ingest", arguments, datetime.now(UTC) + timedelta(minutes=1)
+    )
+    assert (
+        facade.execute_authorized(
+            "retrieval.ingest", arguments, {"project_id": "p"}, approval=approval
         )["status"]
         == "ok"
     )
@@ -132,6 +141,6 @@ def test_facade_roundtrip_and_no_ai_fallback(tmp_path):
         reopened.execute("provider.complete", {"provider": "missing", "prompt": "abc"}, {})[
             "error"
         ]["code"]
-        == "NOT_FOUND"
+        == "NEEDS_APPROVAL"
     )
     reopened.close()

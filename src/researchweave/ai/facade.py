@@ -6,7 +6,8 @@ from typing import Any
 
 from .agents import AgentRuntime, Capability
 from .errors import AIError
-from .policy import EgressPolicy
+from .grounding import GroundingVerifier
+from .policy import Approval, ApprovalIssuer, EgressPolicy
 from .providers import ProviderRegistry
 from .retrieval import EvidenceIndex
 
@@ -17,13 +18,16 @@ class AIFacade:
         storage: Path,
         policy: EgressPolicy | None = None,
         providers: ProviderRegistry | None = None,
+        issuer: ApprovalIssuer | None = None,
     ) -> None:
         if not storage.is_dir():
             raise AIError("NOT_FOUND", "An existing host-controlled storage directory is required")
         self.policy = policy or EgressPolicy()
         self.providers = providers or ProviderRegistry()
+        self.issuer = issuer
         self.retrieval = EvidenceIndex(storage / "evidence.sqlite")
-        self.agents = AgentRuntime(storage / "agents.sqlite")
+        self.grounding = GroundingVerifier(self.retrieval)
+        self.agents = AgentRuntime(storage / "agents.sqlite", issuer)
         self.agents.register(
             Capability(
                 "retrieval.query",
@@ -43,6 +47,7 @@ class AIFacade:
             {"operation": "provider.complete", "effect": "external-network", "offline": False},
             {"operation": "retrieval.ingest", "effect": "local-write", "offline": True},
             {"operation": "retrieval.query", "effect": "read", "offline": True},
+            {"operation": "retrieval.answer", "effect": "read", "offline": True},
             {"operation": "agent.plan", "effect": "local-write", "offline": True},
             {"operation": "agent.preview", "effect": "read", "offline": True},
             {"operation": "agent.execute", "effect": "conditional", "offline": True},
@@ -75,9 +80,24 @@ class AIFacade:
     def execute(
         self, operation: str, arguments: Mapping[str, Any], context: Mapping[str, Any]
     ) -> Mapping[str, Any]:
+        return self.execute_authorized(operation, arguments, context)
+
+    def execute_authorized(
+        self,
+        operation: str,
+        arguments: Mapping[str, Any],
+        context: Mapping[str, Any],
+        *,
+        approval: Approval | None = None,
+    ) -> Mapping[str, Any]:
         request_id = str(context.get("request_id", ""))
         try:
             args = dict(arguments)
+            effects = {item["operation"]: item["effect"] for item in self.capability_manifest()}
+            if effects.get(operation) in {"local-write", "external-network"}:
+                if self.issuer is None:
+                    raise AIError("NEEDS_APPROVAL", "Trusted host approval issuer is required")
+                self.issuer.verify(approval, str(context.get("project_id", "")), operation, args)
             if operation == "provider.list":
                 result: Any = self.providers.list()
             elif operation == "provider.complete":
@@ -95,12 +115,16 @@ class AIFacade:
                         for hit in self.retrieval.query(args["query"], limit=args.get("limit", 5))
                     ]
                 }
+            elif operation == "retrieval.answer":
+                result = self.grounding.retrieve_evidence_only(
+                    args["question"], args.get("limit", 5)
+                )
             elif operation == "agent.plan":
                 result = {"plan_id": self.agents.create_plan(args["project_id"], args["steps"])}
             elif operation == "agent.preview":
                 result = self.agents.preview(args["plan_id"], args["step"])
             elif operation == "agent.execute":
-                result = self.agents.execute(args["plan_id"], args["step"])
+                result = self.agents.execute(args["plan_id"], args["step"], approval)
             elif operation == "agent.cancel":
                 self.agents.cancel(args["plan_id"])
                 result = {"cancelled": True}
@@ -165,6 +189,9 @@ class AIFacade:
 
 
 def build_ai_facade(
-    storage: Path, policy: EgressPolicy | None = None, providers: ProviderRegistry | None = None
+    storage: Path,
+    policy: EgressPolicy | None = None,
+    providers: ProviderRegistry | None = None,
+    issuer: ApprovalIssuer | None = None,
 ) -> AIFacade:
-    return AIFacade(storage, policy, providers)
+    return AIFacade(storage, policy, providers, issuer)

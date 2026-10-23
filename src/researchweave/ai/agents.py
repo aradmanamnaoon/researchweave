@@ -29,10 +29,15 @@ class AgentRuntime:
     def __init__(self, database: Path, issuer: ApprovalIssuer | None = None) -> None:
         self.db = sqlite3.connect(database)
         self.db.execute(
-            "CREATE TABLE IF NOT EXISTS plans (id TEXT PRIMARY KEY, project TEXT NOT NULL, state TEXT NOT NULL, steps TEXT NOT NULL)"
+            "CREATE TABLE IF NOT EXISTS plans ("
+            "id TEXT PRIMARY KEY, project TEXT NOT NULL, "
+            "state TEXT NOT NULL, steps TEXT NOT NULL)"
         )
         self.db.execute(
-            "CREATE TABLE IF NOT EXISTS receipts (id TEXT PRIMARY KEY, plan TEXT NOT NULL, step INTEGER NOT NULL, status TEXT NOT NULL, data TEXT NOT NULL, created TEXT NOT NULL, UNIQUE(plan,step))"
+            "CREATE TABLE IF NOT EXISTS receipts ("
+            "id TEXT PRIMARY KEY, plan TEXT NOT NULL, step INTEGER NOT NULL, "
+            "status TEXT NOT NULL, data TEXT NOT NULL, created TEXT NOT NULL, "
+            "UNIQUE(plan,step))"
         )
         self.db.commit()
         self.issuer = issuer
@@ -104,7 +109,10 @@ class AgentRuntime:
             "SELECT data FROM receipts WHERE plan=? AND step=?", (plan_id, step_number)
         ).fetchone()
         if existing:
-            return json.loads(existing[0])
+            loaded = json.loads(existing[0])
+            if not isinstance(loaded, dict):
+                raise AIError("INTEGRITY_FAILURE", "Saved operation receipt is malformed")
+            return loaded
         step = plan["steps"][step_number]
         capability = self.capabilities[step["operation"]]
         if capability.effect != "read":

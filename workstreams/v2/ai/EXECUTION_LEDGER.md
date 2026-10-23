@@ -1,6 +1,6 @@
 # Execution ledger
 
-`SOURCE_LAYOUT_VERIFIED`: pending final tracked-index and package import gate.
+`SOURCE_LAYOUT_VERIFIED`: package installed and imported from worktree using `uv sync --offline --extra dev`; tracked Git index check pending final local commit. Worker source: `D:\coding\codex\researchweave-v2-ai\src\researchweave\ai`. Intended final path: `D:\coding\codex\researchweave\src\researchweave\ai`. Production count: 10 Python files / 871 token-bearing SLOC (see `CODE_METRICS.json`).
 
 | ID | Capability | Real files | Test evidence | Status |
 |---|---|---|---|---|
@@ -8,9 +8,14 @@
 | AI-001 | Provider list without credential exposure | `providers.py`, `facade.py` | `test_network_offline_blocks_before_transport` | Implemented slice |
 | AI-002 | OpenAI-compatible completion through controlled transport | `providers.py`, `policy.py` | `test_provider_success_and_malformed_response`, offline test | Experimental; transport hardening pending |
 | AI-015 | Persistent bounded passage search, hash verification | `retrieval.py` | `test_persistent_retrieval_and_revocation` | Implemented local lexical slice |
-| AI-020 | Signed host approvals and durable sequential plans | `agents.py`, `policy.py` | `test_agent_requires_host_signed_exact_approval` | Partial: non-atomic effect replay risk |
-| AI-034 | Provider egress disclosure | `facade.py` | Facade exercise | Partial |
-| AI-049 | Offline deny and forged authority tests | `policy.py`, `tests/v2/ai` | `test_unsafe_remote_endpoints`, approval test | Partial |
+| AI-019 | Signed host approvals | `policy.py`, `facade.py` | `test_agent_requires_host_signed_exact_approval`, `test_facade_roundtrip_and_no_ai_fallback` | Partial: injection of persistent host secret pending |
+| AI-020/021 | Ordered bounded agent plans, durable receipts | `agents.py` | `test_agent_requires_host_signed_exact_approval` | Partial: non-atomic effect replay risk |
+| AI-030 | Provider egress disclosure | `facade.py` | Facade test | Partial |
+| AI-031/049 | Offline deny and forged authority tests | `policy.py`, `tests/v2/ai` | `test_unsafe_remote_endpoints`, approval test | Partial |
+| AI-035/036/050 | Local immutable snapshot push, optimistic revision conflict, hash-verified restore | `sync.py`, `test_sync.py` | `test_snapshot_conflict_and_restore`, `test_corrupted_blob_fails_closed` | Partial: no remote CAS/encryption |
+| AI-003/004 | Explicit loopback model discovery | `local_runtime.py`, `test_local_runtime.py` | `test_local_ollama_discovery_in_offline_mode`, catalog rejection tests | Partial: no model text generation |
+| AI-016 | Verify source-bound quotes and offer no-model evidence-only response | `grounding.py`, `test_grounding.py` | `test_offline_evidence_anchors_and_stale_citation_rejection` | Implemented lexical evidence-only slice |
+| QA-001 | Hostile and failure-state regression | `test_edge_cases.py` | Six explicit success+denial tests | 25 total tests passing; 79% coverage |
 
-All other AI-001–AI-050 tasks remain pending or partial; no missing task is implicitly marked implemented. Synthetic test data are original and distributable; no external fixture license applies. GUI wiring is pending for all operations.
+All other AI-001–AI-050 tasks remain pending or partial; no missing task is implicitly marked implemented. Synthetic test data are original and distributable; no external fixture license applies. GUI wiring is pending for all operations. Full validation and precise remaining work are in `TEST_RESULTS.md` and `NEXT_ACTION.md`.
 

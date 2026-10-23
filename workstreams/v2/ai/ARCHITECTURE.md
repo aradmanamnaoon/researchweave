@@ -4,5 +4,9 @@
 
 Local retrieval remains usable with zero model or internet connectivity. Provider HTTP requests are bounded and endpoint restricted. SQL databases stay within a host supplied existing project directory. Integrator must implement a trusted composition root and inject a persisted host approval issuer into agent runtime for effects.
 
+`FolderSnapshotStore` provides a user-owned local folder simulation of a revisioned content-addressed snapshot backend. Snapshot blobs and manifests use exclusive immutable object creation, with a separately updated HEAD pointer. It verifies checksums before restoring only into a previously nonexistent file.
+
 **Known security limitations:** DNS responses for non-literal remote hostnames have not yet been validated against private ranges, and Python's default proxy handling is not disabled. Therefore the current remote HTTP adapter must **not be enabled for untrusted endpoint configuration or production sensitive-data egress**. Remote provider support is an experimental interface with fake-transport tests only. Agent side-effect callbacks are synchronous; interrupted execution after callback and before receipt persistence may replay effects. Only idempotent callbacks are safe until atomic operation coordination is implemented.
+
+Local folder HEAD conflict protection only detects sequential revisions. Concurrent writers in separate processes can race during pointer replacement; it is not a full remote CAS implementation. Snapshot bytes are unencrypted and should remain on a trusted local filesystem until encryption and remote sync are implemented.
 

@@ -6,6 +6,7 @@ import ipaddress
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from typing import Any
 from urllib.parse import urlsplit
 
 from .errors import AIError
@@ -31,9 +32,9 @@ def validate_endpoint(url: str, *, local: bool = False) -> str:
             if not local:
                 raise AIError(
                     "PERMISSION_DENIED", "Local network endpoints require explicit local mode"
-                )
+                ) from None
         elif local:
-            raise AIError("PERMISSION_DENIED", "Local runtimes must use loopback")
+            raise AIError("PERMISSION_DENIED", "Local runtimes must use loopback") from None
     else:
         if local and not address.is_loopback:
             raise AIError("PERMISSION_DENIED", "Local runtimes must use loopback")
@@ -79,7 +80,7 @@ class ApprovalIssuer:
         self._key = key
 
     def issue(
-        self, project_id: str, operation: str, arguments: dict, expires_at: datetime
+        self, project_id: str, operation: str, arguments: dict[str, Any], expires_at: datetime
     ) -> Approval:
         if expires_at.tzinfo is None:
             raise ValueError("Approval expiry must have a timezone")
@@ -89,7 +90,11 @@ class ApprovalIssuer:
         return Approval(project_id, operation, digest, expires_at, signature)
 
     def verify(
-        self, approval: Approval | None, project_id: str, operation: str, arguments: dict
+        self,
+        approval: Approval | None,
+        project_id: str,
+        operation: str,
+        arguments: dict[str, Any],
     ) -> None:
         if approval is None:
             raise AIError("NEEDS_APPROVAL", "Host approval required")

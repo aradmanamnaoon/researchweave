@@ -7,13 +7,38 @@ from researchweave.ai import build_ai_facade
 
 with TemporaryDirectory() as folder:
     ai = build_ai_facade(Path(folder))
-    ai.execute("retrieval.ingest", {"source_id": "study", "content": "Synthetic observations support testing."}, {})
+    # The trusted host signs local writes via ApprovalIssuer.
+    # Read-only search works even without a model or an approval issuer.
+    from researchweave.ai.policy import ApprovalIssuer
+    from datetime import datetime, timedelta, UTC
+    issuer = ApprovalIssuer(b"test-host-key-placeholder-32-bytes!!")
+    ai.close()
+    ai = build_ai_facade(Path(folder), issuer=issuer)
+    args = {"source_id": "study", "content": "Synthetic observations support testing."}
+    approval = issuer.issue("p", "retrieval.ingest", args, datetime.now(UTC) + timedelta(minutes=1))
+    ai.execute_authorized("retrieval.ingest", args, {"project_id": "p"}, approval=approval)
     evidence = ai.execute("retrieval.query", {"query": "synthetic testing"}, {})
     assert evidence["data"]["hits"][0]["source_id"] == "study"
     ai.close()
 ```
 
-Public `AIFacade` methods: `capability_manifest`, `preview`, `execute`, `health`, `close`. Operations currently implemented: `provider.list`, `provider.complete` (experimental remote), `retrieval.ingest`, `retrieval.query`, `agent.plan`, `agent.preview`, `agent.execute` (read-only registered capability; effects need a host issuer), `agent.cancel`, `privacy.preview`. No GUI binding yet.
+Public `AIFacade` methods: `capability_manifest`, `preview`, `execute`, `execute_authorized`, `health`, `close`. Operations currently implemented: `provider.list`, `provider.complete` (experimental remote), `retrieval.ingest`, `retrieval.query`, `retrieval.answer` (verified source quotations without model), `agent.plan`, `agent.preview`, `agent.execute` (read-only registered capability; effects need a host issuer), `agent.cancel`, `privacy.preview`. No GUI binding yet.
+
+Local runtime model discovery is available separately via `LocalRuntimeDiscovery("http://127.0.0.1:11434").discover(EgressPolicy())`. It probes only the explicit loopback endpoint; no model downloads or ambient port scans occur.
 
 The return envelope contains `request_id`, `status`, `data`, `artifacts`, `warnings`, `error`, `provenance`, `impact`. Errors are structured; source text is never treated as policy authority. This is an initial slice, not a complete versioned schema contract.
+
+Snapshot demonstration:
+
+```python
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from researchweave.ai.sync import FolderSnapshotStore
+
+with TemporaryDirectory() as folder:
+    store = FolderSnapshotStore(Path(folder))
+    first = store.push(b"synthetic research backup", expected_revision=None)
+    assert store.pull(first.revision) == b"synthetic research backup"
+    store.restore_to_new_file(first.revision, Path(folder) / "restored.rwproj")
+```
 
