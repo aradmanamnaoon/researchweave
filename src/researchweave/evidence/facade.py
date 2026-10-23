@@ -44,7 +44,13 @@ from .interoperability import (
 from .library import LibraryService
 from .migration import MarkdownMigration, MarkdownRecord, preview_markdown
 from .models import new_id
-from .portability import export_research_artifacts, export_review_packet, selective_clone
+from .portability import (
+    export_research_artifacts,
+    export_review_packet,
+    merge_review_packet,
+    preview_review_packet_merge,
+    selective_clone,
+)
 from .prisma2020 import Prisma2020Service
 from .prisma_export import prisma_export
 from .project_format import archive_project, restore_archive, verify_archive
@@ -335,6 +341,12 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "review.packet_export": (
         "local-write", ("project_id", "review_id", "filename"),
         "Export privacy-reviewed systematic-review packet"),
+    "review.packet_preview": (
+        "read", ("project_id", "filename"),
+        "Verify a review packet and preview merge conflicts without writing state"),
+    "review.packet_merge": (
+        "local-write", ("project_id", "filename", "actor"),
+        "Merge a verified review packet while preserving conflicts and origin provenance"),
     "writing.section_save": ("local-write", ("project_id", "manuscript_id", "section",
                                            "body", "citations"), "Save manuscript section"),
     "writing.section_history": (
@@ -1395,6 +1407,13 @@ class EvidenceFacade:
             if operation == "review.packet_export":
                 exports = self.workspace_root / "exports"
                 exports.mkdir(exist_ok=True)
+                redact_fields = args.get("redact_fields")
+                require(
+                    redact_fields is None
+                    or isinstance(redact_fields, list)
+                    and all(isinstance(item, str) for item in redact_fields),
+                    "Review packet redaction fields must be a list of strings",
+                )
                 return export_review_packet(
                     store,
                     exports / _simple_filename(
@@ -1402,6 +1421,25 @@ class EvidenceFacade:
                     ),
                     _value(args, "review_id", str),
                     confirm_private_export=args.get("confirm_private_export") is True,
+                    redact_fields=redact_fields,
+                )
+            if operation in {"review.packet_preview", "review.packet_merge"}:
+                packet = self.workspace_root / "exports" / _simple_filename(
+                    _value(args, "filename", str), ".rw-review.zip"
+                )
+                if operation == "review.packet_preview":
+                    return preview_review_packet_merge(store, packet)
+                destination_review_id = args.get("destination_review_id")
+                require(
+                    destination_review_id is None or isinstance(destination_review_id, str),
+                    "Destination review ID must be text",
+                )
+                return merge_review_packet(
+                    store,
+                    packet,
+                    destination_review_id=destination_review_id,
+                    actor=_value(args, "actor", str),
+                    expected_revision=expected,
                 )
             writing = WritingService(store)
             if operation == "writing.section_save":
