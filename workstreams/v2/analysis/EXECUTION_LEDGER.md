@@ -1,37 +1,40 @@
 # Scientific analysis execution ledger
 
-| Task | Implementation | Observed checks | Status |
-|---|---|---|---|
-| INITIAL_AUDIT | `INITIAL_AUDIT.md` | main SHA, status, historical worktrees inspected | Done |
-| SA-001/006/007/008 | `datasets.py`, `models.py` | CSV read, bad CSV, paginated data, variable edit, save-reopen tests | Working slice |
-| SA-002–005 | `datasets.import_table` | reader adapters added; import format golden files not yet tested | Partial |
-| SA-009/010 | `transformations.py` | hash-stable filter and null rejection | Working slice |
-| SA-013/016/017 | `statistics.py` | descriptive/Welch/paired/Pearson SciPy oracle tests | Working slice |
-| SA-025/039 | `modeling.py` | OLS exact coefficients; singular design rejection | Working slice |
-| SA-024/038 | `modeling.py` | Holm/BH hand reference; pooled-effects test | Working slice |
-| SA-033/034 | `statistics.py` | Cronbach alpha covariance oracle; reverse range guard | Working slice |
-| SA-043/044 | `runtime.py` | child stdout, failure, approval denial, timeout; R not locally proven | Python slice done; R pending |
-| SA-046 | `plots.py` | chart export implemented; pending file-artifact golden test | Partial |
-| SA-047–049 | `qualitative.py` | Unicode span, reversible serialization, aligned-unit kappa oracle | Working slice |
-| SA-051 | `datasets.py`, facade | immutable history reopening demonstrated; full replay missing | Partial |
-| SA-011/012/042 | `data_ops.py` | case selection, join cardinality/expansion, user-missing codes, frequency weights | Working slice |
-| SA-015/018/019 | `inference.py` | chi-square/Fisher, Mann–Whitney and ANOVA numerical oracles | Working slice |
-| SA-040/041 | `inference.py` | seeded bootstrap repeatability and exhaustive permutation golden case | Working slice |
-| SA-026/027 | `generalized.py` | logit/Poisson compared to statsmodels; separation and invalid count failures | Working slice |
-| SA-031/035 | `multivariate.py` | PCA eigenvalues and reconstruction, seeded k-means and hierarchical | Working slice |
-| SA-051 (plan engine) | `reproducibility.py` | dependency/cycle validation, hash-based rerun and tamper detection | Working slice |
-| SA-030 | `time_series.py` | timezone-aware chronology, causal lags, ACF and ADF oracle | Working slice |
-| SA-034 | `scale_scoring.py` | reverse orientation, missing-item thresholds, corrected item-total correlation | Working slice |
-| SA-037 | `power.py` | rounded t-test sample planning and proportion power reference | Working slice |
-| SA-039 | `diagnostics.py` | influence/Breusch-Pagan/VIF and studentized residual tests | Working slice |
-| SA-048/050 | `mixed_methods.py` | code-by-case linkage, small-cell disclosure guards, overlap provenance | Working slice |
-| SA-049 | `coding_review.py` | two-reviewer adjudication and source-anchor relocation | Working slice |
-| SA-045 | `script_exports.py` | generated Python script reproduced actual result in fresh interpreter; R unverified | Working slice |
-| SA-028 | `longitudinal.py` | balanced difference-in-differences, GEE sandwich SE versus statsmodels; duplicate-key rejection | Working slice |
-| SA-029 | `survival.py` | Kaplan-Meier/Greenwood and logrank compared with statsmodels; Cox input validation | Working slice |
-| SA-036 | `measurement.py` | KMO/Bartlett, exploratory factors, Fleiss agreement and ICC with reference checks | Working slice |
-| SA-042 | `survey.py` | stratified PSU Taylor mean with hand-computed variance and singleton rejection | Working slice |
-| SECURITY | `datasets.py` | checked hex-only IDs, content-derived revision verification and tampered saved JSON rejection | Working slice |
-| SOURCE_LAYOUT_VERIFIED | `src/researchweave/analysis` | compileall, imported install, git index checked on local commit | See TEST_RESULTS |
+Authoritative feature status is in `FEATURE_MATRIX.md`; this ledger records implementation/validation milestones actually observed on branch `rebuild/v2-analysis`.
 
-Actual observed results and metrics belong to `TEST_RESULTS.md` and `CODE_METRICS.json`. Status is intentionally limited to features with observed checks; remaining 52 backlog tasks are captured in `NEXT_ACTION.md` and `LIMITATIONS.md`.
+| Milestone | Evidence | Observed result |
+|---|---|---|
+| Baseline continuation audit | prompts, Git history, source/tests, preserved untracked artifacts | inherited 123-test continuation state confirmed; stale 62-test handoff superseded |
+| Weighted/model extensions | `e52cbc5` | analytic weights, grouped descriptives, correlation matrices, cluster-robust OLS, NB2 and Cox diagnostic improvements |
+| Import + repeated-measures correctness | `1da64a9` | SPSS user-missing preservation, ODS ranges, Type III sum contrasts, sphericity correction |
+| Faithful mandatory journeys | `5c1973c` | actual residual plot and explicit qualitative adjudication |
+| Bounded Parquet | `b350db0` | batch-sliced non-materializing page path; 100k fixture |
+| Repeated/ANCOVA contrasts | `6bd75f2` | paired within-subject contrasts, Holm correction, adjusted ANCOVA means/CIs |
+| Count/survival contracts | `9e4116c` | ML-estimated NB2 dispersion and structured Cox design limitations |
+| Replay/data boundaries | `fb623dc` and prior replay commits | deterministic Python replay broadened; typed data/replay boundaries strengthened |
+| Dependence-aware resampling | `1c13a16` | IID BCa mean plus grouped, paired and cluster bootstrap variants |
+| Generalized-model ratio intervals | `fb28bd9` | explicit odds-ratio/rate-ratio confidence intervals retained alongside coefficient CIs |
+| Static typing cleanup | `03d8a2b` | zero first-party mypy errors under `--ignore-missing-imports` across all 37 modules |
+| Import acceptance | `16806ce` | independent DTA endian + XPT-v5 comparisons, Excel formula/date/corruption checks, Parquet nullable metadata; XPT reader bug fixed |
+| Recursive command schemas | `f3e7a1c` | nested import/transform/metadata/test/psychometric/scale/meta structures recursively validated |
+| EFA oracle coverage | `e61ee02` | statsmodels loading comparison, independent KMO, varimax invariance/simple-structure, singular/small-N failure fixtures |
+| Audit/replay facade | `9f03627` | typed read-only `audit.plan` and `audit.verify_replay`; tampered receipts/cycles/runtime plans rejected |
+| Recommendation integrity | `32b6d05` | design-rule matrix, alternative/limitation evidence and seven result-cherry-picking rejection fixtures |
+| Runtime budgets | `682b8fa` | stdout truncation, runtime-limit binding and artifact-count ceiling tests |
+| Missing-data hardening | `b57bbc7` | finite/PD imputation guards plus denominator/seed/Rubin golden evidence |
+| Plot artifact hardening | `1ece4e2` | SVG/PNG/PDF signatures/hashes, residual/forest evidence and correct complete-case/survival denominators |
+
+## Final observed acceptance measurements
+
+- Full analysis suite: **177 passed**, 2 nonfatal statsmodels seasonal-start warnings.
+- Ruff: pass. `compileall`: pass. `git diff --check` for source/tests: pass.
+- First-party mypy: **0 issues in 37 source files** with `--ignore-missing-imports`.
+- Configured strict mypy: externally blocked by missing stubs/`py.typed` metadata for installed scientific libraries; 52 import-typing diagnostics, no remaining first-party errors identified by the clean first-party run.
+- Coverage: **88% aggregate branch-enabled coverage**; 5,177 statements, 473 missed, 1,140 branches, 223 partial branches (`COVERAGE_FINAL3.*`).
+- Five mandatory headless journeys: all passed positive flow plus injected failure and restart/replay behavior; canonical `JOURNEY_TRACE.json` trace hash `f5eb2be535dd650063f32d15fcd256dd8a9010648d77bf87579add7b6794269b`.
+- Performance: canonical `PERFORMANCE.json`; 100k CSV import 2.1558 s, bounded 100k Parquet page scan 0.00718 s, exactly 100 Python rows converted and full-table materialization false.
+- R: `Rscript` executable unavailable; graceful `DEPENDENCY_MISSING` path exercised, native R parity not claimed.
+- Production size: **37 modules, 11,826 nonblank/noncomment Python lines**.
+- Facade: **116 operations** (91 read, 21 local-write, 2 sensitive-export, 2 code-execution).
+
+No push, merge, reset, clean, or unrelated data deletion was performed. Rows still marked PARTIAL/BLOCKED in `FEATURE_MATRIX.md` remain explicitly qualified rather than being promoted by aggregate test success.

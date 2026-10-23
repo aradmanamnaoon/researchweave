@@ -1,13 +1,30 @@
 # Scientific analysis architecture
 
-The scientific analysis package is headless and independent of PyQt6. `facade.py` is the typed command boundary; `datasets.py` provides immutable dataset revisions and durable JSON store, `models.py` defines scientific contracts and stable hashing, `transformations.py` executes a safe declarative filter/recode/derive AST, and `statistics.py` implements descriptive methods, t-tests, correlations and Cronbach alpha. `modeling.py` implements regression, effect pooling and multiplicity. `qualitative.py` records transcript anchors and aligned-unit coder reliability; `runtime.py` invokes explicitly approved child interpreters; `plots.py` uses the noninteractive Matplotlib backend.
+The V2 scientific-analysis package is headless and PyQt-independent. `facade.py` is the typed command boundary; the trusted host supplies the persistence/import/export roots and issues scoped capabilities. Numerical kernels do not depend on the desktop UI.
 
-Additional validated modules: `inference.py` implements categorical/rank/ANOVA and resampling; `data_ops.py` implements missingness, joins and frequency weights; `generalized.py` fits logit and Poisson GLM; `multivariate.py` provides PCA and deterministic clustering; `reproducibility.py` validates analysis-plan dependency graphs and hashes replay receipts.
+## Boundaries and persistence
 
-Recent headless domains: `time_series.py` enforces ordered timezone-aware timestamps and strictly historical lag features; `scale_scoring.py` preserves explicit scored item orientation; `power.py` produces conditional prospective sample calculations; `diagnostics.py` retains residual/influence review flags; `mixed_methods.py` connects case-level coded evidence to quantitative summaries with privacy thresholds; `coding_review.py` stores independent review decisions; `script_exports.py` generates checked, test-executed Python replay scripts and a limited unverified R descriptive representation.
+- `authorization.py`: HMAC host capabilities bound to project + exact operation + argument hash + effect + nonce + expiry; one-time replay protection and trusted-root path enforcement.
+- `schemas.py`: versioned operation argument schemas, recursive validation for high-risk nested payloads, and strict result envelope.
+- `datasets.py` / `models.py`: immutable content-derived dataset revisions, atomic temp-write + fsync + replace persistence, content SHA-256 verification on reload, import/export adapters and bounded Parquet scanning.
+- `reproducibility.py`: declarative analysis-plan DAG validation, deterministic spec/result hashes, execution receipts, save/reload integrity and replay comparison.
+- `qualitative_store.py`: durable codebook/transcript/annotation/memo/review state with content-hash validation and restart support.
 
-Further modules: `survival.py` supports right-censored Kaplan-Meier, logrank and Cox partial likelihood; `longitudinal.py` provides subject-aware Gaussian GEE and balanced two-period DID; `survey.py` implements first-stage PSU stratification and linearized ratio means; `measurement.py` implements factor suitability, principal-axis EFA and inter-rater agreement. Dataset snapshots now include schema version and content SHA-256 validation in addition to revision recomputation.
+## Scientific services
 
-The persistence root and import/export roots are injected by the trusted host and must never be supplied by model-generated arguments. The host must enforce actual authorization; a context boolean is only a temporary standalone host adapter contract, not an unforgeable capability. Script subprocesses retain the user's OS privileges and **are not security sandboxes**. Scientific results include input revisions, exclusions, conventions and runtime package versions.
+- Core data/statistics: `data_ops.py`, `transformations.py`, `statistics.py`, `inference.py`, `effects.py`.
+- Modeling: `modeling.py`, `generalized.py`, `advanced_statistics.py`, `longitudinal.py`, `survey.py`, `survival.py`, `diagnostics.py`.
+- Multivariate/measurement: `multivariate.py`, `measurement.py`, `psychometrics.py`, `scale_scoring.py`.
+- Temporal/planning/synthesis: `time_series.py`, `power.py`, `meta_analysis.py`, `missing_data.py`.
+- Qualitative/mixed methods: `qualitative.py`, `coding_review.py`, `qualitative_store.py`, `mixed_methods.py`.
+- Reproducible outputs: `plots.py`, `script_exports.py`, `runtime.py`, `recommendations.py`, `journeys.py`.
 
-Future integrator work: define the trusted command bus and approval envelope, SQLite transaction index, durable qualitative store, cancellation handle, calibrated UI decision aids, stronger project privacy policy, full declarative DAG engine and release packaging.
+## Execution safety
+
+`runtime.py` requires a separate one-time runtime approval, launches without shell interpolation, constrains environment/workspace, bounds output and artifacts, hashes produced artifacts and kills process trees on timeout. It intentionally does not describe the child interpreter as an OS sandbox; it retains the user's OS privileges.
+
+## Acceptance shape
+
+The current package contains 37 production modules and 11,826 nonblank/noncomment physical Python lines. The facade exposes 116 operations. The observed test suite passes 177 tests; branch-enabled coverage reports 88% aggregate coverage. Five synthetic end-to-end journeys exercise real imports/services, injected failures and restart/replay behavior with no network dependency. Exact current evidence is in `TEST_RESULTS.md`, `FEATURE_MATRIX.md`, canonical `JOURNEY_TRACE.json` and canonical `PERFORMANCE.json`.
+
+Final cross-domain UI command-bus wiring, packaging and release integration remain final-integrator responsibilities rather than numerical-core responsibilities.

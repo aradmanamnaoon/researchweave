@@ -1,10 +1,14 @@
-# Next execution steps (priority order)
+# Remaining work after the current scientific-analysis checkpoint
 
-1. Expand deterministic coverage: per-command facade success and failure, chart artifact export/hash, import metadata options, semantically invalid samples, script error/timeout and state reopening.
-2. Add strict operation argument/result JSON Schema, host-attested authorization adapter, revision preconditions and idempotency receipts.
-3. Implement independent and paired contingency/nonparametric/ANOVA methods with SciPy/statmodels golden comparisons and effect size/interval conventions.
-4. Add logistic/count GLMs with convergence and separation tests, diagnostics export and long-running job control.
-5. Add richer qualitative durable store and multi-rater adjudication, privacy aggregation guards, stable reanchoring, code hierarchy update history.
-6. Build a declarative analysis plan DAG and deterministic Python/R code exports; supply end-to-end sample fixtures/traces for all five required journeys.
-7. Implement optional import readers with metadata preservation and accessible plot/report export; benchmark 100/10k/100k rows and memory.
-8. Re-run full lint/type/coverage/test suite, update recorded metrics, commit each checked slice locally, and continue toward 6,500 *purposeful* SLOC. Do not inflate counts or merge/push.
+The earlier implementation backlog in this file is obsolete. Current per-requirement status and concrete evidence are maintained in `FEATURE_MATRIX.md`.
+
+Priority remaining work is limited to acceptance items that are still genuinely partial or externally blocked:
+
+1. Add only the import golden fixtures still missing from `FEATURE_MATRIX.md` (principally broader SPSS/Stata/SAS metadata/date-label variants and optional-reader corners); DTA endian, XPT-v5, Excel formula/date/corruption and Parquet nullable-metadata fixtures are already present.
+2. Extend recursive schemas only for flexible nested payloads where the authoritative acceptance actually requires enumeration; high-risk import/transform/metadata/test/scale/meta/audit structures are already recursive.
+3. Add the remaining pathological/oracle cases identified row-by-row in `FEATURE_MATRIX.md` rather than duplicating already-tested statistical kernels.
+4. Validate native R integration on a host with `Rscript`; this machine currently proves only graceful `DEPENDENCY_MISSING` behavior.
+5. Supply third-party typing stubs/typed packages if the final release gate requires configured strict mypy to traverse SciPy/statsmodels/pandas/PyArrow/OpenPyXL/Patsy. First-party code is already clean under `--ignore-missing-imports`.
+6. Final integrator: wire the **116-operation** headless facade to the project-wide UI/command bus and perform cross-domain packaging/release checks.
+
+Do not inflate source counts or reimplement validated slices merely to change status percentages. No push/merge is authorized from this worktree.
