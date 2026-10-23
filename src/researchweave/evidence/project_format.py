@@ -31,7 +31,7 @@ def _valid_name(name: str) -> None:
             not any(ord(c) < 32 for c in name),
             f"Unsafe archive entry: {name!r}", "UNTRUSTED_CONTENT")
     require(str(path) == name, "Noncanonical archive path", "UNTRUSTED_CONTENT")
-    require(name == "manifest.json" or name == "README.txt" or
+    require(name == "manifest.json" or name == "README.txt" or name == "schema.json" or
             name == "data/project.sqlite" or
             (len(path.parts) == 3 and path.parts[0] == "objects" and
              len(path.parts[1]) == 2 and len(path.parts[2]) == 64 and
@@ -58,6 +58,33 @@ def _hash_file(path: Path) -> tuple[str, int]:
     return digest.hexdigest(), size
 
 
+def _schema_descriptor(store: ProjectStore) -> bytes:
+    """Describe the persisted SQLite contract without embedding executable SQL."""
+    objects = []
+    for row in store.conn.execute(
+        "SELECT type,name,tbl_name,sql FROM sqlite_master "
+        "WHERE type IN ('table','index') AND name NOT LIKE 'sqlite_%' "
+        "ORDER BY type,name"
+    ):
+        sql = str(row["sql"] or "")
+        objects.append(
+            {
+                "type": str(row["type"]),
+                "name": str(row["name"]),
+                "table": str(row["tbl_name"]),
+                "definition_sha256": sha256(sql.encode("utf-8")),
+            }
+        )
+    descriptor = {
+        "format": "researchweave-sqlite-schema",
+        "version": 1,
+        "sqlite_schema_version": SCHEMA_VERSION,
+        "archive_version": ARCHIVE_VERSION,
+        "objects": objects,
+    }
+    return (str(canonical_json(descriptor)) + "\n").encode("utf-8")
+
+
 def archive_project(store: ProjectStore, destination: Path) -> dict[str, Any]:
     """SQLite online backup, verified objects and crash-safe archive replacement."""
     report = store.audit()
@@ -77,7 +104,7 @@ def archive_project(store: ProjectStore, destination: Path) -> dict[str, Any]:
         for row in store.conn.execute("SELECT digest FROM objects ORDER BY digest"):
             digest = row["digest"]
             files[f"objects/{digest[:2]}/{digest}"] = store.object_path(digest)
-        require(len(files) <= MAX_ENTRIES - 2, "Too many objects", "RESOURCE_LIMIT")
+        require(len(files) <= MAX_ENTRIES - 3, "Too many objects", "RESOURCE_LIMIT")
         inventory: list[dict[str, Any]] = []
         for name, file in sorted(files.items()):
             _valid_name(name)
@@ -89,6 +116,11 @@ def archive_project(store: ProjectStore, destination: Path) -> dict[str, Any]:
                 require(digest == Path(name).name, "Object changed after audit",
                         "INTEGRITY_FAILURE")
             inventory.append({"path": name, "sha256": digest, "size": size})
+        schema_bytes = _schema_descriptor(store)
+        require(len(schema_bytes) <= 1024 * 1024, "Schema descriptor too large", "RESOURCE_LIMIT")
+        inventory.append(
+            {"path": "schema.json", "sha256": sha256(schema_bytes), "size": len(schema_bytes)}
+        )
         manifest = {"format": "researchweave-rwproj", "version": ARCHIVE_VERSION,
                     "reader_schema": SCHEMA_VERSION, "project_id": store.info().id,
                     "project_revision": store.info().revision, "objects": inventory,
@@ -102,7 +134,11 @@ def archive_project(store: ProjectStore, destination: Path) -> dict[str, Any]:
             staged_archive = Path(stream.name)
         with zipfile.ZipFile(staged_archive, mode="w", allowZip64=True,
                              compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
-            for name, data in (("manifest.json", manifest_bytes), ("README.txt", readme)):
+            for name, data in (
+                ("manifest.json", manifest_bytes),
+                ("README.txt", readme),
+                ("schema.json", schema_bytes),
+            ):
                 archive.writestr(_zipinfo(name), data)
             for name, file in sorted(files.items()):
                 with file.open("rb") as source, archive.open(_zipinfo(name), "w") as target:
@@ -116,7 +152,7 @@ def archive_project(store: ProjectStore, destination: Path) -> dict[str, Any]:
                                 "Choose a new destination filename.")
         os.replace(staged_archive, destination)
         return {"archive": str(destination), "manifest_sha256": sha256(manifest_bytes),
-                "version": ARCHIVE_VERSION, "files": len(files),
+                "version": ARCHIVE_VERSION, "files": len(inventory),
                 "bytes": destination.stat().st_size}
     finally:
         if staged_db is not None:
@@ -153,7 +189,8 @@ def verify_archive(archive_path: Path) -> dict[str, Any]:
                 total += info.file_size
                 require(total <= MAX_ARCHIVE_BYTES, "Expanded archive too large",
                         "RESOURCE_LIMIT")
-            require("manifest.json" in normalized and "data/project.sqlite" in normalized,
+            require("manifest.json" in normalized and "schema.json" in normalized and
+                    "data/project.sqlite" in normalized,
                     "Archive misses required project files", "INTEGRITY_FAILURE")
             manifest_bytes = archive.read("manifest.json")
             require(len(manifest_bytes) <= 1024 * 1024, "Manifest too large", "RESOURCE_LIMIT")
@@ -165,6 +202,20 @@ def verify_archive(archive_path: Path) -> dict[str, Any]:
                     "Unsupported project archive version", "SCHEMA_MISMATCH")
             require(manifest.get("encryption") == "none", "Encrypted archive unsupported",
                     "UNSUPPORTED_FORMAT")
+            schema_bytes = archive.read("schema.json")
+            require(len(schema_bytes) <= 1024 * 1024, "Schema descriptor too large",
+                    "RESOURCE_LIMIT")
+            schema = json.loads(schema_bytes)
+            require(
+                isinstance(schema, dict)
+                and schema.get("format") == "researchweave-sqlite-schema"
+                and schema.get("version") == 1
+                and schema.get("sqlite_schema_version") == manifest.get("reader_schema")
+                and schema.get("archive_version") == manifest.get("version")
+                and isinstance(schema.get("objects"), list),
+                "Invalid schema descriptor",
+                "SCHEMA_MISMATCH",
+            )
             inventory = manifest.get("objects")
             require(isinstance(inventory, list), "Invalid archive inventory",
                     "INTEGRITY_FAILURE")
@@ -193,6 +244,8 @@ def verify_archive(archive_path: Path) -> dict[str, Any]:
                             "Archive checksum mismatch", "INTEGRITY_FAILURE")
             require("data/project.sqlite" in expected, "Missing database checksum",
                     "INTEGRITY_FAILURE")
+            require("schema.json" in expected, "Missing schema descriptor checksum",
+                    "INTEGRITY_FAILURE")
             require(normalized - {"manifest.json", "readme.txt"} ==
                     {x.casefold() for x in expected}, "Unlisted archive payloads",
                     "UNTRUSTED_CONTENT")
@@ -216,7 +269,7 @@ def restore_archive(archive_path: Path, destination: Path) -> dict[str, Any]:
     try:
         with zipfile.ZipFile(archive_path) as archive:
             for info in archive.infolist():
-                if info.filename in {"manifest.json", "README.txt"}:
+                if info.filename in {"manifest.json", "README.txt", "schema.json"}:
                     continue
                 # Validation above enforces two-level object tree and no path traversal.
                 target = staging.joinpath(*PurePosixPath(info.filename).parts)

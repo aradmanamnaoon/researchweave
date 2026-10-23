@@ -53,9 +53,15 @@ def test_beginner_persistence_quotes_and_archive(tmp_path: Path) -> None:
     assert before["revision"] == 6
     assert run(facade, "project.integrity", project_id=project_id)["ok"]
     archive = run(facade, "project.archive", project_id=project_id, filename="notes.rwproj")
-    assert archive["files"] == 4
+    assert archive["files"] == 5
     snapshot = tmp_path / "workspace" / "exports" / "notes.rwproj"
-    assert verify_archive(snapshot)["project_revision"] == 6
+    verified = verify_archive(snapshot)
+    assert verified["project_revision"] == 6
+    with zipfile.ZipFile(snapshot) as native:
+        schema = json.loads(native.read("schema.json"))
+        assert schema["format"] == "researchweave-sqlite-schema"
+        assert schema["sqlite_schema_version"] == 2
+        assert any(item["name"] == "project" for item in schema["objects"])
     restored = restore_archive(snapshot, tmp_path / "restored")
     assert restored["revision"] == 6
     with ProjectStore(tmp_path / "restored") as store:
