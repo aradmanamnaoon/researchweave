@@ -17,6 +17,7 @@ from uuid import UUID
 from .bibliography import parse_bibliography
 from .citation_graph import CitationGraphService
 from .collections import CollectionService
+from .contracts import arguments_schema, response_schema, risk_metadata, validate_arguments
 from .data_management import DataManagementPlanService
 from .diagnostics import library_diagnostics
 from .discovery import CatalogClient, HTTPTransport
@@ -372,12 +373,22 @@ class EvidenceFacade:
              "effect": effect, "required_permission": effect,
              "offline": effect != "external-network",
              "safe_for_batch": effect == "read", "preview_supported": True,
+             "readiness": ("requires-explicit-network"
+                           if effect == "external-network" else "implemented"),
+             "reversibility": ({"read": "no-side-effects",
+                                  "external-network": "no-local-side-effects",
+                                  "local-write": "operation-specific-audited"}[effect]),
+             "transmitted_data": (["provider-selected bibliographic query-or-identifier",
+                                    "result-limit"]
+                                  if effect == "external-network" else []),
              "network_hosts": (["api.crossref.org", "api.openalex.org",
                                 "eutils.ncbi.nlm.nih.gov", "www.ebi.ac.uk"]
                                if effect == "external-network" else []),
              "required_arguments": list(required),
-             "arguments_schema": {"type": "object", "required": list(required)},
-             "result_schema": {"type": "object"}, "summary": description,
+             "arguments_schema": arguments_schema(operation, required),
+             "result_schema": response_schema(), "summary": description,
+             "risks": risk_metadata(operation, effect)[0],
+             "constraints": risk_metadata(operation, effect)[1],
              "ui_binding": "pending"}
             for operation, (effect, required, description) in OPERATIONS.items()
         ]
@@ -415,8 +426,7 @@ class EvidenceFacade:
         request_id = str(context.get("request_id", new_id()))
         try:
             effect, required, _ = OPERATIONS[operation]
-            for name in required:
-                require(name in arguments, f"Missing required argument: {name}")
+            validate_arguments(operation, required, arguments)
             data: dict[str, Any] = {"effect": effect, "preview_only": True}
             if operation == "library.bibliography_preview":
                 references = parse_bibliography(_bytes(arguments),
@@ -444,8 +454,7 @@ class EvidenceFacade:
         request_id = str(context.get("request_id", new_id()))
         try:
             effect, required, _ = OPERATIONS[operation]
-            for name in required:
-                require(name in arguments, f"Missing required argument: {name}")
+            validate_arguments(operation, required, arguments)
             expected = context.get("expected_revision")
             require(expected is None or type(expected) is int and expected >= 0,
                     "Invalid expected_revision")
