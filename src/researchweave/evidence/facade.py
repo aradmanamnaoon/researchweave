@@ -15,6 +15,7 @@ from typing import Any
 from uuid import UUID
 
 from .bibliography import parse_bibliography
+from .citation_graph import CitationGraphService
 from .collections import CollectionService
 from .data_management import DataManagementPlanService
 from .diagnostics import library_diagnostics
@@ -26,6 +27,13 @@ from .encrypted_archive import (
 )
 from .errors import EvidenceError, require
 from .extraction import ExtractedValue, ExtractionService, FieldDefinition
+from .identity import IdentityService
+from .interoperability import (
+    InteroperabilityService,
+    VaultRecord,
+    preview_obsidian_vault,
+    preview_zotero_export,
+)
 from .library import LibraryService
 from .migration import MarkdownMigration, MarkdownRecord, preview_markdown
 from .models import new_id
@@ -126,6 +134,17 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
         "Record provider observation without silently changing metadata"),
     "reference.update_history": (
         "read", ("project_id", "reference_id"), "Read reference update observations"),
+    "reference.identity_record": (
+        "local-write", ("project_id", "reference_id", "provider", "observed"),
+        "Persist explicit provider metadata identity comparison"),
+    "reference.identity_history": (
+        "read", ("project_id", "reference_id"), "Read persisted reference identity checks"),
+    "reference.citation_add": (
+        "local-write", ("project_id", "citing_reference_id", "cited_reference_id",
+                         "provenance", "confirmed_by"),
+        "Add an explicitly confirmed citation relationship"),
+    "reference.citation_graph": (
+        "read", ("project_id",), "Export confirmed citation relationships"),
     "evidence.anchor": ("local-write", ("project_id", "source_id", "quote", "start", "end"),
                         "Record exact quote anchor"),
     "evidence.note": ("local-write", ("project_id", "source_id", "title", "body"),
@@ -205,6 +224,23 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
                                    "Import Markdown notes with fidelity receipt"),
     "migration.markdown_undo": ("local-write", ("project_id", "batch_id"),
                                  "Soft-delete a complete imported Markdown batch"),
+    "migration.zotero_preview": (
+        "read", ("data_base64",), "Preview user-owned Zotero CSL-JSON export mapping"),
+    "migration.zotero_import": (
+        "local-write", ("project_id", "data_base64"),
+        "Import Zotero CSL-JSON with explicit fidelity receipt"),
+    "migration.obsidian_preview": (
+        "read", ("files",), "Preview sanitized Obsidian vault Markdown mapping"),
+    "migration.obsidian_import": (
+        "local-write", ("project_id", "files"),
+        "Import Obsidian vault notes with backlinks and provenance"),
+    "migration.obsidian_export": (
+        "read", ("project_id", "batch_id"), "Export imported Obsidian Markdown losslessly"),
+    "migration.interop_receipt": (
+        "read", ("project_id", "batch_id"), "Read interoperability fidelity receipt"),
+    "migration.interop_undo": (
+        "local-write", ("project_id", "batch_id"),
+        "Undo supported interoperability batch while preserving raw input"),
 }
 
 
@@ -272,6 +308,29 @@ def _markdown_records(arguments: Mapping[str, Any]) -> list[MarkdownRecord]:
             raise EvidenceError("INVALID_INPUT", "Invalid Markdown content encoding",
                                 "Supply a valid base64 UTF-8 Markdown note.") from exc
         records.append(MarkdownRecord(entry["filename"], data))
+    return records
+
+
+def _vault_records(arguments: Mapping[str, Any]) -> list[VaultRecord]:
+    entries = _value(arguments, "files", list)
+    require(0 < len(entries) <= 1000, "Obsidian import count outside bounds",
+            "RESOURCE_LIMIT")
+    records: list[VaultRecord] = []
+    for entry in entries:
+        require(isinstance(entry, dict), "Each vault file must have path and content")
+        relative_path = entry.get("relative_path")
+        encoded = entry.get("data_base64")
+        require(isinstance(relative_path, str), "Vault relative_path required")
+        require(isinstance(encoded, str), "Vault file content must be encoded")
+        try:
+            data = base64.b64decode(encoded, validate=True)
+        except (ValueError, binascii.Error) as exc:
+            raise EvidenceError(
+                "INVALID_INPUT",
+                "Invalid Obsidian content encoding",
+                "Supply valid base64 UTF-8 Markdown notes.",
+            ) from exc
+        records.append(VaultRecord(relative_path, data))
     return records
 
 
@@ -343,6 +402,10 @@ class EvidenceFacade:
                 data["count"] = len(references)
             if operation == "migration.markdown_preview":
                 data.update(preview_markdown(_markdown_records(arguments)))
+            if operation == "migration.zotero_preview":
+                data.update(preview_zotero_export(_bytes(arguments)))
+            if operation == "migration.obsidian_preview":
+                data.update(preview_obsidian_vault(_vault_records(arguments)))
             if operation == "project.archive_verify":
                 data.update(verify_archive(self.workspace_root / "exports" /
                             _archive_filename(_value(arguments, "filename", str))))
@@ -405,6 +468,10 @@ class EvidenceFacade:
                     "writes": 0}
         if operation == "migration.markdown_preview":
             return preview_markdown(_markdown_records(args))
+        if operation == "migration.zotero_preview":
+            return preview_zotero_export(_bytes(args))
+        if operation == "migration.obsidian_preview":
+            return preview_obsidian_vault(_vault_records(args))
         if operation == "project.archive_verify":
             return verify_archive(self.workspace_root / "exports" /
                                   _archive_filename(_value(args, "filename", str)))
@@ -575,6 +642,30 @@ class EvidenceFacade:
             if operation == "reference.unmerge":
                 return library.unmerge_reference(_value(args, "duplicate_id", str),
                     _value(args, "rationale", str), expected_revision=expected)
+            identity = IdentityService(store)
+            if operation == "reference.identity_record":
+                return identity.record(
+                    _value(args, "reference_id", str),
+                    _value(args, "provider", str),
+                    _value(args, "observed", dict),
+                    expected_revision=expected,
+                )
+            if operation == "reference.identity_history":
+                return {
+                    "records": identity.history(_value(args, "reference_id", str))
+                }
+            citations = CitationGraphService(store)
+            if operation == "reference.citation_add":
+                return citations.add(
+                    _value(args, "citing_reference_id", str),
+                    _value(args, "cited_reference_id", str),
+                    _value(args, "provenance", str),
+                    _value(args, "confirmed_by", str),
+                    relationship=str(args.get("relationship", "cites")),
+                    expected_revision=expected,
+                )
+            if operation == "reference.citation_graph":
+                return citations.graph()
             monitor = ReferenceUpdateMonitor(store)
             if operation == "reference.watch":
                 return monitor.subscribe(
@@ -767,5 +858,18 @@ class EvidenceFacade:
             if operation == "migration.markdown_undo":
                 return MarkdownMigration(store).undo_batch(
                     _value(args, "batch_id", str), expected_revision=expected)
+            interop = InteroperabilityService(store)
+            if operation == "migration.zotero_import":
+                return interop.import_zotero(_bytes(args), expected_revision=expected)
+            if operation == "migration.obsidian_import":
+                return interop.import_obsidian(_vault_records(args), expected_revision=expected)
+            if operation == "migration.obsidian_export":
+                return interop.export_obsidian(_value(args, "batch_id", str))
+            if operation == "migration.interop_receipt":
+                return interop.receipt(_value(args, "batch_id", str))
+            if operation == "migration.interop_undo":
+                return interop.undo(
+                    _value(args, "batch_id", str), expected_revision=expected
+                )
         raise EvidenceError("UNSUPPORTED_FORMAT", "Unknown operation",
                             "Choose an advertised evidence command.")
