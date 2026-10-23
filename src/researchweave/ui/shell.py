@@ -18,6 +18,7 @@ from PyQt6.QtWidgets import (
     QLabel,
     QLineEdit,
     QListWidget,
+    QListWidgetItem,
     QMainWindow,
     QMessageBox,
     QPlainTextEdit,
@@ -230,6 +231,15 @@ class ResearchWindow(QMainWindow):
         layout = self._page("Review", "Screen included and excluded sources with a reason.")
         self.review_summary = QLabel("No screening decisions.")
         layout.addWidget(self.review_summary)
+        self.review_filter = QComboBox()
+        self.review_filter.addItems(["All", "pending", "include", "exclude", "unsure"])
+        named(self.review_filter, "Review queue decision filter")
+        self.review_filter.currentTextChanged.connect(self.refresh_review)
+        layout.addWidget(self.review_filter)
+        self.review_queue = QListWidget()
+        named(self.review_queue, "Select a source to review")
+        self.review_queue.currentItemChanged.connect(self._select_review_source)
+        layout.addWidget(self.review_queue)
         self.review_reason = QLineEdit()
         self.review_reason.setPlaceholderText("Exclusion reason (required to exclude)")
         named(self.review_reason, "Screening exclusion reason")
@@ -241,11 +251,24 @@ class ResearchWindow(QMainWindow):
 
         layout = self._page("Data View", "Import a small local CSV; cells stay in a virtual table.")
         layout.addWidget(button("Import CSV text", self.import_csv, primary=True))
+        self.dataset_picker = QComboBox()
+        named(self.dataset_picker, "Active dataset")
+        self.dataset_picker.currentIndexChanged.connect(self._selected_dataset)
+        layout.addWidget(self.dataset_picker)
         self.data_table = QTableView()
         named(self.data_table, "Dataset grid with labeled column and row headers")
         self.data_model = ResearchTableModel()
         self.data_table.setModel(self.data_model)
         layout.addWidget(self.data_table)
+        pager = QHBoxLayout()
+        pager.addWidget(button("Previous data page", self.previous_data_page))
+        self.data_page_status = QLabel("No dataset loaded")
+        pager.addWidget(self.data_page_status)
+        pager.addWidget(button("Next data page", self.next_data_page))
+        layout.addLayout(pager)
+        self.data_offset = 0
+        self.data_total = 0
+        self.data_page_size = 250
 
         layout = self._page("Variable View", "Choose a column and inspect its raw values.")
         self.variable_list = QListWidget()
@@ -329,10 +352,12 @@ class ResearchWindow(QMainWindow):
         self.density_picker = QComboBox()
         self.density_picker.addItems(["comfortable", "compact"])
         self.density_picker.setCurrentText(self.prefs.density)
+        named(self.density_picker, "Workspace information density")
         form.addRow("Density", self.density_picker)
         self.scale_picker = QComboBox()
         self.scale_picker.addItems(["100%", "150%", "200%"])
         self.scale_picker.setCurrentText(f"{round(self.prefs.scale * 100)}%")
+        named(self.scale_picker, "Text scaling factor")
         form.addRow("Text scaling", self.scale_picker)
         layout.addLayout(form)
         layout.addWidget(button("Apply and save preferences", self.save_preferences, primary=True))
@@ -423,7 +448,56 @@ class ResearchWindow(QMainWindow):
     def _selected_project(self, index: int) -> None:
         project_id = self.project_picker.itemData(index)
         if project_id:
+            if project_id != self.project_id and not self._confirm_leave_project():
+                self.refresh_projects()
+                return
             self.open_project(project_id)
+
+    def _writing_dirty(self) -> bool:
+        return any(
+            document is not None and document.isModified()
+            for document in (
+                self.manuscript_editor.document(), self.notebook_editor.document()
+            )
+        )
+
+    def _confirm_leave_project(self) -> bool:
+        """Protect draft text before project switching and application shutdown."""
+        if not self.project_id or not self._writing_dirty():
+            return True
+        outcome = QMessageBox.question(
+            self, "Unsaved research writing",
+            "Save manuscript and notes before leaving this project?",
+            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard |
+            QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save,
+        )
+        if outcome == QMessageBox.StandardButton.Cancel:
+            return False
+        if outcome == QMessageBox.StandardButton.Save:
+            if not self._save_both():
+                QMessageBox.warning(
+                    self, "Save failed",
+                    "Your changes could not be saved. The project remains open. "
+                    "Check the status message and retry.",
+                )
+                return False
+        return True
+
+    def _save_both(self) -> bool:
+        """Do not declare a successful save after a failed optimistic revision check."""
+        if not self.project_id:
+            return False
+        for operation, editor in (
+            ("ui.manuscript.save", self.manuscript_editor),
+            ("ui.notebook.save", self.notebook_editor),
+        ):
+            result = self._call(operation, **{
+                operation.split(".")[1]: editor.toPlainText()
+            })
+            if result is None:
+                return False
+        return True
 
     def create_project(self) -> None:
         dialog = QDialog(self)
@@ -538,14 +612,31 @@ class ResearchWindow(QMainWindow):
         self.reader_text.setPlainText(source["text"])
 
     def vote(self, decision: str) -> None:
-        if not self.current_source_id:
-            self._set_status("Select a source in Library before screening.")
+        selected = self.review_queue.currentItem()
+        if selected is None:
+            self._set_status("Select a source in the review queue first.")
             return
-        if self._call("ui.review.vote", source_id=self.current_source_id,
+        selected_id = selected.data(Qt.ItemDataRole.UserRole)
+        if self._call("ui.review.vote", source_id=selected_id,
                       decision=decision, reason=self.review_reason.text()):
+            self.current_source_id = selected_id
             self.refresh_review()
 
-    def refresh_review(self) -> None:
+    def _select_review_source(self, current: QListWidgetItem | None,
+                              previous: QListWidgetItem | None) -> None:
+        if current is None:
+            return
+        self.current_source_id = current.data(Qt.ItemDataRole.UserRole)
+        response = self._call("ui.source.get", source_id=self.current_source_id)
+        if response:
+            source = response["source"]
+            self.reader_meta.setText(
+                f"{source['title']} · {source['source_label']} · "
+                f"{'verified' if source['verified'] else 'unverified'}"
+            )
+            self.reader_text.setPlainText(source["text"])
+
+    def refresh_review(self, unused: str = "") -> None:
         if not self.project_id:
             return
         counts = self._call("ui.review.counts")
@@ -556,6 +647,27 @@ class ResearchWindow(QMainWindow):
                 f"uncertain: {counts['unsure']}; pending: {counts['pending']}\n"
                 f"{counts['note']}"
             )
+        decision = self.review_filter.currentText()
+        filtered = self._call(
+            "ui.review.queue", limit=500,
+            decision="" if decision == "All" else decision,
+        )
+        if filtered is None:
+            return
+        selected = self.review_queue.currentItem()
+        previous_selection = selected.data(Qt.ItemDataRole.UserRole) if selected else ""
+        self.review_queue.blockSignals(True)
+        self.review_queue.clear()
+        for source in filtered["records"]:
+            item = QListWidgetItem(
+                f"{source['status'].upper()} · {source['title']} · {source['source_label']}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, source["source_id"])
+            self.review_queue.addItem(item)
+            if source["source_id"] == previous_selection:
+                self.review_queue.setCurrentItem(item)
+        self.review_queue.blockSignals(False)
+        self.review_reason.clear()
 
     def annotate_selection(self) -> None:
         if not self.current_source_id:
@@ -594,20 +706,70 @@ class ResearchWindow(QMainWindow):
     def refresh_datasets(self) -> None:
         if not self.project_id:
             return
-        response = self._call("ui.project.open")
+        response = self._call("ui.dataset.list")
         if response is None:
             return
-        datasets = response["project"]["datasets"]
+        datasets = response["datasets"]
         self.variable_list.clear()
         self.variable_picker.clear()
+        self.dataset_picker.blockSignals(True)
+        self.dataset_picker.clear()
         if not datasets:
             self.data_model.set_records([], [])
+            self.dataset_picker.blockSignals(False)
+            self.data_page_status.setText("No dataset imported")
             return
-        dataset = datasets[0]
-        self.current_dataset_id = dataset["id"]
-        self.data_model.set_records(dataset["columns"], dataset["rows"])
-        self.variable_list.addItems(dataset["columns"])
-        self.variable_picker.addItems(dataset["columns"])
+        for dataset in datasets:
+            self.dataset_picker.addItem(dataset["name"], dataset["id"])
+        current = self.dataset_picker.findData(self.current_dataset_id)
+        self.dataset_picker.setCurrentIndex(current if current >= 0 else 0)
+        self.dataset_picker.blockSignals(False)
+        self._selected_dataset(self.dataset_picker.currentIndex())
+
+    def _selected_dataset(self, index: int) -> None:
+        if index < 0:
+            return
+        self.current_dataset_id = self.dataset_picker.itemData(index)
+        self.data_offset = 0
+        self.load_data_page()
+        self.variable_list.clear()
+        self.variable_picker.clear()
+        response = self._call("ui.dataset.variables", dataset_id=self.current_dataset_id)
+        if response is not None:
+            for variable in response["variables"]:
+                self.variable_list.addItem(
+                    f"{variable['name']} · {variable['inferred_type']} · "
+                    f"missing {variable['missing_n']} / {response['total_rows']}"
+                )
+                self.variable_picker.addItem(variable["name"])
+
+    def load_data_page(self) -> None:
+        if not self.current_dataset_id:
+            self.data_model.set_records([], [])
+            return
+        response = self._call(
+            "ui.dataset.page", dataset_id=self.current_dataset_id,
+            offset=self.data_offset, limit=self.data_page_size,
+        )
+        if response is None:
+            return
+        self.data_total = response["total"]
+        self.data_model.set_records(response["columns"], response["rows"])
+        beginning = self.data_offset + 1 if self.data_total else 0
+        last = min(self.data_offset + len(response["rows"]), self.data_total)
+        self.data_page_status.setText(
+            f"Rows {beginning}–{last} of {self.data_total} · synthetic or imported data"
+        )
+
+    def previous_data_page(self) -> None:
+        if self.data_offset > 0:
+            self.data_offset = max(0, self.data_offset - self.data_page_size)
+            self.load_data_page()
+
+    def next_data_page(self) -> None:
+        if self.data_offset + self.data_page_size < self.data_total:
+            self.data_offset += self.data_page_size
+            self.load_data_page()
 
     def run_summary(self) -> None:
         if not self.current_dataset_id:
@@ -717,24 +879,9 @@ class ResearchWindow(QMainWindow):
     def closeEvent(self, event: QCloseEvent | None) -> None:
         if event is None:
             return
-        manuscript_doc = self.manuscript_editor.document()
-        notebook_doc = self.notebook_editor.document()
-        dirty = (self.project_id and
-                 ((manuscript_doc is not None and manuscript_doc.isModified()) or
-                  (notebook_doc is not None and notebook_doc.isModified())))
-        if dirty:
-            outcome = QMessageBox.question(
-                self, "Unsaved writing",
-                "Save changes to your manuscript and notebook before closing?",
-                QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard |
-                QMessageBox.StandardButton.Cancel, QMessageBox.StandardButton.Save,
-            )
-            if outcome == QMessageBox.StandardButton.Cancel:
-                event.ignore()
-                return
-            if outcome == QMessageBox.StandardButton.Save:
-                self.save_text("manuscript")
-                self.save_text("notebook")
+        if not self._confirm_leave_project():
+            event.ignore()
+            return
         self.jobs.invalidate()
         self.prefs.sidebar_width = max(150, min(480, self.splitter.sizes()[0]))
         self.facade.settings.save(self.prefs)

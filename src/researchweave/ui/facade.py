@@ -122,11 +122,14 @@ class UIFacade:
             "ui.source.get": ("Read a local source", Effect.READ),
             "ui.review.vote": ("Save screening decision", Effect.WRITE),
             "ui.review.counts": ("Compute screening counts", Effect.READ),
+            "ui.review.queue": ("List source screening decisions and reasons", Effect.READ),
             "ui.qual.annotate": ("Add a Unicode-safe evidence code", Effect.WRITE),
             "ui.qual.list": ("Inspect coded evidence", Effect.READ),
             "ui.dataset.import": ("Import bounded CSV text", Effect.WRITE),
             "ui.dataset.describe": ("Summarize numeric values", Effect.READ),
             "ui.dataset.list": ("Show project data tables", Effect.READ),
+            "ui.dataset.page": ("Read bounded dataset page", Effect.READ),
+            "ui.dataset.variables": ("Inspect column types and missingness", Effect.READ),
             "ui.manuscript.save": ("Save a manuscript draft", Effect.WRITE),
             "ui.notebook.save": ("Save local research notes", Effect.WRITE),
             "ui.tutorial.step": ("Mark local tutorial step", Effect.WRITE),
@@ -364,6 +367,32 @@ class UIFacade:
                 "pending": len(ids) - len(decisions), **counts,
                 "note": "Screening decisions only; no fabricated PRISMA flow stages."}
 
+    def _do_ui_review_queue(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        offset = _integer(args, "offset", maximum=5000)
+        limit = _integer(args, "limit", minimum=1, maximum=500, default=100)
+        selection = _string(args, "decision", 12, required=False)
+        if selection not in ("", "pending", "include", "exclude", "unsure"):
+            raise UIError("INVALID_INPUT", "Unknown review filter.",
+                          "Choose pending, include, exclude, unsure or all.")
+        decisions = {vote.source_id: vote for vote in project.votes}
+        queue = []
+        for source in project.sources:
+            vote = decisions.get(source.id)
+            status = vote.decision if vote is not None else "pending"
+            if selection and selection != status:
+                continue
+            queue.append({
+                "source_id": source.id,
+                "title": source.title,
+                "source_label": source.source_label,
+                "status": status,
+                "reason": vote.reason if vote is not None else "",
+                "verified": source.verified,
+            })
+        return {"total": len(queue), "offset": offset, "limit": limit,
+                "records": queue[offset:offset + limit], "revision": project.revision}
+
     def _do_ui_qual_annotate(self, args: Mapping[str, Any]) -> dict[str, Any]:
         source_id = _string(args, "source_id", 36)
         start = _integer(args, "start")
@@ -426,6 +455,42 @@ class UIFacade:
                               "rows": len(item.rows), "columns": item.columns,
                               "origin": item.origin}
                              for item in project.datasets]}
+
+    def _do_ui_dataset_page(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        dataset = _dataset(project, _string(args, "dataset_id", 36))
+        offset = _integer(args, "offset", maximum=MAX_ROWS)
+        limit = _integer(args, "limit", minimum=1, maximum=1000, default=250)
+        return {"dataset_id": dataset.id, "columns": list(dataset.columns),
+                "rows": [list(row) for row in dataset.rows[offset:offset + limit]],
+                "total": len(dataset.rows), "offset": offset, "limit": limit,
+                "origin": dataset.origin, "revision": project.revision}
+
+    def _do_ui_dataset_variables(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        dataset = _dataset(project, _string(args, "dataset_id", 36))
+        variables = []
+        for index, name in enumerate(dataset.columns):
+            values = [row[index] for row in dataset.rows]
+            present = [value for value in values if value.strip()]
+            numeric = [_safe_number(value) for value in present]
+            valid_numerics = sum(value is not None for value in numeric)
+            inference = (
+                "numeric"
+                if present and valid_numerics == len(present)
+                else "mixed" if valid_numerics else "text"
+            )
+            variables.append({
+                "name": name,
+                "inferred_type": inference,
+                "nonmissing_n": len(present),
+                "missing_n": len(values) - len(present),
+                "invalid_numeric_n": len(present) - valid_numerics,
+                "distinct_count": len(set(present)),
+                "warning": "Preview types only; manually confirm units and measurement role.",
+            })
+        return {"dataset_id": dataset.id, "variables": variables,
+                "total_rows": len(dataset.rows)}
 
     def _do_ui_dataset_describe(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)

@@ -200,6 +200,28 @@
       "reversible": true
     },
     {
+      "operation": "ui.review.queue",
+      "version": "1.0.0",
+      "summary": "List source screening decisions and reasons",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
       "operation": "ui.qual.annotate",
       "version": "1.0.0",
       "summary": "Add a Unicode-safe evidence code",
@@ -291,6 +313,50 @@
       "operation": "ui.dataset.list",
       "version": "1.0.0",
       "summary": "Show project data tables",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.dataset.page",
+      "version": "1.0.0",
+      "summary": "Read bounded dataset page",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.dataset.variables",
+      "version": "1.0.0",
+      "summary": "Inspect column types and missingness",
       "effect": "read",
       "arguments_schema": {
         "type": "object",
