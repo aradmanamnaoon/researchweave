@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -781,6 +782,71 @@ def ordinal_logistic(
         np.allclose(probabilities.sum(axis=1), 1.0, atol=1e-8),
         "Ordinal probabilities do not sum to one",
     )
+    parallel_slopes: dict[str, Any] = {
+        "method": "threshold_binary_logit_heterogeneity_screen",
+        "available": True,
+        "threshold_fits": [],
+        "predictor_tests": {},
+        "warning": (
+            "Threshold-wise binary logits share observations, so this chi-square heterogeneity "
+            "screen is approximate and is not a full Brant covariance test"
+        ),
+    }
+    try:
+        import statsmodels.api as sm
+
+        threshold_coefficients: dict[str, list[tuple[float, float]]] = {
+            predictor: [] for predictor in predictors
+        }
+        for threshold_index in range(len(levels) - 1):
+            binary = np.asarray([int(value > threshold_index) for value in y], dtype=float)
+            binary_exog = sm.add_constant(exog, has_constant="add")
+            with warnings.catch_warnings(record=True) as caught:
+                warnings.simplefilter("always")
+                threshold_fit = sm.Logit(binary, binary_exog).fit(disp=False, maxiter=300)
+            require(
+                bool(threshold_fit.mle_retvals.get("converged", False)),
+                "Diagnostic logit failed",
+            )
+            fit_row = {
+                "cut": f"{levels[threshold_index]} | {levels[threshold_index + 1]}",
+                "coefficients": {},
+                "standard_errors": {},
+                "warnings": sorted({str(item.message) for item in caught}),
+            }
+            for predictor in predictors:
+                coefficient = float(threshold_fit.params[predictor])
+                standard_error = float(threshold_fit.bse[predictor])
+                require(
+                    math.isfinite(coefficient)
+                    and math.isfinite(standard_error)
+                    and standard_error > 0,
+                    "Diagnostic coefficient is invalid",
+                )
+                fit_row["coefficients"][predictor] = coefficient
+                fit_row["standard_errors"][predictor] = standard_error
+                threshold_coefficients[predictor].append((coefficient, standard_error))
+            parallel_slopes["threshold_fits"].append(fit_row)
+        for predictor, estimates in threshold_coefficients.items():
+            weights = np.asarray([1 / (se * se) for _, se in estimates], dtype=float)
+            slopes = np.asarray([coefficient for coefficient, _ in estimates], dtype=float)
+            pooled = float(np.sum(weights * slopes) / np.sum(weights))
+            statistic = float(np.sum(weights * (slopes - pooled) ** 2))
+            df = len(estimates) - 1
+            parallel_slopes["predictor_tests"][predictor] = {
+                "chi_squared": statistic,
+                "df": df,
+                "p_value": float(stats.chi2.sf(statistic, df=df)) if df > 0 else None,
+                "pooled_log_odds_slope": pooled,
+            }
+    except (AnalysisError, ValueError, np.linalg.LinAlgError, OverflowError) as exc:
+        parallel_slopes = {
+            "method": "threshold_binary_logit_heterogeneity_screen",
+            "available": False,
+            "threshold_fits": [],
+            "predictor_tests": {},
+            "warning": f"Parallel-slopes screening unavailable: {type(exc).__name__}",
+        }
     return {
         "method": "ordinal_logistic",
         "link": link,
@@ -795,9 +861,8 @@ def ordinal_logistic(
         "n_used": len(y),
         "n_excluded": len(dataset.records) - len(y),
         "predicted_probabilities": probabilities.tolist(),
-        "assumption": (
-            "Proportional-odds / parallel-slopes assumption requires external diagnostic review"
-        ),
+        "parallel_slopes_diagnostic": parallel_slopes,
+        "assumption": "Proportional-odds / parallel-slopes assumption requires design-aware review",
         "dataset_revision": dataset.revision,
         "versions": runtime_versions(),
     }

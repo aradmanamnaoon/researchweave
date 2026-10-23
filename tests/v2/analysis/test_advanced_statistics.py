@@ -135,6 +135,31 @@ def test_ancova_reports_adjusted_means_and_covariance_based_contrast(tmp_path: P
     assert 0 <= contrast["p_value"] <= contrast["holm_adjusted_p"] <= 1
 
 
+def test_ordinal_parallel_slopes_screen_is_structured_and_finite(tmp_path: Path):
+    rng = np.random.default_rng(123)
+    x = np.linspace(-2.0, 2.0, 180)
+    latent = 0.9 * x + rng.logistic(size=len(x))
+    levels = np.where(latent < -0.6, "low", np.where(latent < 0.8, "mid", "high"))
+    dataset = _dataset(
+        tmp_path,
+        "ordinal.csv",
+        "x,y\n"
+        + "".join(
+            f"{value:.12g},{level}\n" for value, level in zip(x, levels, strict=True)
+        ),
+    )
+    result = ordinal_logistic(
+        dataset, outcome="y", predictors=["x"], levels=["low", "mid", "high"]
+    )
+    diagnostic = result["parallel_slopes_diagnostic"]
+    assert diagnostic["available"] is True
+    assert len(diagnostic["threshold_fits"]) == 2
+    tested = diagnostic["predictor_tests"]["x"]
+    assert tested["df"] == 1
+    assert tested["chi_squared"] >= 0
+    assert 0 <= tested["p_value"] <= 1
+
+
 def test_mixed_effects_fixed_slope_reference(tmp_path: Path):
     rows = ["subject,time,y"]
     for subject, intercept in [("a", 0.0), ("b", 1.0), ("c", -1.0), ("d", 2.0)]:
