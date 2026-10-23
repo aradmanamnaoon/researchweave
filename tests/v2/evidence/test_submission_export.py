@@ -26,6 +26,15 @@ def test_submission_zip_is_atomic_checksummed_and_never_claims_submission(
     root = tmp_path / "project"
     with ProjectStore.create(root, "Paper", "Question", "observational") as store:
         _complete_manuscript(store)
+        WritingService(store).save_figure(
+            "paper",
+            "Figure 1",
+            "Synthetic figure",
+            b"\x89PNG\r\n\x1a\nsynthetic",
+            "image/png",
+            "A. Researcher",
+            "Submission figure",
+        )
         destination = tmp_path / "paper.rw-submission.zip"
         receipt = PublishingService(store).export_submission_packet(
             "paper",
@@ -37,6 +46,7 @@ def test_submission_zip_is_atomic_checksummed_and_never_claims_submission(
                 "cover_letter": "manual editorial requirement",
             },
             supplied_metadata={
+                "title": "Synthetic manuscript title",
                 "authors": ["A. Researcher"],
                 "funding": "No external funding declared by the user.",
             },
@@ -48,7 +58,20 @@ def test_submission_zip_is_atomic_checksummed_and_never_claims_submission(
         manifest = json.loads(archive.read("manifest.json"))
         assert manifest["submission_performed"] is False
         assert manifest["fabricated_metadata_fields"] == []
-        assert manifest["metadata_fields_supplied"] == ["authors", "funding"]
+        assert manifest["metadata_fields_supplied"] == ["authors", "funding", "title"]
+        assert manifest["figure_count"] == 1
+        assert manifest["blinded_manuscript_generated"] is True
+        assert manifest["blinded_manuscript_human_review_required"] is True
+        assert archive.read("blinded-manuscript.md") == archive.read("manuscript.md")
+        title_page = archive.read("title-page.md").decode()
+        assert "Synthetic manuscript title" in title_page
+        assert "A. Researcher" in title_page
+        assert b"A. Researcher" not in archive.read("blinded-manuscript.md")
+        checklist = archive.read("human-review-checklist.md").decode()
+        assert "actual journal submission manually" in checklist
+        figures = json.loads(archive.read("figures.json"))
+        assert figures[0]["label"] == "Figure 1"
+        assert archive.read(figures[0]["path"]).startswith(b"\x89PNG")
         assert any(
             item["requirement"] == "cover_letter"
             and item["status"] == "manual_review_required"

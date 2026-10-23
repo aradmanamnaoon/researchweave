@@ -186,6 +186,7 @@ class PublishingService:
         rules = dict(requirements or {})
         metadata = dict(supplied_metadata or {})
         allowed_metadata = {
+            "title",
             "authors",
             "affiliations",
             "funding",
@@ -241,8 +242,52 @@ class PublishingService:
                 "Resolve requirements or explicitly allow an incomplete draft packet.",
             )
         validation = self.check_manuscript(manuscript_id)
+        manuscript_text = str(base["files"]["manuscript.md"])
+        title = metadata.get("title")
+        authors = metadata.get("authors")
+        affiliations = metadata.get("affiliations")
+        corresponding = metadata.get("corresponding_author")
+        title_page_lines = [
+            "# Submission Title Page",
+            "",
+            f"Target journal: {journal}",
+            f"Title: {title if isinstance(title, str) and title.strip() else '[not supplied]'}",
+            "",
+            "## Authors",
+            canonical_json(authors) if authors is not None else "[not supplied]",
+            "",
+            "## Affiliations",
+            canonical_json(affiliations) if affiliations is not None else "[not supplied]",
+            "",
+            "## Corresponding author",
+            canonical_json(corresponding) if corresponding is not None else "[not supplied]",
+            "",
+            "Only user-supplied metadata is rendered above.",
+        ]
+        title_page = "\n".join(title_page_lines) + "\n"
+        checklist = "\n".join(
+            [
+                "# Human Submission Review Checklist",
+                "",
+                "- [ ] Confirm journal-specific author instructions and file naming.",
+                "- [ ] Inspect the blinded manuscript for identifying text written "
+                "inside sections.",
+                "- [ ] Confirm title-page authors, affiliations, and corresponding-author details.",
+                "- [ ] Confirm ethics, funding, conflicts, data availability, and "
+                "contributions only "
+                "when supplied by the authors.",
+                "- [ ] Confirm figures, captions, numbering, permissions, and required resolution.",
+                "- [ ] Review all integrity warnings and unresolved venue requirements.",
+                "- [ ] Perform the actual journal submission manually; this packet "
+                "does not submit.",
+                "",
+            ]
+        )
         payloads: dict[str, bytes] = {
-            "manuscript.md": str(base["files"]["manuscript.md"]).encode(),
+            "manuscript.md": manuscript_text.encode(),
+            "blinded-manuscript.md": manuscript_text.encode(),
+            "title-page.md": title_page.encode(),
+            "human-review-checklist.md": checklist.encode(),
             "bibliography.txt": str(base["files"]["bibliography.txt"]).encode(),
             "integrity-report.json": (canonical_json(validation) + "\n").encode(),
             "venue-requirements.json": (
@@ -254,6 +299,33 @@ class PublishingService:
             ).encode(),
             "supplied-metadata.json": (canonical_json(metadata) + "\n").encode(),
         }
+        extension_by_media_type = {
+            "image/png": "png",
+            "image/jpeg": "jpg",
+            "image/svg+xml": "svg",
+            "application/pdf": "pdf",
+        }
+        figure_manifest: list[dict[str, Any]] = []
+        for index, figure in enumerate(self.writing.figures(manuscript_id), 1):
+            media_type = str(figure["media_type"])
+            extension = extension_by_media_type.get(media_type)
+            require(extension is not None, "Unsupported stored figure format", "INTEGRITY_FAILURE")
+            digest = str(figure["digest"])
+            data = self.store.get_object(digest)
+            require(sha256(data) == digest, "Figure object checksum mismatch", "INTEGRITY_FAILURE")
+            path = f"figures/figure-{index:03d}-{figure['id']}.{extension}"
+            payloads[path] = data
+            figure_manifest.append(
+                {
+                    "figure_id": figure["id"],
+                    "label": figure["label"],
+                    "caption": figure["caption"],
+                    "media_type": media_type,
+                    "sha256": digest,
+                    "path": path,
+                }
+            )
+        payloads["figures.json"] = (canonical_json(figure_manifest) + "\n").encode()
         inventory = [
             {"path": name, "sha256": sha256(data), "bytes": len(data)}
             for name, data in sorted(payloads.items())
@@ -267,6 +339,10 @@ class PublishingService:
             "unmet_or_manual_requirements": unmet,
             "metadata_fields_supplied": sorted(metadata),
             "fabricated_metadata_fields": [],
+            "blinded_manuscript_generated": True,
+            "blinded_manuscript_human_review_required": True,
+            "figure_count": len(figure_manifest),
+            "human_review_checklist_included": True,
             "submission_performed": False,
             "files": inventory,
         }
