@@ -107,6 +107,7 @@ from .psychometrics import reliability_diagnostics
 from .qualitative import Code, Transcript, cohen_kappa
 from .qualitative_store import Memo, QualitativeState, QualitativeStore
 from .recommendations import recommend_from_mapping
+from .reproducibility import AnalysisPlan, receipt_from_json, verify_replay
 from .runtime import RuntimeAuthorizer, run_script
 from .scale_scoring import ScaleDefinition, item_total_diagnostics, score_scale
 from .schemas import RESULT_SCHEMA, schema_for, validate_arguments
@@ -273,6 +274,8 @@ class AnalysisFacade:
             "qualitative.adjudicate": "read",
             "mixed.joint_display": "read",
             "mixed.joint_display_sensitive": "sensitive-export",
+            "audit.plan": "read",
+            "audit.verify_replay": "read",
             "plot.render": "local-write",
             "runtime.python": "code-execution",
             "runtime.r": "code-execution",
@@ -388,6 +391,23 @@ class AnalysisFacade:
                     list(arguments["pvalues"]), method=str(arguments.get("method", "holm"))
                 )
             }
+        elif operation == "audit.plan":
+            plan = AnalysisPlan.from_json(dict(arguments["plan"]))
+            data = {
+                "plan_id": plan.plan_id,
+                "schema_version": plan.schema_version,
+                "seed": plan.seed,
+                "spec_hash": plan.spec_hash,
+                "execution_order": list(plan.execution_order()),
+                "operations": [step.operation for step in plan.steps],
+                "step_count": len(plan.steps),
+                "rationale": plan.rationale,
+                "hypotheses": list(plan.hypotheses),
+            }
+        elif operation == "audit.verify_replay":
+            expected = receipt_from_json(dict(arguments["expected"]))
+            actual = receipt_from_json(dict(arguments["actual"]))
+            data = verify_replay(expected, actual)
         elif operation == "statistics.bootstrap":
             from dataclasses import asdict
 

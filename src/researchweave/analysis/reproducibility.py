@@ -100,7 +100,7 @@ class AnalysisPlan:
             "Invalid plan keys",
             "SCHEMA_MISMATCH",
         )
-        require(isinstance(data["steps"], list), "Plan steps must be list")
+        require(isinstance(data["steps"], (list, tuple)), "Plan steps must be an array")
         steps = tuple(
             AnalysisStep(
                 step_id=step["step_id"],
@@ -224,6 +224,46 @@ def verify_replay(expected: ExecutionReceipt, actual: ExecutionReceipt) -> dict[
     }
 
 
+def receipt_from_json(data: Mapping[str, Any]) -> ExecutionReceipt:
+    """Parse and integrity-check an execution receipt supplied at a command boundary."""
+
+    require(
+        set(data)
+        == {
+            "plan_hash",
+            "environment",
+            "step_results",
+            "status",
+            "output_hash",
+            "executed_at",
+        },
+        "Invalid receipt keys",
+        "SCHEMA_MISMATCH",
+    )
+    require(isinstance(data["environment"], Mapping), "Receipt environment must be an object")
+    require(isinstance(data["step_results"], (list, tuple)), "Receipt steps must be an array")
+    require(data["status"] in {"ok", "failed"}, "Invalid receipt status", "SCHEMA_MISMATCH")
+    require(
+        all(isinstance(item, Mapping) for item in data["step_results"]),
+        "Receipt steps must contain objects",
+        "SCHEMA_MISMATCH",
+    )
+    receipt = ExecutionReceipt(
+        str(data["plan_hash"]),
+        {str(key): str(value) for key, value in data["environment"].items()},
+        tuple(dict(item) for item in data["step_results"]),
+        str(data["status"]),
+        str(data["output_hash"]),
+        str(data["executed_at"]),
+    )
+    require(
+        digest(receipt.deterministic_projection()) == receipt.output_hash,
+        "Receipt hash mismatch",
+        "INTEGRITY_FAILURE",
+    )
+    return receipt
+
+
 def save_receipt(receipt: ExecutionReceipt, destination: Path) -> None:
     require(destination.parent.is_dir(), "Receipt directory does not exist", "NOT_FOUND")
     require(not destination.exists(), "Receipt already exists", "CONFLICT")
@@ -244,17 +284,5 @@ def load_receipt(path: Path) -> ExecutionReceipt:
     require(path.is_file(), "Receipt not found", "NOT_FOUND")
     require(path.stat().st_size <= 20_000_000, "Receipt exceeds budget", "RESOURCE_LIMIT")
     data = json.loads(path.read_bytes())
-    receipt = ExecutionReceipt(
-        data["plan_hash"],
-        data["environment"],
-        tuple(data["step_results"]),
-        data["status"],
-        data["output_hash"],
-        data["executed_at"],
-    )
-    require(
-        digest(receipt.deterministic_projection()) == receipt.output_hash,
-        "Receipt hash mismatch",
-        "INTEGRITY_FAILURE",
-    )
-    return receipt
+    require(isinstance(data, Mapping), "Receipt must be a JSON object", "SCHEMA_MISMATCH")
+    return receipt_from_json(data)

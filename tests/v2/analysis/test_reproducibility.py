@@ -10,6 +10,7 @@ from researchweave.analysis.reproducibility import (
     AnalysisStep,
     execute_plan,
     load_receipt,
+    receipt_from_json,
     save_receipt,
     verify_replay,
 )
@@ -109,3 +110,113 @@ def test_execution_stops_on_failure(tmp_path: Path):
     assert receipt.status == "failed"
     assert len(receipt.step_results) == 1
     assert receipt.step_results[0]["result"]["status"] == "failed"
+
+
+def test_audit_facade_inspects_plan_and_verifies_integrity_checked_receipts(tmp_path: Path):
+    facade = build_analysis_facade(tmp_path / "store")
+    plan = AnalysisPlan(
+        "facade_replay",
+        1,
+        (
+            AnalysisStep("inspect", "dataset.inspect", {"dataset_id": "d", "revision": "r"}),
+            AnalysisStep(
+                "describe",
+                "statistics.describe",
+                {"dataset_id": "d", "revision": "r", "column": "score"},
+                dependencies=("inspect",),
+            ),
+        ),
+        seed=2026,
+        rationale="deterministic audit",
+        hypotheses=("H1",),
+    )
+    inspected = facade.execute("audit.plan", {"plan": plan.to_json()}, {"request_id": "audit"})
+    assert inspected["status"] == "ok"
+    assert inspected["data"]["spec_hash"] == plan.spec_hash
+    assert inspected["data"]["execution_order"] == ["inspect", "describe"]
+    assert inspected["data"]["seed"] == 2026
+
+    class StableDispatcher:
+        def execute(self, operation, arguments, context):
+            return {
+                "request_id": context.get("request_id", ""),
+                "status": "ok",
+                "data": {"operation": operation, "arguments": dict(arguments)},
+                "artifacts": [],
+                "warnings": [],
+                "error": None,
+                "provenance": [],
+                "impact": {"local_writes": [], "network_hosts": []},
+            }
+
+    first = execute_plan(plan, StableDispatcher(), {"request_id": "stable"})
+    second = execute_plan(plan, StableDispatcher(), {"request_id": "stable"})
+    compared = facade.execute(
+        "audit.verify_replay",
+        {"expected": first.__dict__, "actual": second.__dict__},
+        {"request_id": "compare"},
+    )
+    assert compared["status"] == "ok"
+    assert compared["data"]["match"] is True
+
+    tampered = dict(first.__dict__)
+    tampered["status"] = "failed"
+    rejected = facade.execute(
+        "audit.verify_replay",
+        {"expected": tampered, "actual": second.__dict__},
+        {"request_id": "tampered"},
+    )
+    assert rejected["status"] == "failed"
+    assert rejected["error"]["code"] == "INTEGRITY_FAILURE"
+    with pytest.raises(AnalysisError, match="INTEGRITY_FAILURE"):
+        receipt_from_json(tampered)
+
+
+def test_audit_plan_rejects_cycle_and_runtime_execution(tmp_path: Path):
+    facade = build_analysis_facade(tmp_path / "store")
+    cyclic = {
+        "plan_id": "cyclic",
+        "schema_version": 1,
+        "steps": [
+            {
+                "step_id": "a",
+                "operation": "dataset.inspect",
+                "arguments": {},
+                "dependencies": ["b"],
+                "binds": {},
+            },
+            {
+                "step_id": "b",
+                "operation": "dataset.page",
+                "arguments": {},
+                "dependencies": ["a"],
+                "binds": {},
+            },
+        ],
+        "seed": 1,
+        "rationale": "invalid",
+        "hypotheses": [],
+    }
+    failed = facade.execute("audit.plan", {"plan": cyclic}, {})
+    assert failed["status"] == "failed"
+    assert failed["error"]["code"] == "SCHEMA_MISMATCH"
+
+    runtime_plan = {
+        "plan_id": "unsafe",
+        "schema_version": 1,
+        "steps": [
+            {
+                "step_id": "run",
+                "operation": "runtime.python",
+                "arguments": {"source": "print(1)"},
+                "dependencies": [],
+                "binds": {},
+            }
+        ],
+        "seed": 1,
+        "rationale": "must reject",
+        "hypotheses": [],
+    }
+    denied = facade.execute("audit.plan", {"plan": runtime_plan}, {})
+    assert denied["status"] == "failed"
+    assert denied["error"]["code"] == "PERMISSION_DENIED"

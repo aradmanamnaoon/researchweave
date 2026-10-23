@@ -215,6 +215,66 @@ SCALE_SPEC = _structured(
     },
 )
 
+PLAN_SPEC = _structured(
+    "object",
+    {
+        "type": "object",
+        "properties": {
+            "plan_id": {"type": "string"},
+            "schema_version": {"type": "integer"},
+            "steps": {
+                "type": "array",
+                "minItems": 1,
+                "maxItems": 100,
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "step_id": {"type": "string"},
+                        "operation": {"type": "string"},
+                        "arguments": {"type": "object"},
+                        "dependencies": {"type": "array", "items": {"type": "string"}},
+                        "binds": {
+                            "type": "object",
+                            "additionalProperties": {"type": "string"},
+                        },
+                    },
+                    "required": ["step_id", "operation", "arguments"],
+                    "additionalProperties": False,
+                },
+            },
+            "seed": {"type": "integer"},
+            "rationale": {"type": "string"},
+            "hypotheses": {"type": "array", "items": {"type": "string"}},
+        },
+        "required": ["plan_id", "schema_version", "steps", "seed", "rationale", "hypotheses"],
+        "additionalProperties": False,
+    },
+)
+
+RECEIPT_SPEC = _structured(
+    "object",
+    {
+        "type": "object",
+        "properties": {
+            "plan_hash": {"type": "string"},
+            "environment": {"type": "object", "additionalProperties": {"type": "string"}},
+            "step_results": {"type": "array", "items": {"type": "object"}},
+            "status": {"type": "string", "enum": ["ok", "failed"]},
+            "output_hash": {"type": "string"},
+            "executed_at": {"type": "string"},
+        },
+        "required": [
+            "plan_hash",
+            "environment",
+            "step_results",
+            "status",
+            "output_hash",
+            "executed_at",
+        ],
+        "additionalProperties": False,
+    },
+)
+
 
 @dataclass(frozen=True)
 class OperationSchema:
@@ -386,6 +446,8 @@ IDENTITY = {"dataset_id": S, "revision": S}
 
 
 OPERATION_SCHEMAS: dict[str, OperationSchema] = {
+    "audit.plan": _schema({"plan": PLAN_SPEC}),
+    "audit.verify_replay": _schema({"expected": RECEIPT_SPEC, "actual": RECEIPT_SPEC}),
     "dataset.import": _schema({"filename": S}, {"options": IMPORT_OPTIONS}),
     "dataset.scan_parquet": _schema(
         {"filename": S},
