@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any
 
+from .coding_review import CodingDecision, CodingReviewLedger
 from .errors import require
 from .models import canonical_json, digest, utc_now
 from .qualitative import Code, CodingProject
@@ -40,7 +41,8 @@ class QualitativeState:
     project: CodingProject = field(default_factory=CodingProject)
     memos: dict[str, Memo] = field(default_factory=dict)
     codebook_events: list[CodebookEvent] = field(default_factory=list)
-    schema_version: int = 1
+    review_events: list[CodingDecision] = field(default_factory=list)
+    schema_version: int = 2
 
     def _record(
         self,
@@ -134,21 +136,46 @@ class QualitativeState:
         require(memo.code_id is None or memo.code_id in self.project.codes, "Unknown memo code")
         self.memos[memo.memo_id] = memo
 
+    def attach_review_ledger(self, ledger: CodingReviewLedger) -> None:
+        """Persist an adjudication ledger only when it belongs to this exact project snapshot."""
+
+        require(
+            digest(ledger.project.to_json()) == digest(self.project.to_json()),
+            "Review ledger belongs to another qualitative snapshot",
+            "INTEGRITY_FAILURE",
+        )
+        exported = ledger.export_json()
+        restored = CodingReviewLedger.load_json(self.project, exported)
+        self.review_events = list(restored.events)
+
+    def review_ledger(self) -> CodingReviewLedger:
+        """Restore validated coder-review history against the current project."""
+
+        payload = {
+            "schema": "researchweave.coding_decisions.v1",
+            "project_hash": digest(self.project.to_json()),
+            "events": [asdict(event) for event in self.review_events],
+            "event_hash": digest([asdict(event) for event in self.review_events]),
+        }
+        return CodingReviewLedger.load_json(self.project, payload)
+
     def to_json(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
             "project": self.project.to_json(),
             "memos": [asdict(value) for value in self.memos.values()],
             "codebook_events": [asdict(value) for value in self.codebook_events],
+            "review_events": [asdict(value) for value in self.review_events],
         }
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> QualitativeState:
-        require(
-            set(data) == {"schema_version", "project", "memos", "codebook_events"},
-            "Invalid qualitative state keys",
-        )
-        require(data["schema_version"] == 1, "Unsupported qualitative schema", "SCHEMA_MISMATCH")
+        schema_version = data.get("schema_version")
+        expected = {"schema_version", "project", "memos", "codebook_events"}
+        if schema_version == 2:
+            expected.add("review_events")
+        require(set(data) == expected, "Invalid qualitative state keys")
+        require(schema_version in {1, 2}, "Unsupported qualitative schema", "SCHEMA_MISMATCH")
         state = cls(project=CodingProject.from_json(data["project"]))
         for entry in data["memos"]:
             state.add_memo(Memo(**entry))
@@ -168,6 +195,9 @@ class QualitativeState:
                 }
             )
             require(expected == event.event_id, "Codebook event hash mismatch", "INTEGRITY_FAILURE")
+        if schema_version == 2:
+            state.review_events = [CodingDecision(**entry) for entry in data["review_events"]]
+            state.review_ledger()  # validates event hashes/anchors/duplicate reviewers
         return state
 
 

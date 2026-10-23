@@ -3,6 +3,7 @@ from pathlib import Path
 
 import pytest
 
+from researchweave.analysis.coding_review import CodingReviewLedger
 from researchweave.analysis.datasets import import_csv
 from researchweave.analysis.errors import AnalysisError
 from researchweave.analysis.missing_data import (
@@ -82,6 +83,10 @@ def test_qualitative_store_restart_history_memo_and_tamper(tmp_path: Path):
     state.add_code(Code("parent", "Parent"), actor="alice")
     state.add_code(Code("child", "Child", parent="parent"), actor="alice")
     annotation = state.project.annotate("source", 0, 5, "child", "alice", "u1")
+    reviewer = CodingReviewLedger(state.project)
+    reviewer.decide(0, "accept", reviewer="reviewer1", rationale="Matches code definition")
+    reviewer.decide(0, "reject", reviewer="reviewer2", rationale="Boundary is too broad")
+    state.attach_review_ledger(reviewer)
     state.add_memo(
         Memo(
             "memo1",
@@ -104,6 +109,7 @@ def test_qualitative_store_restart_history_memo_and_tamper(tmp_path: Path):
     assert reopened.project.codes["child"].description == "Refined definition"
     assert reopened.memos["memo1"].text == "Keep context"
     assert len(reopened.codebook_events) == 3
+    assert reopened.review_ledger().consensus()[0]["status"] == "conflict"
     path = Path(saved["path"])
     envelope = json.loads(path.read_text(encoding="utf-8"))
     envelope["state"]["project"]["transcripts"][0]["text"] = "tampered"
