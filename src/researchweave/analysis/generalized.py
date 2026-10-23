@@ -75,7 +75,7 @@ def logistic_regression(
     require(bool(fitted.mle_retvals.get("converged")), "Logistic fit did not converge")
     coefficients = np.asarray(fitted.params, dtype=float)
     require(bool(np.all(np.isfinite(coefficients))), "Model returned non-finite coefficients")
-    confidence = fitted.conf_int()
+    confidence = np.asarray(fitted.conf_int(), dtype=float)
     names = ["intercept", *predictors]
     probabilities = np.asarray(fitted.predict(x), dtype=float)
     require(
@@ -87,6 +87,9 @@ def logistic_regression(
         "coefficients": dict(zip(names, coefficients.tolist(), strict=True)),
         "odds_ratios": dict(zip(names, np.exp(coefficients).tolist(), strict=True)),
         "confidence_intervals": dict(zip(names, confidence.tolist(), strict=True)),
+        "odds_ratio_confidence_intervals": dict(
+            zip(names, np.exp(confidence).tolist(), strict=True)
+        ),
         "p_values": dict(zip(names, map(float, fitted.pvalues), strict=True)),
         "log_likelihood": float(fitted.llf),
         "aic": float(fitted.aic),
@@ -154,6 +157,7 @@ def poisson_regression(
     require(bool(fitted.converged), "Poisson GLM failed to converge")
     require(bool(np.all(np.isfinite(fitted.params))), "Poisson coefficients non-finite")
     names = ["intercept", *predictors]
+    confidence = np.asarray(fitted.conf_int(), dtype=float)
     dispersion = float(fitted.pearson_chi2 / fitted.df_resid) if fitted.df_resid else math.nan
     warnings_list = []
     if dispersion > 1.5:
@@ -163,7 +167,10 @@ def poisson_regression(
     details = {
         "coefficients": dict(zip(names, map(float, fitted.params), strict=True)),
         "rate_ratios": dict(zip(names, np.exp(fitted.params).tolist(), strict=True)),
-        "confidence_intervals": dict(zip(names, fitted.conf_int().tolist(), strict=True)),
+        "confidence_intervals": dict(zip(names, confidence.tolist(), strict=True)),
+        "rate_ratio_confidence_intervals": dict(
+            zip(names, np.exp(confidence).tolist(), strict=True)
+        ),
         "p_values": dict(zip(names, map(float, fitted.pvalues), strict=True)),
         "deviance": float(fitted.deviance),
         "aic": float(fitted.aic),
@@ -235,10 +242,14 @@ def negative_binomial_regression(
         raise AnalysisError("INVALID_INPUT", "Negative-binomial GLM fitting failed") from exc
     require(bool(fitted.converged), "Negative-binomial GLM failed to converge")
     names = ["intercept", *predictors]
+    confidence = np.asarray(fitted.conf_int(), dtype=float)
     details = {
         "coefficients": dict(zip(names, map(float, fitted.params), strict=True)),
         "rate_ratios": dict(zip(names, np.exp(fitted.params).tolist(), strict=True)),
-        "confidence_intervals": dict(zip(names, fitted.conf_int().tolist(), strict=True)),
+        "confidence_intervals": dict(zip(names, confidence.tolist(), strict=True)),
+        "rate_ratio_confidence_intervals": dict(
+            zip(names, np.exp(confidence).tolist(), strict=True)
+        ),
         "p_values": dict(zip(names, map(float, fitted.pvalues), strict=True)),
         "deviance": float(fitted.deviance),
         "aic": float(fitted.aic),
@@ -347,6 +358,9 @@ def estimated_negative_binomial_regression(
             "rate_ratios": dict(zip(names, np.exp(coefficient_values).tolist(), strict=True)),
             "confidence_intervals": dict(
                 zip(names, coefficient_intervals.tolist(), strict=True)
+            ),
+            "rate_ratio_confidence_intervals": dict(
+                zip(names, np.exp(coefficient_intervals).tolist(), strict=True)
             ),
             "p_values": dict(zip(names, map(float, fitted.pvalues[:-1]), strict=True)),
             "alpha": alpha,
