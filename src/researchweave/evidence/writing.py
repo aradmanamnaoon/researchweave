@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Mapping
+from difflib import unified_diff
 from typing import Any
 
 from .errors import require
@@ -59,6 +60,78 @@ class WritingService:
         return [{"section": row["section"], "revision": row["revision"],
                  "body": row["body"], "citations": json.loads(row["citations_json"])}
                 for row in rows]
+
+    def section_history(self, manuscript_id: str, section: str) -> list[dict[str, Any]]:
+        require(bool(section.strip()), "Section name required")
+        rows = self.store.conn.execute(
+            "SELECT * FROM manuscripts WHERE id=? AND section=? ORDER BY revision",
+            (manuscript_id, section),
+        ).fetchall()
+        return [
+            {
+                "section": row["section"],
+                "revision": row["revision"],
+                "body": row["body"],
+                "body_sha256": sha256(row["body"].encode()),
+                "citations": json.loads(row["citations_json"]),
+                "edited_at": row["edited_at"],
+            }
+            for row in rows
+        ]
+
+    def section_diff(
+        self,
+        manuscript_id: str,
+        section: str,
+        from_revision: int,
+        to_revision: int,
+    ) -> dict[str, Any]:
+        require(
+            type(from_revision) is int and type(to_revision) is int
+            and 0 < from_revision < to_revision,
+            "Manuscript diff requires ordered positive revisions",
+        )
+        history = {
+            row["revision"]: row for row in self.section_history(manuscript_id, section)
+        }
+        require(
+            from_revision in history and to_revision in history,
+            "Manuscript section revision not found",
+            "NOT_FOUND",
+        )
+        before = history[from_revision]
+        after = history[to_revision]
+        diff = list(
+            unified_diff(
+                before["body"].splitlines(),
+                after["body"].splitlines(),
+                fromfile=f"{section}@{from_revision}",
+                tofile=f"{section}@{to_revision}",
+                lineterm="",
+            )
+        )
+        before_keys = before["citations"]
+        after_keys = after["citations"]
+        citation_changes = {
+            "added": sorted(set(after_keys) - set(before_keys)),
+            "removed": sorted(set(before_keys) - set(after_keys)),
+            "remapped": sorted(
+                key
+                for key in set(before_keys) & set(after_keys)
+                if before_keys[key] != after_keys[key]
+            ),
+        }
+        return {
+            "manuscript_id": manuscript_id,
+            "section": section,
+            "from_revision": from_revision,
+            "to_revision": to_revision,
+            "from_sha256": before["body_sha256"],
+            "to_sha256": after["body_sha256"],
+            "diff": diff,
+            "citation_changes": citation_changes,
+            "history_overwritten": False,
+        }
 
     def inspect(self, manuscript_id: str) -> dict[str, Any]:
         sections = self.sections(manuscript_id)

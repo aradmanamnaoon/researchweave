@@ -6,6 +6,8 @@ silently coercing missingness into zero or pooling distinct effect measures.
 
 from __future__ import annotations
 
+import csv
+import io
 import json
 import math
 from dataclasses import dataclass
@@ -128,3 +130,38 @@ class ExtractionService:
                  "extracted": json.loads(r["value_json"]), "unit": r["unit"],
                  "source_anchor": r["source_anchor"], "reviewer": r["reviewer"]}
                 for r in rows]
+
+    def matrix_csv(self, review_id: str) -> str:
+        rows = self.matrix(review_id)
+        stream = io.StringIO(newline="")
+        fields = [
+            "study_id",
+            "record_id",
+            "reference_id",
+            "field",
+            "value",
+            "missingness",
+            "unit",
+            "original_text",
+            "source_anchor",
+            "reviewer",
+        ]
+        writer = csv.DictWriter(stream, fieldnames=fields)
+        writer.writeheader()
+        for row in rows:
+            extracted = row["extracted"]
+            writer.writerow(
+                {
+                    "study_id": row["study_id"],
+                    "record_id": row["record_id"],
+                    "reference_id": row["reference_id"],
+                    "field": row["field"],
+                    "value": extracted.get("value"),
+                    "missingness": extracted.get("missingness"),
+                    "unit": extracted.get("unit", row["unit"]),
+                    "original_text": extracted.get("original_text", ""),
+                    "source_anchor": row["source_anchor"] or "",
+                    "reviewer": row["reviewer"],
+                }
+            )
+        return stream.getvalue()
