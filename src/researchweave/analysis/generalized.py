@@ -261,3 +261,111 @@ def negative_binomial_regression(
         ),
         versions=runtime_versions(),
     )
+
+
+def estimated_negative_binomial_regression(
+    dataset: Dataset,
+    outcome: str,
+    predictors: list[str],
+    *,
+    offset: str | None = None,
+) -> ScientificResult:
+    """NB2 count regression with dispersion estimated by maximum likelihood."""
+
+    from statsmodels.discrete.discrete_model import NegativeBinomial
+
+    x, y, excluded = design_matrix(dataset, outcome, predictors)
+    require(
+        bool(np.all(y >= 0)) and bool(np.all(np.floor(y) == y)) and bool(np.any(y > 0)),
+        "Negative-binomial outcome must be nonnegative integer counts with at least one event",
+    )
+    log_offset = None
+    if offset is not None:
+        require(
+            offset in dataset.columns and offset != outcome and offset not in predictors,
+            "Invalid exposure column",
+        )
+        columns = [outcome, *predictors, offset]
+        complete = [row for row in dataset.records if all(row[col] is not None for col in columns)]
+        require(
+            len(complete) > len(predictors) + 3,
+            "Insufficient cases after exposure missingness",
+        )
+        x = np.asarray([[1.0, *[finite_number(row[c]) for c in predictors]] for row in complete])
+        y = np.asarray([finite_number(row[outcome]) for row in complete])
+        exposure = np.asarray([finite_number(row[offset]) for row in complete])
+        require(bool(np.all(exposure > 0)), "Exposures must be positive")
+        require(np.linalg.matrix_rank(x) == x.shape[1], "Design matrix is singular")
+        log_offset = np.log(exposure)
+        excluded = len(dataset.records) - len(complete)
+    try:
+        model = NegativeBinomial(y, x, loglike_method="nb2", offset=log_offset, check_rank=True)
+        fitted = model.fit(method="bfgs", maxiter=300, disp=0)
+    except (ValueError, np.linalg.LinAlgError, OverflowError) as exc:
+        raise AnalysisError("INVALID_INPUT", "Estimated negative-binomial model failed") from exc
+    require(
+        bool(fitted.mle_retvals.get("converged", False)),
+        "Estimated negative-binomial model failed to converge",
+        "CONVERGENCE_FAILED",
+    )
+    parameters = np.asarray(fitted.params, dtype=float)
+    require(
+        len(parameters) == x.shape[1] + 1 and bool(np.all(np.isfinite(parameters))),
+        "Estimated negative-binomial parameters are invalid",
+    )
+    alpha = float(parameters[-1])
+    require(alpha >= 0 and math.isfinite(alpha), "Estimated dispersion is invalid")
+    coefficient_values = parameters[:-1]
+    names = ["intercept", *predictors]
+    intervals = np.asarray(fitted.conf_int(), dtype=float)
+    coefficient_intervals = intervals[:-1]
+    predictions = np.asarray(fitted.predict(), dtype=float)
+    require(
+        bool(np.all(np.isfinite(predictions))) and bool(np.all(predictions > 0)),
+        "Invalid fitted means",
+    )
+    warnings_list: list[str] = []
+    if alpha < 1e-6:
+        warnings_list.append(
+            "Estimated NB2 dispersion is near the Poisson boundary; compare a Poisson model"
+        )
+    observed_zero = float(np.mean(y == 0))
+    expected_zero = float(np.mean((1 + alpha * predictions) ** (-1 / max(alpha, 1e-12))))
+    if observed_zero > expected_zero + 0.15:
+        warnings_list.append(
+            "Observed zero fraction exceeds the fitted NB2 expectation; "
+            "zero-inflation is not modeled"
+        )
+    return ScientificResult(
+        "negative_binomial_nb2_mle",
+        dataset.revision,
+        len(dataset.records),
+        len(y),
+        excluded,
+        details={
+            "coefficients": dict(zip(names, coefficient_values.tolist(), strict=True)),
+            "rate_ratios": dict(zip(names, np.exp(coefficient_values).tolist(), strict=True)),
+            "confidence_intervals": dict(
+                zip(names, coefficient_intervals.tolist(), strict=True)
+            ),
+            "p_values": dict(zip(names, map(float, fitted.pvalues[:-1]), strict=True)),
+            "alpha": alpha,
+            "alpha_standard_error": float(fitted.bse[-1]),
+            "alpha_confidence_interval_95": intervals[-1].tolist(),
+            "variance_function": "mu + alpha * mu^2",
+            "log_likelihood": float(fitted.llf),
+            "aic": float(fitted.aic),
+            "exposure_column": offset,
+            "observed_zero_fraction": observed_zero,
+            "fitted_zero_fraction": expected_zero,
+            "converged": True,
+            "missing_policy": "complete_case",
+        },
+        warnings=tuple(warnings_list),
+        assumptions=(
+            "NB2 conditional variance specification with maximum-likelihood dispersion",
+            "Independent units unless the sampling design is modeled separately",
+            "Zero-inflation/hurdle processes require a separately specified model",
+        ),
+        versions=runtime_versions(),
+    )

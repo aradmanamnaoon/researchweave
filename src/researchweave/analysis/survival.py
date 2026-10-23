@@ -286,8 +286,15 @@ def cox_proportional_hazards(
         ),
         "proportional_hazards_diagnostics": diagnostics,
         "tie_method": "breslow",
+        "supported_censoring": "right_censoring_only",
+        "unsupported_designs": ["left_truncation", "interval_censoring", "competing_risks"],
         "warning": (
             "Schoenfeld residual time correlations are screening diagnostics; proportional-hazards "
             "assumptions require design-aware review and results remain associations"
         ),
+        "limitations": [
+            "Breslow approximation is used for tied event times",
+            "Left truncation, interval censoring and competing-risk estimands are not supported",
+            "Schoenfeld time correlations are screening diagnostics rather than a global PH proof",
+        ],
     }

@@ -5,7 +5,10 @@ import pytest
 import statsmodels.api as sm
 
 from researchweave.analysis.datasets import import_csv
-from researchweave.analysis.generalized import negative_binomial_regression
+from researchweave.analysis.generalized import (
+    estimated_negative_binomial_regression,
+    negative_binomial_regression,
+)
 from researchweave.analysis.modeling import linear_regression
 from researchweave.analysis.survival import cox_proportional_hazards
 
@@ -51,6 +54,28 @@ def test_negative_binomial_matches_declared_alpha_glm(tmp_path: Path):
     assert result["details"]["rate_ratios"]["x"] > 1
 
 
+def test_negative_binomial_can_estimate_nb2_dispersion(tmp_path: Path):
+    rng = np.random.default_rng(91)
+    x_values = np.linspace(-1.5, 1.5, 160)
+    mu = np.exp(0.4 + 0.55 * x_values)
+    alpha = 0.8
+    shape = 1 / alpha
+    probabilities = shape / (shape + mu)
+    counts = rng.negative_binomial(shape, probabilities)
+    dataset = _data(
+        tmp_path,
+        "estimated_nb.csv",
+        "x,count\n"
+        + "".join(f"{x:.12g},{int(y)}\n" for x, y in zip(x_values, counts, strict=True)),
+    )
+    result = estimated_negative_binomial_regression(dataset, "count", ["x"]).as_json()
+    assert result["method"] == "negative_binomial_nb2_mle"
+    assert result["details"]["converged"] is True
+    assert result["details"]["alpha"] > 0
+    assert result["details"]["coefficients"]["x"] > 0
+    assert result["details"]["observed_zero_fraction"] >= 0
+
+
 def test_cox_returns_intervals_and_ph_screening_diagnostics(tmp_path: Path):
     rows = ["time,event,x"]
     for index in range(1, 41):
@@ -64,3 +89,5 @@ def test_cox_returns_intervals_and_ph_screening_diagnostics(tmp_path: Path):
     assert interval[0] < result["hazard_ratios"]["x"] < interval[1]
     diagnostic = result["proportional_hazards_diagnostics"]["x"]
     assert diagnostic["p_value"] is None or 0 <= diagnostic["p_value"] <= 1
+    assert result["supported_censoring"] == "right_censoring_only"
+    assert "competing_risks" in result["unsupported_designs"]

@@ -49,7 +49,12 @@ from .effects import (
     rank_biserial_from_mann_whitney,
 )
 from .errors import AnalysisError, require
-from .generalized import logistic_regression, negative_binomial_regression, poisson_regression
+from .generalized import (
+    estimated_negative_binomial_regression,
+    logistic_regression,
+    negative_binomial_regression,
+    poisson_regression,
+)
 from .inference import (
     bootstrap_mean,
     contingency,
@@ -179,6 +184,7 @@ class AnalysisFacade:
             "statistics.logistic": "read",
             "statistics.poisson": "read",
             "statistics.negative_binomial": "read",
+            "statistics.negative_binomial_estimated": "read",
             "statistics.meta": "read",
             "statistics.meta_random": "read",
             "statistics.egger": "read",
@@ -647,6 +653,13 @@ class AnalysisFacade:
                     str(arguments["outcome"]),
                     list(arguments["predictors"]),
                     alpha=float(arguments.get("alpha", 1.0)),
+                    offset=arguments.get("offset"),
+                ).as_json()
+            elif operation == "statistics.negative_binomial_estimated":
+                data = estimated_negative_binomial_regression(
+                    obj,
+                    str(arguments["outcome"]),
+                    list(arguments["predictors"]),
                     offset=arguments.get("offset"),
                 ).as_json()
             elif operation == "statistics.contingency":

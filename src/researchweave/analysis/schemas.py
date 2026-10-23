@@ -185,6 +185,9 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "statistics.negative_binomial": _schema(
         {**IDENTITY, "outcome": S, "predictors": AS}, {"offset": SN, "alpha": N}
     ),
+    "statistics.negative_binomial_estimated": _schema(
+        {**IDENTITY, "outcome": S, "predictors": AS}, {"offset": SN}
+    ),
     "statistics.meta": _schema({"studies": A}, {"model": S}),
     "statistics.meta_random": _schema({"studies": A}, {"tau_method": S, "hartung_knapp": B}),
     "statistics.egger": _schema({"studies": A}),
