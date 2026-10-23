@@ -1,0 +1,118 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from researchweave.analysis.datasets import import_csv
+from researchweave.analysis.errors import AnalysisError
+from researchweave.analysis.missing_data import (
+    available_case_covariance,
+    complete_case,
+    multiple_impute_normal,
+    pool_scalar_rubin,
+    simple_impute,
+)
+from researchweave.analysis.qualitative import Code, Transcript
+from researchweave.analysis.qualitative_store import Memo, QualitativeState, QualitativeStore
+from researchweave.analysis.recommendations import (
+    AnalysisDesign,
+    recommend_analysis,
+    recommend_from_mapping,
+)
+
+
+def _table(tmp_path: Path, content: str):
+    path = tmp_path / "data.csv"
+    path.write_text(content, encoding="utf-8")
+    return import_csv(path)
+
+
+def test_complete_available_and_simple_imputation(tmp_path: Path):
+    dataset = _table(tmp_path, "id,x,y\na,1,2\nb,,4\nc,3,\nd,5,8\n")
+    complete, receipt = complete_case(dataset, ["x", "y"])
+    assert receipt["n_used"] == 2
+    assert [row["id"] for row in complete.records] == ["a", "d"]
+    pairwise = available_case_covariance(dataset, ["x", "y"])
+    assert pairwise["pairwise_n"] == [[3, 2], [2, 3]]
+    imputed, operation = simple_impute(dataset, "x", strategy="mean")
+    assert operation["fill_value"] == pytest.approx(3)
+    assert imputed.records[1]["x"] == pytest.approx(3)
+    assert dataset.records[1]["x"] is None
+
+
+def test_multiple_imputation_is_seeded_preserves_observed_and_pools(tmp_path: Path):
+    dataset = _table(
+        tmp_path,
+        "x,y,z\n1,2,3\n2,4,6\n3,,9\n4,8,12\n,10,15\n6,12,18\n",
+    )
+    first = multiple_impute_normal(dataset, ["x", "y", "z"], m=4, seed=19)
+    second = multiple_impute_normal(dataset, ["x", "y", "z"], m=4, seed=19)
+    assert [item.revision for item in first.datasets] == [item.revision for item in second.datasets]
+    assert all(item.records[0]["x"] == "1" for item in first.datasets)
+    imputed_y = [float(item.records[2]["y"]) for item in first.datasets]
+    assert len(set(imputed_y)) > 1
+    pooled = pool_scalar_rubin([1.0, 1.2, 0.8, 1.1], [0.04, 0.05, 0.04, 0.06])
+    assert pooled["estimate"] == pytest.approx(1.025)
+    assert pooled["total_variance"] > pooled["within_variance"]
+
+
+def test_recommendations_use_design_not_observed_results():
+    result = recommend_analysis(
+        AnalysisDesign(outcome_type="continuous", groups=3, research_goal="compare")
+    )
+    assert result["primary_operation"] == "statistics.anova"
+    assert {item["operation"] for item in result["alternatives"]} == {
+        "statistics.welch_anova",
+        "statistics.kruskal",
+    }
+    assert result["integrity"]["uses_observed_results"] is False
+    clustered = recommend_analysis(
+        AnalysisDesign(
+            outcome_type="continuous", predictors=1, clustered=True, research_goal="model"
+        )
+    )
+    assert clustered["primary_operation"] == "statistics.mixed_effects"
+    with pytest.raises(AnalysisError, match="Observed results"):
+        recommend_from_mapping({"outcome_type": "continuous", "groups": 2, "p_value": 0.2})
+
+
+def test_qualitative_store_restart_history_memo_and_tamper(tmp_path: Path):
+    state = QualitativeState()
+    state.project.add_transcript(Transcript("source", "alpha beta gamma", "case1"))
+    state.add_code(Code("parent", "Parent"), actor="alice")
+    state.add_code(Code("child", "Child", parent="parent"), actor="alice")
+    annotation = state.project.annotate("source", 0, 5, "child", "alice", "u1")
+    state.add_memo(
+        Memo(
+            "memo1",
+            "Decision",
+            "Keep context",
+            "alice",
+            "2026-10-23T00:00:00+00:00",
+            source_id="source",
+        )
+    )
+    state.update_code("child", actor="bob", description="Refined definition")
+    with pytest.raises(AnalysisError, match="child codes"):
+        state.delete_code("parent", actor="alice")
+    with pytest.raises(AnalysisError, match="annotations"):
+        state.delete_code("child", actor="alice")
+    store = QualitativeStore(tmp_path / "qual")
+    saved = store.save("project1", state)
+    reopened = QualitativeStore(tmp_path / "qual").load("project1")
+    assert reopened.project.verify(annotation)
+    assert reopened.project.codes["child"].description == "Refined definition"
+    assert reopened.memos["memo1"].text == "Keep context"
+    assert len(reopened.codebook_events) == 3
+    path = Path(saved["path"])
+    envelope = json.loads(path.read_text(encoding="utf-8"))
+    envelope["state"]["project"]["transcripts"][0]["text"] = "tampered"
+    path.write_text(json.dumps(envelope), encoding="utf-8")
+    with pytest.raises(AnalysisError, match="hash mismatch"):
+        store.load("project1")
+
+
+def test_multiple_imputation_rejects_all_missing_row(tmp_path: Path):
+    dataset = _table(tmp_path, "x,y\n1,2\n,\n3,4\n5,6\n")
+    with pytest.raises(AnalysisError, match="missing all"):
+        multiple_impute_normal(dataset, ["x", "y"], m=3, seed=1)

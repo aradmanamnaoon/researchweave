@@ -42,11 +42,18 @@ from .measurement import (
     fleiss_agreement,
     icc_two_way_absolute,
 )
+from .missing_data import (
+    available_case_covariance,
+    complete_case,
+    multiple_impute_normal,
+    simple_impute,
+)
 from .modeling import adjust_pvalues, linear_regression, pooled_effects
 from .models import Dataset, digest
 from .multivariate import hierarchical_clusters, kmeans_clusters, principal_components
 from .plots import render_plot
 from .power import two_sample_t_power, two_sample_t_required
+from .recommendations import recommend_from_mapping
 from .runtime import run_script
 from .scale_scoring import ScaleDefinition, item_total_diagnostics, score_scale
 from .statistics import correlation, describe, reliability, t_test
@@ -92,7 +99,12 @@ class AnalysisFacade:
             "dataset.missingness": "read",
             "dataset.select": "local-write",
             "dataset.user_missing": "local-write",
+            "dataset.complete_case": "local-write",
+            "dataset.simple_impute": "local-write",
+            "dataset.multiple_impute": "local-write",
             "statistics.weighted_mean": "read",
+            "statistics.available_case": "read",
+            "statistics.recommend": "read",
             "statistics.describe": "read",
             "statistics.test": "read",
             "statistics.correlate": "read",
@@ -304,6 +316,8 @@ class AnalysisFacade:
             data = fleiss_agreement(list(arguments["rating_counts"]))
         elif operation == "statistics.icc":
             data = icc_two_way_absolute(list(arguments["ratings"]))
+        elif operation == "statistics.recommend":
+            data = recommend_from_mapping(dict(arguments))
         elif operation in ("runtime.python", "runtime.r"):
             data = run_script(
                 str(arguments["source"]),
@@ -326,6 +340,26 @@ class AnalysisFacade:
                 "columns": list(obj.columns),
                 "source_hash": obj.source_hash,
             }
+        elif operation == "dataset.multiple_impute":
+            obj = self._dataset(arguments)
+            generated = multiple_impute_normal(
+                obj,
+                list(arguments["columns"]),
+                m=int(arguments.get("m", 5)),
+                seed=int(arguments["seed"]),
+            )
+            for revision in generated.datasets:
+                self.store.save(revision)
+            data = {
+                "dataset_id": obj.dataset_id,
+                "parent_revision": obj.revision,
+                "revisions": [revision.revision for revision in generated.datasets],
+                "m": len(generated.datasets),
+                "method": generated.method,
+                "seed": generated.seed,
+                "missing_counts": generated.missing_counts,
+                "assumptions": list(generated.assumptions),
+            }
         elif operation in ("dataset.inspect", "dataset.page"):
             obj = self._dataset(arguments)
             data = page(
@@ -339,6 +373,8 @@ class AnalysisFacade:
             "dataset.variable",
             "dataset.select",
             "dataset.user_missing",
+            "dataset.complete_case",
+            "dataset.simple_impute",
         ):
             obj = self._dataset(arguments)
             if operation == "dataset.transform":
@@ -352,6 +388,14 @@ class AnalysisFacade:
                     list(arguments["allowed"]),
                     include_null=bool(arguments.get("include_null", False)),
                 )
+            elif operation == "dataset.complete_case":
+                updated, receipt = complete_case(obj, list(arguments["columns"]))
+            elif operation == "dataset.simple_impute":
+                updated, receipt = simple_impute(
+                    obj,
+                    str(arguments["column"]),
+                    strategy=str(arguments["strategy"]),
+                )
             else:
                 updated = recode_missing(
                     obj, str(arguments["column"]), list(arguments["missing_values"])
@@ -363,10 +407,14 @@ class AnalysisFacade:
                 "parent_revision": obj.revision,
                 "n": len(updated.records),
             }
+            if operation in {"dataset.complete_case", "dataset.simple_impute"}:
+                data["receipt"] = receipt
         else:
             obj = self._dataset(arguments)
             if operation == "statistics.describe":
                 data = describe(obj, str(arguments["column"]))
+            elif operation == "statistics.available_case":
+                data = available_case_covariance(obj, list(arguments["columns"]))
             elif operation == "statistics.distribution":
                 data = distribution_diagnostics(obj, str(arguments["column"]))
             elif operation == "dataset.missingness":
