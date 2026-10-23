@@ -1,15 +1,17 @@
 {
-  "accepted_branch_revision": "586f9bb76725424994cbfa60fd4eac42",
-  "cryptography": "AES-256-GCM plus scrypt, synthetic password",
+  "accepted_branch_revision": "2605f95838fd44f1bfdc8821c0817d5c",
+  "atomic_head_update": "compare-and-swap",
+  "cryptography": "AES-256-GCM plus scrypt, remote backend receives ciphertext only",
   "external_requests": 0,
-  "first_revision": "3de8d65d16894ac38c560e5074eadc6e",
+  "first_revision": "f560589c5f10459788ae0e9d6cc83ae1",
   "journey": "conflicting-encrypted-revisions",
   "old_revision_restorable": true,
+  "preserved_conflict_revision": "42bde948efac4700b5bd227d8667cb50",
   "preserved_divergent_candidates": [
     "client_A_unmerged.rwproj",
     "client_B_current.rwproj"
   ],
-  "resolved_revision": "b385ddee3a6b4680a77dc8bc57c53b61",
+  "resolved_revision": "4ecd046252014476bcaed345ca74a0c7",
   "resolved_revision_restorable_after_restart": true,
   "selected_resolution": "A as new successor to B",
   "stale_write_error": "CONFLICT"

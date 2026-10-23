@@ -31,9 +31,13 @@ def test_five_reproducible_journeys_and_redacted_persistent_traces(tmp_path):
     assert reports[0]["recovered_citation_count"] == 1
     assert reports[1]["providers_configured"] == 0
     assert reports[2]["actual_external_requests"] == 0
+    assert reports[2]["host_policy_security_suite"]["passed"] == 1
     assert reports[3]["mock_transport_requests"] == 1
+    assert reports[3]["privacy_requires_approval"] is True
     assert reports[4]["stale_write_error"] == "CONFLICT"
     assert reports[4]["old_revision_restorable"] is True
+    assert reports[4]["preserved_conflict_revision"]
+    assert reports[4]["atomic_head_update"] == "compare-and-swap"
     for index in range(1, 6):
         saved = json.loads((tmp_path / "traces" / f"journey_{index}.json").read_text("utf-8"))
         assert saved["journey"] == reports[index - 1]["journey"]
