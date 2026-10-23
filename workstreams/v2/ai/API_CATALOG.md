@@ -57,3 +57,5 @@ with TemporaryDirectory() as folder:
     store.restore_to_new_file(first.revision, Path(folder) / "restored.rwproj")
 ```
 
+Structured graph planning is available headlessly with `PlanCompiler`, `ToolManifest`, and `PlannedStep` from `researchweave.ai.planner`. The host defines exact allowed operation names and argument keys. `compile(project_id, steps)` performs stable topological sorting, schema constraints and offline checks; `revise(compiled, {step_id: new_arguments})` recompiles the plan and reports approval invalidation. The durable executor currently accepts ordered steps; the integrator must connect graph dependencies and authority at the trusted composition root before exposing general multi-step execution.
+
