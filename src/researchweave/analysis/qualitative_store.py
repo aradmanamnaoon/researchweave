@@ -6,7 +6,7 @@ import json
 import os
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .coding_review import CodingDecision, CodingReviewLedger
 from .errors import require
@@ -54,13 +54,15 @@ class QualitativeState:
     ) -> None:
         require(bool(actor), "Codebook actor required")
         timestamp = utc_now()
-        event_data = {
+        before_data: dict[str, Any] | None = asdict(before) if before else None
+        after_data: dict[str, Any] | None = asdict(after) if after else None
+        event_data: dict[str, Any] = {
             "action": action,
             "code_id": code_id,
             "actor": actor,
             "timestamp": timestamp,
-            "before": asdict(before) if before else None,
-            "after": asdict(after) if after else None,
+            "before": before_data,
+            "after": after_data,
         }
         self.codebook_events.append(
             CodebookEvent(
@@ -69,8 +71,8 @@ class QualitativeState:
                 code_id,
                 actor,
                 timestamp,
-                event_data["before"],
-                event_data["after"],
+                before_data,
+                after_data,
             )
         )
 
@@ -89,11 +91,11 @@ class QualitativeState:
     ) -> Code:
         require(code_id in self.project.codes, "Unknown code", "NOT_FOUND")
         before = self.project.codes[code_id]
-        next_parent = before.parent if parent is ... else parent
+        next_parent = before.parent if parent is ... else cast(str | None, parent)
         require(next_parent is None or isinstance(next_parent, str), "Invalid parent code")
         require(next_parent is None or next_parent in self.project.codes, "Unknown parent code")
         require(next_parent != code_id, "Code cannot parent itself", "CONFLICT")
-        cursor = next_parent
+        cursor: str | None = next_parent
         while cursor is not None:
             require(cursor != code_id, "Code hierarchy cycle", "CONFLICT")
             cursor = self.project.codes[cursor].parent
@@ -171,10 +173,10 @@ class QualitativeState:
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> QualitativeState:
         schema_version = data.get("schema_version")
-        expected = {"schema_version", "project", "memos", "codebook_events"}
+        expected_keys = {"schema_version", "project", "memos", "codebook_events"}
         if schema_version == 2:
-            expected.add("review_events")
-        require(set(data) == expected, "Invalid qualitative state keys")
+            expected_keys.add("review_events")
+        require(set(data) == expected_keys, "Invalid qualitative state keys")
         require(schema_version in {1, 2}, "Unsupported qualitative schema", "SCHEMA_MISMATCH")
         state = cls(project=CodingProject.from_json(data["project"]))
         for entry in data["memos"]:
@@ -184,7 +186,7 @@ class QualitativeState:
         for event in state.codebook_events:
             require(event.event_id not in seen, "Duplicate codebook event", "INTEGRITY_FAILURE")
             seen.add(event.event_id)
-            expected = digest(
+            expected_event_id = digest(
                 {
                     "action": event.action,
                     "code_id": event.code_id,
@@ -194,7 +196,11 @@ class QualitativeState:
                     "after": event.after,
                 }
             )
-            require(expected == event.event_id, "Codebook event hash mismatch", "INTEGRITY_FAILURE")
+            require(
+                expected_event_id == event.event_id,
+                "Codebook event hash mismatch",
+                "INTEGRITY_FAILURE",
+            )
         if schema_version == 2:
             state.review_events = [CodingDecision(**entry) for entry in data["review_events"]]
             state.review_ledger()  # validates event hashes/anchors/duplicate reviewers

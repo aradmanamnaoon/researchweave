@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
-from typing import Any, Literal
+from typing import Any, Literal, cast
 
 from .errors import require
 from .models import digest, utc_now
@@ -48,7 +48,12 @@ class CodingReviewLedger:
         return self.project.annotations[ordinal]
 
     def decide(
-        self, annotation_index: int, disposition: str, *, reviewer: str, rationale: str
+        self,
+        annotation_index: int,
+        disposition: Literal["accept", "reject", "needs_review"],
+        *,
+        reviewer: str,
+        rationale: str,
     ) -> CodingDecision:
         annotation = self._annotation(annotation_index)
         require(
@@ -217,20 +222,27 @@ def apply_relocation(
     require(reviewer_approved, "Relocation requires user review", "NEEDS_APPROVAL")
     require(proposal.status == "unique", "Ambiguous/absent quote cannot be relocated")
     require(
+        proposal.start is not None and proposal.end is not None,
+        "Unique relocation must contain concrete offsets",
+        "INTEGRITY_FAILURE",
+    )
+    start = cast(int, proposal.start)
+    end = cast(int, proposal.end)
+    require(
         revised.checksum == proposal.revised_hash and revised.source_id == proposal.source_id,
         "Revised source hash changed",
         "INTEGRITY_FAILURE",
     )
     require(
-        revised.text[proposal.start : proposal.end] == proposal.exact_quote,
+        revised.text[start:end] == proposal.exact_quote,
         "Revised quotation no longer matches",
         "INTEGRITY_FAILURE",
     )
     return Annotation(
         proposal.source_id,
         revised.checksum,
-        proposal.start,
-        proposal.end,
+        start,
+        end,
         proposal.exact_quote,
         code_id,
         coder,
@@ -247,7 +259,7 @@ def disagreements(
         "Two different named coders required",
     )
     require(
-        len(set(unit_ids)) == len(unit_ids) and unit_ids,
+        len(set(unit_ids)) == len(unit_ids) and bool(unit_ids),
         "Explicit distinct coding-unit IDs required",
     )
     labels: dict[str, dict[str, str]] = {coder_a: {}, coder_b: {}}

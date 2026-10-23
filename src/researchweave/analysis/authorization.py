@@ -14,7 +14,7 @@ import time
 from collections.abc import Mapping
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .errors import require
 from .models import canonical_json, digest
@@ -138,6 +138,7 @@ class CapabilityIssuer:
             "Trusted host capability required",
             "PERMISSION_DENIED",
         )
+        capability = cast(HostCapability, capability)
         current = float(time.time() if now is None else now)
         require(
             capability.project_id == self._project_id,
@@ -201,10 +202,11 @@ class HostPaths:
     def _bounded(root: Path | None, relative: str, *, must_exist: bool) -> Path:
         require(root is not None, "Trusted host root not configured", "PERMISSION_DENIED")
         require(
-            relative and not Path(relative).is_absolute(),
+            bool(relative) and not Path(relative).is_absolute(),
             "Path must be project-relative",
             "PERMISSION_DENIED",
         )
+        root = cast(Path, root)
         base = root.resolve()
         candidate = (base / relative).resolve()
         require(

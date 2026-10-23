@@ -12,9 +12,10 @@ import subprocess
 import sys
 import tempfile
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .errors import AnalysisError, require
 from .models import canonical_json
@@ -84,6 +85,7 @@ class RuntimeAuthorizer:
             "Explicit script approval required",
             "NEEDS_APPROVAL",
         )
+        approval = cast(RuntimeApproval, approval)
         current = float(time.time() if now is None else now)
         source_hash = hashlib.sha256(source.encode("utf-8")).hexdigest()
         require(
@@ -143,8 +145,17 @@ def _terminate_process_tree(process: subprocess.Popen[bytes]) -> None:
             shell=False,
         )
     else:
+        killpg = cast(Callable[[int, int], None] | None, getattr(os, "killpg", None))
+        sigkill = cast(int | None, getattr(signal, "SIGKILL", None))
+        require(
+            killpg is not None and sigkill is not None,
+            "POSIX process-tree terminator unavailable",
+            "DEPENDENCY_MISSING",
+        )
+        killpg_fn = cast(Callable[[int, int], None], killpg)
+        sigkill_value = cast(int, sigkill)
         try:
-            os.killpg(process.pid, signal.SIGKILL)
+            killpg_fn(process.pid, sigkill_value)
         except ProcessLookupError:
             pass
     try:

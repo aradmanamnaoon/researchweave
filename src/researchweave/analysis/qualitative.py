@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 from dataclasses import asdict, dataclass, field
+from typing import Any
 
 from .errors import AnalysisError, require
 
@@ -98,7 +99,7 @@ class CodingProject:
         }
 
     @classmethod
-    def from_json(cls, data: dict) -> CodingProject:
+    def from_json(cls, data: dict[str, Any]) -> CodingProject:
         result = cls()
         for entry in data["transcripts"]:
             result.add_transcript(Transcript(**entry))
