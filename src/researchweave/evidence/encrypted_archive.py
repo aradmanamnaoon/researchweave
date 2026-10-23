@@ -8,7 +8,7 @@ import os
 import struct
 import tempfile
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from .errors import EvidenceError, require
 from .models import canonical_json, sha256
@@ -49,12 +49,16 @@ def _password_bytes(password: str) -> bytes:
 
 def _derive_key(password: str, salt: bytes) -> bytes:
     _, Scrypt, _ = _crypto()
-    return cast(
-        bytes,
-        Scrypt(salt=salt, length=32, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P).derive(
-            _password_bytes(password)
-        ),
+    key = Scrypt(salt=salt, length=32, n=SCRYPT_N, r=SCRYPT_R, p=SCRYPT_P).derive(
+        _password_bytes(password)
     )
+    if not isinstance(key, bytes):
+        raise EvidenceError(
+            "INTERNAL_ERROR",
+            "Encryption key derivation returned an invalid value",
+            "Verify the cryptography dependency and retry.",
+        )
+    return key
 
 
 def _encoded(value: bytes) -> str:
@@ -62,8 +66,13 @@ def _encoded(value: bytes) -> str:
 
 
 def _decoded(value: object, expected_size: int, label: str) -> bytes:
-    require(isinstance(value, str), f"Invalid encrypted archive {label}", "INTEGRITY_FAILURE")
-    text = cast(str, value)
+    if not isinstance(value, str):
+        raise EvidenceError(
+            "INTEGRITY_FAILURE",
+            f"Invalid encrypted archive {label}",
+            "Use an intact encrypted archive exported by ResearchWeave.",
+        )
+    text = value
     try:
         decoded = base64.b64decode(text, validate=True)
     except (ValueError, TypeError) as exc:
@@ -269,7 +278,13 @@ def restore_encrypted_archive(path: Path, destination: Path, password: str) -> d
                 inner["project_revision"] == header["project_revision"],
                 "Encrypted archive identity does not match its authenticated envelope",
                 "INTEGRITY_FAILURE")
-        restored = cast(dict[str, Any], restore_archive(temporary, destination))
+        restored = restore_archive(temporary, destination)
+        if not isinstance(restored, dict):
+            raise EvidenceError(
+                "INTERNAL_ERROR",
+                "Native archive restore returned an invalid receipt",
+                "Verify the project archive implementation and retry.",
+            )
         restored["encrypted"] = True
         restored["cipher"] = "AES-256-GCM"
         return restored

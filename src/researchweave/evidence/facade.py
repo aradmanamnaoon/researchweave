@@ -15,16 +15,31 @@ from typing import Any
 from uuid import UUID
 
 from .bibliography import parse_bibliography
+from .collections import CollectionService
+from .data_management import DataManagementPlanService
+from .diagnostics import library_diagnostics
 from .discovery import CatalogClient, HTTPTransport
+from .encrypted_archive import (
+    encrypt_project_archive,
+    restore_encrypted_archive,
+    verify_encrypted_archive,
+)
 from .errors import EvidenceError, require
 from .extraction import ExtractedValue, ExtractionService, FieldDefinition
 from .library import LibraryService
 from .migration import MarkdownMigration, MarkdownRecord, preview_markdown
 from .models import new_id
+from .portability import export_research_artifacts, export_review_packet, selective_clone
 from .project_format import archive_project, restore_archive, verify_archive
 from .protocols import ProtocolService, question_feedback
 from .provenance import export_provenance
 from .publishing import PublishingService
+from .recovery import (
+    create_recovery_snapshot,
+    list_recovery_snapshots,
+    restore_recovery_snapshot,
+)
+from .reference_monitor import ReferenceUpdateMonitor
 from .reviews import ReviewService
 from .search_index import LocalIndex
 from .storage import ProjectStore
@@ -42,6 +57,25 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "project.archive": ("local-write", ("project_id", "filename"), "Create .rwproj snapshot"),
     "project.archive_verify": ("read", ("filename",), "Verify .rwproj without writing"),
     "project.restore": ("local-write", ("filename",), "Restore .rwproj"),
+    "project.archive_encrypted": (
+        "local-write", ("project_id", "filename", "password"),
+        "Create authenticated encrypted .rwproj archive"),
+    "project.archive_encrypted_verify": (
+        "read", ("filename", "password"), "Authenticate encrypted .rwproj archive"),
+    "project.restore_encrypted": (
+        "local-write", ("filename", "password"), "Restore authenticated encrypted archive"),
+    "project.recovery_snapshot": (
+        "local-write", ("project_id",), "Create verified local recovery snapshot"),
+    "project.recovery_list": (
+        "read", ("project_id",), "List and verify local recovery snapshots"),
+    "project.recovery_restore": (
+        "local-write", ("project_id", "snapshot"),
+        "Restore recovery snapshot to a fresh project copy"),
+    "project.selective_clone": (
+        "local-write", ("project_id", "source_ids", "reference_ids"),
+        "Clone selected project objects and dependencies"),
+    "project.artifact_export": (
+        "local-write", ("project_id", "filename"), "Export portable research artifacts"),
     "library.bibliography_preview": ("read", ("format", "data_base64"), "Preview references"),
     "library.bibliography_import": ("local-write", ("project_id", "format", "data_base64"),
                                      "Import bibliography"),
@@ -56,12 +90,42 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
                                    "Opt-in public catalog metadata lookup"),
     "library.fts_search": ("read", ("project_id", "query"), "Rebuildable offline FTS5 search"),
     "library.index_rebuild": ("local-write", ("project_id",), "Rebuild local search cache"),
+    "library.index_sync": (
+        "local-write", ("project_id",), "Incrementally synchronize local search cache"),
     "library.index_health": ("read", ("project_id",), "Inspect search cache state"),
+    "library.diagnostics": (
+        "read", ("project_id",), "Run read-only library diagnostics"),
+    "library.collection_create": (
+        "local-write", ("project_id", "name"), "Create structured reference collection"),
+    "library.collection_tree": (
+        "read", ("project_id",), "Read nested reference collections"),
+    "library.collection_add": (
+        "local-write", ("project_id", "collection_id", "reference_ids"),
+        "Add references to collection"),
+    "library.collection_remove": (
+        "local-write", ("project_id", "collection_id", "reference_ids"),
+        "Remove references from collection"),
+    "library.reference_tag": (
+        "local-write", ("project_id", "reference_ids", "tags"), "Tag references"),
+    "library.collection_search": (
+        "read", ("project_id",), "Filter references by collection tags year and text"),
+    "library.collection_export": (
+        "read", ("project_id", "collection_id"), "Export collection CSV"),
     "reference.validate": ("read", ("project_id", "reference_id"), "Inspect DOI syntax"),
     "reference.merge": ("local-write", ("project_id", "canonical_id", "duplicate_id", "rationale"),
                         "Record reversible user-reviewed reference identity merge"),
     "reference.unmerge": ("local-write", ("project_id", "duplicate_id", "rationale"),
                           "Undo reference alias while retaining original metadata"),
+    "reference.watch": (
+        "local-write", ("project_id", "reference_id", "provider"),
+        "Opt reference into metadata update monitoring"),
+    "reference.unwatch": (
+        "local-write", ("project_id", "reference_id"), "Disable reference update monitoring"),
+    "reference.update_observation": (
+        "local-write", ("project_id", "reference_id", "provider", "observed"),
+        "Record provider observation without silently changing metadata"),
+    "reference.update_history": (
+        "read", ("project_id", "reference_id"), "Read reference update observations"),
     "evidence.anchor": ("local-write", ("project_id", "source_id", "quote", "start", "end"),
                         "Record exact quote anchor"),
     "evidence.note": ("local-write", ("project_id", "source_id", "title", "body"),
@@ -112,6 +176,9 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "review.synthesis_compose": ("local-write", ("project_id", "title", "sections"),
                                  "Save attributed narrative synthesis"),
     "review.synthesis_outline": ("read", ("project_id", "outline_id"), "Read saved synthesis"),
+    "review.packet_export": (
+        "local-write", ("project_id", "review_id", "filename"),
+        "Export privacy-reviewed systematic-review packet"),
     "writing.section_save": ("local-write", ("project_id", "manuscript_id", "section",
                                            "body", "citations"), "Save manuscript section"),
     "writing.inspect": ("read", ("project_id", "manuscript_id"), "Inspect citations"),
@@ -123,6 +190,16 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "writing.submission_packet": ("read", ("project_id", "manuscript_id", "journal"),
                                   "Prepare unsubmitted publication packet"),
     "provenance.graph": ("read", ("project_id",), "Export provenance graph"),
+    "data_management.create": (
+        "local-write", ("project_id", "title", "inventory", "policies", "rationale",
+                         "unresolved", "author"), "Create versioned data-management plan"),
+    "data_management.amend": (
+        "local-write", ("project_id", "plan_id", "inventory", "policies", "rationale",
+                         "unresolved", "author"), "Append data-management plan version"),
+    "data_management.history": (
+        "read", ("project_id", "plan_id"), "Read data-management plan history"),
+    "data_management.export": (
+        "read", ("project_id", "plan_id"), "Export data-management plan Markdown"),
     "migration.markdown_preview": ("read", ("files",), "Preview user-owned Markdown files"),
     "migration.markdown_import": ("local-write", ("project_id", "files"),
                                    "Import Markdown notes with fidelity receipt"),
@@ -167,6 +244,15 @@ def _archive_filename(value: str) -> str:
             value[0] not in {".", " "} and
             not any(char in value for char in "/\\:\x00") and
             value not in {".", ".."}, "Use a simple .rwproj archive filename")
+    return value
+
+
+def _simple_filename(value: str, suffix: str) -> str:
+    require(
+        value.endswith(suffix) and len(value) <= 180 and value[0] not in {".", " "}
+        and not any(char in value for char in "/\\:\x00") and value not in {".", ".."},
+        f"Use a simple {suffix} filename",
+    )
     return value
 
 
@@ -322,11 +408,26 @@ class EvidenceFacade:
         if operation == "project.archive_verify":
             return verify_archive(self.workspace_root / "exports" /
                                   _archive_filename(_value(args, "filename", str)))
+        if operation == "project.archive_encrypted_verify":
+            return verify_encrypted_archive(
+                self.workspace_root / "exports" /
+                _simple_filename(_value(args, "filename", str), ".rwproj.enc"),
+                _value(args, "password", str),
+            )
         if operation == "project.restore":
             name = _archive_filename(_value(args, "filename", str))
             archive_path = self.workspace_root / "exports" / name
             project_id = _uuid(verify_archive(archive_path)["project_id"])
             return restore_archive(archive_path, self.workspace_root / project_id)
+        if operation == "project.restore_encrypted":
+            name = _simple_filename(_value(args, "filename", str), ".rwproj.enc")
+            archive_path = self.workspace_root / "exports" / name
+            verified = verify_encrypted_archive(archive_path, _value(args, "password", str))
+            project_id = _uuid(str(verified["project_id"]))
+            return restore_encrypted_archive(
+                archive_path, self.workspace_root / project_id,
+                _value(args, "password", str),
+            )
         with self._project(_value(args, "project_id", str)) as store:
             if operation == "project.open":
                 return asdict(store.info())
@@ -346,6 +447,50 @@ class EvidenceFacade:
                 exports.mkdir(exist_ok=True)
                 return archive_project(store, exports /
                                        _archive_filename(_value(args, "filename", str)))
+            if operation == "project.archive_encrypted":
+                exports = self.workspace_root / "exports"
+                exports.mkdir(exist_ok=True)
+                return encrypt_project_archive(
+                    store,
+                    exports / _simple_filename(
+                        _value(args, "filename", str), ".rwproj.enc"
+                    ),
+                    _value(args, "password", str),
+                )
+            if operation == "project.recovery_snapshot":
+                return create_recovery_snapshot(store, str(args.get("label", "autosave")))
+            if operation == "project.recovery_list":
+                return {"snapshots": list_recovery_snapshots(store)}
+            if operation == "project.recovery_restore":
+                recovery_root = self.workspace_root / "recovery-restores"
+                recovery_root.mkdir(exist_ok=True)
+                destination = recovery_root / new_id()
+                return restore_recovery_snapshot(
+                    store, _value(args, "snapshot", str), destination
+                )
+            if operation == "project.selective_clone":
+                temporary = self.workspace_root / f".clone-{new_id()}"
+                result = selective_clone(
+                    store,
+                    temporary,
+                    source_ids=_value(args, "source_ids", list),
+                    reference_ids=_value(args, "reference_ids", list),
+                )
+                target = self.workspace_root / _uuid(str(result["destination_project_id"]))
+                require(not target.exists(), "Clone project identity already exists", "CONFLICT")
+                temporary.replace(target)
+                result["destination"] = str(target)
+                return result
+            if operation == "project.artifact_export":
+                exports = self.workspace_root / "exports"
+                exports.mkdir(exist_ok=True)
+                return export_research_artifacts(
+                    store,
+                    exports / _simple_filename(
+                        _value(args, "filename", str), ".rw-artifacts.zip"
+                    ),
+                    include_notes=args.get("include_notes") is not False,
+                )
             library = LibraryService(store)
             if operation == "library.bibliography_import":
                 return library.import_bibliography(_bytes(args),
@@ -374,8 +519,53 @@ class EvidenceFacade:
                     auto_rebuild=False)
             if operation == "library.index_rebuild":
                 return LocalIndex(store).rebuild()
+            if operation == "library.index_sync":
+                return LocalIndex(store).sync()
             if operation == "library.index_health":
                 return LocalIndex(store).diagnostics()
+            if operation == "library.diagnostics":
+                return library_diagnostics(store)
+            collections = CollectionService(store)
+            if operation == "library.collection_create":
+                parent_id = args.get("parent_id")
+                require(parent_id is None or isinstance(parent_id, str), "Invalid parent_id")
+                return collections.create(
+                    _value(args, "name", str), parent_id, expected_revision=expected
+                )
+            if operation == "library.collection_tree":
+                return {"collections": collections.tree()}
+            if operation == "library.collection_add":
+                return collections.add_members(
+                    _value(args, "collection_id", str),
+                    _value(args, "reference_ids", list),
+                    expected_revision=expected,
+                )
+            if operation == "library.collection_remove":
+                return collections.remove_members(
+                    _value(args, "collection_id", str),
+                    _value(args, "reference_ids", list),
+                    expected_revision=expected,
+                )
+            if operation == "library.reference_tag":
+                return collections.tag(
+                    _value(args, "reference_ids", list),
+                    _value(args, "tags", list),
+                    expected_revision=expected,
+                )
+            if operation == "library.collection_search":
+                return {"records": collections.search(
+                    collection_id=args.get("collection_id"),
+                    tag=args.get("tag"),
+                    year_from=args.get("year_from"),
+                    year_to=args.get("year_to"),
+                    text=args.get("text"),
+                    limit=int(args.get("limit", 200)),
+                )}
+            if operation == "library.collection_export":
+                return {
+                    "format": "csv",
+                    "text": collections.export_csv(_value(args, "collection_id", str)),
+                }
             if operation == "reference.validate":
                 return library.validate_reference(_value(args, "reference_id", str))
             if operation == "reference.merge":
@@ -385,6 +575,31 @@ class EvidenceFacade:
             if operation == "reference.unmerge":
                 return library.unmerge_reference(_value(args, "duplicate_id", str),
                     _value(args, "rationale", str), expected_revision=expected)
+            monitor = ReferenceUpdateMonitor(store)
+            if operation == "reference.watch":
+                return monitor.subscribe(
+                    _value(args, "reference_id", str),
+                    _value(args, "provider", str),
+                    expected_revision=expected,
+                )
+            if operation == "reference.unwatch":
+                return monitor.unsubscribe(
+                    _value(args, "reference_id", str), expected_revision=expected
+                )
+            if operation == "reference.update_observation":
+                checked_at = args.get("checked_at")
+                require(checked_at is None or isinstance(checked_at, str), "Invalid checked_at")
+                return monitor.record_observation(
+                    _value(args, "reference_id", str),
+                    _value(args, "provider", str),
+                    _value(args, "observed", dict),
+                    checked_at=checked_at,
+                    expected_revision=expected,
+                )
+            if operation == "reference.update_history":
+                return {
+                    "records": monitor.history(_value(args, "reference_id", str))
+                }
             if operation == "evidence.anchor":
                 return library.add_anchor(_value(args, "source_id", str),
                     _value(args, "quote", str), _value(args, "start", int),
@@ -479,6 +694,17 @@ class EvidenceFacade:
                     _value(args, "sections", list), expected_revision=expected)
             if operation == "review.synthesis_outline":
                 return synthesis.outline(_value(args, "outline_id", str))
+            if operation == "review.packet_export":
+                exports = self.workspace_root / "exports"
+                exports.mkdir(exist_ok=True)
+                return export_review_packet(
+                    store,
+                    exports / _simple_filename(
+                        _value(args, "filename", str), ".rw-review.zip"
+                    ),
+                    _value(args, "review_id", str),
+                    confirm_private_export=args.get("confirm_private_export") is True,
+                )
             writing = WritingService(store)
             if operation == "writing.section_save":
                 return writing.save_section(_value(args, "manuscript_id", str),
@@ -501,6 +727,40 @@ class EvidenceFacade:
                     allow_incomplete=args.get("allow_incomplete") is True)
             if operation == "provenance.graph":
                 return export_provenance(store)
+            dmp = DataManagementPlanService(store)
+            if operation == "data_management.create":
+                return dmp.create(
+                    _value(args, "title", str),
+                    _value(args, "inventory", list),
+                    _value(args, "policies", dict),
+                    _value(args, "rationale", str),
+                    _value(args, "unresolved", list),
+                    _value(args, "author", str),
+                    expected_revision=expected,
+                )
+            if operation == "data_management.amend":
+                return dmp.amend(
+                    _value(args, "plan_id", str),
+                    _value(args, "inventory", list),
+                    _value(args, "policies", dict),
+                    _value(args, "rationale", str),
+                    _value(args, "unresolved", list),
+                    _value(args, "author", str),
+                    expected_revision=expected,
+                )
+            if operation == "data_management.history":
+                return {
+                    "history": dmp.history(_value(args, "plan_id", str))
+                }
+            if operation == "data_management.export":
+                version = args.get("version")
+                require(version is None or type(version) is int, "Invalid plan version")
+                return {
+                    "format": "markdown",
+                    "text": dmp.export_markdown(
+                        _value(args, "plan_id", str), version
+                    ),
+                }
             if operation == "migration.markdown_import":
                 return MarkdownMigration(store).import_batch(
                     _markdown_records(args), expected_revision=expected)
