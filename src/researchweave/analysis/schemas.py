@@ -135,10 +135,27 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
             "research_goal": S,
         },
     ),
+    "statistics.effect_independent": _schema({"first": AN, "second": AN}),
+    "statistics.effect_paired": _schema({"first": AN, "second": AN}),
+    "statistics.effect_rank": _schema({"u": N, "n_first": INT, "n_second": INT}),
+    "statistics.effect_anova": _schema(
+        {"ss_effect": N, "ss_error": N, "df_effect": N, "df_error": N}, {"ss_total": N}
+    ),
+    "statistics.effect_correlation": _schema({"r": N, "n": INT}),
     "statistics.describe": _schema({**IDENTITY, "column": S}),
     "statistics.test": _schema({**IDENTITY, "outcome": S}, {"options": OBJ}),
     "statistics.correlate": _schema({**IDENTITY, "x": S, "y": S}, {"method": S}),
     "statistics.psychometric": _schema({**IDENTITY, "columns": AS}, {"options": OBJ}),
+    "statistics.reliability_diagnostics": _schema(
+        {**IDENTITY, "columns": AS},
+        {
+            "reverse": AS,
+            "scale_min": N,
+            "scale_max": N,
+            "bootstrap_iterations": INT,
+            "seed": INT,
+        },
+    ),
     "statistics.model": _schema({**IDENTITY, "outcome": S, "predictors": AS}, {"covariance": S}),
     "statistics.logistic": _schema(
         {**IDENTITY, "outcome": S, "predictors": AS}, {"max_iterations": INT}

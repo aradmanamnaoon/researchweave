@@ -26,6 +26,13 @@ from .authorization import CapabilityIssuer, HostCapability, HostPaths
 from .data_ops import case_selection, frequency_weighted_mean, missingness, recode_missing
 from .datasets import DatasetStore, import_csv, import_table, page, set_variable
 from .diagnostics import ols_diagnostics, variance_inflation
+from .effects import (
+    anova_effect_sizes,
+    correlation_effect,
+    independent_standardized_mean_difference,
+    paired_standardized_mean_difference,
+    rank_biserial_from_mann_whitney,
+)
 from .errors import AnalysisError, require
 from .generalized import logistic_regression, poisson_regression
 from .inference import (
@@ -53,6 +60,7 @@ from .models import Dataset, digest
 from .multivariate import hierarchical_clusters, kmeans_clusters, principal_components
 from .plots import render_plot
 from .power import two_sample_t_power, two_sample_t_required
+from .psychometrics import reliability_diagnostics
 from .recommendations import recommend_from_mapping
 from .runtime import RuntimeAuthorizer, run_script
 from .scale_scoring import ScaleDefinition, item_total_diagnostics, score_scale
@@ -107,10 +115,16 @@ class AnalysisFacade:
             "statistics.weighted_mean": "read",
             "statistics.available_case": "read",
             "statistics.recommend": "read",
+            "statistics.effect_independent": "read",
+            "statistics.effect_paired": "read",
+            "statistics.effect_rank": "read",
+            "statistics.effect_anova": "read",
+            "statistics.effect_correlation": "read",
             "statistics.describe": "read",
             "statistics.test": "read",
             "statistics.correlate": "read",
             "statistics.psychometric": "read",
+            "statistics.reliability_diagnostics": "read",
             "statistics.model": "read",
             "statistics.logistic": "read",
             "statistics.poisson": "read",
@@ -322,6 +336,30 @@ class AnalysisFacade:
             data = icc_two_way_absolute(list(arguments["ratings"]))
         elif operation == "statistics.recommend":
             data = recommend_from_mapping(dict(arguments))
+        elif operation == "statistics.effect_independent":
+            data = independent_standardized_mean_difference(
+                list(arguments["first"]), list(arguments["second"])
+            )
+        elif operation == "statistics.effect_paired":
+            data = paired_standardized_mean_difference(
+                list(arguments["first"]), list(arguments["second"])
+            )
+        elif operation == "statistics.effect_rank":
+            data = rank_biserial_from_mann_whitney(
+                float(arguments["u"]), int(arguments["n_first"]), int(arguments["n_second"])
+            )
+        elif operation == "statistics.effect_anova":
+            data = anova_effect_sizes(
+                ss_effect=float(arguments["ss_effect"]),
+                ss_error=float(arguments["ss_error"]),
+                df_effect=float(arguments["df_effect"]),
+                df_error=float(arguments["df_error"]),
+                ss_total=(
+                    float(arguments["ss_total"]) if arguments.get("ss_total") is not None else None
+                ),
+            )
+        elif operation == "statistics.effect_correlation":
+            data = correlation_effect(float(arguments["r"]), n=int(arguments["n"]))
         elif operation in ("runtime.python", "runtime.r"):
             language = "python" if operation.endswith("python") else "r"
             timeout_seconds = int(arguments.get("timeout_seconds", 10))
@@ -450,6 +488,16 @@ class AnalysisFacade:
                 data = reliability(
                     obj, list(arguments["columns"]), **dict(arguments.get("options", {}))
                 ).as_json()
+            elif operation == "statistics.reliability_diagnostics":
+                data = reliability_diagnostics(
+                    obj,
+                    list(arguments["columns"]),
+                    reverse=list(arguments.get("reverse", [])),
+                    scale_min=arguments.get("scale_min"),
+                    scale_max=arguments.get("scale_max"),
+                    bootstrap_iterations=int(arguments.get("bootstrap_iterations", 0)),
+                    seed=int(arguments.get("seed", 0)),
+                )
             elif operation == "statistics.model":
                 data = linear_regression(
                     obj,
