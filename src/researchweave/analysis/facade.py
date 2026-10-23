@@ -6,7 +6,9 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .data_ops import case_selection, frequency_weighted_mean, missingness, recode_missing
 from .datasets import DatasetStore, import_csv, import_table, page, set_variable
+from .diagnostics import ols_diagnostics, variance_inflation
 from .errors import AnalysisError, require
 from .generalized import logistic_regression, poisson_regression
 from .inference import (
@@ -18,9 +20,13 @@ from .inference import (
 )
 from .modeling import adjust_pvalues, linear_regression, pooled_effects
 from .models import Dataset, digest
+from .multivariate import hierarchical_clusters, kmeans_clusters, principal_components
 from .plots import render_plot
+from .power import two_sample_t_power, two_sample_t_required
 from .runtime import run_script
+from .scale_scoring import ScaleDefinition, item_total_diagnostics, score_scale
 from .statistics import correlation, describe, reliability, t_test
+from .time_series import adf_stationarity, causal_features, parse_chronology
 from .transformations import transform
 
 
@@ -35,6 +41,10 @@ class AnalysisFacade:
             "dataset.page": "read",
             "dataset.transform": "local-write",
             "dataset.variable": "local-write",
+            "dataset.missingness": "read",
+            "dataset.select": "local-write",
+            "dataset.user_missing": "local-write",
+            "statistics.weighted_mean": "read",
             "statistics.describe": "read",
             "statistics.test": "read",
             "statistics.correlate": "read",
@@ -49,6 +59,17 @@ class AnalysisFacade:
             "statistics.anova": "read",
             "statistics.bootstrap": "read",
             "statistics.permutation": "read",
+            "statistics.pca": "read",
+            "statistics.kmeans": "read",
+            "statistics.hierarchical": "read",
+            "statistics.power": "read",
+            "statistics.required_n": "read",
+            "statistics.diagnostics": "read",
+            "statistics.vif": "read",
+            "statistics.score_scale": "read",
+            "statistics.item_total": "read",
+            "statistics.time_features": "read",
+            "statistics.adf": "read",
             "plot.render": "local-write",
             "runtime.python": "code-execution",
             "runtime.r": "code-execution",
@@ -169,6 +190,14 @@ class AnalysisFacade:
                 list(arguments["second"]),
                 alternative=str(arguments.get("alternative", "two-sided")),
             )
+        elif operation in ("statistics.power", "statistics.required_n"):
+            from dataclasses import asdict
+
+            options = dict(arguments)
+            if operation == "statistics.power":
+                data = asdict(two_sample_t_power(**options))
+            else:
+                data = asdict(two_sample_t_required(**options))
         elif operation in ("runtime.python", "runtime.r"):
             data = run_script(
                 str(arguments["source"]),
@@ -208,12 +237,28 @@ class AnalysisFacade:
             if operation == "dataset.inspect":
                 data["variables"] = [v.__dict__ for v in obj.variables]
                 data["source_hash"] = obj.source_hash
-        elif operation in ("dataset.transform", "dataset.variable"):
+        elif operation in (
+            "dataset.transform",
+            "dataset.variable",
+            "dataset.select",
+            "dataset.user_missing",
+        ):
             obj = self._dataset(arguments)
             if operation == "dataset.transform":
                 updated = transform(obj, dict(arguments["spec"]))
-            else:
+            elif operation == "dataset.variable":
                 updated = set_variable(obj, str(arguments["column"]), **dict(arguments["updates"]))
+            elif operation == "dataset.select":
+                updated = case_selection(
+                    obj,
+                    str(arguments["column"]),
+                    list(arguments["allowed"]),
+                    include_null=bool(arguments.get("include_null", False)),
+                )
+            else:
+                updated = recode_missing(
+                    obj, str(arguments["column"]), list(arguments["missing_values"])
+                )
             self.store.save(updated)
             data = {
                 "dataset_id": updated.dataset_id,
@@ -225,6 +270,12 @@ class AnalysisFacade:
             obj = self._dataset(arguments)
             if operation == "statistics.describe":
                 data = describe(obj, str(arguments["column"]))
+            elif operation == "dataset.missingness":
+                data = missingness(obj, by=arguments.get("by"))
+            elif operation == "statistics.weighted_mean":
+                data = frequency_weighted_mean(
+                    obj, str(arguments["column"]), str(arguments["weight"])
+                )
             elif operation == "statistics.test":
                 data = t_test(
                     obj, str(arguments["outcome"]), **dict(arguments.get("options", {}))
@@ -276,6 +327,51 @@ class AnalysisFacade:
                     str(arguments["group"]),
                     levels=list(arguments["levels"]),
                 ).as_json()
+            elif operation == "statistics.pca":
+                data = principal_components(
+                    obj,
+                    list(arguments["columns"]),
+                    n_components=int(arguments.get("n_components", 2)),
+                    standardize=bool(arguments.get("standardize", True)),
+                )
+            elif operation == "statistics.kmeans":
+                data = kmeans_clusters(
+                    obj,
+                    list(arguments["columns"]),
+                    k=int(arguments["k"]),
+                    seed=int(arguments.get("seed", 0)),
+                )
+            elif operation == "statistics.hierarchical":
+                data = hierarchical_clusters(
+                    obj,
+                    list(arguments["columns"]),
+                    k=int(arguments["k"]),
+                    linkage=str(arguments.get("linkage", "ward")),
+                )
+            elif operation == "statistics.diagnostics":
+                data = ols_diagnostics(
+                    obj, str(arguments["outcome"]), list(arguments["predictors"])
+                )
+            elif operation == "statistics.vif":
+                data = variance_inflation(obj, list(arguments["predictors"]))
+            elif operation in ("statistics.score_scale", "statistics.item_total"):
+                spec = ScaleDefinition(**dict(arguments["scale"]))
+                if operation == "statistics.score_scale":
+                    data = score_scale(obj, spec, row_id=arguments.get("row_id"))
+                else:
+                    data = item_total_diagnostics(obj, spec)
+            elif operation in ("statistics.time_features", "statistics.adf"):
+                chronology = parse_chronology(
+                    obj, str(arguments["time_column"]), str(arguments["value_column"])
+                )
+                if operation == "statistics.time_features":
+                    data = causal_features(
+                        chronology,
+                        lags=list(arguments["lags"]),
+                        rolling_window=arguments.get("rolling_window"),
+                    )
+                else:
+                    data = adf_stationarity(chronology)
             elif operation == "plot.render":
                 output_root = context.get("trusted_export_root")
                 require(

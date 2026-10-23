@@ -20,6 +20,13 @@
 | SA-026/027 | `generalized.py` | logit/Poisson compared to statsmodels; separation and invalid count failures | Working slice |
 | SA-031/035 | `multivariate.py` | PCA eigenvalues and reconstruction, seeded k-means and hierarchical | Working slice |
 | SA-051 (plan engine) | `reproducibility.py` | dependency/cycle validation, hash-based rerun and tamper detection | Working slice |
+| SA-030 | `time_series.py` | timezone-aware chronology, causal lags, ACF and ADF oracle | Working slice |
+| SA-034 | `scale_scoring.py` | reverse orientation, missing-item thresholds, corrected item-total correlation | Working slice |
+| SA-037 | `power.py` | rounded t-test sample planning and proportion power reference | Working slice |
+| SA-039 | `diagnostics.py` | influence/Breusch-Pagan/VIF and studentized residual tests | Working slice |
+| SA-048/050 | `mixed_methods.py` | code-by-case linkage, small-cell disclosure guards, overlap provenance | Working slice |
+| SA-049 | `coding_review.py` | two-reviewer adjudication and source-anchor relocation | Working slice |
+| SA-045 | `script_exports.py` | generated Python script reproduced actual result in fresh interpreter; R unverified | Working slice |
 | SOURCE_LAYOUT_VERIFIED | `src/researchweave/analysis` | compileall, imported install, git index checked on local commit | See TEST_RESULTS |
 
 Actual observed results and metrics belong to `TEST_RESULTS.md` and `CODE_METRICS.json`. Status is intentionally limited to features with observed checks; remaining 52 backlog tasks are captured in `NEXT_ACTION.md` and `LIMITATIONS.md`.
