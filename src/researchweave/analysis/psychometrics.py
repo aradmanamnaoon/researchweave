@@ -77,7 +77,7 @@ def reliability_diagnostics(
     bootstrap_iterations: int = 0,
     seed: int = 0,
 ) -> dict[str, Any]:
-    """Alpha, standardized alpha, omega, item-total and alpha-if-deleted diagnostics."""
+    """Alpha, split-half, omega, item-total and alpha-if-deleted diagnostics."""
 
     reverse = reverse or []
     require(
@@ -102,6 +102,25 @@ def reliability_diagnostics(
             matrix[:, index] = float(scale_min) + float(scale_max) - matrix[:, index]
     alpha = _cronbach_alpha(matrix)
     standardized = _standardized_alpha(matrix)
+    split_half: dict[str, Any] | None = None
+    if len(columns) >= 4:
+        first_indices = np.arange(0, len(columns), 2)
+        second_indices = np.arange(1, len(columns), 2)
+        first_score = matrix[:, first_indices].sum(axis=1)
+        second_score = matrix[:, second_indices].sum(axis=1)
+        if np.std(first_score, ddof=1) > 0 and np.std(second_score, ddof=1) > 0:
+            correlation = float(np.corrcoef(first_score, second_score)[0, 1])
+            denominator = 1 + correlation
+            spearman_brown = (
+                float(2 * correlation / denominator) if abs(denominator) > 1e-12 else None
+            )
+            split_half = {
+                "method": "deterministic_odd_even_spearman_brown",
+                "first_items": [columns[index] for index in first_indices],
+                "second_items": [columns[index] for index in second_indices],
+                "half_score_correlation": correlation,
+                "spearman_brown": spearman_brown,
+            }
     diagnostics: dict[str, dict[str, float | None]] = {}
     for index, column in enumerate(columns):
         item = matrix[:, index]
@@ -120,6 +139,10 @@ def reliability_diagnostics(
     loadings: dict[str, float] | None = None
     uniqueness: dict[str, float] | None = None
     warnings: list[str] = []
+    if split_half is None:
+        warnings.append(
+            "Split-half reliability requires at least four items and nonconstant half scores"
+        )
     if len(columns) >= 3 and len(matrix) >= max(20, 5 * len(columns)):
         try:
             omega, raw_loadings, raw_uniqueness = _omega_total(matrix)
@@ -159,6 +182,7 @@ def reliability_diagnostics(
         "method": "classical_test_theory_reliability",
         "alpha": alpha,
         "standardized_alpha": standardized,
+        "split_half": split_half,
         "omega_total_one_factor": omega,
         "one_factor_loadings": loadings,
         "one_factor_uniqueness": uniqueness,
@@ -173,6 +197,8 @@ def reliability_diagnostics(
         "warnings": warnings,
         "limitations": [
             "Reliability coefficients do not establish unidimensionality or validity",
+            "Odd/even split-half reliability depends on item ordering; inspect alternative "
+            "splits if justified",
             "Omega uses a one-factor continuous-item principal-axis model",
             "Complete-case analysis is used for all coefficients",
         ],

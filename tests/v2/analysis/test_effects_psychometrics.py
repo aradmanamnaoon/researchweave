@@ -48,6 +48,12 @@ def test_reliability_diagnostics_item_statistics_omega_and_seeded_ci(tmp_path: P
     )
     assert first["alpha"] > 0.8
     assert first["standardized_alpha"] > 0.8
+    assert first["split_half"] is not None
+    first_half = items[:, [0, 2]].sum(axis=1)
+    second_half = items[:, [1, 3]].sum(axis=1)
+    correlation = np.corrcoef(first_half, second_half)[0, 1]
+    expected_split = 2 * correlation / (1 + correlation)
+    assert first["split_half"]["spearman_brown"] == pytest.approx(expected_split)
     assert first["omega_total_one_factor"] is not None
     assert first["omega_total_one_factor"] > 0.8
     assert first["alpha_confidence_interval"] == second["alpha_confidence_interval"]
