@@ -1,0 +1,862 @@
+[
+  {
+    "operation": "project.create",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "title",
+      "question",
+      "design"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "title",
+        "question",
+        "design"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Create a local project",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.open",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read local project identity",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.integrity",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Audit project hashes",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.archive",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "filename"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "filename"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Create .rwproj snapshot",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.archive_verify",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "filename"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "filename"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Verify .rwproj without writing",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.restore",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "filename",
+      "destination_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "filename",
+        "destination_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Restore .rwproj",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.bibliography_preview",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "format",
+      "data_base64"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "format",
+        "data_base64"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Preview references",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.bibliography_import",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "format",
+      "data_base64"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "format",
+        "data_base64"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Import bibliography",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.references",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "List references",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.import",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "title",
+      "media_type",
+      "data_base64"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "title",
+        "media_type",
+        "data_base64"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Import local document",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.source_text",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "source_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "source_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read source text",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "discovery.search",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "query"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "query"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Offline library search",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.validate",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "reference_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "reference_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Inspect DOI syntax",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "evidence.anchor",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "source_id",
+      "quote",
+      "start",
+      "end"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "source_id",
+        "quote",
+        "start",
+        "end"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Record exact quote anchor",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "evidence.note",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "source_id",
+      "title",
+      "body"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "source_id",
+        "title",
+        "body"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Record attributed evidence note",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "evidence.notebook_export",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Render notebook Markdown",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "question.feedback",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "question",
+      "framework",
+      "fields"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "question",
+        "framework",
+        "fields"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Question checklist",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "protocol.create",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "title",
+      "author",
+      "body"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "title",
+        "author",
+        "body"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Register protocol",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "protocol.amend",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "protocol_id",
+      "author",
+      "rationale",
+      "body"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "protocol_id",
+        "author",
+        "rationale",
+        "body"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Append protocol version",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "protocol.history",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "protocol_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "protocol_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "View protocol history",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.register",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "review_id",
+      "reference_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "review_id",
+        "reference_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Register review record",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.screen",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "review_id",
+      "record_id",
+      "reviewer",
+      "stage",
+      "decision"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "review_id",
+        "record_id",
+        "reviewer",
+        "stage",
+        "decision"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Record blinded vote",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.status",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "review_id",
+      "record_id",
+      "stage"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "review_id",
+        "record_id",
+        "stage"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read blinded voting status",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.adjudicate",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "review_id",
+      "record_id",
+      "stage",
+      "decision",
+      "adjudicator",
+      "reason"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "review_id",
+        "record_id",
+        "stage",
+        "decision",
+        "adjudicator",
+        "reason"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Record adjudication",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.advance",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "review_id",
+      "record_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "review_id",
+        "record_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Advance included review record",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.prisma",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "review_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "review_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Screening reconciliation",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "writing.section_save",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "manuscript_id",
+      "section",
+      "body",
+      "citations"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "manuscript_id",
+        "section",
+        "body",
+        "citations"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Save manuscript section",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "writing.inspect",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "manuscript_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "manuscript_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Inspect citations",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "writing.render",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "manuscript_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "manuscript_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Export manuscript Markdown",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "provenance.graph",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Export provenance graph",
+    "ui_binding": "pending"
+  }
+]
