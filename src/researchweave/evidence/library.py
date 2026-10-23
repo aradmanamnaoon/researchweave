@@ -220,11 +220,33 @@ class LibraryService:
                              "page_number INTEGER NOT NULL CHECK(page_number > 0),"
                              "text TEXT NOT NULL, page_sha256 TEXT NOT NULL,"
                              "status TEXT NOT NULL, rotation INTEGER NOT NULL,"
-                             "label TEXT, PRIMARY KEY(source_id,page_number))")
+                             "label TEXT, section_kind TEXT, heading TEXT,"
+                             "PRIMARY KEY(source_id,page_number))")
+                columns = {
+                    str(row["name"])
+                    for row in conn.execute("PRAGMA table_info(fulltext_pages)")
+                }
+                if "section_kind" not in columns:
+                    conn.execute("ALTER TABLE fulltext_pages ADD COLUMN section_kind TEXT")
+                if "heading" not in columns:
+                    conn.execute("ALTER TABLE fulltext_pages ADD COLUMN heading TEXT")
                 for page in structured.pages:
-                    conn.execute("INSERT INTO fulltext_pages VALUES (?,?,?,?,?,?,?)",
-                                 (source_id, page.number, page.text, page.sha256,
-                                  page.status, page.rotation, page.label))
+                    conn.execute(
+                        "INSERT INTO fulltext_pages("
+                        "source_id,page_number,text,page_sha256,status,rotation,label,"
+                        "section_kind,heading) VALUES (?,?,?,?,?,?,?,?,?)",
+                        (
+                            source_id,
+                            page.number,
+                            page.text,
+                            page.sha256,
+                            page.status,
+                            page.rotation,
+                            page.label,
+                            page.section_kind,
+                            page.heading,
+                        ),
+                    )
 
         _, revision = self.store.mutate("library.import",
                                         {"source_id": source_id, "content_sha256": digest,

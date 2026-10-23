@@ -38,6 +38,8 @@ class TextPage:
     rotation: int = 0
     label: str | None = None
     scan_evidence: str = "not_applicable"
+    section_kind: str | None = None
+    heading: str | None = None
 
 
 @dataclass(frozen=True)
@@ -89,14 +91,26 @@ def _digest(value: bytes) -> str:
 
 
 def _page(number: int, text: str, *, status: str = "text", rotation: int = 0,
-          label: str | None = None, scan_evidence: str = "not_applicable") -> TextPage:
+          label: str | None = None, scan_evidence: str = "not_applicable",
+          section_kind: str | None = None, heading: str | None = None) -> TextPage:
     require(len(text) <= MAX_SECTION_CHARS, "Extracted section too large", "RESOURCE_LIMIT")
     require(rotation in (0, 90, 180, 270), "Invalid PDF page rotation")
     require(scan_evidence in {
         "not_applicable", "image_detected", "no_image_detected", "unknown_no_text",
     }, "Invalid scan evidence classification")
-    return TextPage(number, text, _digest(text.encode("utf-8")), status, rotation, label,
-                    scan_evidence)
+    require(section_kind is None or len(section_kind) <= 200, "Section kind is too long")
+    require(heading is None or len(heading) <= 2000, "Section heading is too long")
+    return TextPage(
+        number,
+        text,
+        _digest(text.encode("utf-8")),
+        status,
+        rotation,
+        label,
+        scan_evidence,
+        section_kind,
+        heading,
+    )
 
 
 def _pdf_scan_evidence(pdf_page: PdfPage) -> str:
@@ -171,15 +185,32 @@ def _docx(data: bytes) -> tuple[TextPage, ...]:
                             for el in root.iter()), "External DOCX relationship", "UNSAFE_DOCUMENT")
     root = _xml(files["word/document.xml"])
     ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
-    paragraphs: list[str] = []
-    for element in root.iter():
-        if element.tag == ns + "p":
-            chunks = [node.text or "" for node in element.iter()
-                      if node.tag in {ns + "t", ns + "instrText"} and node.tag != ns + "instrText"]
-            if chunks:
-                paragraphs.append("".join(chunks))
-    require(bool(paragraphs), "DOCX contains no extractable text", "INVALID_DOCUMENT")
-    return (_page(1, "\n".join(paragraphs)),)
+    sections: list[TextPage] = []
+    for element in root.iter(ns + "p"):
+        chunks = [node.text or "" for node in element.iter() if node.tag == ns + "t"]
+        text = "".join(chunks).strip()
+        if not text:
+            continue
+        style = None
+        properties = element.find(ns + "pPr")
+        if properties is not None:
+            style_element = properties.find(ns + "pStyle")
+            if style_element is not None:
+                style = style_element.attrib.get(ns + "val") or style_element.attrib.get("val")
+        normalized_style = style.strip() if style else "paragraph"
+        heading = text if normalized_style.casefold().startswith("heading") else None
+        sections.append(
+            _page(
+                len(sections) + 1,
+                text,
+                label=f"word/document.xml#p{len(sections) + 1}",
+                section_kind=normalized_style,
+                heading=heading,
+            )
+        )
+        require(len(sections) <= MAX_PAGES, "Too many DOCX sections", "RESOURCE_LIMIT")
+    require(bool(sections), "DOCX contains no extractable text", "INVALID_DOCUMENT")
+    return tuple(sections)
 
 
 class _HTMLText(HTMLParser):
@@ -187,20 +218,31 @@ class _HTMLText(HTMLParser):
         super().__init__(convert_charrefs=True)
         self.parts: list[str] = []
         self.hidden = 0
+        self.heading: str | None = None
+        self._heading_parts: list[str] | None = None
 
     def handle_starttag(self, tag: str, attrs: list[tuple[str, str | None]]) -> None:
         if tag in {"script", "style", "noscript", "svg", "iframe"}:
             self.hidden += 1
-        elif not self.hidden and tag in {"p", "br", "div", "li", "h1", "h2", "h3", "h4"}:
-            self.parts.append("\n")
+        elif not self.hidden:
+            if tag in {"p", "br", "div", "li", "h1", "h2", "h3", "h4", "h5", "h6"}:
+                self.parts.append("\n")
+            if tag in {"h1", "h2", "h3", "h4", "h5", "h6"} and self.heading is None:
+                self._heading_parts = []
 
     def handle_endtag(self, tag: str) -> None:
         if tag in {"script", "style", "noscript", "svg", "iframe"}:
             self.hidden = max(0, self.hidden - 1)
+        elif tag in {"h1", "h2", "h3", "h4", "h5", "h6"} and self._heading_parts is not None:
+            candidate = "".join(self._heading_parts).strip()
+            self.heading = candidate or None
+            self._heading_parts = None
 
     def handle_data(self, data: str) -> None:
         if not self.hidden:
             self.parts.append(data)
+            if self._heading_parts is not None:
+                self._heading_parts.append(data)
 
 
 def _epub(data: bytes) -> tuple[TextPage, ...]:
@@ -238,7 +280,15 @@ def _epub(data: bytes) -> tuple[TextPage, ...]:
         except (UnicodeError, ValueError) as exc:
             raise EvidenceError("INVALID_DOCUMENT", "Invalid EPUB text encoding",
                                 "Re-export EPUB as UTF-8.") from exc
-        pages.append(_page(len(pages) + 1, "".join(parser.parts).strip(), label=path))
+        pages.append(
+            _page(
+                len(pages) + 1,
+                "".join(parser.parts).strip(),
+                label=path,
+                section_kind="epub_spine_item",
+                heading=parser.heading,
+            )
+        )
         require(len(pages) <= MAX_PAGES, "Too many EPUB sections", "RESOURCE_LIMIT")
     return tuple(pages)
 

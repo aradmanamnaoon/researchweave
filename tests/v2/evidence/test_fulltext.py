@@ -2,6 +2,7 @@
 
 import zipfile
 from io import BytesIO
+from pathlib import Path
 
 import pytest
 
@@ -13,6 +14,8 @@ from researchweave.evidence.fulltext import (
     relocate_highlight,
     verify_quote,
 )
+from researchweave.evidence.library import LibraryService
+from researchweave.evidence.storage import ProjectStore
 
 
 def archive(entries: dict[str, bytes]) -> bytes:
@@ -28,7 +31,8 @@ def docx(*, external: bool = False) -> bytes:
         "[Content_Types].xml": b"<Types/>",
         "word/document.xml": (
             '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
-            '<w:body><w:p><w:r><w:t>Evidence</w:t></w:r></w:p>'
+            '<w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
+            '<w:r><w:t>Evidence</w:t></w:r></w:p>'
             '<w:p><w:r><w:t>\u0645\u062a\u0646</w:t></w:r></w:p></w:body></w:document>'
         ).encode(),
     }
@@ -52,7 +56,10 @@ def epub() -> bytes:
             b'<item id="c1" href="chapter.xhtml" media-type="application/xhtml+xml"/>'
             b'</manifest><spine><itemref idref="c1"/></spine></package>'
         ),
-        "OPS/chapter.xhtml": b'<html><body><p>Chapter one</p><script>evil()</script></body></html>',
+        "OPS/chapter.xhtml": (
+            b'<html><body><h1>Chapter heading</h1><p>Chapter one</p>'
+            b'<script>evil()</script></body></html>'
+        ),
     })
 
 
@@ -125,11 +132,29 @@ def test_pdf_no_parser_and_corruption() -> None:
 def test_docx_and_epub_preserve_real_text() -> None:
     media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
     word = import_document(docx(), media)
-    assert word.pages[0].text == "Evidence\n\u0645\u062a\u0646"
+    assert [page.text for page in word.pages] == ["Evidence", "\u0645\u062a\u0646"]
+    assert word.pages[0].section_kind == "Heading1"
+    assert word.pages[0].heading == "Evidence"
+    assert word.pages[1].section_kind == "paragraph"
     book = import_document(epub(), "application/epub+zip")
     assert "Chapter one" in book.pages[0].text
     assert "evil" not in book.pages[0].text
     assert book.pages[0].label == "OPS/chapter.xhtml"
+    assert book.pages[0].section_kind == "epub_spine_item"
+    assert book.pages[0].heading == "Chapter heading"
+
+
+def test_document_section_metadata_persists_after_reopen(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    media = "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    with ProjectStore.create(root, "Sections", "What was imported?", "exploratory") as store:
+        source = LibraryService(store).import_document(docx(), "Structured DOCX", media)
+        before = LibraryService(store).source_pages(source["source_id"])
+        assert before["pages"][0]["heading"] == "Evidence"
+        assert before["pages"][0]["section_kind"] == "Heading1"
+    with ProjectStore(root) as reopened:
+        after = LibraryService(reopened).source_pages(source["source_id"])
+        assert after["pages"] == before["pages"]
 
 
 def test_reject_external_relationships_and_archive_traversal() -> None:

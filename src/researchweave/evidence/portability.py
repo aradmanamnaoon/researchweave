@@ -732,14 +732,14 @@ def selective_clone(
                         "source_id TEXT NOT NULL REFERENCES sources(id),"
                         "page_number INTEGER NOT NULL CHECK(page_number > 0),"
                         "text TEXT NOT NULL,page_sha256 TEXT NOT NULL,status TEXT NOT NULL,"
-                        "rotation INTEGER NOT NULL,label TEXT,"
+                        "rotation INTEGER NOT NULL,label TEXT,section_kind TEXT,heading TEXT,"
                         "PRIMARY KEY(source_id,page_number))"
                     )
                     for row in fulltext_pages:
                         conn.execute(
-                            "INSERT INTO fulltext_pages VALUES (?,?,?,?,?,?,?)",
+                            "INSERT INTO fulltext_pages VALUES (?,?,?,?,?,?,?,?,?)",
                             tuple(
-                                row[key]
+                                row.get(key)
                                 for key in (
                                     "source_id",
                                     "page_number",
@@ -748,6 +748,8 @@ def selective_clone(
                                     "status",
                                     "rotation",
                                     "label",
+                                    "section_kind",
+                                    "heading",
                                 )
                             ),
                         )

@@ -25,9 +25,11 @@ def test_facade_docx_pages_and_verified_reopen(tmp_path):
     pages = _call(reopened, "library.source_pages", project_id=project_id,
                   source_id=source["source_id"])
     assert pages["available"]
-    assert pages["pages"][0]["text"] == "Evidence\nمتن"
+    assert [page["text"] for page in pages["pages"]] == ["Evidence", "متن"]
+    assert pages["pages"][0]["section_kind"] == "Heading1"
+    assert pages["pages"][0]["heading"] == "Evidence"
     assert _call(reopened, "library.source_text", project_id=project_id,
-                 source_id=source["source_id"])["text"] == "Evidence\nمتن"
+                 source_id=source["source_id"])["text"] == "Evidence\n\nمتن"
     with sqlite3.connect(tmp_path / project_id / "data" / "project.sqlite") as conn:
         conn.execute("UPDATE fulltext_pages SET text='tampered'")
     failed = reopened.execute("library.source_pages", {
