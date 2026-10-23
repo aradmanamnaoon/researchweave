@@ -6,6 +6,22 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .advanced_statistics import (
+    ancova,
+    approximate_permutation_mean_difference,
+    cluster_bootstrap_mean,
+    distribution_diagnostics,
+    factorial_anova,
+    friedman_test,
+    kruskal_wallis,
+    linear_mixed_effects,
+    ordinal_logistic,
+    paired_permutation_mean_difference,
+    repeated_measures_anova,
+    tukey_hsd,
+    welch_anova,
+    wilcoxon_paired,
+)
 from .authorization import CapabilityIssuer, HostCapability, HostPaths
 from .data_ops import case_selection, frequency_weighted_mean, missingness, recode_missing
 from .datasets import DatasetStore, import_csv, import_table, page, set_variable
@@ -86,11 +102,23 @@ class AnalysisFacade:
             "statistics.poisson": "read",
             "statistics.meta": "read",
             "statistics.adjust": "read",
+            "statistics.distribution": "read",
             "statistics.contingency": "read",
             "statistics.rank": "read",
+            "statistics.wilcoxon": "read",
+            "statistics.kruskal": "read",
+            "statistics.friedman": "read",
             "statistics.anova": "read",
+            "statistics.welch_anova": "read",
+            "statistics.tukey": "read",
+            "statistics.factorial_anova": "read",
+            "statistics.repeated_anova": "read",
+            "statistics.ancova": "read",
             "statistics.bootstrap": "read",
+            "statistics.cluster_bootstrap": "read",
             "statistics.permutation": "read",
+            "statistics.permutation_approx": "read",
+            "statistics.permutation_paired": "read",
             "statistics.pca": "read",
             "statistics.kmeans": "read",
             "statistics.hierarchical": "read",
@@ -107,6 +135,8 @@ class AnalysisFacade:
             "statistics.cox": "read",
             "statistics.gee": "read",
             "statistics.did": "read",
+            "statistics.mixed_effects": "read",
+            "statistics.ordinal": "read",
             "statistics.survey_mean": "read",
             "statistics.survey_proportions": "read",
             "statistics.factor_suitability": "read",
@@ -228,10 +258,38 @@ class AnalysisFacade:
                     iterations=int(arguments.get("iterations", 2000)),
                 )
             )
+        elif operation == "statistics.cluster_bootstrap":
+            from dataclasses import asdict
+
+            data = asdict(
+                cluster_bootstrap_mean(
+                    list(arguments["values"]),
+                    [str(value) for value in arguments["clusters"]],
+                    seed=int(arguments["seed"]),
+                    iterations=int(arguments.get("iterations", 2000)),
+                    confidence=float(arguments.get("confidence", 0.95)),
+                )
+            )
         elif operation == "statistics.permutation":
             data = exact_permutation_mean_difference(
                 list(arguments["first"]),
                 list(arguments["second"]),
+                alternative=str(arguments.get("alternative", "two-sided")),
+            )
+        elif operation == "statistics.permutation_approx":
+            data = approximate_permutation_mean_difference(
+                list(arguments["first"]),
+                list(arguments["second"]),
+                seed=int(arguments["seed"]),
+                iterations=int(arguments.get("iterations", 10_000)),
+                alternative=str(arguments.get("alternative", "two-sided")),
+            )
+        elif operation == "statistics.permutation_paired":
+            data = paired_permutation_mean_difference(
+                list(arguments["first"]),
+                list(arguments["second"]),
+                seed=int(arguments["seed"]),
+                iterations=int(arguments.get("iterations", 10_000)),
                 alternative=str(arguments.get("alternative", "two-sided")),
             )
         elif operation in ("statistics.power", "statistics.required_n"):
@@ -309,6 +367,8 @@ class AnalysisFacade:
             obj = self._dataset(arguments)
             if operation == "statistics.describe":
                 data = describe(obj, str(arguments["column"]))
+            elif operation == "statistics.distribution":
+                data = distribution_diagnostics(obj, str(arguments["column"]))
             elif operation == "dataset.missingness":
                 data = missingness(obj, by=arguments.get("by"))
             elif operation == "statistics.weighted_mean":
@@ -359,6 +419,23 @@ class AnalysisFacade:
                 data = independent_rank_test(
                     obj, str(arguments["outcome"]), str(arguments["group"]), levels
                 ).as_json()
+            elif operation == "statistics.wilcoxon":
+                data = wilcoxon_paired(
+                    obj,
+                    str(arguments["first"]),
+                    str(arguments["second"]),
+                    alternative=str(arguments.get("alternative", "two-sided")),
+                    zero_method=str(arguments.get("zero_method", "wilcox")),
+                )
+            elif operation == "statistics.kruskal":
+                data = kruskal_wallis(
+                    obj,
+                    str(arguments["outcome"]),
+                    str(arguments["group"]),
+                    levels=list(arguments["levels"]),
+                )
+            elif operation == "statistics.friedman":
+                data = friedman_test(obj, list(arguments["columns"]))
             elif operation == "statistics.anova":
                 data = one_way_anova(
                     obj,
@@ -366,6 +443,46 @@ class AnalysisFacade:
                     str(arguments["group"]),
                     levels=list(arguments["levels"]),
                 ).as_json()
+            elif operation == "statistics.welch_anova":
+                data = welch_anova(
+                    obj,
+                    str(arguments["outcome"]),
+                    str(arguments["group"]),
+                    levels=list(arguments["levels"]),
+                )
+            elif operation == "statistics.tukey":
+                data = tukey_hsd(
+                    obj,
+                    str(arguments["outcome"]),
+                    str(arguments["group"]),
+                    levels=list(arguments["levels"])
+                    if arguments.get("levels") is not None
+                    else None,
+                    alpha=float(arguments.get("alpha", 0.05)),
+                )
+            elif operation == "statistics.factorial_anova":
+                data = factorial_anova(
+                    obj,
+                    str(arguments["outcome"]),
+                    list(arguments["factors"]),
+                    typ=int(arguments.get("type", 2)),
+                )
+            elif operation == "statistics.repeated_anova":
+                data = repeated_measures_anova(
+                    obj,
+                    subject=str(arguments["subject"]),
+                    within=str(arguments["within"]),
+                    outcome=str(arguments["outcome"]),
+                )
+            elif operation == "statistics.ancova":
+                data = ancova(
+                    obj,
+                    str(arguments["outcome"]),
+                    str(arguments["factor"]),
+                    list(arguments["covariates"]),
+                    typ=int(arguments.get("type", 2)),
+                    include_slope_interactions=bool(arguments.get("slope_interactions", False)),
+                )
             elif operation == "statistics.pca":
                 data = principal_components(
                     obj,
@@ -452,6 +569,23 @@ class AnalysisFacade:
                     time=str(arguments["time"]),
                     treatment=str(arguments["treatment"]),
                     outcome=str(arguments["outcome"]),
+                )
+            elif operation == "statistics.mixed_effects":
+                data = linear_mixed_effects(
+                    obj,
+                    outcome=str(arguments["outcome"]),
+                    predictors=list(arguments["predictors"]),
+                    group=str(arguments["group"]),
+                    random_slope=arguments.get("random_slope"),
+                    reml=bool(arguments.get("reml", True)),
+                )
+            elif operation == "statistics.ordinal":
+                data = ordinal_logistic(
+                    obj,
+                    outcome=str(arguments["outcome"]),
+                    predictors=list(arguments["predictors"]),
+                    levels=list(arguments["levels"]),
+                    link=str(arguments.get("link", "logit")),
                 )
             elif operation == "statistics.survey_mean":
                 data = design_weighted_mean(
