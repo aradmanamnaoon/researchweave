@@ -807,6 +807,10 @@ class AnalysisFacade:
                     y=arguments.get("y"),
                     output=output_path,
                     kind=str(arguments.get("kind", "scatter")),
+                    x_label=arguments.get("x_label"),
+                    y_label=arguments.get("y_label"),
+                    title=str(arguments.get("title", "")),
+                    options=dict(arguments.get("options", {})),
                 )
             elif operation == "dataset.export_csv":
                 output_path = self.host_paths.export_file(str(arguments["filename"]))

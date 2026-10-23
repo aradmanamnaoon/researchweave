@@ -277,7 +277,17 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "statistics.efa": _schema({**IDENTITY, "columns": AS, "n_factors": INT}, {"rotate": S}),
     "statistics.fleiss": _schema({"rating_counts": A}),
     "statistics.icc": _schema({"ratings": A}),
-    "plot.render": _schema({**IDENTITY, "filename": S, "x": S}, {"y": SN, "kind": S}),
+    "plot.render": _schema(
+        {**IDENTITY, "filename": S, "x": S},
+        {
+            "y": SN,
+            "kind": S,
+            "x_label": SN,
+            "y_label": SN,
+            "title": S,
+            "options": OBJ,
+        },
+    ),
     "runtime.python": _schema({"source": S}, {"timeout_seconds": INT}),
     "runtime.r": _schema({"source": S}, {"timeout_seconds": INT}),
 }
