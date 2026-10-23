@@ -1,0 +1,25 @@
+{
+  "protocol_version": 1,
+  "package": "researchweave.analysis",
+  "factory": "build_analysis_facade",
+  "capabilities": [
+    "dataset.import",
+    "dataset.inspect",
+    "dataset.page",
+    "dataset.transform",
+    "dataset.variable",
+    "statistics.describe",
+    "statistics.test",
+    "statistics.correlate",
+    "statistics.psychometric",
+    "statistics.model",
+    "statistics.meta",
+    "statistics.adjust",
+    "plot.render",
+    "runtime.python",
+    "runtime.r"
+  ],
+  "limitations": "Subset implementations and optional backends; see LIMITATIONS.md",
+  "offline": true,
+  "gui_wiring": "pending"
+}

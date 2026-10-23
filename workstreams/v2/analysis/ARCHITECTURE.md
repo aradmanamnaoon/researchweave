@@ -1,0 +1,7 @@
+# Scientific analysis architecture
+
+The scientific analysis package is headless and independent of PyQt6. `facade.py` is the typed command boundary; `datasets.py` provides immutable dataset revisions and durable JSON store, `models.py` defines scientific contracts and stable hashing, `transformations.py` executes a safe declarative filter/recode/derive AST, and `statistics.py` implements descriptive methods, t-tests, correlations and Cronbach alpha. `modeling.py` implements regression, effect pooling and multiplicity. `qualitative.py` records transcript anchors and aligned-unit coder reliability; `runtime.py` invokes explicitly approved child interpreters; `plots.py` uses the noninteractive Matplotlib backend.
+
+The persistence root and import/export roots are injected by the trusted host and must never be supplied by model-generated arguments. The host must enforce actual authorization; a context boolean is only a temporary standalone host adapter contract, not an unforgeable capability. Script subprocesses retain the user's OS privileges and **are not security sandboxes**. Scientific results include input revisions, exclusions, conventions and runtime package versions.
+
+Future integrator work: define the trusted command bus and approval envelope, SQLite transaction index, durable qualitative store, cancellation handle, calibrated UI decision aids, stronger project privacy policy, full declarative DAG engine and release packaging.

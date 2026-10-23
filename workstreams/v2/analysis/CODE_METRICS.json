@@ -1,0 +1,20 @@
+{
+  "production_source_root": "src\\researchweave\\analysis",
+  "definition": "nonblank and non-comment physical Python source lines (includes docstrings; no test/generated files)",
+  "file_count": 11,
+  "nonblank_noncomment_sloc": 1299,
+  "name_tokens": 4136,
+  "files": {
+    "src\\researchweave\\analysis\\__init__.py": 3,
+    "src\\researchweave\\analysis\\datasets.py": 253,
+    "src\\researchweave\\analysis\\errors.py": 13,
+    "src\\researchweave\\analysis\\facade.py": 247,
+    "src\\researchweave\\analysis\\modeling.py": 126,
+    "src\\researchweave\\analysis\\models.py": 86,
+    "src\\researchweave\\analysis\\plots.py": 73,
+    "src\\researchweave\\analysis\\qualitative.py": 121,
+    "src\\researchweave\\analysis\\runtime.py": 66,
+    "src\\researchweave\\analysis\\statistics.py": 238,
+    "src\\researchweave\\analysis\\transformations.py": 73
+  }
+}

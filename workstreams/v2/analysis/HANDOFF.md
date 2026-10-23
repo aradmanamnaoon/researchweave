@@ -1,0 +1,7 @@
+# V2 Analysis handoff for final integrator
+
+All authored production source is tracked at `src/researchweave/analysis/` in branch `rebuild/v2-analysis`; it is expected to appear at `D:\coding\codex\researchweave\src\researchweave\analysis\` only after the final integration branch is successfully fast-forwarded onto the original `main` checkout.
+
+Worker worktree: `D:\coding\codex\researchweave-v2-analysis`. Original repository: `D:\coding\codex\researchweave`. Base: `af5c862d780d65c62a8c083fbfb64bd08a420092`. Tracked source module count: 11 (verify with `git ls-files -- src/researchweave/analysis`). Production source metric: 1,299 nonblank noncomment physical Python lines including docstrings (scope `CODE_METRICS.json`); below the requested aspirational 6,500-line target. Local commit SHA: see `git rev-parse HEAD` on branch following commit.
+
+All tested source can be imported using `from researchweave.analysis import build_analysis_facade`. Evidence for 14 observed tests and lint/compile checks is in `TEST_RESULTS.md`. The feature registry exposes namespaced operations and the local-first workflow, with outstanding limitations explained in `LIMITATIONS.md` and prioritized missing work in `NEXT_ACTION.md`. The facade requires host-injected root paths; connect its authority to a trusted host-generated policy rather than model-supplied arguments. **This domain is not feature-complete and does not satisfy the 52-package final gate.**
