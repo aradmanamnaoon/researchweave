@@ -116,6 +116,18 @@ class ReferenceUpdateMonitor:
             )
         ]
 
+    def watched_provider(self, reference_id: str) -> str:
+        """Return the explicitly enabled provider for a watched reference."""
+        require(_tables_exist(self.store), "Reference is not opted in for update checks",
+                "NEEDS_APPROVAL")
+        row = self.store.conn.execute(
+            "SELECT provider,enabled FROM reference_watch WHERE reference_id=?",
+            (reference_id,),
+        ).fetchone()
+        require(row is not None and bool(row["enabled"]),
+                "Reference is not opted in for update checks", "NEEDS_APPROVAL")
+        return str(row["provider"])
+
     def due_watches(self, *, now: str | None = None,
                     interval_hours: int = 168, limit: int = 100) -> dict[str, Any]:
         """Return opt-in watches due for a host-scheduled or manual metadata check.
@@ -180,6 +192,7 @@ class ReferenceUpdateMonitor:
         allowed = {
             "title", "year", "doi", "authors", "is_retracted", "is_corrected",
             "correction_of", "retraction_notice", "provider_record_id",
+            "catalog_presence", "provider_response_sha256",
         }
         require(set(observed).issubset(allowed), "Observed metadata contains unsupported fields")
         title = observed.get("title")
@@ -193,6 +206,15 @@ class ReferenceUpdateMonitor:
                 "Retraction signal must be boolean")
         require(isinstance(observed.get("is_corrected", False), bool),
                 "Correction signal must be boolean")
+        catalog_presence = observed.get("catalog_presence")
+        require(catalog_presence is None or catalog_presence in {"reported", "not_observed"},
+                "Invalid catalog presence status")
+        response_hashes = observed.get("provider_response_sha256")
+        require(response_hashes is None or (
+            isinstance(response_hashes, list)
+            and len(response_hashes) <= 5
+            and all(isinstance(value, str) and len(value) == 64 for value in response_hashes)
+        ), "Invalid provider response provenance hashes")
 
         changes: list[dict[str, Any]] = []
         if title is not None and title != reference.title:
@@ -214,6 +236,7 @@ class ReferenceUpdateMonitor:
             "identity_mismatch" if identifier_conflict
             else "retraction_reported" if retracted
             else "correction_reported" if corrected
+            else "doi_not_observed" if catalog_presence == "not_observed"
             else "metadata_changed" if changes
             else "no_change"
         )

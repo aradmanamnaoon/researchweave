@@ -188,6 +188,9 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
         "read", ("project_id", "reference_id"), "Read reference update observations"),
     "reference.watch_due": (
         "read", ("project_id",), "List opted-in reference watches due for host execution"),
+    "reference.watch_check": (
+        "external-network", ("project_id", "reference_id"),
+        "Explicitly check an opted-in reference provider without overwriting metadata"),
     "reference.identity_record": (
         "local-write", ("project_id", "reference_id", "provider", "observed"),
         "Persist explicit provider metadata identity comparison"),
@@ -1021,6 +1024,43 @@ class EvidenceFacade:
                     interval_hours=int(args.get("interval_hours", 168)),
                     limit=int(args.get("limit", 100)),
                 )
+            if operation == "reference.watch_check":
+                reference_id = _value(args, "reference_id", str)
+                provider = monitor.watched_provider(reference_id)
+                require(provider != "manual", "Manual watches cannot perform provider lookup",
+                        "UNSUPPORTED_FORMAT")
+                reference = library.get_reference(reference_id)
+                require(bool(reference.doi), "Watched reference has no valid DOI", "INVALID_INPUT")
+                lookup = self.catalog.lookup_doi(provider, str(reference.doi))
+                records = lookup["records"]
+                if records:
+                    first = records[0]
+                    observed = {
+                        "title": first.get("title"),
+                        "year": first.get("year"),
+                        "doi": first.get("doi"),
+                        "authors": first.get("authors", []),
+                        "is_retracted": first.get("is_retracted") is True,
+                        "is_corrected": first.get("is_corrected") is True,
+                        "provider_record_id": first.get("provider_id"),
+                        "catalog_presence": "reported",
+                        "provider_response_sha256": lookup["raw_response_sha256"],
+                    }
+                else:
+                    observed = {
+                        "doi": reference.doi,
+                        "catalog_presence": "not_observed",
+                        "provider_response_sha256": lookup["raw_response_sha256"],
+                    }
+                receipt = monitor.record_observation(
+                    reference_id, provider, observed, expected_revision=expected)
+                return {**receipt, "lookup": {
+                    "catalog_presence": lookup["catalog_presence"],
+                    "raw_response_sha256": lookup["raw_response_sha256"],
+                    "network_hosts": lookup["network_hosts"],
+                    "scientific_claims_verified": False,
+                    "paper_read": False,
+                }}
             if operation == "evidence.anchor":
                 return library.add_anchor(_value(args, "source_id", str),
                     _value(args, "quote", str), _value(args, "start", int),
