@@ -11,7 +11,7 @@ import numpy as np
 from scipy import stats
 
 from .errors import require
-from .models import Dataset, ScientificResult, finite_number, runtime_versions
+from .models import Dataset, ScientificResult, digest, finite_number, runtime_versions
 
 
 def contingency(
@@ -202,6 +202,7 @@ class IntervalEstimate:
     iterations: int
     seed: int
     method: str
+    distribution_hash: str
 
 
 def bootstrap_mean(
@@ -227,6 +228,7 @@ def bootstrap_mean(
         iterations,
         seed,
         "iid_percentile",
+        digest(means.tolist()),
     )
 
 

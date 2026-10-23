@@ -18,6 +18,7 @@ from .advanced_statistics import (
     ordinal_logistic,
     paired_permutation_mean_difference,
     repeated_measures_anova,
+    stratified_permutation_mean_difference,
     tukey_hsd,
     welch_anova,
     wilcoxon_paired,
@@ -219,6 +220,7 @@ class AnalysisFacade:
             "statistics.permutation": "read",
             "statistics.permutation_approx": "read",
             "statistics.permutation_paired": "read",
+            "statistics.permutation_stratified": "read",
             "statistics.pca": "read",
             "statistics.kmeans": "read",
             "statistics.hierarchical": "read",
@@ -420,6 +422,16 @@ class AnalysisFacade:
             data = paired_permutation_mean_difference(
                 list(arguments["first"]),
                 list(arguments["second"]),
+                seed=int(arguments["seed"]),
+                iterations=int(arguments.get("iterations", 10_000)),
+                alternative=str(arguments.get("alternative", "two-sided")),
+            )
+        elif operation == "statistics.permutation_stratified":
+            data = stratified_permutation_mean_difference(
+                list(arguments["first"]),
+                list(arguments["second"]),
+                list(arguments["first_strata"]),
+                list(arguments["second_strata"]),
                 seed=int(arguments["seed"]),
                 iterations=int(arguments.get("iterations", 10_000)),
                 alternative=str(arguments.get("alternative", "two-sided")),

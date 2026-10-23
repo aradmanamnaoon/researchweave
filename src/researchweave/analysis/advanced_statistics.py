@@ -12,7 +12,7 @@ import pandas as pd
 from scipy import stats
 
 from .errors import AnalysisError, require
-from .models import Dataset, finite_number, runtime_versions
+from .models import Dataset, digest, finite_number, runtime_versions
 
 
 def _numeric_rows(dataset: Dataset, columns: list[str]) -> tuple[np.ndarray, int]:
@@ -878,6 +878,7 @@ class ResamplingInterval:
     seed: int
     method: str
     n_units: int
+    distribution_hash: str
 
 
 def cluster_bootstrap_mean(
@@ -913,6 +914,7 @@ def cluster_bootstrap_mean(
         seed,
         "cluster_percentile",
         len(unique),
+        digest(estimates.tolist()),
     )
 
 
@@ -950,6 +952,81 @@ def approximate_permutation_mean_difference(
         "seed": seed,
         "alternative": alternative,
         "method": "monte_carlo_independent_permutation",
+        "assumption": "Independent observations are exchangeable across the two groups",
+    }
+
+
+def stratified_permutation_mean_difference(
+    first: list[float],
+    second: list[float],
+    first_strata: list[str],
+    second_strata: list[str],
+    *,
+    seed: int,
+    iterations: int = 10_000,
+    alternative: str = "two-sided",
+) -> dict[str, Any]:
+    """Monte-Carlo mean-difference permutation preserving group counts within strata."""
+
+    require(alternative in {"two-sided", "less", "greater"}, "Invalid alternative")
+    require(100 <= iterations <= 1_000_000, "Permutation budget outside supported range")
+    require(
+        len(first) == len(first_strata) and len(second) == len(second_strata),
+        "Values and stratum labels must align",
+    )
+    require(bool(first) and bool(second), "Nonempty groups required")
+    a = np.asarray([finite_number(value) for value in first], dtype=float)
+    b = np.asarray([finite_number(value) for value in second], dtype=float)
+    a_strata = np.asarray([str(value) for value in first_strata], dtype=object)
+    b_strata = np.asarray([str(value) for value in second_strata], dtype=object)
+    require(
+        all(value for value in [*a_strata.tolist(), *b_strata.tolist()]),
+        "Stratum labels cannot be empty",
+    )
+    strata = sorted(set(a_strata.tolist()) | set(b_strata.tolist()))
+    require(1 <= len(strata) <= 10_000, "Invalid stratum count", "RESOURCE_LIMIT")
+    blocks: list[tuple[np.ndarray, int]] = []
+    for stratum in strata:
+        block_a = a[a_strata == stratum]
+        block_b = b[b_strata == stratum]
+        require(
+            len(block_a) > 0 and len(block_b) > 0,
+            "Every stratum must contain observations from both groups",
+            "SCHEMA_MISMATCH",
+        )
+        blocks.append((np.concatenate([block_a, block_b]), len(block_a)))
+    observed = float(np.mean(a) - np.mean(b))
+    rng = np.random.default_rng(seed)
+    distribution = np.empty(iterations, dtype=float)
+    extreme = 0
+    for iteration in range(iterations):
+        permuted_a: list[float] = []
+        permuted_b: list[float] = []
+        for block, n_first in blocks:
+            permutation = rng.permutation(block)
+            permuted_a.extend(permutation[:n_first].tolist())
+            permuted_b.extend(permutation[n_first:].tolist())
+        difference = float(np.mean(permuted_a) - np.mean(permuted_b))
+        distribution[iteration] = difference
+        if alternative == "two-sided":
+            extreme += int(abs(difference) >= abs(observed) - 1e-12)
+        elif alternative == "greater":
+            extreme += int(difference >= observed - 1e-12)
+        else:
+            extreme += int(difference <= observed + 1e-12)
+    return {
+        "estimate": observed,
+        "p_value": (extreme + 1) / (iterations + 1),
+        "extreme": extreme,
+        "iterations": iterations,
+        "seed": seed,
+        "alternative": alternative,
+        "strata": strata,
+        "distribution_hash": digest(distribution.tolist()),
+        "method": "monte_carlo_stratified_permutation",
+        "assumption": (
+            "Treatment labels are exchangeable within each declared stratum under the null"
+        ),
     }
 
 

@@ -242,6 +242,16 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "statistics.permutation_paired": _schema(
         {"first": AN, "second": AN, "seed": INT}, {"iterations": INT, "alternative": S}
     ),
+    "statistics.permutation_stratified": _schema(
+        {
+            "first": AN,
+            "second": AN,
+            "first_strata": AS,
+            "second_strata": AS,
+            "seed": INT,
+        },
+        {"iterations": INT, "alternative": S},
+    ),
     "statistics.pca": _schema({**IDENTITY, "columns": AS}, {"n_components": INT, "standardize": B}),
     "statistics.kmeans": _schema({**IDENTITY, "columns": AS, "k": INT}, {"seed": INT}),
     "statistics.hierarchical": _schema({**IDENTITY, "columns": AS, "k": INT}, {"linkage": S}),

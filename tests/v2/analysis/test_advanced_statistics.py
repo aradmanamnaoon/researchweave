@@ -16,6 +16,7 @@ from researchweave.analysis.advanced_statistics import (
     ordinal_logistic,
     paired_permutation_mean_difference,
     repeated_measures_anova,
+    stratified_permutation_mean_difference,
     tukey_hsd,
     welch_anova,
     wilcoxon_paired,
@@ -191,6 +192,7 @@ def test_seeded_cluster_bootstrap_and_permutations():
     first = cluster_bootstrap_mean([1, 2, 10, 11], ["a", "a", "b", "b"], seed=7, iterations=200)
     second = cluster_bootstrap_mean([1, 2, 10, 11], ["a", "a", "b", "b"], seed=7, iterations=200)
     assert first == second
+    assert len(first.distribution_hash) == 64
     independent = approximate_permutation_mean_difference(
         [1, 2, 3, 4, 5], [11, 12, 13, 14, 15], seed=11, iterations=2000
     )
@@ -201,3 +203,22 @@ def test_seeded_cluster_bootstrap_and_permutations():
     assert independent["p_value"] < 0.05
     paired = paired_permutation_mean_difference([3, 4, 5, 6], [1, 2, 3, 4], seed=11, iterations=500)
     assert 0 < paired["p_value"] <= 1
+    stratified = stratified_permutation_mean_difference(
+        [2, 3, 8, 9],
+        [1, 2, 6, 7],
+        ["young", "young", "old", "old"],
+        ["young", "young", "old", "old"],
+        seed=17,
+        iterations=500,
+    )
+    repeated_stratified = stratified_permutation_mean_difference(
+        [2, 3, 8, 9],
+        [1, 2, 6, 7],
+        ["young", "young", "old", "old"],
+        ["young", "young", "old", "old"],
+        seed=17,
+        iterations=500,
+    )
+    assert stratified == repeated_stratified
+    assert stratified["strata"] == ["old", "young"]
+    assert len(stratified["distribution_hash"]) == 64
