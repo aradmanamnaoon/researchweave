@@ -324,6 +324,85 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "statistics.efa": _schema({**IDENTITY, "columns": AS, "n_factors": INT}, {"rotate": S}),
     "statistics.fleiss": _schema({"rating_counts": A}),
     "statistics.icc": _schema({"ratings": A}),
+    "qualitative.create": _schema({"project_id": S}),
+    "qualitative.inspect": _schema({"project_id": S}),
+    "qualitative.add_code": _schema(
+        {"project_id": S, "expected_content_hash": S, "code_id": S, "name": S, "actor": S},
+        {"description": S, "parent": SN},
+    ),
+    "qualitative.update_code": _schema(
+        {"project_id": S, "expected_content_hash": S, "code_id": S, "actor": S},
+        {"name": S, "description": S, "parent": SN},
+    ),
+    "qualitative.delete_code": _schema(
+        {"project_id": S, "expected_content_hash": S, "code_id": S, "actor": S}
+    ),
+    "qualitative.add_transcript": _schema(
+        {
+            "project_id": S,
+            "expected_content_hash": S,
+            "source_id": S,
+            "text": S,
+            "case_id": S,
+        },
+        {"confidential": B},
+    ),
+    "qualitative.annotate": _schema(
+        {
+            "project_id": S,
+            "expected_content_hash": S,
+            "source_id": S,
+            "start": INT,
+            "end": INT,
+            "code_id": S,
+            "coder": S,
+            "unit_id": S,
+        }
+    ),
+    "qualitative.add_memo": _schema(
+        {
+            "project_id": S,
+            "expected_content_hash": S,
+            "memo_id": S,
+            "title": S,
+            "text": S,
+            "author": S,
+        },
+        {"source_id": SN, "code_id": SN},
+    ),
+    "qualitative.review_annotation": _schema(
+        {
+            "project_id": S,
+            "expected_content_hash": S,
+            "annotation_index": INT,
+            "disposition": S,
+            "reviewer": S,
+            "rationale": S,
+        }
+    ),
+    "qualitative.relocation_proposal": _schema(
+        {"project_id": S, "annotation_index": INT, "revised_text": S}
+    ),
+    "qualitative.kappa": _schema({"first": OBJ, "second": OBJ}),
+    "qualitative.adjudicate": _schema(
+        {
+            "project_id": S,
+            "coder_a": S,
+            "coder_b": S,
+            "unit_ids": AS,
+            "resolutions": OBJ,
+            "adjudicator": S,
+            "rationales": OBJ,
+        }
+    ),
+    "mixed.joint_display": _schema(
+        {**IDENTITY, "project_id": S, "case_column": S, "measure_column": S, "code_id": S},
+        {"min_reporting_cases": INT},
+    ),
+    "mixed.joint_display_sensitive": _schema(
+        {**IDENTITY, "project_id": S, "case_column": S, "measure_column": S, "code_id": S},
+        {"min_reporting_cases": INT, "allow_quotes": B, "include_private": B},
+    ),
     "plot.render": _schema(
         {**IDENTITY, "filename": S, "x": S},
         {

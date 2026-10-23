@@ -23,6 +23,7 @@ from .advanced_statistics import (
     wilcoxon_paired,
 )
 from .authorization import CapabilityIssuer, HostCapability, HostPaths
+from .coding_review import adjudicate_disagreements, propose_relocation
 from .data_ops import (
     aggregate_groups,
     analytic_weighted_mean,
@@ -80,8 +81,9 @@ from .missing_data import (
     multiple_impute_normal,
     simple_impute,
 )
+from .mixed_methods import joint_display
 from .modeling import adjust_pvalues, linear_regression, pooled_effects
-from .models import Dataset, digest
+from .models import Dataset, digest, utc_now
 from .multivariate import (
     cluster_validation,
     hierarchical_clusters,
@@ -98,6 +100,8 @@ from .power import (
     two_sample_t_required,
 )
 from .psychometrics import reliability_diagnostics
+from .qualitative import Code, Transcript, cohen_kappa
+from .qualitative_store import Memo, QualitativeState, QualitativeStore
 from .recommendations import recommend_from_mapping
 from .runtime import RuntimeAuthorizer, run_script
 from .scale_scoring import ScaleDefinition, item_total_diagnostics, score_scale
@@ -127,6 +131,7 @@ from .transformations import transform
 class AnalysisFacade:
     def __init__(self, directory: Path, *, host_paths: HostPaths | None = None):
         self.store = DatasetStore(directory)
+        self.qualitative_store = QualitativeStore(directory / "qualitative")
         self.host_paths = host_paths or HostPaths()
         self.authorizations = CapabilityIssuer(directory)
         self.runtime_authorizations = RuntimeAuthorizer()
@@ -246,6 +251,20 @@ class AnalysisFacade:
             "statistics.efa": "read",
             "statistics.fleiss": "read",
             "statistics.icc": "read",
+            "qualitative.create": "local-write",
+            "qualitative.inspect": "read",
+            "qualitative.add_code": "local-write",
+            "qualitative.update_code": "local-write",
+            "qualitative.delete_code": "local-write",
+            "qualitative.add_transcript": "local-write",
+            "qualitative.annotate": "local-write",
+            "qualitative.add_memo": "local-write",
+            "qualitative.review_annotation": "local-write",
+            "qualitative.relocation_proposal": "read",
+            "qualitative.kappa": "read",
+            "qualitative.adjudicate": "read",
+            "mixed.joint_display": "read",
+            "mixed.joint_display_sensitive": "sensitive-export",
             "plot.render": "local-write",
             "runtime.python": "code-execution",
             "runtime.r": "code-execution",
@@ -432,6 +451,161 @@ class AnalysisFacade:
             data = fleiss_agreement(list(arguments["rating_counts"]))
         elif operation == "statistics.icc":
             data = icc_two_way_absolute(list(arguments["ratings"]))
+        elif operation == "qualitative.create":
+            project_id = str(arguments["project_id"])
+            data = self.qualitative_store.save(
+                project_id, QualitativeState(), create_only=True
+            )
+        elif operation == "qualitative.inspect":
+            project_id = str(arguments["project_id"])
+            state, content_hash = self.qualitative_store.load_snapshot(project_id)
+            data = {
+                "project_id": project_id,
+                "content_hash": content_hash,
+                "state": state.to_json(),
+            }
+        elif operation in {
+            "qualitative.add_code",
+            "qualitative.update_code",
+            "qualitative.delete_code",
+            "qualitative.add_transcript",
+            "qualitative.annotate",
+            "qualitative.add_memo",
+            "qualitative.review_annotation",
+        }:
+            project_id = str(arguments["project_id"])
+            expected_hash = str(arguments["expected_content_hash"])
+            state, actual_hash = self.qualitative_store.load_snapshot(project_id)
+            require(
+                actual_hash == expected_hash,
+                "Qualitative project changed since it was read",
+                "CONFLICT",
+            )
+            if operation == "qualitative.add_code":
+                state.add_code(
+                    Code(
+                        str(arguments["code_id"]),
+                        str(arguments["name"]),
+                        str(arguments.get("description", "")),
+                        arguments.get("parent"),
+                    ),
+                    actor=str(arguments["actor"]),
+                )
+            elif operation == "qualitative.update_code":
+                parent = arguments["parent"] if "parent" in arguments else ...
+                state.update_code(
+                    str(arguments["code_id"]),
+                    actor=str(arguments["actor"]),
+                    name=arguments.get("name"),
+                    description=arguments.get("description"),
+                    parent=parent,
+                )
+            elif operation == "qualitative.delete_code":
+                state.delete_code(str(arguments["code_id"]), actor=str(arguments["actor"]))
+            elif operation == "qualitative.add_transcript":
+                state.project.add_transcript(
+                    Transcript(
+                        str(arguments["source_id"]),
+                        str(arguments["text"]),
+                        str(arguments["case_id"]),
+                        bool(arguments.get("confidential", True)),
+                    )
+                )
+            elif operation == "qualitative.annotate":
+                state.project.annotate(
+                    str(arguments["source_id"]),
+                    int(arguments["start"]),
+                    int(arguments["end"]),
+                    str(arguments["code_id"]),
+                    str(arguments["coder"]),
+                    str(arguments["unit_id"]),
+                )
+            elif operation == "qualitative.add_memo":
+                state.add_memo(
+                    Memo(
+                        str(arguments["memo_id"]),
+                        str(arguments["title"]),
+                        str(arguments["text"]),
+                        str(arguments["author"]),
+                        utc_now(),
+                        source_id=arguments.get("source_id"),
+                        code_id=arguments.get("code_id"),
+                    )
+                )
+            else:
+                ledger = state.review_ledger()
+                decision = ledger.decide(
+                    int(arguments["annotation_index"]),
+                    str(arguments["disposition"]),
+                    reviewer=str(arguments["reviewer"]),
+                    rationale=str(arguments["rationale"]),
+                )
+                state.attach_review_ledger(ledger)
+            saved = self.qualitative_store.save(
+                project_id, state, expected_content_hash=expected_hash
+            )
+            data = {**saved, "state": state.to_json()}
+            if operation == "qualitative.review_annotation":
+                data["decision"] = decision.__dict__
+        elif operation == "qualitative.relocation_proposal":
+            state = self.qualitative_store.load(str(arguments["project_id"]))
+            index = int(arguments["annotation_index"])
+            require(
+                0 <= index < len(state.project.annotations),
+                "Annotation does not exist",
+                "NOT_FOUND",
+            )
+            annotation = state.project.annotations[index]
+            original = state.project.transcripts[annotation.source_id]
+            proposal = propose_relocation(
+                annotation,
+                Transcript(
+                    original.source_id,
+                    str(arguments["revised_text"]),
+                    original.case_id,
+                    original.confidential,
+                ),
+            )
+            data = proposal.__dict__
+        elif operation == "qualitative.kappa":
+            first = {str(key): str(value) for key, value in dict(arguments["first"]).items()}
+            second = {
+                str(key): str(value) for key, value in dict(arguments["second"]).items()
+            }
+            data = cohen_kappa(first, second)
+        elif operation == "qualitative.adjudicate":
+            state = self.qualitative_store.load(str(arguments["project_id"]))
+            data = adjudicate_disagreements(
+                state.project,
+                coder_a=str(arguments["coder_a"]),
+                coder_b=str(arguments["coder_b"]),
+                unit_ids=list(arguments["unit_ids"]),
+                resolutions={
+                    str(key): str(value)
+                    for key, value in dict(arguments["resolutions"]).items()
+                },
+                adjudicator=str(arguments["adjudicator"]),
+                rationales={
+                    str(key): str(value)
+                    for key, value in dict(arguments["rationales"]).items()
+                },
+            )
+        elif operation in {"mixed.joint_display", "mixed.joint_display_sensitive"}:
+            obj = self._dataset(arguments)
+            state = self.qualitative_store.load(str(arguments["project_id"]))
+            sensitive = operation == "mixed.joint_display_sensitive"
+            data = joint_display(
+                obj,
+                state.project,
+                case_column=str(arguments["case_column"]),
+                measure_column=str(arguments["measure_column"]),
+                code_id=str(arguments["code_id"]),
+                min_reporting_cases=int(arguments.get("min_reporting_cases", 3)),
+                allow_quotes=bool(arguments.get("allow_quotes", False)) if sensitive else False,
+                include_private=(
+                    bool(arguments.get("include_private", False)) if sensitive else False
+                ),
+            )
         elif operation == "statistics.recommend":
             data = recommend_from_mapping(dict(arguments))
         elif operation == "statistics.effect_independent":

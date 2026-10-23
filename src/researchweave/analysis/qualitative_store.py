@@ -212,8 +212,58 @@ class QualitativeStore:
         require(project_id.isidentifier(), "Invalid qualitative project identifier")
         return self.directory / f"{project_id}.json"
 
-    def save(self, project_id: str, state: QualitativeState) -> dict[str, Any]:
+    def content_hash(self, project_id: str) -> str:
         path = self._path(project_id)
+        require(path.is_file(), "Qualitative project not found", "NOT_FOUND")
+        require(
+            path.stat().st_size <= 50_000_000,
+            "Qualitative project exceeds storage budget",
+            "RESOURCE_LIMIT",
+        )
+        envelope = json.loads(path.read_text(encoding="utf-8"))
+        require(
+            set(envelope) == {"project_id", "content_hash", "state"},
+            "Invalid project envelope",
+        )
+        require(
+            envelope["project_id"] == project_id,
+            "Qualitative project identity mismatch",
+            "INTEGRITY_FAILURE",
+        )
+        require(
+            digest(envelope["state"]) == envelope["content_hash"],
+            "Qualitative project hash mismatch",
+            "INTEGRITY_FAILURE",
+        )
+        return str(envelope["content_hash"])
+
+    def save(
+        self,
+        project_id: str,
+        state: QualitativeState,
+        *,
+        expected_content_hash: str | None = None,
+        create_only: bool = False,
+    ) -> dict[str, Any]:
+        path = self._path(project_id)
+        if path.exists():
+            require(not create_only, "Qualitative project already exists", "CONFLICT")
+            require(
+                expected_content_hash is not None,
+                "Expected qualitative content hash required for update",
+                "CONFLICT",
+            )
+            require(
+                self.content_hash(project_id) == expected_content_hash,
+                "Qualitative project changed since it was read",
+                "CONFLICT",
+            )
+        else:
+            require(
+                expected_content_hash is None,
+                "Cannot supply expected hash for a new qualitative project",
+                "CONFLICT",
+            )
         payload = state.to_json()
         content_hash = digest(payload)
         envelope = {"project_id": project_id, "content_hash": content_hash, "state": payload}
@@ -255,3 +305,7 @@ class QualitativeStore:
             "INTEGRITY_FAILURE",
         )
         return QualitativeState.from_json(envelope["state"])
+
+    def load_snapshot(self, project_id: str) -> tuple[QualitativeState, str]:
+        state = self.load(project_id)
+        return state, self.content_hash(project_id)
