@@ -56,9 +56,7 @@ class ResearchLibrarian:
             dict.fromkeys(hit.source_id for hit in hits if self.evidence.verify(hit))
         )
         terms = [
-            term
-            for term in re.findall(r"\w+", query.casefold(), re.UNICODE)
-            if len(term) >= 4
+            term for term in re.findall(r"\w+", query.casefold(), re.UNICODE) if len(term) >= 4
         ]
         refined = " ".join(dict.fromkeys(terms))
         return SearchSuggestion(
@@ -69,9 +67,7 @@ class ResearchLibrarian:
 
 
 class Methodologist:
-    _CAUSAL_WORDS = re.compile(
-        r"(?i)\b(causes?|caused|causal|effect of|leads? to|results? in)\b"
-    )
+    _CAUSAL_WORDS = re.compile(r"(?i)\b(causes?|caused|causal|effect of|leads? to|results? in)\b")
 
     def critique(
         self,
@@ -281,12 +277,8 @@ class ManuscriptCopilot:
                 {
                     "text": item.claim,
                     "status": item.status,
-                    "source_id": None
-                    if item.citation is None
-                    else item.citation.source_id,
-                    "chunk_id": None
-                    if item.citation is None
-                    else item.citation.chunk_id,
+                    "source_id": None if item.citation is None else item.citation.source_id,
+                    "chunk_id": None if item.citation is None else item.citation.chunk_id,
                 }
                 for item in checks
             ],
@@ -352,4 +344,3 @@ class ScientificReviewer:
                 )
             )
         return findings
-

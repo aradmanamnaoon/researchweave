@@ -328,11 +328,7 @@ class DurableAgentRuntime:
             (plan_id,),
         ).fetchall()
         wanted = set(step.dependencies)
-        return {
-            str(step_id): str(state)
-            for step_id, state in rows
-            if str(step_id) in wanted
-        }
+        return {str(step_id): str(state) for step_id, state in rows if str(step_id) in wanted}
 
     def execute_step(
         self,
@@ -357,9 +353,7 @@ class DurableAgentRuntime:
         ).fetchone()
         if row is None:
             raise AIError("INTEGRITY_FAILURE", "Step state is missing")
-        state, prior_intent, prior_result = (
-            None if value is None else str(value) for value in row
-        )
+        state, prior_intent, prior_result = (None if value is None else str(value) for value in row)
         if state == "ok":
             if prior_result is None:
                 raise AIError("INTEGRITY_FAILURE", "Completed step is missing result")
@@ -418,9 +412,7 @@ class DurableAgentRuntime:
             self._event(plan_id, step_id, "step-started", {"intent": intent})
         try:
             result = dict(contract.handler(step.arguments))
-            encoded = json.dumps(
-                result, sort_keys=True, separators=(",", ":"), ensure_ascii=False
-            )
+            encoded = json.dumps(result, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
         except AIError as exc:
             with self.db:
                 self.db.execute(

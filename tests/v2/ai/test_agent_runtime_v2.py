@@ -120,9 +120,7 @@ def test_human_correction_invalidates_old_exact_approval(tmp_path: Path) -> None
         runtime.execute_step(revised.plan_id, "w", approval=old_approval)
     assert exc.value.code == "PERMISSION_DENIED"
     current_step = revised.steps[0]
-    new_approval = _approval(
-        issuer, "project", revised.plan_id, revised.revision, current_step
-    )
+    new_approval = _approval(issuer, "project", revised.plan_id, revised.revision, current_step)
     assert runtime.execute_step(revised.plan_id, "w", approval=new_approval) == {"ok": True}
     assert observed == ["new"]
     runtime.close()

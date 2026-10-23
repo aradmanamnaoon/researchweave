@@ -343,15 +343,23 @@ class RagAnswerDiffer:
         for key in before_map.keys() & after_map.keys():
             left = before_map[key]
             right = after_map[key]
-            left_ref = None if left.citation is None else (
-                left.citation.source_id,
-                left.citation.chunk_id,
-                left.citation.digest,
+            left_ref = (
+                None
+                if left.citation is None
+                else (
+                    left.citation.source_id,
+                    left.citation.chunk_id,
+                    left.citation.digest,
+                )
             )
-            right_ref = None if right.citation is None else (
-                right.citation.source_id,
-                right.citation.chunk_id,
-                right.citation.digest,
+            right_ref = (
+                None
+                if right.citation is None
+                else (
+                    right.citation.source_id,
+                    right.citation.chunk_id,
+                    right.citation.digest,
+                )
             )
             if left_ref != right_ref or left.status != right.status:
                 changed.append(right.claim)

@@ -236,9 +236,7 @@ class UsageDiagnostics:
                 errors[str(error_code)] = errors.get(str(error_code), 0) + 1
         for entry in providers.values():
             requests = int(entry["requests"])
-            entry["mean_latency_ms"] = (
-                entry["latency_ms_total"] / requests if requests else 0.0
-            )
+            entry["mean_latency_ms"] = entry["latency_ms_total"] / requests if requests else 0.0
             del entry["latency_ms_total"]
         return {
             "project_id": project_id,
