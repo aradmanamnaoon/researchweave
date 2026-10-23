@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from .errors import EvidenceError, require
 from .project_format import archive_project, restore_archive, verify_archive
@@ -177,4 +177,4 @@ def restore_recovery_snapshot(
     verified = verify_archive(path)
     require(verified["project_id"] == store.info().id,
             "Recovery snapshot belongs to another project", "CONFLICT")
-    return cast(dict[str, Any], restore_archive(path, destination))
+    return restore_archive(path, destination)
