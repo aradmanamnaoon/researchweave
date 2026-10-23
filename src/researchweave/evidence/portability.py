@@ -91,8 +91,9 @@ def _write_bundle(
                     "Unsafe artifact path",
                 )
                 archive.writestr(_zipinfo(name), data)
-        require(staged.stat().st_size <= MAX_EXPORT_BYTES, "Artifact bundle too large",
-                "RESOURCE_LIMIT")
+        require(
+            staged.stat().st_size <= MAX_EXPORT_BYTES, "Artifact bundle too large", "RESOURCE_LIMIT"
+        )
         with zipfile.ZipFile(staged, "r") as archive:
             loaded = json.loads(archive.read("manifest.json"))
             for item in loaded["files"]:
@@ -146,15 +147,17 @@ def export_research_artifacts(
         for row in references
     ]
     payloads: dict[str, bytes] = {
-        "project.json": _json_bytes({
-            "id": project.id,
-            "title": project.title,
-            "question": project.question,
-            "design": project.design,
-            "locale": project.locale,
-            "privacy": project.privacy,
-            "revision": project.revision,
-        }),
+        "project.json": _json_bytes(
+            {
+                "id": project.id,
+                "title": project.title,
+                "question": project.question,
+                "design": project.design,
+                "locale": project.locale,
+                "privacy": project.privacy,
+                "revision": project.revision,
+            }
+        ),
         "references.csv": _csv_bytes(
             reference_rows,
             ["id", "title", "authors", "year", "doi", "kind", "format", "status", "imported_at"],
@@ -240,8 +243,7 @@ def export_review_packet(
         )
     ]
     protocols = [
-        dict(row)
-        for row in store.conn.execute("SELECT * FROM protocols ORDER BY id,version")
+        dict(row) for row in store.conn.execute("SELECT * FROM protocols ORDER BY id,version")
     ]
     prisma = ReviewService(store).prisma(review_id)
     payloads = {
@@ -280,33 +282,139 @@ def selective_clone(
     *,
     source_ids: list[str],
     reference_ids: list[str],
+    collection_ids: list[str] | None = None,
+    review_ids: list[str] | None = None,
+    protocol_ids: list[str] | None = None,
 ) -> dict[str, Any]:
-    """Clone selected durable objects to a fresh project while preserving object IDs."""
+    """Clone selected objects plus required dependencies to a fresh project."""
+    collection_ids = list(collection_ids or [])
+    review_ids = list(review_ids or [])
+    protocol_ids = list(protocol_ids or [])
     require(destination.parent.is_dir(), "Clone destination parent must exist")
     require(not destination.exists(), "Clone destination already exists", "CONFLICT")
-    require(len(source_ids) + len(reference_ids) <= MAX_CLONE_ITEMS,
-            "Clone selection exceeds item limit", "RESOURCE_LIMIT")
-    require(len(source_ids) == len(set(source_ids)) and
-            len(reference_ids) == len(set(reference_ids)),
-            "Clone selection contains duplicate IDs")
+    require(
+        len(source_ids)
+        + len(reference_ids)
+        + len(collection_ids)
+        + len(review_ids)
+        + len(protocol_ids)
+        <= MAX_CLONE_ITEMS,
+        "Clone selection exceeds item limit",
+        "RESOURCE_LIMIT",
+    )
+    require(
+        len(source_ids) == len(set(source_ids))
+        and len(reference_ids) == len(set(reference_ids))
+        and len(collection_ids) == len(set(collection_ids))
+        and len(review_ids) == len(set(review_ids))
+        and len(protocol_ids) == len(set(protocol_ids)),
+        "Clone selection contains duplicate IDs",
+    )
+    source_set = set(source_ids)
+    reference_set = set(reference_ids)
+    collection_set = set(collection_ids)
+
+    def table_exists(name: str) -> bool:
+        return (
+            store.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+            ).fetchone()
+            is not None
+        )
+
+    if collection_set:
+        require(table_exists("library_collections"), "Collection selection not found", "NOT_FOUND")
+        pending = list(collection_set)
+        while pending:
+            collection_id = pending.pop()
+            row = store.conn.execute(
+                "SELECT id,parent_id FROM library_collections WHERE id=?", (collection_id,)
+            ).fetchone()
+            require(row is not None, f"Collection {collection_id} not found", "NOT_FOUND")
+            parent = row["parent_id"]
+            if parent is not None and parent not in collection_set:
+                collection_set.add(str(parent))
+                pending.append(str(parent))
+        reference_set.update(
+            str(row["reference_id"])
+            for row in store.conn.execute(
+                "SELECT collection_id,reference_id FROM collection_members"
+            )
+            if row["collection_id"] in collection_set
+        )
+
+    review_record_ids: set[str] = set()
+    if review_ids:
+        rows = [
+            row
+            for row in store.conn.execute("SELECT id,review_id,reference_id FROM review_records")
+            if row["review_id"] in review_ids
+        ]
+        review_record_ids.update(str(row["id"]) for row in rows)
+        reference_set.update(str(row["reference_id"]) for row in rows)
+        if table_exists("review_search_runs"):
+            run_rows = [
+                row
+                for row in store.conn.execute("SELECT id,review_id FROM review_search_runs")
+                if row["review_id"] in review_ids
+            ]
+            run_ids = [str(row["id"]) for row in run_rows]
+            if run_ids:
+                reference_set.update(
+                    str(row["reference_id"])
+                    for row in store.conn.execute(
+                        "SELECT run_id,reference_id FROM review_search_hits"
+                    )
+                    if row["run_id"] in run_ids
+                )
+        if review_record_ids:
+            for row in store.conn.execute(
+                "SELECT record_id,source_anchor FROM extractions WHERE source_anchor IS NOT NULL"
+            ):
+                if row["record_id"] not in review_record_ids:
+                    continue
+                anchor = store.conn.execute(
+                    "SELECT source_id FROM anchors WHERE id=?", (row["source_anchor"],)
+                ).fetchone()
+                require(
+                    anchor is not None,
+                    "Extraction anchor dependency is missing",
+                    "INTEGRITY_FAILURE",
+                )
+                source_set.add(str(anchor["source_id"]))
+
+    # Alias canonical records are dependencies of explicitly selected aliases.
+    changed = True
+    while changed:
+        changed = False
+        for ref_id in tuple(reference_set):
+            alias = store.conn.execute(
+                "SELECT canonical_id FROM reference_alias WHERE original_id=?", (ref_id,)
+            ).fetchone()
+            if alias is not None and str(alias["canonical_id"]) not in reference_set:
+                reference_set.add(str(alias["canonical_id"]))
+                changed = True
+
     sources = []
-    for source_id in source_ids:
+    for source_id in sorted(source_set):
         row = store.conn.execute(
             "SELECT * FROM sources WHERE id=? AND deleted=0", (source_id,)
         ).fetchone()
         if row is None:
-            raise EvidenceError("NOT_FOUND", f"Source {source_id} not found",
-                                "Choose an existing non-deleted source.")
+            raise EvidenceError(
+                "NOT_FOUND",
+                f"Source {source_id} not found",
+                "Choose an existing non-deleted source.",
+            )
         sources.append(dict(row))
     references = []
-    for reference_id in reference_ids:
+    for reference_id in sorted(reference_set):
         row = store.conn.execute("SELECT * FROM reference WHERE id=?", (reference_id,)).fetchone()
         if row is None:
-            raise EvidenceError("NOT_FOUND", f"Reference {reference_id} not found",
-                                "Choose an existing reference.")
+            raise EvidenceError(
+                "NOT_FOUND", f"Reference {reference_id} not found", "Choose an existing reference."
+            )
         references.append(dict(row))
-    source_set = set(source_ids)
-    reference_set = set(reference_ids)
     notes = [
         dict(row)
         for row in store.conn.execute("SELECT * FROM notes ORDER BY id")
@@ -327,6 +435,136 @@ def selective_clone(
         for row in store.conn.execute("SELECT * FROM reference_alias ORDER BY original_id")
         if row["original_id"] in reference_set and row["canonical_id"] in reference_set
     ]
+    fulltext_pages = (
+        [
+            dict(row)
+            for row in store.conn.execute(
+                "SELECT * FROM fulltext_pages ORDER BY source_id,page_number"
+            )
+            if row["source_id"] in source_set
+        ]
+        if table_exists("fulltext_pages")
+        else []
+    )
+    collection_rows = (
+        [
+            dict(row)
+            for row in store.conn.execute("SELECT * FROM library_collections ORDER BY id")
+            if row["id"] in collection_set
+        ]
+        if collection_set
+        else []
+    )
+    collection_members = (
+        [
+            dict(row)
+            for row in store.conn.execute(
+                "SELECT * FROM collection_members ORDER BY collection_id,reference_id"
+            )
+            if row["collection_id"] in collection_set and row["reference_id"] in reference_set
+        ]
+        if collection_set
+        else []
+    )
+    reference_tags = (
+        [
+            dict(row)
+            for row in store.conn.execute("SELECT * FROM reference_tags ORDER BY reference_id,tag")
+            if row["reference_id"] in reference_set
+        ]
+        if table_exists("reference_tags")
+        else []
+    )
+    protocol_rows = []
+    for protocol_id in protocol_ids:
+        rows = [
+            dict(row)
+            for row in store.conn.execute(
+                "SELECT * FROM protocols WHERE id=? ORDER BY version", (protocol_id,)
+            )
+        ]
+        require(bool(rows), f"Protocol {protocol_id} not found", "NOT_FOUND")
+        protocol_rows.extend(rows)
+    review_records = [
+        dict(row)
+        for row in store.conn.execute("SELECT * FROM review_records ORDER BY id")
+        if row["id"] in review_record_ids
+    ]
+    votes = [
+        dict(row)
+        for row in store.conn.execute(
+            "SELECT * FROM votes ORDER BY review_id,record_id,reviewer,stage"
+        )
+        if row["record_id"] in review_record_ids
+    ]
+    adjudications = [
+        dict(row)
+        for row in store.conn.execute(
+            "SELECT * FROM adjudications ORDER BY review_id,record_id,stage"
+        )
+        if row["record_id"] in review_record_ids
+    ]
+    extractions = [
+        dict(row)
+        for row in store.conn.execute("SELECT * FROM extractions ORDER BY record_id,id")
+        if row["record_id"] in review_record_ids
+    ]
+    search_runs = [
+        dict(row)
+        for row in store.conn.execute("SELECT * FROM review_search_runs ORDER BY id")
+        if row["review_id"] in review_ids
+    ]
+    run_set = {row["id"] for row in search_runs}
+    search_hits = [
+        dict(row)
+        for row in store.conn.execute("SELECT * FROM review_search_hits ORDER BY id")
+        if row["run_id"] in run_set
+    ]
+    retrievals = [
+        dict(row)
+        for row in store.conn.execute("SELECT * FROM review_retrieval ORDER BY record_id")
+        if row["record_id"] in review_record_ids
+    ]
+    studies = (
+        [
+            dict(row)
+            for row in store.conn.execute("SELECT * FROM review_studies ORDER BY id")
+            if row["review_id"] in review_ids
+        ]
+        if table_exists("review_studies")
+        else []
+    )
+    study_set = {row["id"] for row in studies}
+    study_reports = (
+        [
+            dict(row)
+            for row in store.conn.execute(
+                "SELECT * FROM review_study_reports ORDER BY study_id,record_id"
+            )
+            if row["study_id"] in study_set and row["record_id"] in review_record_ids
+        ]
+        if table_exists("review_study_reports")
+        else []
+    )
+    form_values = (
+        [
+            dict(row)
+            for row in store.conn.execute("SELECT * FROM extraction_form_values ORDER BY id")
+            if row["record_id"] in review_record_ids
+        ]
+        if table_exists("extraction_form_values")
+        else []
+    )
+    form_keys = {(row["form_id"], row["form_version"]) for row in form_values}
+    forms = (
+        [
+            dict(row)
+            for row in store.conn.execute("SELECT * FROM extraction_forms ORDER BY id,version")
+            if (row["id"], row["version"]) in form_keys
+        ]
+        if table_exists("extraction_forms")
+        else []
+    )
     info = store.info()
     temporary_root = Path(tempfile.mkdtemp(prefix=".rw-clone-", dir=destination.parent))
     project_root = temporary_root / "project"
@@ -348,22 +586,71 @@ def selective_clone(
                 for source in sources:
                     conn.execute(
                         "INSERT INTO sources VALUES (?,?,?,?,?,?,?)",
-                        tuple(source[key] for key in
-                              ("id", "title", "media_type", "digest", "imported_at", "origin",
-                               "deleted")),
+                        tuple(
+                            source[key]
+                            for key in (
+                                "id",
+                                "title",
+                                "media_type",
+                                "digest",
+                                "imported_at",
+                                "origin",
+                                "deleted",
+                            )
+                        ),
                     )
                 for row in text_rows:
                     conn.execute(
                         "INSERT INTO document_text VALUES (?,?,?,?)",
-                        tuple(row[key] for key in
-                              ("source_id", "body", "extraction_version", "body_hash")),
+                        tuple(
+                            row[key]
+                            for key in ("source_id", "body", "extraction_version", "body_hash")
+                        ),
                     )
+                if fulltext_pages:
+                    conn.execute(
+                        "CREATE TABLE IF NOT EXISTS fulltext_pages ("
+                        "source_id TEXT NOT NULL REFERENCES sources(id),"
+                        "page_number INTEGER NOT NULL CHECK(page_number > 0),"
+                        "text TEXT NOT NULL,page_sha256 TEXT NOT NULL,status TEXT NOT NULL,"
+                        "rotation INTEGER NOT NULL,label TEXT,"
+                        "PRIMARY KEY(source_id,page_number))"
+                    )
+                    for row in fulltext_pages:
+                        conn.execute(
+                            "INSERT INTO fulltext_pages VALUES (?,?,?,?,?,?,?)",
+                            tuple(
+                                row[key]
+                                for key in (
+                                    "source_id",
+                                    "page_number",
+                                    "text",
+                                    "page_sha256",
+                                    "status",
+                                    "rotation",
+                                    "label",
+                                )
+                            ),
+                        )
                 for reference in references:
                     conn.execute(
                         "INSERT INTO reference VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                        tuple(reference[key] for key in
-                              ("id", "title", "authors_json", "year", "doi", "kind", "format",
-                               "raw", "metadata_json", "status", "imported_at")),
+                        tuple(
+                            reference[key]
+                            for key in (
+                                "id",
+                                "title",
+                                "authors_json",
+                                "year",
+                                "doi",
+                                "kind",
+                                "format",
+                                "raw",
+                                "metadata_json",
+                                "status",
+                                "imported_at",
+                            )
+                        ),
                     )
                 for alias in aliases:
                     conn.execute(
@@ -373,16 +660,275 @@ def selective_clone(
                 for note in notes:
                     conn.execute(
                         "INSERT INTO notes VALUES (?,?,?,?,?)",
-                        tuple(note[key] for key in
-                              ("id", "source_id", "title", "body", "created_at")),
+                        tuple(
+                            note[key] for key in ("id", "source_id", "title", "body", "created_at")
+                        ),
                     )
                 for anchor in anchors:
                     conn.execute(
                         "INSERT INTO anchors VALUES (?,?,?,?,?,?,?,?)",
-                        tuple(anchor[key] for key in
-                              ("id", "source_id", "quote", "start", "end", "page", "body_hash",
-                               "verified")),
+                        tuple(
+                            anchor[key]
+                            for key in (
+                                "id",
+                                "source_id",
+                                "quote",
+                                "start",
+                                "end",
+                                "page",
+                                "body_hash",
+                                "verified",
+                            )
+                        ),
                     )
+                for protocol in protocol_rows:
+                    conn.execute(
+                        "INSERT INTO protocols VALUES (?,?,?,?,?,?,?)",
+                        tuple(
+                            protocol[key]
+                            for key in (
+                                "id",
+                                "version",
+                                "title",
+                                "body_json",
+                                "rationale",
+                                "author",
+                                "recorded_at",
+                            )
+                        ),
+                    )
+                for record in review_records:
+                    conn.execute(
+                        "INSERT INTO review_records VALUES (?,?,?,?,?)",
+                        tuple(
+                            record[key]
+                            for key in ("id", "review_id", "reference_id", "study_id", "stage")
+                        ),
+                    )
+                for run in search_runs:
+                    conn.execute(
+                        "INSERT INTO review_search_runs VALUES (?,?,?,?,?,?,?,?,?)",
+                        tuple(
+                            run[key]
+                            for key in (
+                                "id",
+                                "review_id",
+                                "provider",
+                                "original_query",
+                                "filters_json",
+                                "searched_at",
+                                "response_sha256",
+                                "expected_records",
+                                "finalized",
+                            )
+                        ),
+                    )
+                for hit in search_hits:
+                    conn.execute(
+                        "INSERT INTO review_search_hits VALUES (?,?,?,?,?,?,?,?)",
+                        tuple(
+                            hit[key]
+                            for key in (
+                                "id",
+                                "run_id",
+                                "reference_id",
+                                "record_id",
+                                "disposition",
+                                "rationale",
+                                "actor",
+                                "recorded_at",
+                            )
+                        ),
+                    )
+                for vote in votes:
+                    conn.execute(
+                        "INSERT INTO votes VALUES (?,?,?,?,?,?,?)",
+                        tuple(
+                            vote[key]
+                            for key in (
+                                "review_id",
+                                "record_id",
+                                "reviewer",
+                                "stage",
+                                "decision",
+                                "reason",
+                                "recorded_at",
+                            )
+                        ),
+                    )
+                for row in adjudications:
+                    conn.execute(
+                        "INSERT INTO adjudications VALUES (?,?,?,?,?,?,?)",
+                        tuple(
+                            row[key]
+                            for key in (
+                                "review_id",
+                                "record_id",
+                                "stage",
+                                "decision",
+                                "reason",
+                                "adjudicator",
+                                "recorded_at",
+                            )
+                        ),
+                    )
+                for row in retrievals:
+                    conn.execute(
+                        "INSERT INTO review_retrieval VALUES (?,?,?,?,?,?)",
+                        tuple(
+                            row[key]
+                            for key in (
+                                "record_id",
+                                "review_id",
+                                "outcome",
+                                "reason",
+                                "actor",
+                                "recorded_at",
+                            )
+                        ),
+                    )
+                for row in extractions:
+                    conn.execute(
+                        "INSERT INTO extractions VALUES (?,?,?,?,?,?,?,?)",
+                        tuple(
+                            row[key]
+                            for key in (
+                                "id",
+                                "record_id",
+                                "field_name",
+                                "value_json",
+                                "unit",
+                                "source_anchor",
+                                "reviewer",
+                                "recorded_at",
+                            )
+                        ),
+                    )
+                if collection_rows:
+                    conn.execute(
+                        "CREATE TABLE library_collections (id TEXT PRIMARY KEY,"
+                        "parent_id TEXT REFERENCES library_collections(id),name TEXT NOT NULL,"
+                        "created_at TEXT NOT NULL,UNIQUE(parent_id,name))"
+                    )
+                    conn.execute(
+                        "CREATE TABLE collection_members (collection_id TEXT NOT NULL "
+                        "REFERENCES library_collections(id),reference_id TEXT NOT NULL "
+                        "REFERENCES reference(id),added_at TEXT NOT NULL,"
+                        "PRIMARY KEY(collection_id,reference_id))"
+                    )
+                    conn.execute(
+                        "CREATE TABLE reference_tags (reference_id TEXT NOT NULL "
+                        "REFERENCES reference(id),tag TEXT NOT NULL,added_at TEXT NOT NULL,"
+                        "PRIMARY KEY(reference_id,tag))"
+                    )
+                    for row in collection_rows:
+                        conn.execute(
+                            "INSERT INTO library_collections VALUES (?,?,?,?)",
+                            tuple(row[key] for key in ("id", "parent_id", "name", "created_at")),
+                        )
+                    for row in collection_members:
+                        conn.execute(
+                            "INSERT INTO collection_members VALUES (?,?,?)",
+                            tuple(
+                                row[key] for key in ("collection_id", "reference_id", "added_at")
+                            ),
+                        )
+                    for row in reference_tags:
+                        conn.execute(
+                            "INSERT INTO reference_tags VALUES (?,?,?)",
+                            tuple(row[key] for key in ("reference_id", "tag", "added_at")),
+                        )
+                if studies:
+                    conn.execute(
+                        "CREATE TABLE review_studies (id TEXT PRIMARY KEY,review_id TEXT NOT NULL,"
+                        "label TEXT NOT NULL,metadata_json TEXT NOT NULL,created_at TEXT NOT NULL,"
+                        "UNIQUE(review_id,label))"
+                    )
+                    conn.execute(
+                        "CREATE TABLE review_study_reports (study_id TEXT NOT NULL REFERENCES "
+                        "review_studies(id),record_id TEXT NOT NULL REFERENCES review_records(id),"
+                        "relationship TEXT NOT NULL,rationale TEXT NOT NULL,"
+                        "linked_at TEXT NOT NULL,"
+                        "PRIMARY KEY(study_id,record_id),UNIQUE(record_id))"
+                    )
+                    for row in studies:
+                        conn.execute(
+                            "INSERT INTO review_studies VALUES (?,?,?,?,?)",
+                            tuple(
+                                row[key]
+                                for key in (
+                                    "id",
+                                    "review_id",
+                                    "label",
+                                    "metadata_json",
+                                    "created_at",
+                                )
+                            ),
+                        )
+                    for row in study_reports:
+                        conn.execute(
+                            "INSERT INTO review_study_reports VALUES (?,?,?,?,?)",
+                            tuple(
+                                row[key]
+                                for key in (
+                                    "study_id",
+                                    "record_id",
+                                    "relationship",
+                                    "rationale",
+                                    "linked_at",
+                                )
+                            ),
+                        )
+                if forms:
+                    conn.execute(
+                        "CREATE TABLE extraction_forms (id TEXT NOT NULL,version INTEGER NOT NULL,"
+                        "name TEXT NOT NULL,schema_json TEXT NOT NULL,rationale TEXT NOT NULL,"
+                        "author TEXT NOT NULL,recorded_at TEXT NOT NULL,"
+                        "schema_sha256 TEXT NOT NULL,"
+                        "PRIMARY KEY(id,version))"
+                    )
+                    conn.execute(
+                        "CREATE TABLE extraction_form_values (id TEXT PRIMARY KEY,"
+                        "form_id TEXT NOT NULL,form_version INTEGER NOT NULL,"
+                        "record_id TEXT NOT NULL REFERENCES review_records(id),"
+                        "values_json TEXT NOT NULL,reviewer TEXT NOT NULL,migrated_from TEXT,"
+                        "recorded_at TEXT NOT NULL,FOREIGN KEY(form_id,form_version) "
+                        "REFERENCES extraction_forms(id,version))"
+                    )
+                    for row in forms:
+                        conn.execute(
+                            "INSERT INTO extraction_forms VALUES (?,?,?,?,?,?,?,?)",
+                            tuple(
+                                row[key]
+                                for key in (
+                                    "id",
+                                    "version",
+                                    "name",
+                                    "schema_json",
+                                    "rationale",
+                                    "author",
+                                    "recorded_at",
+                                    "schema_sha256",
+                                )
+                            ),
+                        )
+                    for row in form_values:
+                        conn.execute(
+                            "INSERT INTO extraction_form_values VALUES (?,?,?,?,?,?,?,?)",
+                            tuple(
+                                row[key]
+                                for key in (
+                                    "id",
+                                    "form_id",
+                                    "form_version",
+                                    "record_id",
+                                    "values_json",
+                                    "reviewer",
+                                    "migrated_from",
+                                    "recorded_at",
+                                )
+                            ),
+                        )
 
             _, revision = clone.mutate(
                 "project.selective_clone",
@@ -391,6 +937,9 @@ def selective_clone(
                     "source_project_revision": info.revision,
                     "selected_source_ids": source_ids,
                     "selected_reference_ids": reference_ids,
+                    "selected_collection_ids": collection_ids,
+                    "selected_review_ids": review_ids,
+                    "selected_protocol_ids": protocol_ids,
                 },
                 persist,
                 expected_revision=0,
@@ -408,6 +957,11 @@ def selective_clone(
             "references": len(references),
             "notes": len(notes),
             "anchors": len(anchors),
+            "collections": len(collection_rows),
+            "review_records": len(review_records),
+            "protocol_versions": len(protocol_rows),
+            "dependency_closed_source_ids": sorted(source_set),
+            "dependency_closed_reference_ids": sorted(reference_set),
             "destination": str(destination),
         }
     finally:

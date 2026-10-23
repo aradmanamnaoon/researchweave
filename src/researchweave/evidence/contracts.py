@@ -14,8 +14,8 @@ from typing import Any
 from .errors import require
 
 _ARRAYS = {
-    "files", "inventory", "reference_ids", "source_ids", "tags", "searches",
-    "sections", "unresolved",
+    "files", "inventory", "reference_ids", "source_ids", "collection_ids",
+    "review_ids", "protocol_ids", "tags", "searches", "sections", "unresolved",
 }
 _OBJECTS = {
     "advanced", "candidate", "citations", "extracted", "finding", "metadata",
@@ -49,6 +49,7 @@ _OPTIONAL: dict[str, str] = {
     "rationale": "string", "actor": "string", "review_id": "string",
     "checked_at": "string", "start": "integer", "end": "integer",
     "expected_records": "integer", "allow_network": "boolean",
+    "collection_ids": "array", "review_ids": "array", "protocol_ids": "array",
     "mode": "string", "stage": "string", "description": "string",
     "tags": "array", "advanced": "object", "metadata": "object",
     "anchor_id": "string", "interpretation": "boolean", "relationship": "string",
@@ -78,6 +79,7 @@ _ENUMS = {
     "disposition": ["retained", "duplicate", "removed_automation", "removed_other"],
 }
 _MAX_ITEMS = {"files": 1000, "reference_ids": 5000, "source_ids": 5000,
+              "collection_ids": 5000, "review_ids": 5000, "protocol_ids": 5000,
               "tags": 500, "searches": 2000, "sections": 1000,
               "inventory": 10000, "unresolved": 10000}
 

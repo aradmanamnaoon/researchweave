@@ -831,6 +831,12 @@ class EvidenceFacade:
                     temporary,
                     source_ids=_value(args, "source_ids", list),
                     reference_ids=_value(args, "reference_ids", list),
+                    collection_ids=(args.get("collection_ids")
+                                    if isinstance(args.get("collection_ids"), list) else None),
+                    review_ids=(args.get("review_ids")
+                                if isinstance(args.get("review_ids"), list) else None),
+                    protocol_ids=(args.get("protocol_ids")
+                                  if isinstance(args.get("protocol_ids"), list) else None),
                 )
                 target = self.workspace_root / _uuid(str(result["destination_project_id"]))
                 require(not target.exists(), "Clone project identity already exists", "CONFLICT")
