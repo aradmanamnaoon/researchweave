@@ -10,3 +10,12 @@
 - Tested persistence after reopen, database tampering, stale revisions, duplicate request denial, malicious ZIP, Unicode, source quote validation, incomplete PRISMA accounting, blinded votes and protocol amendment.
 - Windows backup lock regression fixed by closing SQLite backup connection.
 - No live network, UI integration, Cross-OS runner, strict mypy, production-scale benchmark or real PDF parser acceptance claimed.
+
+## Discovery follow-up (2026-10-23)
+
+- `pytest -q tests/v2/evidence --cov=researchweave.evidence --cov-report=term -o pythonpath=src`: 19 tests passed; 80% overall combined coverage, 1,649 statements and 448 branches.
+- `ruff check src/researchweave/evidence tests/v2/evidence`: passed.
+- `mypy src/researchweave/evidence --strict --follow-imports=skip`: passed (17 files).
+- `python -m compileall -q src/researchweave/evidence`: passed.
+- `python workstreams/v2/evidence/count_sloc.py`: 17 files, 2,432 meaningful source lines.
+- Provider requests were mocked; no live network provider validation was performed.

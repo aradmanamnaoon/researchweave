@@ -322,6 +322,40 @@
     "ui_binding": "pending"
   },
   {
+    "operation": "discovery.provider_search",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "external-network",
+    "required_permission": "external-network",
+    "offline": false,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [
+      "api.crossref.org",
+      "api.openalex.org",
+      "eutils.ncbi.nlm.nih.gov",
+      "www.ebi.ac.uk"
+    ],
+    "required_arguments": [
+      "project_id",
+      "query",
+      "provider"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "query",
+        "provider"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Opt-in public catalog metadata lookup",
+    "ui_binding": "pending"
+  },
+  {
     "operation": "library.fts_search",
     "protocol_version": 1,
     "version": "1.0.0",

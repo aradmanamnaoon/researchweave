@@ -1,0 +1,154 @@
+"""Provider contract tests with deterministic, zero-network transports."""
+
+from __future__ import annotations
+
+import json
+from pathlib import Path
+from urllib.parse import parse_qs, urlsplit
+
+import pytest
+
+from researchweave.evidence import build_evidence_facade
+from researchweave.evidence.discovery import (
+    CatalogClient,
+    HTTPResponse,
+    StdlibHTTPS,
+)
+from researchweave.evidence.errors import EvidenceError
+
+
+class FixtureTransport:
+    def __init__(self, *responses: HTTPResponse) -> None:
+        self.responses = list(responses)
+        self.calls: list[tuple[str, dict[str, str], float]] = []
+
+    def get(self, url: str, *, headers: dict[str, str], timeout: float) -> HTTPResponse:
+        self.calls.append((url, dict(headers), timeout))
+        assert self.responses, "Unexpected live/extra request"
+        return self.responses.pop(0)
+
+
+def fixture(payload: dict) -> HTTPResponse:
+    return HTTPResponse(200, json.dumps(payload).encode("utf-8"))
+
+
+@pytest.mark.parametrize(
+    ("provider", "payload", "expected_id"),
+    [
+        ("crossref", {"message": {"items": [{"title": ["Synthetic brain study"],
+         "DOI": "10.9999/EXAMPLE", "published": {"date-parts": [[2025, 1]]},
+         "author": [{"given": "Ada", "family": "Researcher"}]}]}},
+         "10.9999/example"),
+        ("openalex", {"results": [{"title": "Synthetic brain study",
+         "doi": "https://doi.org/10.9999/EXAMPLE", "publication_year": 2025,
+         "id": "https://openalex.org/W123", "authorships": [
+             {"author": {"display_name": "Ada Researcher"}}]}]}, "10.9999/example"),
+        ("europepmc", {"resultList": {"result": [{"title": "Synthetic brain study",
+         "doi": "10.9999/EXAMPLE", "pubYear": "2025", "pmid": "12345",
+         "authorString": "Researcher A"}]}}, "10.9999/example"),
+    ],
+)
+def test_providers_normalize_without_identity_claims(
+    provider: str, payload: dict, expected_id: str
+) -> None:
+    transport = FixtureTransport(fixture(payload))
+    client = CatalogClient(transport, offline=False, min_interval_seconds=0)
+    result = client.search(provider, "brain & cognition", limit=3)
+    assert result["count"] == 1
+    assert result["records"][0]["doi"] == expected_id
+    assert result["records"][0]["metadata_status"] == "unverified"
+    assert result["scientific_claims_verified"] is False
+    assert result["raw_response_sha256"][0]
+    assert "brain+%26+cognition" in transport.calls[0][0]
+    assert urlsplit(transport.calls[0][0]).scheme == "https"
+    assert client.search(provider, "brain & cognition", limit=3)["cache"] == "memory"
+    assert len(transport.calls) == 1
+
+
+def test_pubmed_two_stage_retrieval_without_generated_doi() -> None:
+    lookup = fixture({"esearchresult": {"idlist": ["12345"]}})
+    summary = fixture({"result": {"uids": ["12345"], "12345": {
+        "title": "Mock example", "pubdate": "2024 Jan",
+        "authors": [{"name": "Synthetic A"}],
+        "articleids": [{"idtype": "pii", "value": "no-doi"}],
+    }}})
+    transport = FixtureTransport(lookup, summary)
+    client = CatalogClient(transport, offline=False, min_interval_seconds=0)
+    output = client.search("pubmed", "test", 5)
+    assert output["count"] == 1
+    assert output["records"][0]["doi"] is None
+    assert output["records"][0]["pmid"] == "12345"
+    assert len(output["raw_response_sha256"]) == 2
+    assert "esearch.fcgi" in transport.calls[0][0]
+    assert parse_qs(urlsplit(transport.calls[1][0]).query)["id"] == ["12345"]
+
+
+def test_offline_requires_injected_transport_and_explicit_permission(tmp_path: Path) -> None:
+    facade = build_evidence_facade(tmp_path, allow_local_writes=True)
+    created = facade.execute("project.create", {
+        "title": "Offline", "question": "Why?", "design": "exploratory"}, {})
+    project_id = created["data"]["project_id"]
+    query = {"project_id": project_id, "provider": "openalex", "query": "cognition"}
+    result = facade.execute("discovery.provider_search", query, {})
+    assert result["status"] == "failed"
+    assert result["error"]["code"] == "OFFLINE_DENIED"
+    preview = facade.preview("discovery.provider_search", query, {})
+    assert preview["status"] == "ok" and preview["data"]["preview_only"]
+    assert not facade.health()["network_enabled"]
+
+    transport = FixtureTransport(fixture({"results": []}))
+    granted = build_evidence_facade(tmp_path, allow_remote_queries=True,
+                                    metadata_transport=transport)
+    result = granted.execute("discovery.provider_search", query, {})
+    assert result["status"] == "ok"
+    assert result["impact"]["network_hosts"] == ["api.openalex.org"]
+    assert len(transport.calls) == 1
+
+
+def test_invalid_provider_responses_and_rate_limits() -> None:
+    for response, code in [
+        (HTTPResponse(429, b"exhausted", {"retry-after": "30"}), "RATE_LIMITED"),
+        (HTTPResponse(503, b"unavailable"), "PROVIDER_UNAVAILABLE"),
+        (HTTPResponse(200, b"{bad json"), "PROVIDER_UNAVAILABLE"),
+        (HTTPResponse(200, b"x" * (2 * 1024 * 1024 + 1)), "RESOURCE_LIMIT"),
+    ]:
+        client = CatalogClient(FixtureTransport(response), offline=False,
+                               min_interval_seconds=0)
+        with pytest.raises(EvidenceError) as error:
+            client.search("crossref", "test")
+        assert error.value.code == code
+
+
+def test_reject_non_https_endpoint_without_network() -> None:
+    transport = StdlibHTTPS()
+    for url in ["http://api.crossref.org/works", "https://127.0.0.1/works",
+                "https://api.crossref.org:8080/works"]:
+        with pytest.raises(EvidenceError) as error:
+            transport.get(url, headers={}, timeout=1.0)
+        assert error.value.code == "PERMISSION_DENIED"
+
+
+def test_retry_after_blocks_provider_until_cooldown_expires() -> None:
+    now = [100.0]
+    transport = FixtureTransport(HTTPResponse(429, b"slow", {"Retry-After": "30"}),
+                                 fixture({"results": []}))
+    client = CatalogClient(transport, offline=False, clock=lambda: now[0],
+                           min_interval_seconds=0)
+    with pytest.raises(EvidenceError) as first:
+        client.search("openalex", "memory")
+    assert first.value.code == "RATE_LIMITED"
+    now[0] += 29
+    with pytest.raises(EvidenceError) as second:
+        client.search("openalex", "memory")
+    assert second.value.code == "RATE_LIMITED"
+    assert len(transport.calls) == 1
+    now[0] += 1
+    assert client.search("openalex", "memory")["count"] == 0
+
+
+def test_malformed_provider_records_are_structured_failure() -> None:
+    transport = FixtureTransport(fixture({"message": {"items": [{"author": None}]}}))
+    client = CatalogClient(transport, offline=False, min_interval_seconds=0)
+    with pytest.raises(EvidenceError) as error:
+        client.search("crossref", "synthetic")
+    assert error.value.code == "PROVIDER_UNAVAILABLE"

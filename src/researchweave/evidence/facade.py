@@ -15,6 +15,7 @@ from typing import Any
 from uuid import UUID
 
 from .bibliography import parse_bibliography
+from .discovery import CatalogClient, HTTPTransport
 from .errors import EvidenceError, require
 from .extraction import ExtractedValue, ExtractionService, FieldDefinition
 from .library import LibraryService
@@ -44,6 +45,8 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
                        "Import local document"),
     "library.source_text": ("read", ("project_id", "source_id"), "Read source text"),
     "discovery.search": ("read", ("project_id", "query"), "Offline library search"),
+    "discovery.provider_search": ("external-network", ("project_id", "query", "provider"),
+                                   "Opt-in public catalog metadata lookup"),
     "library.fts_search": ("read", ("project_id", "query"), "Rebuildable offline FTS5 search"),
     "library.index_rebuild": ("local-write", ("project_id",), "Rebuild local search cache"),
     "library.index_health": ("read", ("project_id",), "Inspect search cache state"),
@@ -147,16 +150,24 @@ def _markdown_records(arguments: Mapping[str, Any]) -> list[MarkdownRecord]:
 
 
 class EvidenceFacade:
-    def __init__(self, workspace_root: Path, *, allow_local_writes: bool = False) -> None:
+    def __init__(self, workspace_root: Path, *, allow_local_writes: bool = False,
+                 allow_remote_queries: bool = False,
+                 metadata_transport: HTTPTransport | None = None) -> None:
         self.workspace_root = workspace_root.resolve()
         self.allow_local_writes = allow_local_writes
+        self.allow_remote_queries = allow_remote_queries and metadata_transport is not None
+        self.catalog = CatalogClient(metadata_transport, offline=not self.allow_remote_queries)
 
     def capability_manifest(self) -> list[Mapping[str, Any]]:
         return [
             {"operation": operation, "protocol_version": 1, "version": "1.0.0",
-             "effect": effect, "required_permission": effect, "offline": True,
+             "effect": effect, "required_permission": effect,
+             "offline": effect != "external-network",
              "safe_for_batch": effect == "read", "preview_supported": True,
-             "network_hosts": [], "required_arguments": list(required),
+             "network_hosts": (["api.crossref.org", "api.openalex.org",
+                                "eutils.ncbi.nlm.nih.gov", "www.ebi.ac.uk"]
+                               if effect == "external-network" else []),
+             "required_arguments": list(required),
              "arguments_schema": {"type": "object", "required": list(required)},
              "result_schema": {"type": "object"}, "summary": description,
              "ui_binding": "pending"}
@@ -164,8 +175,10 @@ class EvidenceFacade:
         ]
 
     def health(self) -> Mapping[str, Any]:
-        return {"status": "ok", "schema_version": 1, "offline": True,
-                "network_enabled": False, "operations": len(OPERATIONS)}
+        return {"status": "ok", "schema_version": 1,
+                "offline": not self.allow_remote_queries,
+                "network_enabled": self.allow_remote_queries,
+                "operations": len(OPERATIONS)}
 
     def _project(self, project_id: str) -> ProjectStore:
         root = self.workspace_root / _uuid(project_id)
@@ -175,10 +188,12 @@ class EvidenceFacade:
 
     @staticmethod
     def _result(request_id: str, data: Any, effect: str) -> dict[str, Any]:
+        hosts = (data.get("network_hosts", [])
+                 if effect == "external-network" and isinstance(data, dict) else [])
         return {"request_id": request_id, "status": "ok", "data": data,
                 "artifacts": [], "warnings": [], "error": None, "provenance": [],
                 "impact": {"local_writes": [effect] if effect == "local-write" else [],
-                           "network_hosts": [], "irreversible": False}}
+                           "network_hosts": hosts, "irreversible": False}}
 
     @staticmethod
     def _error(request_id: str, error: EvidenceError) -> dict[str, Any]:
@@ -225,6 +240,9 @@ class EvidenceFacade:
             if effect == "local-write" and not self.allow_local_writes:
                 raise EvidenceError("NEEDS_APPROVAL", "Local writes need trusted host access",
                                     "Approve through the host, then retry.")
+            if effect == "external-network" and not self.allow_remote_queries:
+                raise EvidenceError("OFFLINE_DENIED", "Network lookups are disabled",
+                                    "Enable access with an injected trusted HTTPS transport.")
             data = self._dispatch(operation, arguments, expected)
             return self._result(request_id, data, effect)
         except KeyError:
@@ -295,6 +313,10 @@ class EvidenceFacade:
             if operation == "discovery.search":
                 return library.search(_value(args, "query", str),
                                       int(args.get("limit", 50)))
+            if operation == "discovery.provider_search":
+                return self.catalog.search(_value(args, "provider", str),
+                                           _value(args, "query", str),
+                                           int(args.get("limit", 20)))
             if operation == "library.fts_search":
                 return LocalIndex(store).search(_value(args, "query", str),
                     limit=int(args.get("limit", 25)), kind=args.get("kind"),
