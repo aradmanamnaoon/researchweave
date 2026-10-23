@@ -18,7 +18,7 @@ def _cronbach_alpha(matrix: np.ndarray) -> float:
     )
     item_variance = matrix.var(axis=0, ddof=1)
     total_variance = matrix.sum(axis=1).var(ddof=1)
-    require(total_variance > 0, "Total score variance is zero")
+    require(bool(total_variance > 0), "Total score variance is zero")
     k = matrix.shape[1]
     return float(k / (k - 1) * (1 - item_variance.sum() / total_variance))
 
@@ -49,7 +49,7 @@ def _omega_total(matrix: np.ndarray) -> tuple[float, dict[str, float], dict[str,
     loadings = np.asarray(fitted.loadings, dtype=float).reshape(-1)
     uniqueness = np.asarray(fitted.uniqueness, dtype=float).reshape(-1)
     require(
-        np.all(np.isfinite(loadings)) and np.all(np.isfinite(uniqueness)),
+        bool(np.all(np.isfinite(loadings))) and bool(np.all(np.isfinite(uniqueness))),
         "Invalid omega factor solution",
     )
     anchor = int(np.argmax(np.abs(loadings)))
@@ -92,6 +92,8 @@ def reliability_diagnostics(
     selected = extract_numeric_matrix(dataset, columns)
     matrix = selected.matrix.copy()
     if reverse:
+        if scale_min is None or scale_max is None:
+            raise AnalysisError("INVALID_INPUT", "Reverse coding requires explicit scale endpoints")
         for index, column in enumerate(columns):
             if column not in reverse:
                 continue
@@ -152,7 +154,7 @@ def reliability_diagnostics(
             warnings.append(f"Omega unavailable: {exc.message}")
     else:
         warnings.append("Omega requires at least 3 items and max(20, 5p) complete cases")
-    interval: dict[str, float | int] | None = None
+    interval: dict[str, float | int | str] | None = None
     if bootstrap_iterations:
         require(
             200 <= bootstrap_iterations <= 20_000, "Reliability bootstrap budget must be 200..20000"

@@ -157,14 +157,14 @@ class MultipleImputation:
 
 def _normal_parameters(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     means = np.nanmean(matrix, axis=0)
-    require(np.all(np.isfinite(means)), "Each imputation variable needs observed values")
+    require(bool(np.all(np.isfinite(means))), "Each imputation variable needs observed values")
     filled = np.where(np.isnan(matrix), means, matrix)
     require(len(filled) >= 3, "At least three rows required for normal imputation")
     covariance = np.cov(filled, rowvar=False, ddof=1)
     covariance = np.atleast_2d(np.asarray(covariance, dtype=float))
     scale = max(float(np.trace(covariance)) / max(1, covariance.shape[0]), 1.0)
     covariance = covariance + np.eye(covariance.shape[0]) * scale * 1e-8
-    require(np.all(np.isfinite(covariance)), "Imputation covariance is non-finite")
+    require(bool(np.all(np.isfinite(covariance))), "Imputation covariance is non-finite")
     return means, covariance
 
 
@@ -264,7 +264,7 @@ def pool_scalar_rubin(estimates: list[float], variances: list[float]) -> dict[st
     )
     q = np.asarray([finite_number(value, name="estimate") for value in estimates], dtype=float)
     u = np.asarray([finite_number(value, name="variance") for value in variances], dtype=float)
-    require(np.all(u >= 0), "Within-imputation variances must be nonnegative")
+    require(bool(np.all(u >= 0)), "Within-imputation variances must be nonnegative")
     m = len(q)
     estimate = float(np.mean(q))
     within = float(np.mean(u))

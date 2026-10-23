@@ -259,7 +259,7 @@ def arima_forecast(
         "Series too short for declared ARIMA order",
     )
 
-    def fit(data: np.ndarray):
+    def fit(data: np.ndarray) -> Any:
         try:
             result = SARIMAX(
                 data,

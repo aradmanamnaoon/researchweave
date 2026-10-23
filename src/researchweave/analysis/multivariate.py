@@ -307,7 +307,7 @@ def _cluster_indices(
             for j in range(k)
             if j != i and center_distances[i, j] > 0
         ]
-        require(candidates, "Cluster centers are not distinct")
+        require(bool(candidates), "Cluster centers are not distinct")
         ratios.append(max(candidates))
     return {
         "silhouette": float(np.mean(silhouettes)),

@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 import math
-from typing import Any
+from typing import Any, cast
 
 import numpy as np
 
@@ -31,7 +31,7 @@ def linear_regression(
         "Cluster covariance requires exactly one cluster_group",
     )
     require(
-        outcome in dataset.columns and predictors and len(set(predictors)) == len(predictors),
+        outcome in dataset.columns and bool(predictors) and len(set(predictors)) == len(predictors),
         "Outcome and distinct predictors required",
     )
     require(
@@ -46,7 +46,8 @@ def linear_regression(
     x = np.asarray([[1.0, *[finite_number(row[c]) for c in predictors]] for row in complete])
     require(np.linalg.matrix_rank(x) == x.shape[1], "Singular design matrix")
     if robust == "cluster":
-        groups = np.asarray([str(row[cluster_group]) for row in complete], dtype=object)
+        cluster_column = cast(str, cluster_group)
+        groups = np.asarray([str(row[cluster_column]) for row in complete], dtype=object)
         require(len(np.unique(groups)) >= 2, "Cluster covariance requires at least two clusters")
         fit = sm.OLS(y, x).fit(cov_type="cluster", cov_kwds={"groups": groups})
     else:
@@ -144,7 +145,7 @@ def adjust_pvalues(pvalues: list[float], *, method: str = "holm") -> list[float]
     require(bool(np.all((values >= 0) & (values <= 1))), "p-values must lie in [0,1]")
     n = len(values)
     if method == "bonferroni":
-        return np.minimum(values * n, 1).tolist()
+        return [float(value) for value in np.minimum(values * n, 1)]
     order = np.argsort(values)
     sorted_values = values[order]
     if method == "holm":
@@ -153,4 +154,4 @@ def adjust_pvalues(pvalues: list[float], *, method: str = "holm") -> list[float]
         adjusted = np.minimum.accumulate((sorted_values * n / np.arange(1, n + 1))[::-1])[::-1]
     result = np.empty(n)
     result[order] = np.minimum(adjusted, 1)
-    return result.tolist()
+    return [float(value) for value in result]

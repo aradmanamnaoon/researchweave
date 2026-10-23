@@ -44,7 +44,7 @@ def contingency(
     chi = stats.chi2_contingency(counts, correction=correction)
     warning = "Expected count below five; chi-square approximation may be unsuitable"
     warnings = [warning] if bool(np.any(chi.expected_freq < 5)) else []
-    fisher: dict[str, float] | None = None
+    fisher: dict[str, Any] | None = None
     if counts.shape == (2, 2):
         odds, exact_p = stats.fisher_exact(counts)
         corrected = counts.astype(float)

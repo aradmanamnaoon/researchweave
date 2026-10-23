@@ -45,7 +45,7 @@ class ScaleDefinition:
         require(self.aggregation in ("mean", "sum"), "Invalid score aggregation")
         for name, columns in self.subscales.items():
             require(
-                bool(name) and columns and set(columns) <= set(self.items),
+                bool(name) and bool(columns) and set(columns) <= set(self.items),
                 "Invalid subscale definition",
             )
 
@@ -102,7 +102,11 @@ def score_scale(
         score = average * len(spec.items) if spec.aggregation == "sum" else average
         subscore = {}
         for name, columns in spec.subscales.items():
-            answers = [oriented[column] for column in columns if oriented[column] is not None]
+            answers = [
+                value
+                for column in columns
+                if (value := oriented[column]) is not None
+            ]
             # Do not silently prorate subscales without an explicit local policy.
             subscore[name] = float(np.mean(answers)) if len(answers) == len(columns) else None
         scored.append(

@@ -72,7 +72,7 @@ def design_weighted_mean(
     for h, cluster, w, y in records:
         strata[h][cluster].append((w, y))
     variance_numerator = 0.0
-    details = []
+    details: list[dict[str, Any]] = []
     for h, clusters in sorted(strata.items()):
         m = len(clusters)
         require(m >= 2, f"Singleton PSU stratum {h!r} cannot estimate variance", "INSUFFICIENT_PSU")
@@ -141,7 +141,7 @@ def survey_proportions(
 ) -> dict[str, Any]:
     """Estimate declared categories by linearized binary indicator means."""
     require(
-        category in dataset.columns and levels and len(set(levels)) == len(levels),
+        category in dataset.columns and bool(levels) and len(set(levels)) == len(levels),
         "Categorical outcome and unique declared levels required",
     )
     require(len(levels) <= 50, "Too many levels for survey estimate", "RESOURCE_LIMIT")

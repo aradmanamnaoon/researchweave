@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 from scipy import stats
 
-from .errors import require
+from .errors import AnalysisError, require
 from .models import Dataset, ScientificResult, finite_number, runtime_versions
 
 
@@ -168,6 +168,8 @@ def correlation_matrix(
         denominators[index][index] = sum(row[columns[index]] is not None for row in dataset.records)
         for other in range(index + 1, len(columns)):
             result = correlation(dataset, columns[index], columns[other], method)
+            if result.estimate is None or result.p_value is None:
+                raise AnalysisError("INTEGRITY_FAILURE", "Correlation result is incomplete")
             value = float(result.estimate)
             matrix[index][other] = matrix[other][index] = value
             denominators[index][other] = denominators[other][index] = result.n_used
@@ -224,7 +226,7 @@ def t_test(
         ]
         require(len(pairs) >= 2, "At least two complete pairs required")
         differences = np.asarray([a - b for a, b in pairs])
-        require(np.var(differences, ddof=1) > 0, "Constant paired differences")
+        require(bool(np.var(differences, ddof=1) > 0), "Constant paired differences")
         tested = stats.ttest_1samp(differences, popmean=null_mean, alternative=alternative)
         estimate = float(np.mean(differences) - null_mean)
         se = float(stats.sem(differences))
@@ -241,6 +243,8 @@ def t_test(
             groups is not None and len(groups) == 2 and groups[0] != groups[1],
             "Exactly two explicitly ordered groups required",
         )
+        if groups is None:
+            raise AnalysisError("INVALID_INPUT", "Exactly two explicitly ordered groups required")
         values = [
             [
                 finite_number(row[outcome])
@@ -275,17 +279,17 @@ def t_test(
         if any(row[group] not in groups and row[group] is not None for row in dataset.records):
             warnings.append("Other group levels excluded by explicit selection")
     else:
-        values, _ = numeric(dataset, outcome)
+        sample, _ = numeric(dataset, outcome)
         require(
-            len(values) >= 2 and np.var(values, ddof=1) > 0,
+            len(sample) >= 2 and bool(np.var(sample, ddof=1) > 0),
             "At least two nonconstant observations required",
         )
-        tested = stats.ttest_1samp(values, popmean=null_mean, alternative=alternative)
-        estimate = float(np.mean(values) - null_mean)
-        df = float(len(values) - 1)
-        se = float(stats.sem(values))
-        effect = {"cohen_d": estimate / float(np.std(values, ddof=1))}
-        used = len(values)
+        tested = stats.ttest_1samp(sample, popmean=null_mean, alternative=alternative)
+        estimate = float(np.mean(sample) - null_mean)
+        df = float(len(sample) - 1)
+        se = float(stats.sem(sample))
+        effect = {"cohen_d": estimate / float(np.std(sample, ddof=1))}
+        used = len(sample)
         method = "one_sample_t"
     cutoff = stats.t.ppf(1 - alpha / 2, df)
     ci = (estimate - cutoff * se, estimate + cutoff * se)
@@ -381,7 +385,11 @@ def reliability(
         not reverse or (scale_min is not None and scale_max is not None and scale_min < scale_max),
         "Reverse coding needs explicit valid scale endpoints",
     )
+    if reverse and (scale_min is None or scale_max is None):
+        raise AnalysisError("INVALID_INPUT", "Reverse coding needs explicit valid scale endpoints")
     rows: list[list[float]] = []
+    if reverse and (scale_min is None or scale_max is None):
+        raise AnalysisError("INVALID_INPUT", "Reverse coding needs explicit valid scale endpoints")
     for row in dataset.records:
         if any(row[c] is None for c in columns):
             continue
@@ -389,6 +397,10 @@ def reliability(
         if reverse:
             for i, column in enumerate(columns):
                 if column in reverse:
+                    if scale_min is None or scale_max is None:
+                        raise AnalysisError(
+                            "INVALID_INPUT", "Reverse coding needs explicit valid scale endpoints"
+                        )
                     require(
                         scale_min <= values[i] <= scale_max, "Item outside declared reverse scale"
                     )
@@ -398,7 +410,7 @@ def reliability(
     matrix = np.asarray(rows)
     variances = matrix.var(axis=0, ddof=1)
     total_variance = matrix.sum(axis=1).var(ddof=1)
-    require(total_variance > 0, "Zero total score variance")
+    require(bool(total_variance > 0), "Zero total score variance")
     alpha = len(columns) / (len(columns) - 1) * (1 - sum(variances) / total_variance)
     return ScientificResult(
         "cronbach_alpha",

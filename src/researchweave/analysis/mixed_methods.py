@@ -183,7 +183,7 @@ def code_cooccurrence(
             require(project.verify(second), "Stale second annotation", "INTEGRITY_FAILURE")
             span = max(0, min(first.end, second.end) - max(first.start, second.start))
             if span >= min_shared_codepoints:
-                pair = tuple(sorted((first.code_id, second.code_id)))
+                pair = (min(first.code_id, second.code_id), max(first.code_id, second.code_id))
                 counts[pair] += 1
                 examples.setdefault("|".join(pair), []).append((index, second_index))
     return {

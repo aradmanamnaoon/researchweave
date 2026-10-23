@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 from scipy import stats
 
-from .errors import require
+from .errors import AnalysisError, require
 from .models import Dataset, digest, finite_number
 from .survival import kaplan_meier
 
@@ -270,7 +270,8 @@ def render_plot(
     n_used = 0
     try:
         if kind in {"scatter", "line", "regression", "residual"}:
-            require(y is not None, f"{kind} requires y")
+            if y is None:
+                raise AnalysisError("INVALID_INPUT", f"{kind} requires y")
             xs, ys, indices = _paired_numeric(dataset, x, y)
             n_used = len(xs)
             if kind == "scatter":
@@ -280,7 +281,10 @@ def render_plot(
                 ordered = sorted(zip(xs, ys, strict=True))
                 ax.plot([value[0] for value in ordered], [value[1] for value in ordered])
             elif kind == "regression":
-                require(len(xs) >= 3 and np.ptp(xs) > 0, "Regression plot needs nonconstant x")
+                require(
+                    len(xs) >= 3 and bool(np.ptp(xs) > 0),
+                    "Regression plot needs nonconstant x",
+                )
                 fitted = stats.linregress(xs, ys)
                 grid = np.linspace(min(xs), max(xs), 100)
                 ax.scatter(xs, ys, alpha=0.75)
@@ -288,7 +292,7 @@ def render_plot(
                 options["slope"] = float(fitted.slope)
                 options["r_squared"] = float(fitted.rvalue**2)
             else:
-                require(len(xs) >= 3 and np.ptp(xs) > 0, "Residual plot needs nonconstant x")
+                require(len(xs) >= 3 and bool(np.ptp(xs) > 0), "Residual plot needs nonconstant x")
                 fitted = stats.linregress(xs, ys)
                 fitted_values = [fitted.intercept + fitted.slope * value for value in xs]
                 residuals = [
@@ -310,9 +314,12 @@ def render_plot(
             n_used = len(xs)
             if kind == "histogram":
                 counts, bins, _ = ax.hist(xs, bins="auto", edgecolor="black")
-                plot_data = {"bin_edges": bins.tolist(), "counts": counts.tolist()}
+                plot_data = {"bin_edges": bins.tolist(), "counts": np.asarray(counts).tolist()}
             elif kind == "density":
-                require(len(xs) >= 3 and np.ptp(xs) > 0, "Density plot needs nonconstant values")
+                require(
+                    len(xs) >= 3 and bool(np.ptp(xs) > 0),
+                    "Density plot needs nonconstant values",
+                )
                 kde = stats.gaussian_kde(xs)
                 grid = np.linspace(min(xs), max(xs), 200)
                 density = kde(grid)
@@ -322,12 +329,15 @@ def render_plot(
                 ax.boxplot(xs, tick_labels=[x])
                 plot_data = {"values": xs, "source_indices": indices}
             elif kind == "violin":
-                require(len(xs) >= 2 and np.ptp(xs) > 0, "Violin plot needs nonconstant values")
+                require(
+                    len(xs) >= 2 and bool(np.ptp(xs) > 0),
+                    "Violin plot needs nonconstant values",
+                )
                 ax.violinplot(xs, showmeans=True, showmedians=True)
                 ax.set_xticks([1], labels=[x])
                 plot_data = {"values": xs, "source_indices": indices}
             else:
-                require(len(xs) >= 3 and np.ptp(xs) > 0, "Q-Q plot needs nonconstant values")
+                require(len(xs) >= 3 and bool(np.ptp(xs) > 0), "Q-Q plot needs nonconstant values")
                 osm, osr = stats.probplot(xs, dist="norm", fit=False)
                 fitted = stats.linregress(osm, osr)
                 ax.scatter(osm, osr)
@@ -344,7 +354,8 @@ def render_plot(
             plot_data = _plot_correlation(dataset, columns, ax)
             n_used = int(plot_data["n_complete"])
         elif kind == "time_series":
-            require(y is not None, "time_series requires y")
+            if y is None:
+                raise AnalysisError("INVALID_INPUT", "time_series requires y")
             plot_data = _plot_time_series(dataset, x, y, ax)
             n_used = len(plot_data["values"])
         elif kind == "forest":

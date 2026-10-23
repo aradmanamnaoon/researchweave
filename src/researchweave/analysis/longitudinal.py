@@ -181,7 +181,7 @@ def difference_in_differences(
         "At least two complete subjects per treatment arm required",
     )
     matrix = []
-    response = []
+    responses: list[float] = []
     cluster_ids = []
     cells: dict[str, list[float]] = {
         "control_pre": [],
@@ -195,13 +195,13 @@ def difference_in_differences(
         for period in (0, 1):
             value = periods[period][1]
             matrix.append([1.0, float(treated), float(period), float(treated * period)])
-            response.append(value)
+            responses.append(value)
             cluster_ids.append(identifier)
             cell = "treated" if treated else "control"
             cells[f"{cell}_{'post' if period else 'pre'}"].append(value)
     matrix_array = np.asarray(matrix)
     require(np.linalg.matrix_rank(matrix_array) == 4, "DID design not identifiable")
-    fit = sm.OLS(np.asarray(response), matrix_array).fit(
+    fit = sm.OLS(np.asarray(responses), matrix_array).fit(
         cov_type="cluster", cov_kwds={"groups": cluster_ids}
     )
     effects = np.asarray(fit.params)
@@ -226,8 +226,8 @@ def difference_in_differences(
         "group_sizes": dict(assignments),
         "n_subjects": len(groups),
         "n_total": len(dataset.records),
-        "n_used": len(response),
-        "n_excluded": len(dataset.records) - len(response),
+        "n_used": len(responses),
+        "n_excluded": len(dataset.records) - len(responses),
         "cell_means": {key: float(np.mean(vals)) for key, vals in cells.items()},
         "assumptions": [
             "Parallel counterfactual trends cannot be verified using only two periods",

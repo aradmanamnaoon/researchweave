@@ -80,7 +80,7 @@ def wilcoxon_paired(
     values, excluded = _numeric_rows(dataset, [first, second])
     require(len(values) >= 2, "At least two complete pairs required")
     differences = values[:, 0] - values[:, 1]
-    require(np.any(differences != 0), "Wilcoxon undefined when all differences are zero")
+    require(bool(np.any(differences != 0)), "Wilcoxon undefined when all differences are zero")
     result = stats.wilcoxon(
         values[:, 0],
         values[:, 1],
@@ -701,7 +701,7 @@ def linear_mixed_effects(
     for index, predictor in enumerate(predictors, start=1):
         coefficients[predictor] = float(result.fe_params.iloc[index])
     covariance = np.asarray(result.cov_re, dtype=float)
-    require(np.all(np.isfinite(covariance)), "Invalid random-effects covariance")
+    require(bool(np.all(np.isfinite(covariance))), "Invalid random-effects covariance")
     return {
         "method": "linear_mixed_effects",
         "coefficients": coefficients,
@@ -777,7 +777,10 @@ def ordinal_logistic(
         if str(name) not in set(predictors)
     }
     probabilities = np.asarray(result.model.predict(result.params, exog=exog), dtype=float)
-    require(np.all(np.isfinite(probabilities)), "Ordinal predicted probabilities are non-finite")
+    require(
+        bool(np.all(np.isfinite(probabilities))),
+        "Ordinal predicted probabilities are non-finite",
+    )
     require(
         np.allclose(probabilities.sum(axis=1), 1.0, atol=1e-8),
         "Ordinal probabilities do not sum to one",
@@ -808,7 +811,7 @@ def ordinal_logistic(
                 bool(threshold_fit.mle_retvals.get("converged", False)),
                 "Diagnostic logit failed",
             )
-            fit_row = {
+            fit_row: dict[str, Any] = {
                 "cut": f"{levels[threshold_index]} | {levels[threshold_index + 1]}",
                 "coefficients": {},
                 "standard_errors": {},
