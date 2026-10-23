@@ -1,0 +1,7 @@
+{
+  "relative_root": "src/researchweave/ui",
+  "python_files": 8,
+  "nonblank_noncomment_physical_lines": 1701,
+  "counting_method": "Python nonblank lines excluding full comment lines; docstrings not excluded, so upper bound on meaningful SLOC",
+  "target": 5500
+}

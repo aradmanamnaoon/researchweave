@@ -1,0 +1,533 @@
+{
+  "protocol_version": 1,
+  "capabilities": [
+    {
+      "operation": "ui.project.list",
+      "version": "1.0.0",
+      "summary": "Show saved projects",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.project.create",
+      "version": "1.0.0",
+      "summary": "Create a local research project",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.project.open",
+      "version": "1.0.0",
+      "summary": "Reopen a saved project",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.project.update",
+      "version": "1.0.0",
+      "summary": "Update research question",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.source.add",
+      "version": "1.0.0",
+      "summary": "Import a local text source",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.source.search",
+      "version": "1.0.0",
+      "summary": "Search project library",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.source.get",
+      "version": "1.0.0",
+      "summary": "Read a local source",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.review.vote",
+      "version": "1.0.0",
+      "summary": "Save screening decision",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.review.counts",
+      "version": "1.0.0",
+      "summary": "Compute screening counts",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.qual.annotate",
+      "version": "1.0.0",
+      "summary": "Add a Unicode-safe evidence code",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.qual.list",
+      "version": "1.0.0",
+      "summary": "Inspect coded evidence",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.dataset.import",
+      "version": "1.0.0",
+      "summary": "Import bounded CSV text",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.dataset.describe",
+      "version": "1.0.0",
+      "summary": "Summarize numeric values",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.dataset.list",
+      "version": "1.0.0",
+      "summary": "Show project data tables",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.manuscript.save",
+      "version": "1.0.0",
+      "summary": "Save a manuscript draft",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.notebook.save",
+      "version": "1.0.0",
+      "summary": "Save local research notes",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.tutorial.step",
+      "version": "1.0.0",
+      "summary": "Mark local tutorial step",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.activity.list",
+      "version": "1.0.0",
+      "summary": "Read local audit history",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.preferences.read",
+      "version": "1.0.0",
+      "summary": "Read desktop preferences",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.preferences.update",
+      "version": "1.0.0",
+      "summary": "Save validated preferences",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.export.preview",
+      "version": "1.0.0",
+      "summary": "Preview an offline export",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.export.write",
+      "version": "1.0.0",
+      "summary": "Write approved export under host root",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": true,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.agent.propose",
+      "version": "1.0.0",
+      "summary": "Preview untrusted agent proposal",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.agent.deny",
+      "version": "1.0.0",
+      "summary": "Reject untrusted proposed action",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    }
+  ]
+}
