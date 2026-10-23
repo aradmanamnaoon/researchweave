@@ -49,6 +49,7 @@ from .measurement import (
     fleiss_agreement,
     icc_two_way_absolute,
 )
+from .meta_analysis import funnel_asymmetry_egger, random_effects_meta
 from .missing_data import (
     available_case_covariance,
     complete_case,
@@ -57,7 +58,12 @@ from .missing_data import (
 )
 from .modeling import adjust_pvalues, linear_regression, pooled_effects
 from .models import Dataset, digest
-from .multivariate import hierarchical_clusters, kmeans_clusters, principal_components
+from .multivariate import (
+    cluster_validation,
+    hierarchical_clusters,
+    kmeans_clusters,
+    principal_components,
+)
 from .plots import render_plot
 from .power import two_sample_t_power, two_sample_t_required
 from .psychometrics import reliability_diagnostics
@@ -68,7 +74,14 @@ from .schemas import RESULT_SCHEMA, schema_for, validate_arguments
 from .statistics import correlation, describe, reliability, t_test
 from .survey import design_weighted_mean, survey_proportions
 from .survival import cox_proportional_hazards, kaplan_meier, logrank_test
-from .time_series import adf_stationarity, causal_features, parse_chronology
+from .time_series import (
+    adf_stationarity,
+    arima_forecast,
+    causal_features,
+    ljung_box,
+    parse_chronology,
+    seasonal_decomposition,
+)
 from .transformations import transform
 
 
@@ -129,6 +142,8 @@ class AnalysisFacade:
             "statistics.logistic": "read",
             "statistics.poisson": "read",
             "statistics.meta": "read",
+            "statistics.meta_random": "read",
+            "statistics.egger": "read",
             "statistics.adjust": "read",
             "statistics.distribution": "read",
             "statistics.contingency": "read",
@@ -150,6 +165,7 @@ class AnalysisFacade:
             "statistics.pca": "read",
             "statistics.kmeans": "read",
             "statistics.hierarchical": "read",
+            "statistics.cluster_validation": "read",
             "statistics.power": "read",
             "statistics.required_n": "read",
             "statistics.diagnostics": "read",
@@ -158,6 +174,9 @@ class AnalysisFacade:
             "statistics.item_total": "read",
             "statistics.time_features": "read",
             "statistics.adf": "read",
+            "statistics.ljung_box": "read",
+            "statistics.seasonal_decompose": "read",
+            "statistics.arima_forecast": "read",
             "statistics.survival": "read",
             "statistics.logrank": "read",
             "statistics.cox": "read",
@@ -272,6 +291,14 @@ class AnalysisFacade:
             data = pooled_effects(
                 list(arguments["studies"]), model=str(arguments.get("model", "fixed"))
             )
+        elif operation == "statistics.meta_random":
+            data = random_effects_meta(
+                list(arguments["studies"]),
+                tau_method=str(arguments.get("tau_method", "reml")),
+                hartung_knapp=bool(arguments.get("hartung_knapp", True)),
+            )
+        elif operation == "statistics.egger":
+            data = funnel_asymmetry_egger(list(arguments["studies"]))
         elif operation == "statistics.adjust":
             data = {
                 "adjusted": adjust_pvalues(
@@ -612,6 +639,14 @@ class AnalysisFacade:
                     k=int(arguments["k"]),
                     linkage=str(arguments.get("linkage", "ward")),
                 )
+            elif operation == "statistics.cluster_validation":
+                data = cluster_validation(
+                    obj,
+                    list(arguments["columns"]),
+                    k_values=[int(value) for value in arguments["k_values"]],
+                    seed=int(arguments.get("seed", 0)),
+                    stability_repeats=int(arguments.get("stability_repeats", 8)),
+                )
             elif operation == "statistics.diagnostics":
                 data = ols_diagnostics(
                     obj, str(arguments["outcome"]), list(arguments["predictors"])
@@ -624,7 +659,13 @@ class AnalysisFacade:
                     data = score_scale(obj, spec, row_id=arguments.get("row_id"))
                 else:
                     data = item_total_diagnostics(obj, spec)
-            elif operation in ("statistics.time_features", "statistics.adf"):
+            elif operation in (
+                "statistics.time_features",
+                "statistics.adf",
+                "statistics.ljung_box",
+                "statistics.seasonal_decompose",
+                "statistics.arima_forecast",
+            ):
                 chronology = parse_chronology(
                     obj, str(arguments["time_column"]), str(arguments["value_column"])
                 )
@@ -634,8 +675,23 @@ class AnalysisFacade:
                         lags=list(arguments["lags"]),
                         rolling_window=arguments.get("rolling_window"),
                     )
-                else:
+                elif operation == "statistics.adf":
                     data = adf_stationarity(chronology)
+                elif operation == "statistics.ljung_box":
+                    data = ljung_box(chronology, lags=[int(value) for value in arguments["lags"]])
+                elif operation == "statistics.seasonal_decompose":
+                    data = seasonal_decomposition(chronology, period=int(arguments["period"]))
+                else:
+                    data = arima_forecast(
+                        chronology,
+                        order=tuple(int(value) for value in arguments["order"]),
+                        seasonal_order=tuple(
+                            int(value) for value in arguments.get("seasonal_order", [0, 0, 0, 0])
+                        ),
+                        horizon=int(arguments["horizon"]),
+                        validation_horizon=int(arguments.get("validation_horizon", 0)),
+                        confidence=float(arguments.get("confidence", 0.95)),
+                    )
             elif operation == "statistics.survival":
                 data = kaplan_meier(
                     obj,

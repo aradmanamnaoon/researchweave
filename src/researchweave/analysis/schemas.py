@@ -162,6 +162,8 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     ),
     "statistics.poisson": _schema({**IDENTITY, "outcome": S, "predictors": AS}, {"offset": SN}),
     "statistics.meta": _schema({"studies": A}, {"model": S}),
+    "statistics.meta_random": _schema({"studies": A}, {"tau_method": S, "hartung_knapp": B}),
+    "statistics.egger": _schema({"studies": A}),
     "statistics.adjust": _schema({"pvalues": AN}, {"method": S}),
     "statistics.distribution": _schema({**IDENTITY, "column": S}),
     "statistics.contingency": _schema({**IDENTITY, "first": S, "second": S}),
@@ -196,6 +198,10 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "statistics.pca": _schema({**IDENTITY, "columns": AS}, {"n_components": INT, "standardize": B}),
     "statistics.kmeans": _schema({**IDENTITY, "columns": AS, "k": INT}, {"seed": INT}),
     "statistics.hierarchical": _schema({**IDENTITY, "columns": AS, "k": INT}, {"linkage": S}),
+    "statistics.cluster_validation": _schema(
+        {**IDENTITY, "columns": AS, "k_values": A},
+        {"seed": INT, "stability_repeats": INT},
+    ),
     "statistics.power": _schema(
         {"effect": N, "n_group1": INT},
         {"ratio": N, "alpha": N, "alternative": S},
@@ -213,6 +219,20 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
         {"rolling_window": INT},
     ),
     "statistics.adf": _schema({**IDENTITY, "time_column": S, "value_column": S}),
+    "statistics.ljung_box": _schema({**IDENTITY, "time_column": S, "value_column": S, "lags": A}),
+    "statistics.seasonal_decompose": _schema(
+        {**IDENTITY, "time_column": S, "value_column": S, "period": INT}
+    ),
+    "statistics.arima_forecast": _schema(
+        {
+            **IDENTITY,
+            "time_column": S,
+            "value_column": S,
+            "order": A,
+            "horizon": INT,
+        },
+        {"seasonal_order": A, "validation_horizon": INT, "confidence": N},
+    ),
     "statistics.survival": _schema(
         {**IDENTITY, "duration": S, "event": S}, {"group": SN, "level": SN}
     ),

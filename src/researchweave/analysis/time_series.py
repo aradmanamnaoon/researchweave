@@ -174,3 +174,148 @@ def trend_slope(chronology: Chronology) -> dict[str, Any]:
             "an appropriate error model is required for inference"
         ),
     }
+
+
+def ljung_box(chronology: Chronology, *, lags: list[int]) -> dict[str, Any]:
+    """Ljung-Box serial-correlation diagnostic for declared positive lags."""
+
+    from statsmodels.stats.diagnostic import acorr_ljungbox
+
+    require(bool(lags) and len(set(lags)) == len(lags), "Distinct Ljung-Box lags required")
+    require(
+        all(isinstance(lag, int) and 1 <= lag < len(chronology.values) for lag in lags),
+        "Invalid Ljung-Box lag",
+    )
+    result = acorr_ljungbox(chronology.values, lags=sorted(lags), return_df=True)
+    return {
+        "lags": [int(value) for value in result.index],
+        "statistics": [float(value) for value in result["lb_stat"]],
+        "p_values": [float(value) for value in result["lb_pvalue"]],
+        "null_hypothesis": "No autocorrelation through each declared lag",
+        "n": len(chronology.values),
+    }
+
+
+def seasonal_decomposition(chronology: Chronology, *, period: int) -> dict[str, Any]:
+    """Classical additive seasonal decomposition for regular series."""
+
+    from statsmodels.tsa.seasonal import seasonal_decompose
+
+    require(
+        2 <= period <= len(chronology.values) // 2, "Seasonal period requires at least two cycles"
+    )
+    try:
+        fitted = seasonal_decompose(
+            chronology.values,
+            model="additive",
+            period=period,
+            extrapolate_trend="period",
+        )
+    except ValueError as exc:
+        raise AnalysisError("INVALID_INPUT", "Seasonal decomposition failed") from exc
+    return {
+        "method": "classical_additive_decomposition",
+        "period": period,
+        "observed": chronology.values.tolist(),
+        "trend": np.asarray(fitted.trend, dtype=float).tolist(),
+        "seasonal": np.asarray(fitted.seasonal, dtype=float).tolist(),
+        "residual": np.asarray(fitted.resid, dtype=float).tolist(),
+        "n": len(chronology.values),
+        "interval_seconds": chronology.interval_seconds,
+        "limitation": (
+            "Classical decomposition assumes a fixed seasonal pattern and regular spacing"
+        ),
+    }
+
+
+def arima_forecast(
+    chronology: Chronology,
+    *,
+    order: tuple[int, int, int],
+    horizon: int,
+    seasonal_order: tuple[int, int, int, int] = (0, 0, 0, 0),
+    validation_horizon: int = 0,
+    confidence: float = 0.95,
+) -> dict[str, Any]:
+    """ARIMA/SARIMA forecast with optional chronological holdout evaluation."""
+
+    from statsmodels.tsa.statespace.sarimax import SARIMAX
+
+    require(
+        len(order) == 3 and all(isinstance(value, int) and value >= 0 for value in order),
+        "Invalid ARIMA order",
+    )
+    require(
+        len(seasonal_order) == 4
+        and all(isinstance(value, int) and value >= 0 for value in seasonal_order),
+        "Invalid seasonal ARIMA order",
+    )
+    require(1 <= horizon <= 1000, "Forecast horizon outside supported range")
+    require(0 <= validation_horizon < len(chronology.values) - 5, "Invalid validation horizon")
+    require(0.5 <= confidence < 1, "Forecast confidence must be in [0.5,1)")
+    values = chronology.values
+    require(
+        len(values) >= max(12, sum(order) + sum(seasonal_order[:3]) + 6),
+        "Series too short for declared ARIMA order",
+    )
+
+    def fit(data: np.ndarray):
+        try:
+            result = SARIMAX(
+                data,
+                order=order,
+                seasonal_order=seasonal_order,
+                trend="c" if order[1] == 0 else "n",
+                enforce_stationarity=True,
+                enforce_invertibility=True,
+            ).fit(disp=False, maxiter=300)
+        except (ValueError, np.linalg.LinAlgError) as exc:
+            raise AnalysisError("INVALID_INPUT", "ARIMA model could not be estimated") from exc
+        require(
+            bool(result.mle_retvals.get("converged", False)),
+            "ARIMA fit did not converge",
+            "CONVERGENCE_FAILED",
+        )
+        return result
+
+    validation: dict[str, Any] | None = None
+    if validation_horizon:
+        train = values[:-validation_horizon]
+        held_out = values[-validation_horizon:]
+        trained = fit(train)
+        predicted = np.asarray(trained.forecast(validation_horizon), dtype=float)
+        errors = held_out - predicted
+        validation = {
+            "strategy": "chronological_tail_holdout",
+            "training_n": len(train),
+            "holdout_n": validation_horizon,
+            "actual": held_out.tolist(),
+            "predicted": predicted.tolist(),
+            "mae": float(np.mean(np.abs(errors))),
+            "rmse": float(np.sqrt(np.mean(errors**2))),
+            "no_future_leakage": True,
+        }
+    final = fit(values)
+    forecast = final.get_forecast(horizon)
+    mean = np.asarray(forecast.predicted_mean, dtype=float)
+    alpha = 1 - confidence
+    interval = np.asarray(forecast.conf_int(alpha=alpha), dtype=float)
+    return {
+        "method": "sarimax",
+        "order": list(order),
+        "seasonal_order": list(seasonal_order),
+        "horizon": horizon,
+        "confidence": confidence,
+        "forecast": mean.tolist(),
+        "confidence_interval": interval.tolist(),
+        "aic": float(final.aic),
+        "bic": float(final.bic),
+        "converged": bool(final.mle_retvals.get("converged", False)),
+        "validation": validation,
+        "n_fit": len(values),
+        "interval_seconds": chronology.interval_seconds,
+        "limitations": [
+            "Order is analyst-declared; automatic order search is intentionally not performed",
+            "Prediction intervals are conditional on the fitted ARIMA specification",
+        ],
+    }

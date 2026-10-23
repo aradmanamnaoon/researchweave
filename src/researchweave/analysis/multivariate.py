@@ -238,3 +238,148 @@ def hierarchical_clusters(
         "standardize": standardize,
         "limitation": "Exploratory partitions; distance and scaling are analyst-selected",
     }
+
+
+def _adjusted_rand(first: np.ndarray, second: np.ndarray) -> float:
+    """Adjusted Rand index without an optional scikit-learn dependency."""
+
+    require(len(first) == len(second) and len(first) >= 2, "Cluster label vectors must align")
+    a_levels = np.unique(first)
+    b_levels = np.unique(second)
+    contingency = np.zeros((len(a_levels), len(b_levels)), dtype=np.int64)
+    a_map = {value: index for index, value in enumerate(a_levels.tolist())}
+    b_map = {value: index for index, value in enumerate(b_levels.tolist())}
+    for a, b in zip(first.tolist(), second.tolist(), strict=True):
+        contingency[a_map[a], b_map[b]] += 1
+
+    def pairs(values: np.ndarray) -> float:
+        return float(np.sum(values * (values - 1) / 2))
+
+    nij = pairs(contingency)
+    ai = pairs(contingency.sum(axis=1))
+    bj = pairs(contingency.sum(axis=0))
+    total = len(first) * (len(first) - 1) / 2
+    expected = ai * bj / total if total else 0.0
+    maximum = (ai + bj) / 2
+    denominator = maximum - expected
+    return 1.0 if denominator == 0 and nij == expected else (nij - expected) / denominator
+
+
+def _cluster_indices(
+    matrix: np.ndarray, labels: np.ndarray, centers: np.ndarray
+) -> dict[str, float]:
+    """Silhouette, Calinski-Harabasz and Davies-Bouldin for one partition."""
+
+    n = len(matrix)
+    groups = sorted(np.unique(labels).tolist())
+    k = len(groups)
+    require(2 <= k < n, "Cluster validation requires 2..n-1 groups")
+    distances = cdist(matrix, matrix, metric="euclidean")
+    silhouettes: list[float] = []
+    for i, label in enumerate(labels):
+        same = np.flatnonzero(labels == label)
+        same = same[same != i]
+        a = float(np.mean(distances[i, same])) if len(same) else 0.0
+        other_means = [
+            float(np.mean(distances[i, labels == other])) for other in groups if other != label
+        ]
+        b = min(other_means)
+        silhouettes.append((b - a) / max(a, b) if max(a, b) > 0 else 0.0)
+    grand = matrix.mean(axis=0)
+    between = sum(
+        int(np.sum(labels == group)) * float(np.sum((centers[group] - grand) ** 2))
+        for group in groups
+    )
+    within = sum(float(np.sum((matrix[labels == group] - centers[group]) ** 2)) for group in groups)
+    require(within > 0, "Within-cluster dispersion is zero")
+    calinski = (between / (k - 1)) / (within / (n - k))
+    scatters = np.asarray(
+        [
+            float(np.mean(np.linalg.norm(matrix[labels == group] - centers[group], axis=1)))
+            for group in groups
+        ]
+    )
+    center_distances = cdist(centers, centers, metric="euclidean")
+    ratios = []
+    for i in range(k):
+        candidates = [
+            (scatters[i] + scatters[j]) / center_distances[i, j]
+            for j in range(k)
+            if j != i and center_distances[i, j] > 0
+        ]
+        require(candidates, "Cluster centers are not distinct")
+        ratios.append(max(candidates))
+    return {
+        "silhouette": float(np.mean(silhouettes)),
+        "calinski_harabasz": float(calinski),
+        "davies_bouldin": float(np.mean(ratios)),
+    }
+
+
+def cluster_validation(
+    dataset: Dataset,
+    columns: list[str],
+    *,
+    k_values: list[int],
+    seed: int = 0,
+    stability_repeats: int = 8,
+) -> dict[str, Any]:
+    """Validate candidate k-means partitions and quantify seed stability."""
+
+    require(
+        bool(k_values) and len(set(k_values)) == len(k_values) and len(k_values) <= 20,
+        "Distinct candidate cluster counts required",
+    )
+    require(2 <= stability_repeats <= 30, "Stability repeats must be 2..30")
+    sample = extract_numeric_matrix(dataset, columns)
+    matrix = sample.matrix
+    means = matrix.mean(axis=0)
+    scales = matrix.std(axis=0, ddof=1)
+    require(bool(np.all(scales > 0)), "Cannot validate clustering with constant features")
+    normalized = (matrix - means) / scales
+    require(all(2 <= k < len(matrix) for k in k_values), "Candidate k outside 2..n-1")
+    rows = []
+    for k in sorted(k_values):
+        runs = [
+            kmeans_clusters(dataset, columns, k=k, seed=seed + repeat, n_init=4)
+            for repeat in range(stability_repeats)
+        ]
+        base_labels = np.asarray(runs[0]["labels"], dtype=int)
+        centers = np.asarray(runs[0]["centers_original_units"], dtype=float)
+        centers_normalized = (centers - means) / scales
+        indices = _cluster_indices(normalized, base_labels, centers_normalized)
+        stability = [
+            _adjusted_rand(base_labels, np.asarray(run["labels"], dtype=int)) for run in runs[1:]
+        ]
+        rows.append(
+            {
+                "k": k,
+                **indices,
+                "mean_adjusted_rand_vs_first": float(np.mean(stability)),
+                "min_adjusted_rand_vs_first": float(np.min(stability)),
+                "inertia_standardized": float(runs[0]["inertia_standardized"]),
+            }
+        )
+    recommended = max(
+        rows,
+        key=lambda item: (
+            item["silhouette"],
+            item["mean_adjusted_rand_vs_first"],
+            -item["davies_bouldin"],
+        ),
+    )["k"]
+    return {
+        "method": "kmeans_validation",
+        "candidates": rows,
+        "recommended_k_by_declared_rule": recommended,
+        "selection_rule": "maximize silhouette, then seed stability, then minimize Davies-Bouldin",
+        "seed": seed,
+        "stability_repeats": stability_repeats,
+        "n_used": len(matrix),
+        "n_excluded": sample.n_excluded,
+        "dataset_revision": dataset.revision,
+        "limitations": [
+            "Internal indices and seed stability do not establish substantive cluster validity",
+            "Recommendation is exploratory and must not be treated as confirmatory evidence",
+        ],
+    }
