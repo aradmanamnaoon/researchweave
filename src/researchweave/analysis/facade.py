@@ -56,6 +56,7 @@ from .power import two_sample_t_power, two_sample_t_required
 from .recommendations import recommend_from_mapping
 from .runtime import run_script
 from .scale_scoring import ScaleDefinition, item_total_diagnostics, score_scale
+from .schemas import RESULT_SCHEMA, schema_for, validate_arguments
 from .statistics import correlation, describe, reliability, t_test
 from .survey import design_weighted_mean, survey_proportions
 from .survival import cox_proportional_hazards, kaplan_meier, logrank_test
@@ -166,8 +167,8 @@ class AnalysisFacade:
                 "effect": effect,
                 "offline": True,
                 "risk": effect,
-                "arguments_schema": {"type": "object"},
-                "result_schema": {"type": "object"},
+                "arguments_schema": schema_for(operation).as_json_schema(),
+                "result_schema": RESULT_SCHEMA,
                 "requires_permission": "local-data-write"
                 if effect != "read"
                 else "local-data-read",
@@ -188,6 +189,7 @@ class AnalysisFacade:
     ) -> Mapping[str, Any]:
         known = {entry["operation"]: entry for entry in self.capability_manifest()}
         require(operation in known, "Unknown operation", "NOT_FOUND")
+        validate_arguments(operation, arguments)
         return {
             "operation": operation,
             "effect": known[operation]["effect"],
@@ -242,6 +244,7 @@ class AnalysisFacade:
     ) -> Mapping[str, Any]:
         known = {entry["operation"]: entry for entry in self.capability_manifest()}
         require(operation in known, "Unknown operation", "NOT_FOUND")
+        validate_arguments(operation, arguments)
         effect = known[operation]["effect"]
         if effect != "read":
             self.authorizations.verify_and_consume(
