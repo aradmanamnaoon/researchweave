@@ -50,7 +50,7 @@ from .screening import adjudicate, review_queue, screening_flow, submit_decision
 from .search import search_project
 from .snapshots import SnapshotManager
 from .store import MAX_ROWS, MAX_SOURCE_CHARS, PreferenceStore, ProjectStore
-from .visualization import ChartSpec, chart_svg, histogram
+from .visualization import ChartSpec, categorical_bar, chart_png, chart_svg, histogram
 from .workflows import (
     AnalysisBackend,
     add_mixed_method_link,
@@ -229,7 +229,9 @@ class UIFacade:
             "ui.variable.metadata": ("Read variable metadata", Effect.READ),
             "ui.variable.metadata.update": ("Save variable metadata", Effect.WRITE),
             "ui.chart.histogram": ("Compute descriptive histogram counts", Effect.READ),
+            "ui.chart.bar": ("Compute descriptive categorical counts", Effect.READ),
             "ui.chart.svg": ("Produce local accessible chart SVG", Effect.READ),
+            "ui.chart.png": ("Produce local descriptive chart PNG", Effect.READ),
             "ui.analysis.methods": ("List scientific analysis adapter methods", Effect.READ),
             "ui.analysis.run": ("Run and persist a typed scientific analysis", Effect.WRITE),
             "ui.analysis.results": ("List versioned analysis results", Effect.READ),
@@ -241,6 +243,10 @@ class UIFacade:
             "ui.mixed.add": ("Link qualitative and quantitative evidence", Effect.WRITE),
             "ui.manuscript.save": ("Save a manuscript draft", Effect.WRITE),
             "ui.notebook.save": ("Save local research notes", Effect.WRITE),
+            "ui.code.execution.status": (
+                "Inspect disabled code execution safety gate",
+                Effect.READ,
+            ),
             "ui.reference.list": ("List manuscript references", Effect.READ),
             "ui.reference.upsert": ("Create or correct reference metadata", Effect.WRITE),
             "ui.reference.citation": ("Format user-entered citation metadata", Effect.READ),
@@ -1300,15 +1306,43 @@ class UIFacade:
         if column not in dataset.columns:
             raise UIError("NOT_FOUND", "Unknown variable for chart.",
                           "Select a column in Variable View.")
-        bin_count = _integer(args, "bins", minimum=1, maximum=60, default=10)
-        unit = _string(args, "unit", 60, required=False)
         index = dataset.columns.index(column)
-        values = [_safe_number(row[index]) for row in dataset.rows]
-        return histogram(values, column=column, bins=bin_count, unit=unit,
-                         source_label=dataset.origin)
+        plot_type = _string(args, "plot_type", 20, required=False) or "histogram"
+        if plot_type == "bar":
+            values = [row[index] if row[index].strip() else None for row in dataset.rows]
+            spec = categorical_bar(values, column=column, source_label=dataset.origin)
+        elif plot_type != "histogram":
+            raise UIError("INVALID_INPUT", "Unknown descriptive plot type.",
+                          "Choose histogram or bar.")
+        else:
+            bin_count = _integer(args, "bins", minimum=1, maximum=60, default=10)
+            unit = _string(args, "unit", 60, required=False)
+            numeric = [_safe_number(row[index]) for row in dataset.rows]
+            spec = histogram(
+                numeric, column=column, bins=bin_count, unit=unit,
+                source_label=dataset.origin,
+            )
+        title = _string(args, "title", 180, required=False)
+        x_label = _string(args, "x_label", 120, required=False)
+        y_label = _string(args, "y_label", 120, required=False)
+        if title or x_label or y_label:
+            spec = replace(
+                spec,
+                title=title or spec.title,
+                x_label=x_label or spec.x_label,
+                y_label=y_label or spec.y_label,
+            )
+        return spec
 
     def _do_ui_chart_histogram(self, args: Mapping[str, Any]) -> dict[str, Any]:
-        return {"chart": self._chart(args).as_dict()}
+        values = dict(args)
+        values["plot_type"] = "histogram"
+        return {"chart": self._chart(values).as_dict()}
+
+    def _do_ui_chart_bar(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        values = dict(args)
+        values["plot_type"] = "bar"
+        return {"chart": self._chart(values).as_dict()}
 
     def _do_ui_chart_svg(self, args: Mapping[str, Any]) -> dict[str, Any]:
         spec = self._chart(args)
@@ -1322,6 +1356,21 @@ class UIFacade:
             "warnings": ["Descriptive display only; no statistical inference."],
         }
 
+    def _do_ui_chart_png(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        spec = self._chart(args)
+        width = _integer(args, "width", minimum=400, maximum=4096, default=900)
+        height = _integer(args, "height", minimum=240, maximum=2160, default=500)
+        content = chart_png(spec, width=width, height=height)
+        return {
+            "format": "image/png",
+            "bytes": len(content),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "png_hex": content.hex(),
+            "source_label": spec.source_label,
+            "accessibility_data": spec.accessible_table(),
+            "warnings": ["Descriptive display only; no statistical inference."],
+        }
+
     def _do_ui_manuscript_save(self, args: Mapping[str, Any]) -> dict[str, Any]:
         manuscript = _string(args, "manuscript", MAX_NOTE, required=False)
         return self._mutate(args, "ui.manuscript.save",
@@ -1331,6 +1380,31 @@ class UIFacade:
         notebook = _string(args, "notebook", MAX_NOTE, required=False)
         return self._mutate(args, "ui.notebook.save",
                             lambda project: self._set_text(project, "notebook", notebook))
+
+    def _do_ui_code_execution_status(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        _required_project(args, self.store)
+        return {
+            "enabled": False,
+            "python": "disabled",
+            "r": "disabled",
+            "reason": (
+                "Safe resource isolation is not available in this UI workstream. "
+                "Arbitrary user code is never passed to eval, a shell, or an "
+                "in-process interpreter."
+            ),
+            "required_integration": {
+                "process_boundary": True,
+                "explicit_confirmation": True,
+                "time_limit": True,
+                "memory_or_resource_limit": True,
+                "cancellation": True,
+                "bounded_working_directory": True,
+                "stdout_stderr_capture": True,
+                "provenance": True,
+                "shell_true": False,
+                "untrusted_pickle": False,
+            },
+        }
 
     @staticmethod
     def _set_text(project: Project, key: str, text: str) -> dict[str, Any]:

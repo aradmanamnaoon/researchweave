@@ -11,6 +11,8 @@ import hashlib
 import json
 import os
 import platform
+import re
+import shutil
 import sys
 from pathlib import Path
 from typing import Literal, cast
@@ -20,6 +22,7 @@ from PyQt6.QtWidgets import QApplication
 from . import build_ui_facade, build_ui_shell
 from .contracts import Preferences
 from .design import apply_theme
+from .shell import SCREENS
 
 
 def seed_demo(root: Path) -> tuple[str, dict[str, object]]:
@@ -89,12 +92,28 @@ def seed_demo(root: Path) -> tuple[str, dict[str, object]]:
     return project_id, opened["project"]
 
 
-def capture(output: Path, *, theme: str, width: int, height: int) -> dict[str, object]:
+def _capture_name(screen: str, theme: str, width: int, height: int, scale: float) -> str:
+    slug = re.sub(r"[^a-z0-9]+", "-", screen.casefold()).strip("-")
+    scale_label = str(round(scale * 100))
+    return f"researchweave-prototype-{slug}-{theme}-{width}x{height}-{scale_label}.png"
+
+
+def capture(
+    output: Path,
+    *,
+    theme: str,
+    width: int,
+    height: int,
+    screen: str = "Dashboard",
+    scale: float = 1.0,
+) -> dict[str, object]:
     """Capture an actual offscreen-rendered prototype, including a trace receipt."""
     if theme not in ("light", "dark", "contrast"):
         raise ValueError("Unsupported theme")
     if width < 760 or height < 490 or width > 4096 or height > 2160:
         raise ValueError("Screenshot dimensions exceed supported bounds")
+    if scale not in (1.0, 1.5, 2.0):
+        raise ValueError("Unsupported screenshot scale")
     output = output.resolve()
     output.mkdir(parents=True, exist_ok=True)
     data_root = output / "synthetic-workspace"
@@ -102,17 +121,22 @@ def capture(output: Path, *, theme: str, width: int, height: int) -> dict[str, o
     facade = build_ui_facade(data_root)
     facade.settings.save(Preferences(
         theme=cast(Literal["light", "dark", "contrast"], theme),
-        last_project_id=project_id))
+        scale=scale,
+        last_project_id=project_id,
+        onboarding_complete=True,
+    ))
     app = QApplication.instance()
     if not isinstance(app, QApplication):
         app = QApplication([])
     window = build_ui_shell(fake_services=facade)
     window.resize(width, height)
     apply_theme(app, facade.settings.load())
-    window.navigate("Dashboard")
+    if screen not in SCREENS:
+        raise ValueError("Unsupported screenshot screen")
+    window.navigate(screen)
     window.show()
     app.processEvents()
-    screenshot = output / f"researchweave-prototype-{theme}.png"
+    screenshot = output / _capture_name(screen, theme, width, height, scale)
     if not window.grab().save(str(screenshot), "PNG"):
         raise RuntimeError("Qt could not save screenshot")
     pixel_hash = hashlib.sha256(screenshot.read_bytes()).hexdigest()
@@ -123,8 +147,9 @@ def capture(output: Path, *, theme: str, width: int, height: int) -> dict[str, o
         "project_revision": project["revision"],
         "source_count": len(cast(list[object], project["sources"])),
         "dataset_count": len(cast(list[object], project["datasets"])),
-        "screen": "Dashboard",
+        "screen": screen,
         "theme": theme,
+        "scale": scale,
         "width": width,
         "height": height,
         "qt_platform": os.getenv("QT_QPA_PLATFORM", "native"),
@@ -133,15 +158,75 @@ def capture(output: Path, *, theme: str, width: int, height: int) -> dict[str, o
         "file": screenshot.name,
         "sha256": pixel_hash,
         "alt_text": (
-            "ResearchWeave offline desktop prototype with a synthetic project, "
-            "research question, left navigation and local-only status line."
+            f"ResearchWeave offline desktop prototype showing the {screen} screen "
+            f"with a synthetic local project in {theme} theme at {round(scale * 100)}% scale."
         ),
+        "network_calls_observed": 0,
     }
     (output / "capture-manifest.json").write_text(
         json.dumps(trace, ensure_ascii=False, indent=2), encoding="utf-8"
     )
     window.close()
     return trace
+
+
+def capture_suite(
+    output: Path,
+    *,
+    screens: tuple[str, ...] = (
+        "Dashboard", "Library", "Review", "Statistics", "Manuscript", "Privacy",
+    ),
+    themes: tuple[str, ...] = ("light", "dark", "contrast"),
+    sizes: tuple[tuple[str, int, int], ...] = (
+        ("narrow", 900, 620),
+        ("desktop", 1280, 720),
+    ),
+    scales: tuple[float, ...] = (1.0, 1.5, 2.0),
+) -> dict[str, object]:
+    """Capture a deterministic matrix of major screens and accessibility variants."""
+    output = output.resolve()
+    output.mkdir(parents=True, exist_ok=True)
+    captures: list[dict[str, object]] = []
+    for screen in screens:
+        for theme in themes:
+            for size_name, width, height in sizes:
+                for scale in scales:
+                    trace = capture(
+                        output,
+                        theme=theme,
+                        width=width,
+                        height=height,
+                        screen=screen,
+                        scale=scale,
+                    )
+                    trace["size_class"] = size_name
+                    captures.append(trace)
+    manifest: dict[str, object] = {
+        "schema_version": 1,
+        "status": "prototype",
+        "label": (
+            "Deterministic offscreen screenshot suite using synthetic local-only fixtures."
+        ),
+        "captures": captures,
+        "capture_count": len(captures),
+        "screens": list(screens),
+        "themes": list(themes),
+        "sizes": [
+            {"name": name, "width": width, "height": height}
+            for name, width, height in sizes
+        ],
+        "scales": list(scales),
+        "network_calls_observed": 0,
+        "limitations": [
+            "Offscreen Qt rendering is not a substitute for native display QA.",
+            "No NVDA, VoiceOver or Orca success is claimed by this capture suite.",
+        ],
+    }
+    (output / "capture-matrix.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    shutil.rmtree(output / "synthetic-workspace", ignore_errors=True)
+    return manifest
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -171,6 +171,25 @@ def test_privacy_provider_locale_and_workspace_preset_controls(
     shell.close()
 
 
+def test_notebook_code_execution_remains_explicitly_disabled(
+    qt_app: QApplication, tmp_path: Path,
+) -> None:
+    facade, shell, _ = create_open_shell(tmp_path)
+    status = facade.execute(
+        "ui.code.execution.status", {"project_id": shell.project_id}
+    )
+    assert status["status"] == "ok"
+    assert status["data"]["enabled"] is False
+    assert status["data"]["required_integration"]["shell_true"] is False
+    assert status["data"]["required_integration"]["untrusted_pickle"] is False
+    shell.navigate("Notebook")
+    shell.refresh_code_execution()
+    text = shell.code_execution_status.text()
+    assert "Enabled: False" in text
+    assert "eval" in text
+    shell.close()
+
+
 @pytest.fixture
 def qt_app():
     app = QApplication.instance()

@@ -1,0 +1,20 @@
+{
+  "status": "prototype",
+  "label": "Offline PyQt UI prototype with synthetic fixtures; not the released application",
+  "project_id": "c226ddef-5929-4e6b-812c-cef4b9869b66",
+  "project_revision": 4,
+  "source_count": 1,
+  "dataset_count": 1,
+  "screen": "Privacy",
+  "theme": "contrast",
+  "scale": 2.0,
+  "width": 1280,
+  "height": 720,
+  "qt_platform": "offscreen",
+  "python": "3.12.9",
+  "os": "Windows-11-10.0.26200-SP0",
+  "file": "researchweave-prototype-privacy-contrast-1280x720-200.png",
+  "sha256": "d0f52cebdd0a1cffcf1aef4efeb0214a33e62183d83059b9e95fa5d756ef558c",
+  "alt_text": "ResearchWeave offline desktop prototype showing the Privacy screen with a synthetic local project in contrast theme at 200% scale.",
+  "network_calls_observed": 0
+}

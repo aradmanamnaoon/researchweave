@@ -15,3 +15,13 @@ Do not push or merge from this worker worktree.
 Latest implemented: journaled recovery, QtPdf rendering, source-linked evidence, descriptive SVG charts, diagnostics and publication review preview. Priorities: core/evidence/analysis/AI integration, professional citation anchors, sub-second crash data retention, stronger coverage and human screen-reader/platform tests.
 
 After continuation: add an authenticated reviewer adapter and bind the independent decision/PRISMA partial-flow service to the Qt screening view. Add targeted branch/security tests to increase combined coverage from 78% to >=80%; implement the remaining substantial UX stories only with real feature validation. Keep all work in this isolated branch and preserve canonical main.
+
+Current next actions after Milestone 6:
+
+1. Add mandatory five end-to-end JSON journey receipts with restart state, injected failures/denials, hashes, network-call observations and screenshot references.
+2. Add security/resource acceptance tests for malicious CSV/formula export, corrupt JSON/recovery, ZIP traversal/symlink/decompression bounds, invalid/encrypted PDF, huge rows, cancellation and stale revisions.
+3. Run full UI branch coverage and close real uncovered safety paths until >=80% if feasible without exclusion manipulation.
+4. Perform defensible AST/token-based meaningful production SLOC audit and refresh `CODE_METRICS.json`.
+5. Refresh the UX matrix, API catalog, capabilities manifest, user guide and handoff with final observed SHAs and exact external/native blockers.
+
+Do not push or merge from this worker worktree.

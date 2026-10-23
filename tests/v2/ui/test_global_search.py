@@ -50,6 +50,48 @@ def test_global_search_returns_distinct_types(tmp_path: Path) -> None:
     assert bad["error"]["code"] == "INVALID_INPUT"
 
 
+def test_global_search_includes_source_linked_evidence_and_claim_facets(tmp_path: Path) -> None:
+    facade, pid, source_id = _project(tmp_path)
+    opened = _ok(facade, "ui.project.open", project_id=pid)["project"]
+    evidence = _ok(
+        facade,
+        "ui.evidence.capture",
+        project_id=pid,
+        expected_revision=opened["revision"],
+        source_id=source_id,
+        start=5,
+        end=14,
+        note="Synthetic evidence memo about attention.",
+    )
+    claim = _ok(
+        facade,
+        "ui.claim.create",
+        project_id=pid,
+        expected_revision=evidence["revision"],
+        text="Synthetic attention claim requiring review.",
+        supporting_evidence=[evidence["evidence"]["id"]],
+        challenging_evidence=[],
+    )
+    evidence_hits = _ok(
+        facade,
+        "ui.search.global",
+        project_id=pid,
+        query="attention",
+        kind="evidence",
+    )
+    assert evidence_hits["total"] == 1
+    assert evidence_hits["hits"][0]["source_id"] == source_id
+    claim_hits = _ok(
+        facade,
+        "ui.search.global",
+        project_id=pid,
+        query="requiring review",
+        kind="claim",
+    )
+    assert claim_hits["total"] == 1
+    assert claim_hits["hits"][0]["record_id"] == claim["claim"]["id"]
+
+
 def test_unicode_codepoint_offsets() -> None:
     assert _matches("Straße", "STRASSE") == 0
     assert _matches("prefix 🧠 brain", "BRAIN") == 9

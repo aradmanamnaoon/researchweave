@@ -47,3 +47,12 @@ Repository-wide verification after milestone 3: QT_QPA_PLATFORM=offscreen uv run
 - `uv run mypy src/researchweave/ui --follow-imports=silent`: passed (21 production Python files).
 - `uv run python -m compileall -q src/researchweave/ui`: passed.
 - Quantities in `CODE_METRICS.json` computed from the worker-owned source subtree.
+
+## Milestone 6 focused validation
+
+- `uv run ruff check src/researchweave/ui ...`: passed for the changed visualization, search, demo, shell/facade and evidence tests.
+- `uv run mypy src/researchweave/ui --follow-imports=silent`: passed for all 24 production UI Python files at this checkpoint.
+- `QT_QPA_PLATFORM=offscreen uv run pytest -q tests/v2/ui/test_visualization.py tests/v2/ui/test_global_search.py tests/v2/ui/test_advanced_widgets.py tests/v2/ui/test_demo.py tests/v2/ui/test_assets.py`: **18 passed**.
+- Screenshot evidence generation: **60 PNG captures**, 5 major screens × 3 themes × 2 size classes × 2 scale factors, plus `capture-manifest.json` and `capture-matrix.json`; total 719,127 bytes for 62 files.
+- Screenshot fixture network calls observed: 0. Captures are explicitly labeled prototype/synthetic.
+- Native screen-reader and native multi-platform/DPI validation remain unperformed and are not claimed.

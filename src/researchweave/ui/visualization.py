@@ -9,6 +9,8 @@ from __future__ import annotations
 
 import html
 import math
+import struct
+import zlib
 from dataclasses import asdict, dataclass
 from statistics import fmean
 from typing import Any, Literal
@@ -140,16 +142,93 @@ def histogram(
     unit_note = f" ({unit})" if unit else ""
     return ChartSpec(
         title=f"Descriptive distribution · {column}",
-        column=column, kind="histogram",
+        column=column,
+        kind="histogram",
         x_label=f"{column}{unit_note}",
         y_label="Observation count",
-        bins=groups, n=count, missing_n=len(values) - count,
-        min_value=min(filtered), max_value=max(filtered),
-        mean=fmean(filtered), source_label=source_label,
+        bins=groups,
+        n=count,
+        missing_n=len(values) - count,
+        min_value=min(filtered),
+        max_value=max(filtered),
+        mean=fmean(filtered),
+        source_label=source_label,
         description=(
             f"Histogram of {count} finite observed values with "
             f"{len(values) - count} invalid or missing entries omitted. "
             "Bars show counts; no statistical significance is inferred."
+        ),
+    )
+
+
+def categorical_bar(
+    values: list[str | None],
+    *,
+    column: str,
+    source_label: str = "Local dataset",
+) -> ChartSpec:
+    """Count bounded categorical observations without statistical inference."""
+    if len(values) > MAX_CHART_VALUES:
+        raise UIError(
+            "RESOURCE_LIMIT",
+            "Chart exceeds 50,000 sample values.",
+            "Plot a reviewed bounded dataset or aggregate first.",
+        )
+    if not isinstance(column, str) or not column.strip() or len(column) > 100:
+        raise UIError(
+            "INVALID_INPUT",
+            "Missing descriptive chart variable.",
+            "Choose a named categorical variable.",
+        )
+    counts: dict[str, int] = {}
+    missing = 0
+    for value in values:
+        if value is None or not str(value).strip():
+            missing += 1
+            continue
+        label = str(value).strip()
+        if len(label) > 160:
+            raise UIError(
+                "INVALID_INPUT",
+                "Categorical label is too long.",
+                "Clean the categorical variable before plotting.",
+            )
+        counts[label] = counts.get(label, 0) + 1
+    if not counts:
+        raise UIError(
+            "INVALID_INPUT",
+            "No observed categories are available for plotting.",
+            "Choose a categorical variable with observed values.",
+        )
+    if len(counts) > MAX_BINS:
+        raise UIError(
+            "RESOURCE_LIMIT",
+            "Categorical chart has more than 60 distinct levels.",
+            "Filter or regroup reviewed categories before plotting.",
+        )
+    ordered = sorted(counts.items(), key=lambda item: (-item[1], item[0].casefold()))
+    bins = tuple(
+        Bin(float(index), float(index + 1), count, label)
+        for index, (label, count) in enumerate(ordered)
+    )
+    observed = sum(counts.values())
+    return ChartSpec(
+        title=f"Observed category counts · {column}",
+        column=column,
+        kind="bar",
+        x_label=column,
+        y_label="Observation count",
+        bins=bins,
+        n=observed,
+        missing_n=missing,
+        min_value=0.0,
+        max_value=float(max(counts.values())),
+        mean=float(observed / len(counts)),
+        source_label=source_label,
+        description=(
+            f"Bar chart of {observed} observed categorical values across {len(counts)} "
+            f"levels with {missing} missing entries omitted. No statistical significance "
+            "or ordering is inferred."
         ),
     )
 
@@ -231,6 +310,89 @@ def chart_svg(
         "</svg>",
     ])
     return "\n".join(components)
+
+
+def chart_png(spec: ChartSpec, *, width: int = 900, height: int = 500) -> bytes:
+    """Render a deterministic dependency-free PNG with descriptive metadata.
+
+    The raster contains axes, gridlines and bars. Human-readable title/axis/source
+    labels are stored in standard PNG text chunks so headless export never depends
+    on a GUI application or font database.
+    """
+    if not 400 <= width <= 4096 or not 240 <= height <= 2160:
+        raise UIError(
+            "INVALID_INPUT",
+            "Unsupported PNG chart dimensions.",
+            "Choose a width between 400 and 4096 and height 240–2160.",
+        )
+    left, top, right, bottom = 88, 54, 30, 86
+    plot_width = max(1, width - left - right)
+    plot_height = max(1, height - top - bottom)
+    max_count = max(1, max(item.count for item in spec.bins))
+    pixels = bytearray(b"\xff\xff\xff" * width * height)
+
+    def set_pixel(x: int, y: int, rgb: tuple[int, int, int]) -> None:
+        if 0 <= x < width and 0 <= y < height:
+            offset = (y * width + x) * 3
+            pixels[offset:offset + 3] = bytes(rgb)
+
+    def horizontal(y: int, x1: int, x2: int, rgb: tuple[int, int, int]) -> None:
+        for x in range(max(0, x1), min(width, x2 + 1)):
+            set_pixel(x, y, rgb)
+
+    def vertical(x: int, y1: int, y2: int, rgb: tuple[int, int, int]) -> None:
+        for y in range(max(0, y1), min(height, y2 + 1)):
+            set_pixel(x, y, rgb)
+
+    axis = (24, 35, 57)
+    grid = (216, 225, 236)
+    bar = (49, 95, 172)
+    vertical(left, top, top + plot_height, axis)
+    horizontal(top + plot_height, left, left + plot_width, axis)
+    for tick in range(5):
+        y = round(top + plot_height - tick * plot_height / 4)
+        horizontal(y, left, left + plot_width, grid)
+    column_width = plot_width / max(1, len(spec.bins))
+    for index, group in enumerate(spec.bins):
+        bar_height = round(plot_height * group.count / max_count)
+        x1 = round(left + index * column_width + 1)
+        x2 = round(left + (index + 1) * column_width - 2)
+        y1 = top + plot_height - bar_height
+        y2 = top + plot_height - 1
+        for y in range(max(top, y1), min(height, y2 + 1)):
+            horizontal(y, x1, x2, bar)
+
+    def chunk(kind: bytes, data: bytes) -> bytes:
+        payload = kind + data
+        return (
+            struct.pack(">I", len(data))
+            + payload
+            + struct.pack(">I", zlib.crc32(payload) & 0xFFFFFFFF)
+        )
+
+    rows = []
+    stride = width * 3
+    for y in range(height):
+        start = y * stride
+        rows.append(b"\x00" + bytes(pixels[start:start + stride]))
+    png = bytearray(b"\x89PNG\r\n\x1a\n")
+    png += chunk(
+        b"IHDR",
+        struct.pack(">IIBBBBB", width, height, 8, 2, 0, 0, 0),
+    )
+    metadata = {
+        "Title": spec.title,
+        "Description": spec.description,
+        "XLabel": spec.x_label,
+        "YLabel": spec.y_label,
+        "Source": spec.source_label,
+        "PlotType": spec.kind,
+    }
+    for key, value in metadata.items():
+        png += chunk(b"tEXt", key.encode("latin-1") + b"\x00" + value.encode("utf-8"))
+    png += chunk(b"IDAT", zlib.compress(b"".join(rows), level=9))
+    png += chunk(b"IEND", b"")
+    return bytes(png)
 
 
 class HistogramWidget(QFrame):

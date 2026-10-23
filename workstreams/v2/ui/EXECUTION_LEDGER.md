@@ -50,3 +50,13 @@ Every unimplemented UX story remains open; see LIMITATIONS.md and NEXT_ACTION.md
 - Recovery and close/save logic validated across 64 UI tests; static lint, Mypy (21 files), compileall pass; combined branch/line coverage is **78%**.
 - Source count: **21** Python production modules, **5,821** physical nonblank noncomment lines including docstrings (upper bound; not audited meaningful SLOC), **59** declared UI commands.
 - Incomplete: >=80% coverage goal; full 50-story UX matrix; production AI/domain integration, real multiuser authenticated screening, complete PRISMA, professional PDF source anchors, installers and screen-reader hardware tests.
+
+## Milestone 6 · durable workflows, visible research surfaces and evidence harness
+
+- Local commits `617b7ef` and `c10d66b` added durable extraction, variable metadata, typed analysis-result, codebook, mixed-method, reference, scoped agent approval/timeline, provider/privacy/integration/notification, localization and workspace-preset contracts plus visible Qt screens.
+- Visible Review uses independent `ui.screening.*` operations with local alias blinding, conflict state and separate adjudication; aliases remain explicitly unauthenticated.
+- Plot configuration supports descriptive histogram and categorical bar views with title/axis/unit configuration, accessible tables, SVG output and headless-safe PNG bytes. Code execution remains explicitly disabled with a typed sandbox integration contract.
+- Global literal search includes source-linked evidence and draft claims in addition to sources, annotations, protocol, manuscript and notes.
+- UX-048 screenshot harness produced 60 real offscreen PNGs under `workstreams/v2/ui/screenshots/` across five major screens, three themes, narrow/desktop sizes and 100%/200% scale. Total observed evidence size: 719,127 bytes for 62 files including manifests.
+- UX-049 asset manifest records SHA-256, title, description, GPL-3.0-only license and original provenance for both shipped SVG assets; validation rejects scripts and external hrefs.
+- Focused validation for this slice: Ruff clean, strict Mypy clean, and 18 visualization/search/advanced-widget/demo/asset tests passed.

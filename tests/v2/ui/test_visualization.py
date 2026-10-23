@@ -15,6 +15,8 @@ from PyQt6.QtWidgets import QApplication
 from researchweave.ui import build_ui_facade, build_ui_shell
 from researchweave.ui.contracts import UIError
 from researchweave.ui.visualization import (
+    categorical_bar,
+    chart_png,
     chart_svg,
     histogram,
     nice_number,
@@ -67,6 +69,22 @@ def test_svg_contains_accessible_labels_and_escapes(tmp_path: Path) -> None:
         chart_svg(spec, width=100)
 
 
+def test_categorical_bar_and_png_export() -> None:
+    spec = categorical_bar(
+        ["A", "B", "A", None, "C", "B", "A"],
+        column="group",
+        source_label="Synthetic categorical fixture",
+    )
+    assert spec.kind == "bar"
+    assert spec.n == 6
+    assert spec.missing_n == 1
+    assert [item.label for item in spec.bins] == ["A", "B", "C"]
+    assert [item.count for item in spec.bins] == [3, 2, 1]
+    png = chart_png(spec, width=800, height=400)
+    assert png.startswith(b"\x89PNG\r\n\x1a\n")
+    assert len(png) > 1000
+
+
 def test_chart_facade_and_qt_render(tmp_path: Path) -> None:
     app = QApplication.instance()
     if not isinstance(app, QApplication):
@@ -86,6 +104,20 @@ def test_chart_facade_and_qt_render(tmp_path: Path) -> None:
     })
     assert svg["status"] == "ok", svg
     assert svg["data"]["format"] == "image/svg+xml"
+    bar = facade.execute("ui.chart.bar", {
+        "project_id": pid, "dataset_id": dataset_id, "column": "points",
+        "title": "Observed synthetic groups", "x_label": "Value", "y_label": "Count",
+    })
+    assert bar["status"] == "ok", bar
+    assert bar["data"]["chart"]["kind"] == "bar"
+    assert bar["data"]["chart"]["title"] == "Observed synthetic groups"
+    png = facade.execute("ui.chart.png", {
+        "project_id": pid, "dataset_id": dataset_id, "column": "points",
+        "plot_type": "histogram", "width": 800, "height": 400,
+    })
+    assert png["status"] == "ok", png
+    assert png["data"]["format"] == "image/png"
+    assert bytes.fromhex(png["data"]["png_hex"]).startswith(b"\x89PNG")
     window = build_ui_shell(fake_services=facade)
     window.open_project(pid)
     window.navigate("Statistics")
@@ -95,4 +127,12 @@ def test_chart_facade_and_qt_render(tmp_path: Path) -> None:
     window.histogram_chart.resize(960, 360)
     app.processEvents()
     assert window.histogram_chart.grab().width() >= 280
+    window.plot_type.setCurrentText("bar")
+    window.plot_title.setText("Visible synthetic bar chart")
+    window.render_configured_plot()
+    assert window.histogram_chart.spec is not None
+    assert window.histogram_chart.spec.kind == "bar"
+    assert window.histogram_chart.spec.title == "Visible synthetic bar chart"
+    window.preview_plot_exports()
+    assert "PNG SHA-256" in window.stats_result.toPlainText()
     window.close()

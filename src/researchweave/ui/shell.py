@@ -317,7 +317,8 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.global_query)
         self.global_kind = QComboBox()
         self.global_kind.addItems([
-            "All", "source", "annotation", "protocol", "manuscript", "notebook"
+            "All", "source", "evidence", "annotation", "claim",
+            "protocol", "manuscript", "notebook"
         ])
         named(self.global_kind, "Global search category filter")
         layout.addWidget(self.global_kind)
@@ -605,6 +606,25 @@ class ResearchWindow(QMainWindow):
         named(self.variable_picker, "Numeric column for descriptive summary")
         layout.addWidget(self.variable_picker)
         layout.addWidget(button("Compute descriptive summary", self.run_summary, primary=True))
+        plot_form = QFormLayout()
+        self.plot_type = QComboBox()
+        self.plot_type.addItems(["histogram", "bar"])
+        self.plot_title = QLineEdit()
+        self.plot_x_label = QLineEdit()
+        self.plot_y_label = QLineEdit()
+        self.plot_unit = QLineEdit()
+        for label, widget in (
+            ("Plot type", self.plot_type), ("Title", self.plot_title),
+            ("X-axis label", self.plot_x_label), ("Y-axis label", self.plot_y_label),
+            ("Units", self.plot_unit),
+        ):
+            named(widget, f"Plot {label.lower()}")
+            plot_form.addRow(label, widget)
+        layout.addLayout(plot_form)
+        plot_actions = QHBoxLayout()
+        plot_actions.addWidget(button("Render configured plot", self.render_configured_plot))
+        plot_actions.addWidget(button("Preview SVG + PNG receipts", self.preview_plot_exports))
+        layout.addLayout(plot_actions)
         self.histogram_chart = HistogramWidget()
         named(self.histogram_chart, "Observed value histogram")
         layout.addWidget(self.histogram_chart)
@@ -746,6 +766,13 @@ class ResearchWindow(QMainWindow):
         named(self.notebook_editor, "Editable research notes")
         layout.addWidget(self.notebook_editor)
         layout.addWidget(button("Save notes · Ctrl+S", lambda: self.save_text("notebook")))
+        layout.addWidget(button("Inspect code execution safety", self.refresh_code_execution))
+        self.code_execution_status = QLabel(
+            "Code execution is disabled until an isolated execution host is integrated."
+        )
+        self.code_execution_status.setWordWrap(True)
+        named(self.code_execution_status, "Code execution safety status")
+        layout.addWidget(self.code_execution_status)
 
         layout = self._page(
             "Publishing",
@@ -1127,6 +1154,8 @@ class ResearchWindow(QMainWindow):
             self.refresh_evidence()
         elif name == "References":
             self.refresh_references()
+        elif name == "Notebook":
+            self.refresh_code_execution()
         elif name == "Analysis Results":
             self.refresh_analysis_results()
         elif name == "Agent":
@@ -1302,6 +1331,9 @@ class ResearchWindow(QMainWindow):
                 f"Verified: {source['verified']} · hash: {source['content_hash']}"
             )
             self.navigate("Reader")
+        elif hit["kind"] in ("evidence", "claim"):
+            self.navigate("Evidence")
+            self.refresh_evidence()
         elif hit["kind"] == "protocol":
             self.navigate("Protocol")
         elif hit["kind"] == "notebook":
@@ -2245,6 +2277,92 @@ class ResearchWindow(QMainWindow):
                         for item in data["accessibility_data"]
                     )
                 )
+
+    def _configured_plot_args(self) -> dict[str, Any]:
+        return {
+            "dataset_id": self.current_dataset_id,
+            "column": self.variable_picker.currentText(),
+            "plot_type": self.plot_type.currentText(),
+            "unit": self.plot_unit.text(),
+            "title": self.plot_title.text(),
+            "x_label": self.plot_x_label.text(),
+            "y_label": self.plot_y_label.text(),
+            "bins": 10,
+        }
+
+    def render_configured_plot(self) -> None:
+        if not self.current_dataset_id or not self.variable_picker.currentText():
+            self._set_status("Choose a dataset and variable before plotting.")
+            return
+        operation = (
+            "ui.chart.bar" if self.plot_type.currentText() == "bar"
+            else "ui.chart.histogram"
+        )
+        args = self._configured_plot_args()
+        args.pop("plot_type", None)
+        response = self._call(operation, **args)
+        if response is None:
+            return
+        data = response["chart"]
+        spec = ChartSpec(
+            title=data["title"],
+            column=data["column"],
+            kind=data["kind"],
+            x_label=data["x_label"],
+            y_label=data["y_label"],
+            bins=tuple(Bin(**item) for item in data["bins"]),
+            n=data["n"],
+            missing_n=data["missing_n"],
+            min_value=data["min_value"],
+            max_value=data["max_value"],
+            mean=data["mean"],
+            source_label=data["source_label"],
+            description=data["description"],
+        )
+        self.histogram_chart.set_chart(spec)
+        self.stats_result.setPlainText(
+            f"{spec.title}\nType: {spec.kind}\nN: {spec.n}\n"
+            f"Missing: {spec.missing_n}\nX label: {spec.x_label}\n"
+            f"Y label: {spec.y_label}\nSource: {spec.source_label}\n\n"
+            "Accessible table:\n"
+            + "\n".join(
+                f"{item['interval']}: {item['count']} observations"
+                for item in data["accessibility_data"]
+            )
+        )
+
+    def preview_plot_exports(self) -> None:
+        if not self.current_dataset_id or not self.variable_picker.currentText():
+            self._set_status("Choose a dataset and variable before exporting a plot.")
+            return
+        args = self._configured_plot_args()
+        svg = self._call("ui.chart.svg", **args, width=900, height=500)
+        png = self._call("ui.chart.png", **args, width=900, height=500)
+        if svg is None or png is None:
+            return
+        self.stats_result.appendPlainText(
+            "\n\nExport receipts (preview only):\n"
+            f"SVG SHA-256: {svg['sha256']}\n"
+            f"PNG SHA-256: {png['sha256']} · {png['bytes']} bytes\n"
+            "Both outputs represent the same descriptive configuration; "
+            "no inferential result is added."
+        )
+
+    def refresh_code_execution(self) -> None:
+        if not self.project_id:
+            self.code_execution_status.setText(
+                "Open a project to inspect the code-execution safety contract."
+            )
+            return
+        response = self._call("ui.code.execution.status")
+        if response is None:
+            return
+        requirements = response["required_integration"]
+        self.code_execution_status.setText(
+            f"Enabled: {response['enabled']} · Python: {response['python']} · "
+            f"R: {response['r']}\n{response['reason']}\n"
+            f"Required integration: {requirements}"
+        )
 
     def load_variable_metadata(
         self, current: QListWidgetItem | None, previous: QListWidgetItem | None
