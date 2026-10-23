@@ -96,14 +96,15 @@ def test_alpha_manual_covariance(sample):
 
 
 def test_facade_authorization_and_restart(sample, tmp_path):
-    facade = build_analysis_facade(tmp_path / "database")
+    facade = build_analysis_facade(tmp_path / "database", import_root=tmp_path)
     source = tmp_path / "source.csv"
     source.write_text("x,y\n1,2\n3,4\n", encoding="utf-8")
     req = {"filename": "source.csv"}
-    denied = facade.execute("dataset.import", req, {"trusted_import_root": tmp_path})
+    denied = facade.execute("dataset.import", req, {})
     assert denied["error"]["code"] == "PERMISSION_DENIED"
+    capability = facade.issue_authorization("dataset.import", req)
     allowed = facade.execute(
-        "dataset.import", req, {"host_authorized": True, "trusted_import_root": tmp_path}
+        "dataset.import", req, {"host_capability": capability}
     )
     assert allowed["status"] == "ok"
     data = allowed["data"]
@@ -114,12 +115,30 @@ def test_facade_authorization_and_restart(sample, tmp_path):
         {},
     )
     assert describe_result["data"]["mean"] == 2
-    malicious = reopened.execute(
+    malicious_req = {"filename": "../outside.csv"}
+    malicious_cap = facade.issue_authorization("dataset.import", malicious_req)
+    malicious = facade.execute(
         "dataset.import",
-        {"filename": "../outside.csv"},
-        {"host_authorized": True, "trusted_import_root": tmp_path},
+        malicious_req,
+        {"host_capability": malicious_cap},
     )
     assert malicious["error"]["code"] == "PERMISSION_DENIED"
+
+
+def test_facade_capability_exact_binding_and_replay(tmp_path):
+    source = tmp_path / "study.csv"
+    source.write_text("x\n1\n", encoding="utf-8")
+    facade = build_analysis_facade(tmp_path / "db", import_root=tmp_path)
+    arguments = {"filename": "study.csv"}
+    capability = facade.issue_authorization("dataset.import", arguments)
+    changed = facade.execute(
+        "dataset.import", {"filename": "other.csv"}, {"host_capability": capability}
+    )
+    assert changed["error"]["code"] == "PERMISSION_DENIED"
+    first = facade.execute("dataset.import", arguments, {"host_capability": capability})
+    assert first["status"] == "ok"
+    replay = facade.execute("dataset.import", arguments, {"host_capability": capability})
+    assert replay["error"]["code"] == "PERMISSION_DENIED"
 
 
 def test_regression_oracle_and_singular_design(tmp_path):

@@ -6,6 +6,7 @@ from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
 
+from .authorization import CapabilityIssuer, HostCapability, HostPaths
 from .data_ops import case_selection, frequency_weighted_mean, missingness, recode_missing
 from .datasets import DatasetStore, import_csv, import_table, page, set_variable
 from .diagnostics import ols_diagnostics, variance_inflation
@@ -40,8 +41,30 @@ from .transformations import transform
 
 
 class AnalysisFacade:
-    def __init__(self, directory: Path):
+    def __init__(self, directory: Path, *, host_paths: HostPaths | None = None):
         self.store = DatasetStore(directory)
+        self.host_paths = host_paths or HostPaths()
+        self.authorizations = CapabilityIssuer(directory)
+
+    def issue_authorization(
+        self,
+        operation: str,
+        arguments: Mapping[str, Any],
+        *,
+        ttl_seconds: int = 60,
+    ) -> HostCapability:
+        """Trusted-host API used only after the user approves an exact preview."""
+
+        known = {entry["operation"]: entry for entry in self.capability_manifest()}
+        require(operation in known, "Unknown operation", "NOT_FOUND")
+        effect = str(known[operation]["effect"])
+        require(effect != "read", "Read-only operations do not require approval")
+        return self.authorizations.issue(
+            operation,
+            arguments,
+            effect=effect,
+            ttl_seconds=ttl_seconds,
+        )
 
     def capability_manifest(self) -> list[Mapping[str, Any]]:
         names = {
@@ -179,10 +202,11 @@ class AnalysisFacade:
         require(operation in known, "Unknown operation", "NOT_FOUND")
         effect = known[operation]["effect"]
         if effect != "read":
-            require(
-                context.get("host_authorized") is True,
-                "Host authorization required for persistent changes",
-                "PERMISSION_DENIED",
+            self.authorizations.verify_and_consume(
+                context.get("host_capability"),
+                operation,
+                arguments,
+                effect=str(effect),
             )
         if operation == "statistics.meta":
             data = pooled_effects(
@@ -226,21 +250,12 @@ class AnalysisFacade:
             data = run_script(
                 str(arguments["source"]),
                 language="python" if operation.endswith("python") else "r",
-                approved=context.get("host_authorized") is True,
+                approved=True,
                 timeout_seconds=int(arguments.get("timeout_seconds", 10)),
+                directory=self.host_paths.execution_directory(),
             )
         elif operation == "dataset.import":
-            # Trusted host must inject a fixed import root. Do not accept an arbitrary AI path.
-            allowed = context.get("trusted_import_root")
-            require(
-                isinstance(allowed, Path), "Trusted import root not supplied", "PERMISSION_DENIED"
-            )
-            path = (allowed / str(arguments["filename"])).resolve()
-            require(
-                path.is_relative_to(allowed.resolve()) and path.is_file(),
-                "Import must be under host-approved root",
-                "PERMISSION_DENIED",
-            )
+            path = self.host_paths.import_file(str(arguments["filename"]))
             if path.suffix.lower() in (".csv", ".tsv"):
                 obj = import_csv(path, **dict(arguments.get("options", {})))
             else:
@@ -465,18 +480,7 @@ class AnalysisFacade:
                     rotate=str(arguments.get("rotate", "varimax")),
                 )
             elif operation == "plot.render":
-                output_root = context.get("trusted_export_root")
-                require(
-                    isinstance(output_root, Path),
-                    "Approved export root required",
-                    "PERMISSION_DENIED",
-                )
-                output_path = (output_root / str(arguments["filename"])).resolve()
-                require(
-                    output_path.is_relative_to(output_root.resolve()),
-                    "Export must be under approved root",
-                    "PERMISSION_DENIED",
-                )
+                output_path = self.host_paths.export_file(str(arguments["filename"]))
                 data = render_plot(
                     obj,
                     x=str(arguments["x"]),
@@ -505,5 +509,14 @@ class AnalysisFacade:
         }
 
 
-def build_analysis_facade(directory: Path) -> AnalysisFacade:
-    return AnalysisFacade(directory)
+def build_analysis_facade(
+    directory: Path,
+    *,
+    import_root: Path | None = None,
+    export_root: Path | None = None,
+    execution_root: Path | None = None,
+) -> AnalysisFacade:
+    return AnalysisFacade(
+        directory,
+        host_paths=HostPaths(import_root, export_root, execution_root),
+    )

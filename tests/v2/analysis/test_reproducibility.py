@@ -52,11 +52,12 @@ def test_analysis_plan_order_cycle_and_json_roundtrip():
 def test_reproducibility_receipt_save_reload_and_tamper(tmp_path: Path):
     file = tmp_path / "source.csv"
     file.write_text("score\n2\n4\n6\n", encoding="utf-8")
-    facade = build_analysis_facade(tmp_path / "store")
+    facade = build_analysis_facade(tmp_path / "store", import_root=tmp_path)
+    import_args = {"filename": file.name}
     imported = facade.execute(
         "dataset.import",
-        {"filename": file.name},
-        {"host_authorized": True, "trusted_import_root": tmp_path},
+        import_args,
+        {"host_capability": facade.issue_authorization("dataset.import", import_args)},
     )
     assert imported["status"] == "ok"
     parameters = {

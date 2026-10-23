@@ -35,11 +35,12 @@ def test_new_facade_methods_end_to_end(tmp_path: Path):
     path.write_text(
         "duration,event,group\n1,1,A\n2,0,A\n3,1,A\n4,1,B\n5,0,B\n6,1,B\n", encoding="utf-8"
     )
-    facade = build_analysis_facade(tmp_path / "store")
+    facade = build_analysis_facade(tmp_path / "store", import_root=tmp_path)
+    import_args = {"filename": path.name}
     imported = facade.execute(
         "dataset.import",
-        {"filename": path.name},
-        {"host_authorized": True, "trusted_import_root": tmp_path},
+        import_args,
+        {"host_capability": facade.issue_authorization("dataset.import", import_args)},
     )
     assert imported["status"] == "ok", imported
     identity = {
