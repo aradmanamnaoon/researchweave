@@ -89,7 +89,10 @@ def _plot_bar(dataset: Dataset, x: str, y: str | None, ax: Any) -> dict[str, Any
         values = [float(len(groups[label])) for label in labels]
         require(bool(labels), "No nonmissing bar categories")
         ax.bar(labels, values)
-        return {"labels": labels, "values": values, "summary": "count"}
+        return {
+            "labels": labels, "values": values,
+            "summary": "count", "n_complete": int(sum(values)),
+        }
     require(y in dataset.columns and y != x, "Unknown bar outcome")
     for row in dataset.records:
         if row[x] is None or row[y] is None:
@@ -100,7 +103,13 @@ def _plot_bar(dataset: Dataset, x: str, y: str | None, ax: Any) -> dict[str, Any
     means = [float(np.mean(groups[label])) for label in labels]
     sem = [float(stats.sem(groups[label])) if len(groups[label]) >= 2 else 0.0 for label in labels]
     ax.bar(labels, means, yerr=sem, capsize=4)
-    return {"labels": labels, "values": means, "standard_error": sem, "summary": "mean"}
+    return {
+        "labels": labels,
+        "values": means,
+        "standard_error": sem,
+        "summary": "mean",
+        "n_complete": sum(len(group) for group in groups.values()),
+    }
 
 
 def _plot_correlation(dataset: Dataset, columns: list[str], ax: Any) -> dict[str, Any]:
@@ -237,7 +246,11 @@ def _plot_survival(dataset: Dataset, x: str, options: dict[str, Any], ax: Any) -
         times = [0.0, *[float(point["time"]) for point in result["timeline"]]]
         survival = [1.0, *[float(point["survival"]) for point in result["timeline"]]]
         ax.step(times, survival, where="post", label=label)
-        plot_data[label] = {"time": times, "survival": survival}
+        plot_data[label] = {
+            "time": times,
+            "survival": survival,
+            "n_subjects": int(result["n_used"]),
+        }
     if len(curves) > 1:
         ax.legend()
     ax.set_ylim(0, 1.05)
@@ -348,7 +361,7 @@ def render_plot(
                 }
         elif kind == "bar":
             plot_data = _plot_bar(dataset, x, y, ax)
-            n_used = sum(row[x] is not None for row in dataset.records)
+            n_used = int(plot_data["n_complete"])
         elif kind == "correlation_heatmap":
             columns = list(options.get("columns", []))
             plot_data = _plot_correlation(dataset, columns, ax)
@@ -366,14 +379,25 @@ def render_plot(
             n_used = len(plot_data["estimate"])
         else:
             plot_data = _plot_survival(dataset, x, options, ax)
-            n_used = sum(len(curve["time"]) - 1 for curve in plot_data.values())
+            n_used = sum(int(curve["n_subjects"]) for curve in plot_data.values())
         ax.set_xlabel(x_label or _variable_label(dataset, x))
         default_y = "Frequency" if kind == "histogram" else y or "Value"
         if kind == "survival":
             default_y = "Survival probability"
         elif kind == "funnel":
             default_y = str(options.get("se_column", "Standard error"))
-        ax.set_ylabel(y_label or (default_y if y is None else _variable_label(dataset, y)))
+        elif kind == "residual":
+            default_y = "Residual"
+        elif kind == "qq":
+            default_y = "Observed quantile"
+        elif kind == "bar" and y is None:
+            default_y = "Count"
+        ax.set_ylabel(
+            y_label or (
+                default_y if y is None or kind in {"residual", "qq"}
+                else _variable_label(dataset, y)
+            )
+        )
         ax.set_title(title)
         ax.grid(alpha=0.2)
         fig.savefig(output, metadata={"Creator": "ResearchWeave Scientific Analysis"})
