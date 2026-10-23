@@ -47,6 +47,32 @@ ASSESSMENT_DOMAINS: dict[str, tuple[str, ...]] = {
     ),
 }
 JUDGMENTS = {"low", "some_concerns", "high", "unclear"}
+BIAS_TEMPLATES: dict[str, dict[str, Any]] = {
+    "randomized-v1": {
+        "label": "Randomized study appraisal",
+        "methodology": "general randomized-study domains",
+        "version": 1,
+        "official_instrument": False,
+    },
+    "observational-v1": {
+        "label": "Observational study appraisal",
+        "methodology": "general observational-study domains",
+        "version": 1,
+        "official_instrument": False,
+    },
+    "rob2-compatible-v1": {
+        "label": "RoB 2 compatible workflow",
+        "methodology": "Cochrane RoB 2 domain structure compatibility",
+        "version": 1,
+        "official_instrument": False,
+    },
+    "robins-i-compatible-v1": {
+        "label": "ROBINS-I compatible workflow",
+        "methodology": "ROBINS-I domain structure compatibility",
+        "version": 1,
+        "official_instrument": False,
+    },
+}
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS synthesis_appraisals (
@@ -111,6 +137,17 @@ class SynthesisService:
             "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
         ).fetchone() is not None
 
+    @staticmethod
+    def bias_templates() -> list[dict[str, Any]]:
+        """Describe supported appraisal structures without claiming official certification."""
+        return [
+            {"id": template, **BIAS_TEMPLATES[template],
+             "domains": list(ASSESSMENT_DOMAINS[template]),
+             "judgments": sorted(JUDGMENTS),
+             "definitive_judgments_require_verified_anchor": True}
+            for template in sorted(ASSESSMENT_DOMAINS)
+        ]
+
     def assess_bias(
         self,
         record_id: str,
@@ -142,6 +179,8 @@ class SynthesisService:
             anchor_id = answer.get("anchor_id")
             require(anchor_id is None or isinstance(anchor_id, str),
                     f"Invalid anchor for {domain}")
+            require(answer.get("judgment") == "unclear" or bool(anchor_id),
+                    f"Definitive judgment for {domain} requires a verified source anchor")
             if anchor_id:
                 anchor = self.store.conn.execute(
                     "SELECT a.verified,s.deleted FROM anchors a "
@@ -194,6 +233,7 @@ class SynthesisService:
             "overall": "requires_manual_interpretation",
             "medical_decision_support": False,
             "framework_certification": "compatible_workflow_not_official_instrument",
+            "template_metadata": BIAS_TEMPLATES[template],
         }
 
     def appraisals(self, record_id: str) -> list[dict[str, Any]]:

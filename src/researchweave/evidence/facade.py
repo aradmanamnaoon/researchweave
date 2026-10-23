@@ -289,6 +289,8 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
                                           "assessor", "responses"),
                            "Record evidence-backed manual bias appraisal"),
     "review.bias_history": ("read", ("project_id", "record_id"), "List human appraisal history"),
+    "review.bias_templates": (
+        "read", ("project_id",), "List versioned risk-of-bias appraisal structures"),
     "review.finding_add": ("local-write", ("project_id", "finding"),
                            "Register anchored study finding"),
     "review.contradictions": ("read", ("project_id", "question"),
@@ -1208,6 +1210,8 @@ class EvidenceFacade:
                     _value(args, "responses", dict), expected_revision=expected)
             if operation == "review.bias_history":
                 return {"records": synthesis.appraisals(_value(args, "record_id", str))}
+            if operation == "review.bias_templates":
+                return {"templates": synthesis.bias_templates()}
             if operation == "review.finding_add":
                 return synthesis.add_finding(Finding(**_value(args, "finding", dict)),
                                              expected_revision=expected)
