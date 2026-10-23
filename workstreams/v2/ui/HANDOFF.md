@@ -15,3 +15,5 @@ Import: from researchweave.ui import build_ui_shell, build_ui_facade. For deskto
 Source files: __init__.py, contracts.py, design.py, facade.py, jobs.py, models.py, shell.py, store.py. See ledger/test results/limitations for evidence and gaps. Local commit SHA recorded by git log on this branch.
 
 Follow-on modules: demo.py and accessibility.py. Second milestone: 27 offline operations, 20 tests and 74% measured coverage. Executable prototype capture is documented in docs/v2/ui/USER_GUIDE.md; screenshot and manifest are labeled synthetic design prototypes. All authored source is within the exclusive tracked path.
+
+Milestone 3 adds research_guides.py, snapshots.py and search.py plus Qt Protocol/Guidance/Backups/Search views. Re-run capabilities.v1.json and CODE_METRICS.json generation before final commit. No changes made to the original main worktree or other worker branches. Remaining incomplete integrations are enumerated in NEXT_ACTION.md and LIMITATIONS.md.

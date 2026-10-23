@@ -20,3 +20,15 @@ Environment: Windows, CPython 3.12.9, PyQt6 6.10.2, uv.
 - Automated theme/scale checks passed for light/dark/contrast and 100/150/200% application text scales.
 - Combined measured branch+line coverage: 74%, below requested >=80% threshold.
 - Native real-display 4K, Linux/macOS and screen-reader checks still pending.
+
+## Third observed milestone
+
+- Windows 11 / Python 3.12.9 / PyQt6 6.10.2, QT_QPA_PLATFORM=offscreen.
+- Ruff: all checks passed; Mypy: no issues in 13 production files.
+- pytest tests/v2/ui with branch and line coverage: 35 passed in 2.51s; 75% overall package coverage.
+- Backup creation/denial/reopen/restore and malformed ZIP tests passed.
+- Protocol-required-field, human approval caveat, draft persistence and unsaved close tests passed.
+- Unicode literal global search and UI destination navigation tests passed.
+- Manual NVDA and native multi-OS render tests unperformed; no claim of production UX sign-off.
+
+Repository-wide verification after milestone 3: QT_QPA_PLATFORM=offscreen uv run pytest -q passed, 39 tests in 2.33s. Ruff and Mypy passed. UI-only suite reported 35 tests and 75% combined coverage immediately before repository-wide run; exact coverage for all 39 tests is to be measured in the final gate.

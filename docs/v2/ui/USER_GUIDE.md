@@ -14,6 +14,10 @@ The Agent screen demonstrates proposed-action review and denial only; there is n
 
 Reproduce a test capture from the UI worktree with:
 
+Protocol is an editable research-design draft with four methodology templates; incomplete required fields trigger validation messages. Guidance explains basic research concepts and limitations in context. Global Search searches sources, coded excerpts, manuscript, notes and protocol only within the current project. It is literal text matching and does not establish citation credibility.
+
+Backups provides a local project snapshot plan, a human confirmation before ZIP creation, a list of integrity-verified snapshots, and a separate human confirmation before restoring to a new project ID. Existing projects and backup archives are retained, and the archive contains no credentials. A backup is a project data snapshot, not a guaranteed copy of future large document attachments.
+
     $env:QT_QPA_PLATFORM='offscreen'
     uv run python -m researchweave.ui.demo --output ./prototype-artifacts --theme light --width 1280 --height 720
 

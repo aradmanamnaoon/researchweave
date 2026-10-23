@@ -133,6 +133,7 @@ class Project:
     datasets: list[Dataset] = field(default_factory=list)
     manuscript: str = ""
     notebook: str = ""
+    protocol: dict[str, Any] = field(default_factory=dict)
     activity: list[Activity] = field(default_factory=list)
     tutorial_steps: list[str] = field(default_factory=list)
 

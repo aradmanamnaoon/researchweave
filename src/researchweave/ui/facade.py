@@ -26,6 +26,16 @@ from .contracts import (
     new_id,
     utc_now,
 )
+from .research_guides import (
+    blank_protocol,
+    get_template,
+    list_guidance,
+    list_templates,
+    protocol_completion,
+    validate_protocol,
+)
+from .search import search_project
+from .snapshots import SnapshotManager
 from .store import MAX_ROWS, MAX_SOURCE_CHARS, PreferenceStore, ProjectStore
 
 MAX_TITLE = 180
@@ -106,20 +116,30 @@ class UIFacade:
         *,
         export_root: Path | None = None,
         export_authorizer: Callable[[str], bool] | None = None,
+        backup_authorizer: Callable[[str, str], bool] | None = None,
     ) -> None:
         self.store = ProjectStore(root)
         self.settings = PreferenceStore(root)
         self.export_root = (export_root or (root / "exports")).resolve()
         self.export_authorizer = export_authorizer
+        self.backup_authorizer = backup_authorizer
+        self.snapshots = SnapshotManager(self.store)
         self._recent: dict[str, dict[str, Any]] = {}
         self._operations: dict[str, tuple[str, Effect]] = {
             "ui.project.list": ("Show saved projects", Effect.READ),
             "ui.project.create": ("Create a local research project", Effect.WRITE),
             "ui.project.open": ("Reopen a saved project", Effect.READ),
             "ui.project.update": ("Update research question", Effect.WRITE),
+            "ui.templates.list": ("List editable study designs", Effect.READ),
+            "ui.guidance.search": ("Find research method explanations", Effect.READ),
+            "ui.protocol.read": ("Read project research protocol", Effect.READ),
+            "ui.protocol.start": ("Create an editable protocol draft", Effect.WRITE),
+            "ui.protocol.update": ("Revise draft protocol fields", Effect.WRITE),
+            "ui.protocol.complete": ("Validate protocol for human review", Effect.READ),
             "ui.source.add": ("Import a local text source", Effect.WRITE),
             "ui.source.search": ("Search project library", Effect.READ),
             "ui.source.get": ("Read a local source", Effect.READ),
+            "ui.search.global": ("Search all local research objects", Effect.READ),
             "ui.review.vote": ("Save screening decision", Effect.WRITE),
             "ui.review.counts": ("Compute screening counts", Effect.READ),
             "ui.review.queue": ("List source screening decisions and reasons", Effect.READ),
@@ -138,6 +158,11 @@ class UIFacade:
             "ui.preferences.update": ("Save validated preferences", Effect.WRITE),
             "ui.export.preview": ("Preview an offline export", Effect.READ),
             "ui.export.write": ("Write approved export under host root", Effect.WRITE),
+            "ui.backup.plan": ("Preview project snapshot", Effect.READ),
+            "ui.backup.list": ("List local integrity-checked snapshots", Effect.READ),
+            "ui.backup.inspect": ("Verify archive before restoring", Effect.READ),
+            "ui.backup.create": ("Create approved immutable backup", Effect.WRITE),
+            "ui.backup.restore": ("Restore approved backup to new project", Effect.WRITE),
             "ui.agent.propose": ("Preview untrusted agent proposal", Effect.READ),
             "ui.agent.deny": ("Reject untrusted proposed action", Effect.READ),
         }
@@ -147,7 +172,8 @@ class UIFacade:
             Capability(name, summary, effect,
                        {"project_id": {"type": "string"},
                         "expected_revision": {"type": "integer", "minimum": 0}},
-                       approval=name == "ui.export.write").as_dict()
+                       approval=name in ("ui.export.write", "ui.backup.create",
+                                         "ui.backup.restore")).as_dict()
             for name, (summary, effect) in self._operations.items()
         ]
 
@@ -174,7 +200,9 @@ class UIFacade:
             "status": "ok",
             "data": {"effect": effect.value, "arguments": self._redacted(arguments),
                      "preview_only": True,
-                     "human_confirmation": operation == "ui.export.write"},
+                     "human_confirmation": operation in (
+                         "ui.export.write", "ui.backup.create", "ui.backup.restore"
+                     )},
             "artifacts": [],
             "warnings": [],
             "error": None,
@@ -299,6 +327,64 @@ class UIFacade:
 
         return self._mutate(args, "ui.project.update", update)
 
+    def _do_ui_templates_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        approach = _string(args, "study_type", 30, required=False)
+        return {"templates": list_templates(study_type=approach or None)}
+
+    def _do_ui_guidance_search(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        query = _string(args, "query", 200, required=False)
+        return {"guidance": list_guidance(query)}
+
+    def _do_ui_protocol_read(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {"protocol": project.protocol, "revision": project.revision}
+
+    def _do_ui_protocol_start(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        template_id = _string(args, "template_id", 80)
+        record = blank_protocol(template_id)
+
+        def update(project: Project) -> dict[str, Any]:
+            if project.protocol:
+                raise UIError("CONFLICT", "This project already has a protocol.",
+                              "Edit the existing protocol or create a separate project.")
+            project.protocol = record
+            return {"protocol": record}
+
+        return self._mutate(args, "ui.protocol.start", update)
+
+    def _do_ui_protocol_update(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        values = args.get("values", {})
+        if not isinstance(values, dict):
+            raise UIError("INVALID_INPUT", "Protocol values must be a field map.",
+                          "Use the available protocol editor.")
+
+        def update(project: Project) -> dict[str, Any]:
+            if not project.protocol:
+                raise UIError("NOT_FOUND", "No protocol is attached to this project.",
+                              "Start from a research design template.")
+            template_id = str(project.protocol.get("template_id", ""))
+            merged = dict(project.protocol.get("values", {}))
+            merged.update(values)
+            validated = validate_protocol(template_id, merged, allow_incomplete=True)
+            project.protocol["values"] = validated
+            project.protocol["status"] = "draft"
+            progress = protocol_completion(template_id, validated)
+            return {"protocol": project.protocol, "completion": progress}
+
+        return self._mutate(args, "ui.protocol.update", update)
+
+    def _do_ui_protocol_complete(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        if not project.protocol:
+            raise UIError("NOT_FOUND", "No protocol is attached to this project.",
+                          "Start with a study design template.")
+        template_id = str(project.protocol.get("template_id", ""))
+        values = dict(project.protocol.get("values", {}))
+        validated = validate_protocol(template_id, values)
+        return {"template": get_template(template_id).title,
+                "completion": protocol_completion(template_id, validated),
+                "note": "Ready for human methodology review; never ethics-approved automatically."}
+
     def _do_ui_source_add(self, args: Mapping[str, Any]) -> dict[str, Any]:
         title = _string(args, "title", MAX_TITLE)
         text = _string(args, "text", MAX_SOURCE_CHARS)
@@ -333,6 +419,16 @@ class UIFacade:
     def _do_ui_source_get(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
         return {"source": asdict(_source(project, _string(args, "source_id", 36)))}
+
+    def _do_ui_search_global(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        query = _string(args, "query", 200)
+        limit = _integer(args, "limit", minimum=1, maximum=500, default=50)
+        offset = _integer(args, "offset", maximum=100_000)
+        kind = _string(args, "kind", 30, required=False)
+        kinds = (kind,) if kind else None
+        return search_project(project, query, limit=limit, offset=offset,
+                              categories=kinds)
 
     def _do_ui_review_vote(self, args: Mapping[str, Any]) -> dict[str, Any]:
         source_id = _string(args, "source_id", 36)
@@ -616,6 +712,38 @@ class UIFacade:
                 "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
                 "bytes": len(content.encode("utf-8"))}
 
+    def _do_ui_backup_plan(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return self.snapshots.plan(_string(args, "project_id", 36))
+
+    def _do_ui_backup_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return {"backups": self.snapshots.list()}
+
+    def _do_ui_backup_inspect(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return self.snapshots.inspect(_string(args, "backup_id", 100))
+
+    def _do_ui_backup_create(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project_id = _string(args, "project_id", 36)
+        revision = _integer(args, "expected_revision", minimum=1)
+        if self.backup_authorizer is None or not self.backup_authorizer(
+            "create", project_id
+        ):
+            raise UIError("NEEDS_APPROVAL", "Backup creation needs human approval.",
+                          "Review the snapshot plan and approve using the desktop.")
+        return self.snapshots.create(project_id, expected_revision=revision)
+
+    def _do_ui_backup_restore(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        backup_id = _string(args, "backup_id", 100)
+        expected_sha256 = _string(args, "expected_sha256", 64)
+        if not re.fullmatch(r"[a-f0-9]{64}", expected_sha256):
+            raise UIError("INVALID_INPUT", "Backup digest is invalid.",
+                          "Inspect the selected backup and retry.")
+        if self.backup_authorizer is None or not self.backup_authorizer(
+            "restore", backup_id
+        ):
+            raise UIError("NEEDS_APPROVAL", "Backup restoration needs human approval.",
+                          "Review the snapshot and approve the recovery action.")
+        return self.snapshots.restore(backup_id, expected_sha256=expected_sha256)
+
     def _do_ui_agent_propose(self, args: Mapping[str, Any]) -> dict[str, Any]:
         summary = _string(args, "summary", 2000)
         risk = _string(args, "risk", 30)
@@ -633,10 +761,12 @@ class UIFacade:
 
 
 def build_ui_facade(root: Path | str | None = None, *,
-                    export_authorizer: Callable[[str], bool] | None = None) -> UIFacade:
+                    export_authorizer: Callable[[str], bool] | None = None,
+                    backup_authorizer: Callable[[str, str], bool] | None = None) -> UIFacade:
     """Construct a real local command host; caller controls all filesystem locations."""
     from platformdirs import user_data_dir
 
     destination = Path(root) if root is not None else Path(user_data_dir(
         "ResearchWeave", "ResearchWeave")) / "ui-v2"
-    return UIFacade(destination, export_authorizer=export_authorizer)
+    return UIFacade(destination, export_authorizer=export_authorizer,
+                    backup_authorizer=backup_authorizer)

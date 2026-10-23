@@ -22,4 +22,14 @@
 - Local measured source: 10 production modules, 2,158 nonblank noncomment physical lines (upper bound incl. docstrings), 27 registered operations, 20 passing tests, 74% combined branch/line coverage. Target 5,500 meaningful lines and 80% coverage are NOT complete.
 - First local commit: c2e499db078a7d2693d3f21917b357c8d944850b. Second commit SHA: inspect Git log after second coherent commit.
 
+## Milestone 3: additional implemented and tested workflows
+
+- UX-004/005/015/043/044: editable methodology template forms with required-field validation, explicit human review caveat and persistent draft/reopen, research_guides.py and test_protocol_guidance.py.
+- UX-033/050: checksum and format verified, bounded data-only ZIP archive, preview/approval/restore to separate project, snapshots.py and test_snapshots.py. Rejects malformed/traversal entries and stale checksums.
+- UX-045: project-wide Unicode literal search across local source, coded evidence, draft manuscript/notes and protocol fields; test_global_search.py.
+- RECOVERY-003: previously unsaved protocol editor content protected on close by confirmation and guarded save; test_protocol_unsaved_close_guard.
+- Observed 35 passing Qt/offline tests, Ruff and Mypy clean; 75% combined coverage. Full UI story acceptance and 5,500-line target remain unfinished; limitations tracked in LIMITATIONS.md.
+
+Final measured milestone-3 snapshot: 13 production Python modules and 3,438 nonblank noncomment physical lines (includes docstrings, an upper bound on meaningful SLOC), 39 capability operations, and 39 passing full-suite tests. See CODE_METRICS.json for exact counting method. 
+
 Every unimplemented UX story remains open; see LIMITATIONS.md and NEXT_ACTION.md. Baseline is af5c862; test outcomes in TEST_RESULTS.md.

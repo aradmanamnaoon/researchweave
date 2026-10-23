@@ -90,6 +90,138 @@
       "reversible": true
     },
     {
+      "operation": "ui.templates.list",
+      "version": "1.0.0",
+      "summary": "List editable study designs",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.guidance.search",
+      "version": "1.0.0",
+      "summary": "Find research method explanations",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.protocol.read",
+      "version": "1.0.0",
+      "summary": "Read project research protocol",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.protocol.start",
+      "version": "1.0.0",
+      "summary": "Create an editable protocol draft",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.protocol.update",
+      "version": "1.0.0",
+      "summary": "Revise draft protocol fields",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.protocol.complete",
+      "version": "1.0.0",
+      "summary": "Validate protocol for human review",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
       "operation": "ui.source.add",
       "version": "1.0.0",
       "summary": "Import a local text source",
@@ -137,6 +269,28 @@
       "operation": "ui.source.get",
       "version": "1.0.0",
       "summary": "Read a local source",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.search.global",
+      "version": "1.0.0",
+      "summary": "Search all local research objects",
       "effect": "read",
       "arguments_schema": {
         "type": "object",
@@ -533,6 +687,116 @@
       "operation": "ui.export.write",
       "version": "1.0.0",
       "summary": "Write approved export under host root",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": true,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.backup.plan",
+      "version": "1.0.0",
+      "summary": "Preview project snapshot",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.backup.list",
+      "version": "1.0.0",
+      "summary": "List local integrity-checked snapshots",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.backup.inspect",
+      "version": "1.0.0",
+      "summary": "Verify archive before restoring",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.backup.create",
+      "version": "1.0.0",
+      "summary": "Create approved immutable backup",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": true,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.backup.restore",
+      "version": "1.0.0",
+      "summary": "Restore approved backup to new project",
       "effect": "local-write",
       "arguments_schema": {
         "type": "object",
