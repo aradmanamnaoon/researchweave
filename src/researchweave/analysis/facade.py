@@ -24,7 +24,15 @@ from .advanced_statistics import (
 )
 from .authorization import CapabilityIssuer, HostCapability, HostPaths
 from .data_ops import case_selection, frequency_weighted_mean, missingness, recode_missing
-from .datasets import DatasetStore, import_csv, import_table, page, set_variable
+from .datasets import (
+    DatasetStore,
+    data_view,
+    export_csv,
+    import_csv,
+    import_table,
+    page,
+    set_variable,
+)
 from .diagnostics import ols_diagnostics, variance_inflation
 from .effects import (
     anova_effect_sizes,
@@ -117,6 +125,8 @@ class AnalysisFacade:
             "dataset.import": "local-write",
             "dataset.inspect": "read",
             "dataset.page": "read",
+            "dataset.view": "read",
+            "dataset.export_csv": "sensitive-export",
             "dataset.transform": "local-write",
             "dataset.variable": "local-write",
             "dataset.missingness": "read",
@@ -437,11 +447,23 @@ class AnalysisFacade:
                 "missing_counts": generated.missing_counts,
                 "assumptions": list(generated.assumptions),
             }
-        elif operation in ("dataset.inspect", "dataset.page"):
+        elif operation in ("dataset.inspect", "dataset.page", "dataset.view"):
             obj = self._dataset(arguments)
-            data = page(
-                obj, offset=int(arguments.get("offset", 0)), limit=int(arguments.get("limit", 100))
-            )
+            if operation == "dataset.view":
+                data = data_view(
+                    obj,
+                    offset=int(arguments.get("offset", 0)),
+                    limit=int(arguments.get("limit", 100)),
+                    sort_by=arguments.get("sort_by"),
+                    descending=bool(arguments.get("descending", False)),
+                    search=arguments.get("search"),
+                )
+            else:
+                data = page(
+                    obj,
+                    offset=int(arguments.get("offset", 0)),
+                    limit=int(arguments.get("limit", 100)),
+                )
             if operation == "dataset.inspect":
                 data["variables"] = [v.__dict__ for v in obj.variables]
                 data["source_hash"] = obj.source_hash
@@ -785,6 +807,15 @@ class AnalysisFacade:
                     y=arguments.get("y"),
                     output=output_path,
                     kind=str(arguments.get("kind", "scatter")),
+                )
+            elif operation == "dataset.export_csv":
+                output_path = self.host_paths.export_file(str(arguments["filename"]))
+                data = export_csv(
+                    obj,
+                    output_path,
+                    delimiter=str(arguments.get("delimiter", ",")),
+                    decimal=str(arguments.get("decimal", ".")),
+                    formula_safe=bool(arguments.get("formula_safe", True)),
                 )
             else:
                 raise AnalysisError("NOT_FOUND", "Unsupported operation")

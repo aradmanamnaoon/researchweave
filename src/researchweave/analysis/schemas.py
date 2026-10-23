@@ -109,6 +109,14 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "dataset.import": _schema({"filename": S}, {"options": OBJ}),
     "dataset.inspect": _schema(IDENTITY, {"offset": INT, "limit": INT}),
     "dataset.page": _schema(IDENTITY, {"offset": INT, "limit": INT}),
+    "dataset.view": _schema(
+        IDENTITY,
+        {"offset": INT, "limit": INT, "sort_by": SN, "descending": B, "search": SN},
+    ),
+    "dataset.export_csv": _schema(
+        {**IDENTITY, "filename": S},
+        {"delimiter": S, "decimal": S, "formula_safe": B},
+    ),
     "dataset.transform": _schema({**IDENTITY, "spec": OBJ}),
     "dataset.variable": _schema({**IDENTITY, "column": S, "updates": OBJ}),
     "dataset.missingness": _schema(IDENTITY, {"by": SN}),

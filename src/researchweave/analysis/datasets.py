@@ -7,6 +7,7 @@ import hashlib
 import io
 import json
 import os
+import re
 from dataclasses import replace
 from pathlib import Path
 from typing import Any
@@ -17,6 +18,8 @@ from .models import Dataset, Variable, canonical_json, digest, utc_now
 MAX_BYTES = 50 * 1024 * 1024
 MAX_ROWS = 500_000
 MAX_COLUMNS = 2000
+_FORMULA_PREFIXES = ("=", "+", "-", "@")
+_DECIMAL_COMMA = re.compile(r"^[+-]?\d+,\d+(?:[eE][+-]?\d+)?$")
 
 
 def validate_dataset_identity(dataset_id: str, revision: str | None = None) -> None:
@@ -94,6 +97,13 @@ def import_csv(
         path.stat().st_size <= MAX_BYTES, "Source exceeds configured byte budget", "RESOURCE_LIMIT"
     )
     content = path.read_bytes()
+    if encoding == "auto":
+        if content.startswith((b"\xff\xfe", b"\xfe\xff")):
+            encoding = "utf-16"
+        elif content.startswith(b"\xef\xbb\xbf"):
+            encoding = "utf-8-sig"
+        else:
+            encoding = "utf-8"
     try:
         text = content.decode(encoding)
     except (UnicodeError, LookupError) as exc:
@@ -127,7 +137,16 @@ def import_csv(
             "CSV row has missing fields",
             "SCHEMA_MISMATCH",
         )
-        rows.append({column: None if row[column] in missing else row[column] for column in columns})
+        normalized: dict[str, Any] = {}
+        for column in columns:
+            raw = row[column]
+            if raw in missing:
+                normalized[column] = None
+            elif decimal == "," and _DECIMAL_COMMA.fullmatch(raw.strip()):
+                normalized[column] = raw.strip().replace(",", ".")
+            else:
+                normalized[column] = raw
+        rows.append(normalized)
     variables = tuple(Variable(name=c, missing_values=missing) for c in columns)
     source_hash = hashlib.sha256(content).hexdigest()
     identifier = dataset_id or digest({"source_hash": source_hash})[:24]
@@ -153,6 +172,63 @@ def import_csv(
     )
 
 
+def export_csv(
+    dataset: Dataset,
+    destination: Path,
+    *,
+    delimiter: str = ",",
+    decimal: str = ".",
+    formula_safe: bool = True,
+) -> dict[str, Any]:
+    """Write a deterministic CSV snapshot without silently overwriting existing files."""
+
+    require(len(delimiter) == 1, "Delimiter must be one character")
+    require(decimal in {".", ","}, "Decimal must be dot or comma")
+    require(destination.parent.is_dir(), "Export directory missing", "NOT_FOUND")
+    require(not destination.exists(), "Export destination exists", "CONFLICT")
+    require(destination.suffix.lower() in {".csv", ".tsv"}, "CSV export suffix required")
+
+    def cell(value: Any) -> str:
+        if value is None:
+            return ""
+        text = str(value)
+        if decimal == "," and isinstance(value, (int, float)):
+            text = text.replace(".", ",")
+        if formula_safe and text.startswith(_FORMULA_PREFIXES):
+            return "'" + text
+        return text
+
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(
+        buffer,
+        fieldnames=list(dataset.columns),
+        delimiter=delimiter,
+        lineterminator="\n",
+        quoting=csv.QUOTE_MINIMAL,
+    )
+    writer.writeheader()
+    for row in dataset.records:
+        writer.writerow({column: cell(row[column]) for column in dataset.columns})
+    payload = buffer.getvalue().encode("utf-8-sig")
+    require(len(payload) <= MAX_BYTES * 2, "Export exceeds byte budget", "RESOURCE_LIMIT")
+    destination.write_bytes(payload)
+    return {
+        "path": str(destination),
+        "sha256": hashlib.sha256(payload).hexdigest(),
+        "bytes": len(payload),
+        "delimiter": delimiter,
+        "decimal": decimal,
+        "encoding": "utf-8-sig",
+        "formula_safe": formula_safe,
+        "warning": (
+            "Spreadsheet-formula safety prefixes formula-like text with an apostrophe, "
+            "which intentionally changes those exported cell strings"
+            if formula_safe
+            else "Formula-like cells are preserved exactly and may execute in spreadsheet software"
+        ),
+    }
+
+
 def import_table(
     path: Path, *, format: str | None = None, sheet: int | str = 0, dataset_id: str | None = None
 ) -> Dataset:
@@ -164,24 +240,89 @@ def import_table(
     kind = (format or path.suffix.lower().lstrip(".")).lower()
     if kind in ("csv", "tsv"):
         return import_csv(path, delimiter="\t" if kind == "tsv" else None, dataset_id=dataset_id)
-    readers = {
-        "xlsx": lambda: pd.read_excel(path, sheet_name=sheet),
-        "ods": lambda: pd.read_excel(path, sheet_name=sheet, engine="odf"),
-        "parquet": lambda: pd.read_parquet(path),
-        "dta": lambda: pd.read_stata(path, convert_categoricals=False),
-        "xpt": lambda: pd.read_sas(path, format="xport"),
-        "sav": lambda: pd.read_spss(path, convert_categoricals=False),
-        "zsav": lambda: pd.read_spss(path, convert_categoricals=False),
-        "json": lambda: pd.read_json(path),
-        "jsonl": lambda: pd.read_json(path, lines=True),
-    }
-    require(kind in readers, f"Unsupported import format: {kind}", "UNSUPPORTED_FORMAT")
-    try:
-        frame = readers[kind]()
-    except ImportError as exc:
-        raise AnalysisError("DEPENDENCY_MISSING", f"Reader for {kind} is not installed") from exc
-    except (ValueError, TypeError, OSError) as exc:
-        raise AnalysisError("INVALID_INPUT", f"Could not parse {kind} source") from exc
+    if kind == "parquet":
+        try:
+            import pyarrow.parquet as pq
+        except ImportError as exc:
+            raise AnalysisError(
+                "DEPENDENCY_MISSING", "Reader for parquet is not installed"
+            ) from exc
+        try:
+            parquet = pq.ParquetFile(path)
+            metadata = parquet.metadata
+            require(
+                metadata.num_rows <= MAX_ROWS and metadata.num_columns <= MAX_COLUMNS,
+                "Parquet metadata exceeds row/column budget",
+                "RESOURCE_LIMIT",
+            )
+            frame = parquet.read().to_pandas()
+        except AnalysisError:
+            raise
+        except (ValueError, TypeError, OSError) as exc:
+            raise AnalysisError("INVALID_INPUT", "Could not parse parquet source") from exc
+        metadata_variables = None
+    elif kind in {"sav", "zsav", "dta", "xpt"}:
+        try:
+            import pyreadstat
+        except ImportError as exc:
+            raise AnalysisError(
+                "DEPENDENCY_MISSING", f"Reader for {kind} is not installed"
+            ) from exc
+        readstat = {
+            "sav": pyreadstat.read_sav,
+            "zsav": pyreadstat.read_sav,
+            "dta": pyreadstat.read_dta,
+            "xpt": pyreadstat.read_xport,
+        }[kind]
+        try:
+            frame, metadata = readstat(path, apply_value_formats=False)
+        except (ValueError, TypeError, OSError) as exc:
+            raise AnalysisError("INVALID_INPUT", f"Could not parse {kind} source") from exc
+        labels_by_name = getattr(metadata, "column_names_to_labels", {}) or {}
+        value_labels = getattr(metadata, "variable_value_labels", {}) or {}
+        missing_ranges = getattr(metadata, "missing_ranges", {}) or {}
+        missing_user_values = getattr(metadata, "missing_user_values", {}) or {}
+        measure = getattr(metadata, "variable_measure", {}) or {}
+        metadata_variables = {
+            str(name): {
+                "label": str(labels_by_name.get(name) or ""),
+                "value_labels": {
+                    (
+                        f"{float(key):.17g}"
+                        if isinstance(key, (int, float)) and not isinstance(key, bool)
+                        else str(key)
+                    ): str(value)
+                    for key, value in (value_labels.get(name, {}) or {}).items()
+                },
+                "missing_values": tuple(
+                    [str(value) for value in (missing_user_values.get(name, []) or [])]
+                    + [
+                        str(entry)
+                        for entry in (missing_ranges.get(name, []) or [])
+                        if not isinstance(entry, dict)
+                    ]
+                ),
+                "scale": str(measure.get(name) or "unknown"),
+            }
+            for name in frame.columns
+        }
+    else:
+        metadata_variables = None
+        readers = {
+            "xlsx": lambda: pd.read_excel(path, sheet_name=sheet),
+            "ods": lambda: pd.read_excel(path, sheet_name=sheet, engine="odf"),
+            "json": lambda: pd.read_json(path),
+            "jsonl": lambda: pd.read_json(path, lines=True),
+        }
+        require(kind in readers, f"Unsupported import format: {kind}", "UNSUPPORTED_FORMAT")
+        try:
+            frame = readers[kind]()
+        except ImportError as exc:
+            raise AnalysisError(
+                "DEPENDENCY_MISSING", f"Reader for {kind} is not installed"
+            ) from exc
+        except (ValueError, TypeError, OSError) as exc:
+            raise AnalysisError("INVALID_INPUT", f"Could not parse {kind} source") from exc
     require(
         len(frame) <= MAX_ROWS and len(frame.columns) <= MAX_COLUMNS,
         "Parsed table exceeds row/column budget",
@@ -190,12 +331,20 @@ def import_table(
     names = tuple(str(c) for c in frame.columns)
     require(len(set(names)) == len(names), "Duplicate columns prohibited")
     rows = json.loads(frame.to_json(orient="records", date_format="iso"))
-    labels = tuple(
-        Variable(
-            name=c, dtype="number" if pd.api.types.is_numeric_dtype(frame.iloc[:, i]) else "text"
+    labels = []
+    for i, c in enumerate(names):
+        rich = (metadata_variables or {}).get(c, {})
+        labels.append(
+            Variable(
+                name=c,
+                dtype="number" if pd.api.types.is_numeric_dtype(frame.iloc[:, i]) else "text",
+                label=rich.get("label", ""),
+                value_labels=rich.get("value_labels", {}),
+                missing_values=tuple(rich.get("missing_values", ())),
+                scale=rich.get("scale", "unknown"),
+            )
         )
-        for i, c in enumerate(names)
-    )
+    labels = tuple(labels)
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     identifier = dataset_id or digest({"source": source_hash})[:24]
     validate_dataset_identity(identifier)
@@ -310,6 +459,64 @@ def page(dataset: Dataset, *, offset: int = 0, limit: int = 100) -> dict[str, An
         "offset": offset,
         "limit": limit,
         "rows": list(dataset.records[offset : offset + limit]),
+        "revision": dataset.revision,
+    }
+
+
+def data_view(
+    dataset: Dataset,
+    *,
+    offset: int = 0,
+    limit: int = 100,
+    sort_by: str | None = None,
+    descending: bool = False,
+    search: str | None = None,
+) -> dict[str, Any]:
+    """Stable row identities with deterministic filtering, sorting and paging."""
+
+    require(offset >= 0 and 1 <= limit <= 1000, "Invalid page range")
+    require(sort_by is None or sort_by in dataset.columns, "Unknown sort column")
+    require(search is None or len(search) <= 1000, "Search text exceeds budget", "RESOURCE_LIMIT")
+    indexed = list(enumerate(dataset.records))
+    if search:
+        needle = search.casefold()
+        indexed = [
+            (index, row)
+            for index, row in indexed
+            if any(value is not None and needle in str(value).casefold() for value in row.values())
+        ]
+    if sort_by is not None:
+        indexed.sort(
+            key=lambda item: (
+                item[1][sort_by] is None,
+                "" if item[1][sort_by] is None else str(item[1][sort_by]).casefold(),
+                item[0],
+            ),
+            reverse=descending,
+        )
+    selected = indexed[offset : offset + limit]
+    return {
+        "total": len(indexed),
+        "source_total": len(dataset.records),
+        "offset": offset,
+        "limit": limit,
+        "sort_by": sort_by,
+        "descending": descending,
+        "search": search,
+        "rows": [
+            {
+                "row_id": digest(
+                    {
+                        "dataset_id": dataset.dataset_id,
+                        "revision": dataset.revision,
+                        "source_index": index,
+                    }
+                )[:24],
+                "source_index": index,
+                "values": dict(row),
+            }
+            for index, row in selected
+        ],
         "revision": dataset.revision,
     }
 
