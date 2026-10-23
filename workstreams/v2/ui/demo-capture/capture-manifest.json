@@ -1,0 +1,18 @@
+{
+  "status": "prototype",
+  "label": "Offline PyQt UI prototype with synthetic fixtures; not the released application",
+  "project_id": "f0f9513c-e7cb-47e7-a527-bd197efe2bb7",
+  "project_revision": 4,
+  "source_count": 1,
+  "dataset_count": 1,
+  "screen": "Dashboard",
+  "theme": "light",
+  "width": 1280,
+  "height": 720,
+  "qt_platform": "offscreen",
+  "python": "3.12.9",
+  "os": "Windows-11-10.0.26200-SP0",
+  "file": "researchweave-prototype-light.png",
+  "sha256": "05092ec1c1c623599de929e7debee571b1b24690e22c795a29b8b198c7308fde",
+  "alt_text": "ResearchWeave offline desktop prototype with a synthetic project, research question, left navigation and local-only status line."
+}
