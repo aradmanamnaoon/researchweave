@@ -1,0 +1,198 @@
+from __future__ import annotations
+
+from pathlib import Path
+from uuid import UUID, uuid4
+
+from researchweave.app.composition import build_services
+from researchweave.app.desktop_gateway import DesktopCommandGateway
+from researchweave.core import OperationRequest
+
+
+def request(
+    operation: str,
+    project_id: UUID,
+    arguments: dict[str, object] | None = None,
+    *,
+    preview: bool = False,
+) -> OperationRequest:
+    return OperationRequest(
+        operation=operation,
+        project_id=project_id,
+        arguments=arguments or {},
+        preview=preview,
+    )
+
+
+def approved(services, operation_request: OperationRequest):
+    approval = services.bus.issue_approval(operation_request)
+    return services.bus.dispatch(operation_request, approval=approval)
+
+
+def test_composition_registers_all_domains_and_defaults_offline(tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    try:
+        health = services.health()
+        assert health["status"] == "ok"
+        assert health["offline"] is True
+        capabilities = services.bus.capabilities()
+        domains = {item["domain"] for item in capabilities}
+        assert domains == {"evidence", "analysis", "ai", "ui"}
+        assert len(capabilities) >= 300
+
+        provider_list = services.bus.dispatch(request("provider.list", uuid4()))
+        assert provider_list["status"] == "ok"
+        assert services.ai.policy.offline is True
+    finally:
+        services.close()
+
+
+def test_host_approval_is_exact_one_use_and_audited_without_payload(tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    try:
+        project_scope = uuid4()
+        create = request(
+            "ui.project.create",
+            project_scope,
+            {
+                "title": "Synthetic integration project",
+                "question": "Can an exact approval be replayed?",
+                "study_type": "quantitative",
+            },
+        )
+        denied = services.bus.dispatch(create)
+        assert denied["error"]["code"] == "NEEDS_APPROVAL"
+
+        approval = services.bus.issue_approval(create)
+        substituted = create.model_copy(
+            update={"arguments": {**create.arguments, "title": "Changed after approval"}}
+        )
+        changed = services.bus.dispatch(substituted, approval=approval)
+        assert changed["error"]["code"] == "NEEDS_APPROVAL"
+
+        allowed = services.bus.dispatch(create, approval=approval)
+        assert allowed["status"] == "ok"
+        replay = services.bus.dispatch(create, approval=approval)
+        assert replay["error"]["code"] == "NEEDS_APPROVAL"
+
+        events = services.audit.events()
+        assert [event["status"] for event in events] == ["failed", "failed", "ok", "failed"]
+        serialized = repr(events)
+        assert "Synthetic integration project" not in serialized
+        assert all(len(event["input_sha256"]) == 64 for event in events)
+        assert all(len(event["output_sha256"]) == 64 for event in events)
+    finally:
+        services.close()
+
+
+def test_analysis_write_uses_host_and_domain_capabilities(tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    try:
+        source = services.paths.imports / "numbers.csv"
+        source.write_text("x,y\n1,2\n3,4\n", encoding="utf-8")
+        project_scope = uuid4()
+        import_request = request("dataset.import", project_scope, {"filename": source.name})
+        denied = services.bus.dispatch(import_request)
+        assert denied["error"]["code"] == "NEEDS_APPROVAL"
+        imported = approved(services, import_request)
+        assert imported["status"] == "ok"
+
+        data = imported["data"]
+        describe = services.bus.dispatch(
+            request(
+                "statistics.describe",
+                project_scope,
+                {
+                    "dataset_id": data["dataset_id"],
+                    "revision": data["revision"],
+                    "column": "x",
+                },
+            )
+        )
+        assert describe["status"] == "ok"
+        assert describe["data"]["mean"] == 2.0
+        assert describe["data"]["n_valid"] == 2
+    finally:
+        services.close()
+
+
+def test_desktop_analysis_bridge_runs_production_scientific_code(tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    try:
+        scope = uuid4()
+        created = approved(
+            services,
+            request(
+                "ui.project.create",
+                scope,
+                {
+                    "title": "Integrated statistics",
+                    "question": "What is the mean synthetic score?",
+                    "study_type": "quantitative",
+                },
+            ),
+        )["data"]
+        project_id = UUID(created["project_id"])
+
+        imported = approved(
+            services,
+            request(
+                "ui.dataset.import",
+                project_id,
+                {
+                    "project_id": str(project_id),
+                    "expected_revision": created["revision"],
+                    "name": "Synthetic scores",
+                    "csv_text": "score,group\n1,A\n2,A\n3,B\n4,B\n",
+                },
+            ),
+        )["data"]
+        methods = services.bus.dispatch(
+            request("ui.analysis.methods", project_id, {"project_id": str(project_id)})
+        )
+        method_ids = {item["id"] for item in methods["data"]["methods"]}
+        assert "analysis.statistics.describe" in method_ids
+
+        run_request = request(
+            "ui.analysis.run",
+            project_id,
+            {
+                "project_id": str(project_id),
+                "expected_revision": imported["revision"],
+                "method": "analysis.statistics.describe",
+                "inputs": {"dataset_id": imported["dataset_id"], "column": "score"},
+            },
+        )
+        result = approved(services, run_request)
+        assert result["status"] == "ok", result
+        record = result["data"]["result"]
+        assert record["method_version"] == "researchweave-analysis-v2"
+        assert record["estimates"]["mean"] == 2.5
+        assert record["estimates"]["n_valid"] == 4
+        assert record["uncertainty"]["mean_confidence_interval_95"] is not None
+        assert record["provenance"]["staged_csv_sha256"] == record["provenance"][
+            "analysis_source_sha256"
+        ]
+        assert not list(services.paths.imports.glob("ui-analysis-*.csv"))
+    finally:
+        services.close()
+
+
+def test_desktop_gateway_routes_human_mutations_through_shared_audit(tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    try:
+        gateway = DesktopCommandGateway(services.ui, services.bus)
+        response = gateway.execute(
+            "ui.project.create",
+            {
+                "title": "Human routed project",
+                "question": "Does the desktop use the shared command bus?",
+                "study_type": "qualitative",
+            },
+        )
+        assert response["status"] == "ok"
+        event = services.audit.events()[-1]
+        assert event["operation"] == "ui.project.create"
+        assert event["actor"] == "desktop-user"
+        assert event["effect"] == "local-write"
+    finally:
+        services.close()

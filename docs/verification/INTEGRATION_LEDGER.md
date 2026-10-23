@@ -82,6 +82,40 @@ files or private working-tree data.
 
 ## Current next phase
 
-Phase 04/06: implement the shared `core` command bus, host approval authority, audit store and real
-application composition root; inject the production analysis facade into the desktop UI; replace the
-placeholder app entry point; then add integration tests before retiring any legacy placeholders.
+## Phase 04/06 — shared contracts, command bus and application composition
+
+- Status: implemented; broader acceptance validation remains in progress.
+- Added a versioned `OperationRequest` used by desktop/headless callers, deterministic request/result
+  hashing, and the common integration error vocabulary.
+- Added a process-local host approval authority. Non-read operations require an exact, expiring,
+  one-use approval bound to operation, project, request ID, arguments, revision and actor.
+- Added a unified command bus that registers all four worker capability manifests, rejects duplicate
+  operation IDs, preserves facade previews, and delegates only after the host gate succeeds.
+- Analysis writes receive a fresh analysis-owned one-use `HostCapability` after the shared approval
+  succeeds. AI writes/network actions likewise receive an AI-owned signed approval. Evidence is
+  instantiated write-capable only behind the shared host gate and remains network-disabled by default.
+- Added an SQLite/WAL integration audit containing timestamps, IDs, actor, operation, effect, status,
+  error code and SHA-256 input/output hashes. Argument/result payloads are not stored in this audit.
+- Replaced the placeholder desktop entry point with the V2 `ResearchWindow` and real application
+  composition root. The desktop gateway sends the same `ui.*` operation IDs through the command bus;
+  a direct human desktop gesture is the trust event that causes the host to issue its exact one-use
+  approval. Existing export/backup/agent confirmation gates remain active inside the UI facade.
+- Added `researchweave-cli` using the same composition root for health and capability discovery.
+- Connected the UI analysis adapter to the production analysis facade. A UI dataset is staged as an
+  ephemeral CSV, imported through the analysis facade with its own capability, analyzed from the
+  immutable analysis revision, provenance/hashes are returned to UI result storage, and the staging
+  file is deleted afterward.
+- Added integration tests for all-domain registration/offline defaults, approval substitution/replay,
+  payload-free audit metadata, analysis import/describe routing, production desktop analysis and the
+  desktop gateway audit route. Current focused result: **6 passed**.
+- Shared source-wide Ruff passes. First-party mypy with `--ignore-missing-imports` passes across
+  **151 source files** after removing two obsolete reportlab suppressions exposed by the integrated
+  dependency environment.
+- Added `reportlab>=4.4,<5` to the canonical runtime because the evidence subsystem's implemented PDF
+  export path imports it. `uv.lock` now resolves 95 packages.
+
+## Current next phase
+
+Phase 07/08: exercise cross-domain vertical journeys through the integrated services, run scientific
+oracles and failure injection, then consolidate obsolete placeholder package paths only when their
+replacement is covered by tests.

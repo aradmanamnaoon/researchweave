@@ -207,8 +207,8 @@ class ArtifactFormatService:
             fidelity = "section_and_paragraph_structure_preserved_citation_tokens_literal"
         else:
             try:
-                from reportlab.lib.styles import getSampleStyleSheet  # type: ignore[import-untyped]
-                from reportlab.platypus import (  # type: ignore[import-untyped]
+                from reportlab.lib.styles import getSampleStyleSheet
+                from reportlab.platypus import (
                     Paragraph,
                     SimpleDocTemplate,
                     Spacer,

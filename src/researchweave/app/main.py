@@ -1,29 +1,26 @@
-"""Start a minimal accessible Qt shell; no network access or credentials required."""
+"""Start the integrated ResearchWeave desktop with offline-safe production services."""
+
+from __future__ import annotations
 
 import sys
+from typing import cast
 
-from PyQt6.QtWidgets import QApplication, QLabel, QMainWindow, QVBoxLayout, QWidget
+from PyQt6.QtWidgets import QApplication, QMainWindow
 
+from researchweave.app.composition import AppServices, build_services
 from researchweave.app.config import AppConfig, load_config
+from researchweave.app.desktop_gateway import DesktopCommandGateway
+from researchweave.ui import build_ui_shell
+from researchweave.ui.facade import UIFacade
 
 
-def create_window(config: AppConfig) -> QMainWindow:
-    window = QMainWindow()
+def create_window(config: AppConfig, *, services: AppServices | None = None) -> QMainWindow:
+    """Build the real V2 desktop shell without starting a second QApplication."""
+
+    integrated = services or build_services(config.data_directory)
+    gateway = DesktopCommandGateway(integrated.ui, integrated.bus)
+    window = build_ui_shell(fake_services=cast(UIFacade, gateway))
     window.setWindowTitle(config.application_title)
-    window.setMinimumSize(760, 480)
-    content = QWidget()
-    content.setAccessibleName("ResearchWeave welcome screen")
-    layout = QVBoxLayout(content)
-    heading = QLabel("ResearchWeave")
-    heading.setObjectName("welcomeHeading")
-    heading.setAccessibleName("ResearchWeave")
-    heading.setStyleSheet("font-size: 26px; font-weight: 600;")
-    summary = QLabel("A research workspace is taking shape.")
-    summary.setWordWrap(True)
-    layout.addWidget(heading)
-    layout.addWidget(summary)
-    layout.addStretch()
-    window.setCentralWidget(content)
     return window
 
 
@@ -33,7 +30,9 @@ def main() -> int:
         app = QApplication(sys.argv)
     if not isinstance(app, QApplication):
         raise RuntimeError("Expected QApplication instance")
-    window = create_window(load_config())
+    services = build_services(load_config().data_directory)
+    app.aboutToQuit.connect(services.close)
+    window = create_window(load_config(), services=services)
     window.show()
     return app.exec()
 
