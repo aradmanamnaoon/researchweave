@@ -2,12 +2,19 @@
 
 from __future__ import annotations
 
+import json
+import os
 import re
+import stat
+import tempfile
+import zipfile
+from pathlib import Path
 from typing import Any
 
-from .errors import require
+from .claim_support import ClaimSupportService
+from .errors import EvidenceError, require
 from .library import LibraryService
-from .models import canonical_json, sha256
+from .models import canonical_json, now_utc, sha256
 from .storage import ProjectStore
 from .writing import CITATION_PATTERN, WritingService
 
@@ -83,11 +90,23 @@ class PublishingService:
                 issues.append({"section": row["section"], "code": "UNRESOLVED_PLACEHOLDER"})
             if "@" in body and re.search(r"\[@[^\]]*$", body):
                 issues.append({"section": row["section"], "code": "MALFORMED_CITATION_MARKER"})
+        claim_check = ClaimSupportService(self.store).check(manuscript_id)
+        for claim_issue in claim_check["issues"]:
+            issues.append(
+                {
+                    "claim_id": claim_issue["claim_id"],
+                    "code": claim_issue["code"],
+                    "section": "registered_claim",
+                }
+            )
         return {
             "manuscript_id": manuscript_id,
             "issues": issues,
             "ready_for_submission": not issues,
             "scientific_claims_verified": False,
+            "registered_claims": claim_check["registered_claims"],
+            "registered_claim_issues": claim_check["issues"],
+            "claim_coverage_complete": claim_check["claim_coverage_complete"],
             "checks": [
                 "section_completeness",
                 "reference_identity",
@@ -132,3 +151,149 @@ class PublishingService:
             "warnings": (["Packet contains unresolved issues"] if check["issues"] else [])
             + ["Confirm journal-specific instructions and ethics declarations manually"],
         }
+
+    def export_submission_packet(
+        self,
+        manuscript_id: str,
+        journal: str,
+        destination: Path,
+        *,
+        allow_incomplete: bool = False,
+        requirements: dict[str, Any] | None = None,
+        supplied_metadata: dict[str, Any] | None = None,
+    ) -> dict[str, Any]:
+        """Atomically write a checksum-verified draft submission ZIP."""
+        require(destination.name.endswith(".rw-submission.zip"),
+                "Submission export needs .rw-submission.zip suffix")
+        destination = destination.resolve()
+        require(destination.parent.is_dir(), "Submission destination parent must exist")
+        require(not destination.exists(), "Submission destination already exists", "CONFLICT")
+        rules = dict(requirements or {})
+        metadata = dict(supplied_metadata or {})
+        allowed_metadata = {
+            "authors",
+            "affiliations",
+            "funding",
+            "conflicts",
+            "ethics",
+            "data_availability",
+            "author_contributions",
+            "corresponding_author",
+        }
+        require(
+            set(metadata).issubset(allowed_metadata),
+            "Submission metadata contains unsupported fields",
+        )
+        base = self.submission_packet(
+            manuscript_id, journal, allow_incomplete=allow_incomplete
+        )
+        sections = self.writing.sections(manuscript_id)
+        section_names = {row["section"] for row in sections}
+        unmet: list[dict[str, Any]] = []
+        for name, rule in sorted(rules.items()):
+            if name == "required_sections":
+                require(
+                    isinstance(rule, list) and all(isinstance(item, str) for item in rule),
+                    "required_sections must be a list of section names",
+                )
+                missing = sorted(set(rule) - section_names)
+                if missing:
+                    unmet.append({"requirement": name, "status": "unmet", "missing": missing})
+            elif name == "max_abstract_characters":
+                require(type(rule) is int and rule > 0,
+                        "max_abstract_characters must be positive")
+                abstract = next(
+                    (row["body"] for row in sections if row["section"] == "Abstract"),
+                    "",
+                )
+                if len(abstract) > rule:
+                    unmet.append({
+                        "requirement": name,
+                        "status": "unmet",
+                        "actual": len(abstract),
+                        "maximum": rule,
+                    })
+            else:
+                unmet.append({
+                    "requirement": name,
+                    "status": "manual_review_required",
+                    "rule": rule,
+                })
+        if unmet and not allow_incomplete:
+            raise EvidenceError(
+                "INCOMPLETE_SUBMISSION",
+                "Venue requirements are not fully satisfied",
+                "Resolve requirements or explicitly allow an incomplete draft packet.",
+            )
+        validation = self.check_manuscript(manuscript_id)
+        payloads: dict[str, bytes] = {
+            "manuscript.md": str(base["files"]["manuscript.md"]).encode(),
+            "bibliography.txt": str(base["files"]["bibliography.txt"]).encode(),
+            "integrity-report.json": (canonical_json(validation) + "\n").encode(),
+            "venue-requirements.json": (
+                canonical_json({
+                    "journal": journal,
+                    "requirements": rules,
+                    "unmet_or_manual": unmet,
+                }) + "\n"
+            ).encode(),
+            "supplied-metadata.json": (canonical_json(metadata) + "\n").encode(),
+        }
+        inventory = [
+            {"path": name, "sha256": sha256(data), "bytes": len(data)}
+            for name, data in sorted(payloads.items())
+        ]
+        manifest = {
+            **base["manifest"],
+            "format": "researchweave-submission-packet",
+            "version": 1,
+            "generated_at": now_utc(),
+            "requirements": rules,
+            "unmet_or_manual_requirements": unmet,
+            "metadata_fields_supplied": sorted(metadata),
+            "fabricated_metadata_fields": [],
+            "submission_performed": False,
+            "files": inventory,
+        }
+        payloads["manifest.json"] = (canonical_json(manifest) + "\n").encode()
+        staged: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                prefix=".rw-submission-",
+                suffix=".tmp",
+                dir=destination.parent,
+                delete=False,
+            ) as handle:
+                staged = Path(handle.name)
+            with zipfile.ZipFile(
+                staged, "w", compression=zipfile.ZIP_DEFLATED, compresslevel=6
+            ) as archive:
+                for name, data in sorted(payloads.items()):
+                    info = zipfile.ZipInfo(name, (2020, 1, 1, 0, 0, 0))
+                    info.compress_type = zipfile.ZIP_DEFLATED
+                    info.external_attr = (stat.S_IFREG | 0o600) << 16
+                    info.create_system = 3
+                    archive.writestr(info, data)
+            with zipfile.ZipFile(staged, "r") as archive:
+                decoded = json.loads(archive.read("manifest.json"))
+                for item in decoded["files"]:
+                    data = archive.read(item["path"])
+                    require(
+                        len(data) == item["bytes"] and sha256(data) == item["sha256"],
+                        "Submission packet checksum mismatch",
+                        "INTEGRITY_FAILURE",
+                    )
+            require(not destination.exists(), "Submission destination appeared", "CONFLICT")
+            os.replace(staged, destination)
+            return {
+                "path": str(destination),
+                "bytes": destination.stat().st_size,
+                "journal": journal,
+                "ready_for_submission": validation["ready_for_submission"] and not unmet,
+                "submission_performed": False,
+                "manifest_sha256": sha256(payloads["manifest.json"]),
+                "warnings": base["warnings"],
+            }
+        finally:
+            if staged is not None:
+                staged.unlink(missing_ok=True)
