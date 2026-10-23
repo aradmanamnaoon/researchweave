@@ -22,6 +22,7 @@ from .contracts import (
     UIError,
 )
 from .evidence import ClaimRecord, EvidenceAnchor
+from .screening import Adjudication, ScreeningDecision
 
 SCHEMA_VERSION = 1
 MAX_PROJECT_BYTES = 8 * 1024 * 1024
@@ -50,6 +51,10 @@ def decode_project(raw: dict[str, Any]) -> Project:
         project = _record(data, Project)
         project.sources = [_record(item, Source) for item in data.get("sources", [])]
         project.votes = [_record(item, ReviewVote) for item in data.get("votes", [])]
+        project.screening_decisions = [_record(item, ScreeningDecision)
+                                       for item in data.get("screening_decisions", [])]
+        project.adjudications = [_record(item, Adjudication)
+                                 for item in data.get("adjudications", [])]
         project.annotations = [_record(item, Annotation) for item in data.get("annotations", [])]
         project.datasets = [_record(item, Dataset) for item in data.get("datasets", [])]
         project.activity = [_record(item, Activity) for item in data.get("activity", [])]
@@ -73,6 +78,9 @@ def decode_project(raw: dict[str, Any]) -> Project:
     if len(project.evidence) > 5000 or len(project.claims) > 5000:
         raise UIError("RESOURCE_LIMIT", "Project has too many evidence records.",
                       "Split the project into smaller research workspaces.")
+    if len(project.screening_decisions) > 20_000 or len(project.adjudications) > 5000:
+        raise UIError("RESOURCE_LIMIT", "Screening history exceeds local limits.",
+                      "Archive the project before continuing.")
     return cast(Project, project)
 
 

@@ -34,6 +34,7 @@ from .evidence import (
     inspect_anchor,
     inspect_claim,
 )
+from .recovery import RecoveryJournal
 from .release import inspect_submission, submission_markdown
 from .research_guides import (
     blank_protocol,
@@ -43,6 +44,7 @@ from .research_guides import (
     protocol_completion,
     validate_protocol,
 )
+from .screening import adjudicate, review_queue, screening_flow, submit_decision
 from .search import search_project
 from .snapshots import SnapshotManager
 from .store import MAX_ROWS, MAX_SOURCE_CHARS, PreferenceStore, ProjectStore
@@ -134,6 +136,7 @@ class UIFacade:
         self.export_authorizer = export_authorizer
         self.backup_authorizer = backup_authorizer
         self.snapshots = SnapshotManager(self.store)
+        self.recovery = RecoveryJournal(self.store)
         self._recent: dict[str, dict[str, Any]] = {}
         self._operations: dict[str, tuple[str, Effect]] = {
             "ui.project.list": ("Show saved projects", Effect.READ),
@@ -158,11 +161,19 @@ class UIFacade:
             "ui.claim.inspect": ("Check supporting and conflicting evidence", Effect.READ),
             "ui.claim.reference": ("Generate unverified citation placeholder", Effect.READ),
             "ui.project.audit": ("Audit local project structural integrity", Effect.READ),
+            "ui.recovery.save": ("Journal unsaved editor text locally", Effect.WRITE),
+            "ui.recovery.inspect": ("Inspect unsaved editor recovery", Effect.READ),
+            "ui.recovery.list": ("List available local recovery drafts", Effect.READ),
+            "ui.recovery.discard": ("Discard exact reviewed recovery draft", Effect.WRITE),
             "ui.release.preview": ("Inspect human review gates for a manuscript", Effect.READ),
             "ui.release.markdown": ("Generate local submission review Markdown", Effect.READ),
             "ui.review.vote": ("Save screening decision", Effect.WRITE),
             "ui.review.counts": ("Compute screening counts", Effect.READ),
             "ui.review.queue": ("List source screening decisions and reasons", Effect.READ),
+            "ui.screening.vote": ("Record independent reviewer decision", Effect.WRITE),
+            "ui.screening.queue": ("Inspect reviewer-blinded screening records", Effect.READ),
+            "ui.screening.adjudicate": ("Resolve independent reviewer disagreement", Effect.WRITE),
+            "ui.screening.flow": ("Calculate recorded screening stage counts", Effect.READ),
             "ui.qual.annotate": ("Add a Unicode-safe evidence code", Effect.WRITE),
             "ui.qual.list": ("Inspect coded evidence", Effect.READ),
             "ui.dataset.import": ("Import bounded CSV text", Effect.WRITE),
@@ -530,6 +541,28 @@ class UIFacade:
         project = _required_project(args, self.store)
         return audit_project(project)
 
+    def _do_ui_recovery_save(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return self.recovery.save(
+            _string(args, "project_id", 36),
+            _string(args, "field", 20),
+            _string(args, "text", 250_000, required=False),
+            _integer(args, "expected_revision"),
+        )
+
+    def _do_ui_recovery_inspect(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return self.recovery.inspect(
+            _string(args, "project_id", 36), _string(args, "field", 20))
+
+    def _do_ui_recovery_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return self.recovery.list(_string(args, "project_id", 36))
+
+    def _do_ui_recovery_discard(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return self.recovery.discard(
+            _string(args, "project_id", 36),
+            _string(args, "field", 20),
+            _string(args, "expected_sha256", 64),
+        )
+
     def _do_ui_release_preview(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
         return inspect_submission(project)
@@ -596,6 +629,31 @@ class UIFacade:
             })
         return {"total": len(queue), "offset": offset, "limit": limit,
                 "records": queue[offset:offset + limit], "revision": project.revision}
+
+    def _do_ui_screening_vote(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        def update(project: Project) -> dict[str, Any]:
+            decision = submit_decision(project, source_id=_string(args, "source_id", 36),
+                                       reviewer=_string(args, "reviewer", 60),
+                                       decision=_string(args, "decision", 12),
+                                       reason=_string(args, "reason", 1200, required=False))
+            return {"decision": asdict(decision), "flow": screening_flow(project)}
+        return self._mutate(args, "ui.screening.vote", update)
+
+    def _do_ui_screening_queue(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return review_queue(_required_project(args, self.store),
+                            reviewer=_string(args, "reviewer", 60, required=False))
+
+    def _do_ui_screening_adjudicate(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        def update(project: Project) -> dict[str, Any]:
+            decision = adjudicate(project, source_id=_string(args, "source_id", 36),
+                                  adjudicator=_string(args, "adjudicator", 60),
+                                  final_decision=_string(args, "final_decision", 12),
+                                  rationale=_string(args, "rationale", 1200))
+            return {"adjudication": asdict(decision), "flow": screening_flow(project)}
+        return self._mutate(args, "ui.screening.adjudicate", update)
+
+    def _do_ui_screening_flow(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return screening_flow(_required_project(args, self.store))
 
     def _do_ui_qual_annotate(self, args: Mapping[str, Any]) -> dict[str, Any]:
         source_id = _string(args, "source_id", 36)

@@ -33,3 +33,20 @@
 Final measured milestone-3 snapshot: 13 production Python modules and 3,438 nonblank noncomment physical lines (includes docstrings, an upper bound on meaningful SLOC), 39 capability operations, and 39 passing full-suite tests. See CODE_METRICS.json for exact counting method. 
 
 Every unimplemented UX story remains open; see LIMITATIONS.md and NEXT_ACTION.md. Baseline is af5c862; test outcomes in TEST_RESULTS.md.
+
+## Milestone 4: final local verification
+
+- Commit 4d19876 contains PDF reader, evidence/claims, descriptive graphics, diagnostics and publishing previews.
+- Crash recovery module includes atomic draft journaling, SHA-256 verification, revision conflict detection and restore-into-editor UI, with two additional regression tests.
+- Observed: 52 UI tests passed, Ruff/Mypy/compileall passed, combined branch/line coverage 78%.
+- Source layout: 19 production Python files under src/researchweave/ui, and 55 registered operations.
+- Measured 5,513 nonblank noncomment physical lines including docstrings. This is an upper bound and does not prove 5,500 meaningful SLOC.
+- SOURCE_LAYOUT_VERIFIED: owned source relative path src/researchweave/ui; verify latest tracked paths and SHA after local commit.
+
+## Milestone 5 · continuation after interrupted session
+
+- `text_offsets.py` maps Qt UTF-16 cursor selections into Python codepoints, guarding emoji and Persian text before evidence/coding mutations; `test_text_offsets.py` includes deliberate split-surrogate failure tests.
+- `screening.py` saves reviewer-specific decisions with a local blindness convenience barrier, duplicate-vote protection, exclusion rationales and independent adjudication; computes grounded screening counts with unavailable PRISMA stages left null. `test_screening.py` verifies re-open and denial paths. Aliases are not authenticated identities.
+- Recovery and close/save logic validated across 64 UI tests; static lint, Mypy (21 files), compileall pass; combined branch/line coverage is **78%**.
+- Source count: **21** Python production modules, **5,821** physical nonblank noncomment lines including docstrings (upper bound; not audited meaningful SLOC), **59** declared UI commands.
+- Incomplete: >=80% coverage goal; full 50-story UX matrix; production AI/domain integration, real multiuser authenticated screening, complete PRISMA, professional PDF source anchors, installers and screen-reader hardware tests.

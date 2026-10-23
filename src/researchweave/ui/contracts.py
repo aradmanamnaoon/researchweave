@@ -9,6 +9,7 @@ from typing import TYPE_CHECKING, Any, Literal
 
 if TYPE_CHECKING:
     from .evidence import ClaimRecord, EvidenceAnchor
+    from .screening import Adjudication, ScreeningDecision
 from uuid import uuid4
 
 
@@ -132,6 +133,8 @@ class Project:
     revision: int = 0
     sources: list[Source] = field(default_factory=list)
     votes: list[ReviewVote] = field(default_factory=list)
+    screening_decisions: list[ScreeningDecision] = field(default_factory=list)
+    adjudications: list[Adjudication] = field(default_factory=list)
     annotations: list[Annotation] = field(default_factory=list)
     datasets: list[Dataset] = field(default_factory=list)
     manuscript: str = ""

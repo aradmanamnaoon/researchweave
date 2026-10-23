@@ -32,3 +32,18 @@ Environment: Windows, CPython 3.12.9, PyQt6 6.10.2, uv.
 - Manual NVDA and native multi-OS render tests unperformed; no claim of production UX sign-off.
 
 Repository-wide verification after milestone 3: QT_QPA_PLATFORM=offscreen uv run pytest -q passed, 39 tests in 2.33s. Ruff and Mypy passed. UI-only suite reported 35 tests and 75% combined coverage immediately before repository-wide run; exact coverage for all 39 tests is to be measured in the final gate.
+
+## Milestone 4 verification
+
+- Offscreen pytest UI coverage run: 52 passed in 4.64 seconds, combined 78% branch/line coverage.
+- Ruff, Mypy (19 source files) and compileall: pass.
+- Source: 19 Python modules, 5,513 physical nonblank noncomment lines including docstrings; 55 operations.
+- Real assistive technology, platform installers and shared-domain integration were not tested.
+
+## Milestone 5 observed gate
+
+- `QT_QPA_PLATFORM=offscreen uv run pytest -q tests/v2/ui --cov=researchweave.ui --cov-report=term`: **64 passed**, **78%** combined branch/line coverage.
+- `uv run ruff check src/researchweave/ui tests/v2/ui`: passed.
+- `uv run mypy src/researchweave/ui --follow-imports=silent`: passed (21 production Python files).
+- `uv run python -m compileall -q src/researchweave/ui`: passed.
+- Quantities in `CODE_METRICS.json` computed from the worker-owned source subtree.

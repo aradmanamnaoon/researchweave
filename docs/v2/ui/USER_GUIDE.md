@@ -22,3 +22,7 @@ Backups provides a local project snapshot plan, a human confirmation before ZIP 
     uv run python -m researchweave.ui.demo --output ./prototype-artifacts --theme light --width 1280 --height 720
 
 The generated PNG is a real Qt screenshot of a synthetic prototype; its manifest records capture settings, a SHA-256 digest and descriptive alt text. It does not depict the released application.
+
+Recovery lists draft copies of unsaved Notebook and Manuscript text. Select one to load into an editor without overwriting the saved project, then review and press Save. If the underlying project has changed, the UI asks before loading the draft. PDF Reader opens an explicitly selected local PDF. Evidence captures quotations with source hashes, and Publishing makes human review requirements visible.
+
+The independent screening service supports two separate local reviewer aliases, explicit exclusion reasons, conflict review and adjudication by a third alias; these identities are not authenticated. Its flow counts reflect only recorded local source screening, not all required PRISMA stages. Source highlighting in Reader now accounts for Qt UTF-16 positions when emoji and other supplementary Unicode symbols appear before selected text.

@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections.abc import Callable
 from typing import Any, cast
 
-from PyQt6.QtCore import Qt
+from PyQt6.QtCore import Qt, QTimer
 from PyQt6.QtGui import QAction, QCloseEvent, QKeySequence
 from PyQt6.QtWidgets import (
     QApplication,
@@ -31,12 +31,13 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
-from .contracts import Preferences
+from .contracts import Preferences, UIError
 from .design import apply_theme, named
 from .facade import UIFacade
 from .jobs import JobManager
 from .models import ResearchTableModel
 from .pdf_reader import PDFReader
+from .text_offsets import qt_range_to_codepoints
 from .visualization import Bin, ChartSpec, HistogramWidget
 
 SCREENS = (
@@ -45,7 +46,7 @@ SCREENS = (
     "Data View", "Variable View",
     "Statistics", "Qualitative", "Manuscript", "Notebook", "Publishing",
     "Agent", "Privacy",
-    "Exports", "Backups", "Diagnostics", "Jobs", "Guidance",
+    "Exports", "Backups", "Recovery", "Diagnostics", "Jobs", "Guidance",
     "Preferences", "Activity", "About",
 )
 
@@ -133,6 +134,15 @@ class ResearchWindow(QMainWindow):
         self.setMinimumSize(760, 490)
         self.resize(1260, 780)
         self._build()
+        self._draft_timers: dict[str, QTimer] = {}
+        for field, editor in (("manuscript", self.manuscript_editor),
+                              ("notebook", self.notebook_editor)):
+            timer = QTimer(self)
+            timer.setSingleShot(True)
+            timer.setInterval(600)
+            timer.timeout.connect(lambda which=field: self._journal_editor(which))
+            editor.textChanged.connect(lambda which=field: self._schedule_journal(which))
+            self._draft_timers[field] = timer
         app = QApplication.instance()
         if isinstance(app, QApplication):
             apply_theme(app, self.prefs)
@@ -480,6 +490,20 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.backup_receipt)
 
         layout = self._page(
+            "Recovery", "Inspect unsaved editor copies after an interrupted session. "
+            "Restoring into an editor never overwrites saved project files."
+        )
+        layout.addWidget(button("Refresh recovery drafts", self.refresh_recovery))
+        self.recovery_list = QListWidget()
+        named(self.recovery_list, "Available journaled research drafts")
+        layout.addWidget(self.recovery_list)
+        layout.addWidget(button("Restore selected into editor", self.restore_recovery,
+                                primary=True))
+        self.recovery_receipt = QLabel("No recovery draft selected.")
+        self.recovery_receipt.setWordWrap(True)
+        layout.addWidget(self.recovery_receipt)
+
+        layout = self._page(
             "Diagnostics",
             "Audit local source hashes, research links, screening decisions and "
             "table structure. Passing this audit does not certify research validity.",
@@ -612,6 +636,8 @@ class ResearchWindow(QMainWindow):
             self.refresh_backups()
         elif name == "Diagnostics":
             self.run_diagnostics()
+        elif name == "Recovery":
+            self.refresh_recovery()
         elif name == "Publishing":
             self.preview_publishing()
         elif name in ("Data View", "Variable View", "Statistics"):
@@ -714,6 +740,17 @@ class ResearchWindow(QMainWindow):
             )
         )
 
+    def _schedule_journal(self, field: str) -> None:
+        if not self._editor_loading and self.project_id:
+            self._draft_timers[field].start()
+
+    def _journal_editor(self, field: str) -> None:
+        if not self.project_id or self._editor_loading:
+            return
+        editor = self.manuscript_editor if field == "manuscript" else self.notebook_editor
+        self._call("ui.recovery.save", field=field,
+                   text=editor.toPlainText(), expected_revision=self.revision)
+
     def _confirm_leave_project(self) -> bool:
         """Protect draft text before project switching and application shutdown."""
         if not self.project_id or not self._writing_dirty():
@@ -745,12 +782,20 @@ class ResearchWindow(QMainWindow):
             ("ui.manuscript.save", self.manuscript_editor),
             ("ui.notebook.save", self.notebook_editor),
         ):
+            document = editor.document()
+            if document is None or not document.isModified():
+                continue
             result = self._call(operation, **{
                 operation.split(".")[1]: editor.toPlainText()
             })
             if result is None:
                 return False
-        if self.protocol_fields:
+            document.setModified(False)
+            self._draft_timers[operation.split(".")[1]].stop()
+        if self.protocol_fields and any(
+            bool(document and document.isModified())
+            for document in (editor.document() for editor in self.protocol_fields.values())
+        ):
             values = {key: editor.toPlainText()
                       for key, editor in self.protocol_fields.items()}
             if self._call("ui.protocol.update", values=values) is None:
@@ -794,6 +839,8 @@ class ResearchWindow(QMainWindow):
             self.navigate("Dashboard")
 
     def open_project(self, project_id: str) -> None:
+        for timer in self._draft_timers.values():
+            timer.stop()
         response = self._call("ui.project.open", project_id=project_id)
         if response is None:
             return
@@ -937,9 +984,16 @@ class ResearchWindow(QMainWindow):
             self._set_status("Select a source in Library first.")
             return
         cursor = self.reader_text.textCursor()
-        start, end = cursor.selectionStart(), cursor.selectionEnd()
-        if start == end:
+        if not cursor.hasSelection():
             self._set_status("Highlight a passage in Reader before coding.")
+            return
+        try:
+            start, end = qt_range_to_codepoints(
+                self.reader_text.toPlainText(), cursor.selectionStart(),
+                cursor.selectionEnd()
+            )
+        except UIError as exc:
+            self._set_status(f"{exc.message} {exc.recovery}")
             return
         code, accepted = QInputDialog.getText(self, "Code selected source text", "Code label")
         if accepted and self._call("ui.qual.annotate", source_id=self.current_source_id,
@@ -1076,6 +1130,11 @@ class ResearchWindow(QMainWindow):
             return
         editor = self.manuscript_editor if which == "manuscript" else self.notebook_editor
         if self._call(f"ui.{which}.save", **{which: editor.toPlainText()}):
+            document = editor.document()
+            if document is not None:
+                document.setModified(False)
+            if which in self._draft_timers:
+                self._draft_timers[which].stop()
             self._set_status(f"Saved {which} locally")
 
     def save_active(self) -> None:
@@ -1246,6 +1305,47 @@ class ResearchWindow(QMainWindow):
             self.open_project(restored["restored_project_id"])
             self.navigate("Dashboard")
             self._set_status("Verified snapshot restored to a separate local project.")
+
+    def refresh_recovery(self) -> None:
+        self.recovery_list.clear()
+        if not self.project_id:
+            return
+        result = self._call("ui.recovery.list")
+        if result is not None:
+            for draft in result["drafts"]:
+                item = QListWidgetItem(
+                    f"{draft['field']} · "
+                    f"{'conflict' if draft.get('conflict') else 'ready'}"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, draft["field"])
+                self.recovery_list.addItem(item)
+
+    def restore_recovery(self) -> None:
+        item = self.recovery_list.currentItem()
+        if item is None:
+            self._set_status("Select a recovery draft first.")
+            return
+        field = item.data(Qt.ItemDataRole.UserRole)
+        result = self._call("ui.recovery.inspect", field=field)
+        if result is None:
+            return
+        target = self.manuscript_editor if field == "manuscript" else self.notebook_editor
+        if result["conflict"]:
+            answer = QMessageBox.question(
+                self, "Review changed project",
+                "The saved project changed since this draft. Load the recovery text "
+                "into the editor for comparison? Saved files stay unchanged.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            if answer != QMessageBox.StandardButton.Yes:
+                return
+        target.setPlainText(result["text"])
+        document = target.document()
+        if document is not None:
+            document.setModified(True)
+        self.navigate("Manuscript" if field == "manuscript" else "Notebook")
+        self._set_status("Recovery text loaded into editor. Review and save explicitly.")
 
     def run_diagnostics(self) -> None:
         self.audit_findings.clear()
@@ -1501,9 +1601,16 @@ class ResearchWindow(QMainWindow):
             self._set_status("Choose a local source in Library before capturing evidence.")
             return
         cursor = self.reader_text.textCursor()
-        start, end = cursor.selectionStart(), cursor.selectionEnd()
-        if start >= end:
+        if not cursor.hasSelection():
             self._set_status("Highlight an exact passage in Reader first.")
+            return
+        try:
+            start, end = qt_range_to_codepoints(
+                self.reader_text.toPlainText(), cursor.selectionStart(),
+                cursor.selectionEnd()
+            )
+        except UIError as exc:
+            self._set_status(f"{exc.message} {exc.recovery}")
             return
         note, accepted = QInputDialog.getText(
             self, "Evidence interpretation", "Optional context note (not a verified claim)"
@@ -1607,6 +1714,8 @@ class ResearchWindow(QMainWindow):
         if not self._confirm_leave_project():
             event.ignore()
             return
+        for timer in self._draft_timers.values():
+            timer.stop()
         self.jobs.invalidate()
         self.prefs.sidebar_width = max(150, min(480, self.splitter.sizes()[0]))
         self.facade.settings.save(self.prefs)

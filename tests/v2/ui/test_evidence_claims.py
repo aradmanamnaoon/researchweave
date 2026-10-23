@@ -113,7 +113,7 @@ def test_evidence_qt_capture_and_inspection(tmp_path: Path, monkeypatch) -> None
     window.reader_text.setPlainText(source["text"])
     cursor = window.reader_text.textCursor()
     cursor.setPosition(6)
-    cursor.setPosition(7, cursor.MoveMode.KeepAnchor)
+    cursor.setPosition(8, cursor.MoveMode.KeepAnchor)
     window.reader_text.setTextCursor(cursor)
     from PyQt6.QtWidgets import QInputDialog
 

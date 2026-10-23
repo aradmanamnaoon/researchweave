@@ -1,8 +1,8 @@
 {
   "relative_root": "src/researchweave/ui",
-  "python_files": 13,
-  "nonblank_noncomment_physical_lines": 3438,
-  "counting_method": "Physical nonblank lines excluding full-line comments, including docstrings. Upper bound on meaningful SLOC, not audited SLOC.",
+  "python_files": 21,
+  "nonblank_noncomment_physical_lines": 5821,
+  "counting_method": "Nonblank non-full-comment lines including docstrings; upper bound, not audited meaningful SLOC",
   "target": 5500,
-  "capability_count": 39
+  "capability_count": 59
 }

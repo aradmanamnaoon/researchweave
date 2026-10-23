@@ -310,6 +310,314 @@
       "reversible": true
     },
     {
+      "operation": "ui.evidence.capture",
+      "version": "1.0.0",
+      "summary": "Save source-anchored passage",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.evidence.list",
+      "version": "1.0.0",
+      "summary": "List project source excerpts",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.evidence.inspect",
+      "version": "1.0.0",
+      "summary": "Check anchored quotation integrity",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.claim.create",
+      "version": "1.0.0",
+      "summary": "Create draft with evidence references",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.claim.list",
+      "version": "1.0.0",
+      "summary": "List claims with provenance warnings",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.claim.inspect",
+      "version": "1.0.0",
+      "summary": "Check supporting and conflicting evidence",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.claim.reference",
+      "version": "1.0.0",
+      "summary": "Generate unverified citation placeholder",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.project.audit",
+      "version": "1.0.0",
+      "summary": "Audit local project structural integrity",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.recovery.save",
+      "version": "1.0.0",
+      "summary": "Journal unsaved editor text locally",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.recovery.inspect",
+      "version": "1.0.0",
+      "summary": "Inspect unsaved editor recovery",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.recovery.list",
+      "version": "1.0.0",
+      "summary": "List available local recovery drafts",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.recovery.discard",
+      "version": "1.0.0",
+      "summary": "Discard exact reviewed recovery draft",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.release.preview",
+      "version": "1.0.0",
+      "summary": "Inspect human review gates for a manuscript",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.release.markdown",
+      "version": "1.0.0",
+      "summary": "Generate local submission review Markdown",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
       "operation": "ui.review.vote",
       "version": "1.0.0",
       "summary": "Save screening decision",
@@ -357,6 +665,94 @@
       "operation": "ui.review.queue",
       "version": "1.0.0",
       "summary": "List source screening decisions and reasons",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.screening.vote",
+      "version": "1.0.0",
+      "summary": "Record independent reviewer decision",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.screening.queue",
+      "version": "1.0.0",
+      "summary": "Inspect reviewer-blinded screening records",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.screening.adjudicate",
+      "version": "1.0.0",
+      "summary": "Resolve independent reviewer disagreement",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.screening.flow",
+      "version": "1.0.0",
+      "summary": "Calculate recorded screening stage counts",
       "effect": "read",
       "arguments_schema": {
         "type": "object",
@@ -511,6 +907,50 @@
       "operation": "ui.dataset.variables",
       "version": "1.0.0",
       "summary": "Inspect column types and missingness",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.chart.histogram",
+      "version": "1.0.0",
+      "summary": "Compute descriptive histogram counts",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.chart.svg",
+      "version": "1.0.0",
+      "summary": "Produce local accessible chart SVG",
       "effect": "read",
       "arguments_schema": {
         "type": "object",
