@@ -31,6 +31,7 @@ from .encrypted_archive import (
 from .errors import EvidenceError, require
 from .extraction import ExtractedValue, ExtractionService, FieldDefinition
 from .extraction_forms import ExtractionFormService
+from .highlights import HighlightService
 from .identity import IdentityService
 from .interoperability import (
     InteroperabilityService,
@@ -195,6 +196,14 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
         "Add an explicitly confirmed citation relationship"),
     "evidence.anchor": ("local-write", ("project_id", "source_id", "quote", "start", "end"),
                         "Record exact quote anchor"),
+    "evidence.highlight_create": (
+        "local-write", ("project_id", "source_id", "page", "start", "end", "quote"),
+        "Persist a page-bound exact highlight with extraction provenance"),
+    "evidence.highlight_relocate": (
+        "local-write", ("project_id", "highlight_id", "target_source_id"),
+        "Record deterministic highlight relocation or ambiguity for review"),
+    "evidence.highlight_history": (
+        "read", ("project_id", "highlight_id"), "Read highlight and relocation audit history"),
     "evidence.note": ("local-write", ("project_id", "source_id", "title", "body"),
                       "Record attributed evidence note"),
     "evidence.note_revise": (
@@ -1002,6 +1011,18 @@ class EvidenceFacade:
                 return library.add_anchor(_value(args, "source_id", str),
                     _value(args, "quote", str), _value(args, "start", int),
                     _value(args, "end", int), args.get("page"), expected_revision=expected)
+            highlights = HighlightService(store)
+            if operation == "evidence.highlight_create":
+                return highlights.create(
+                    _value(args, "source_id", str), _value(args, "page", int),
+                    _value(args, "start", int), _value(args, "end", int),
+                    _value(args, "quote", str), expected_revision=expected)
+            if operation == "evidence.highlight_relocate":
+                return highlights.relocate(
+                    _value(args, "highlight_id", str),
+                    _value(args, "target_source_id", str), expected_revision=expected)
+            if operation == "evidence.highlight_history":
+                return highlights.history(_value(args, "highlight_id", str))
             if operation == "evidence.note":
                 return library.add_note(_value(args, "source_id", str),
                     _value(args, "title", str), _value(args, "body", str),
