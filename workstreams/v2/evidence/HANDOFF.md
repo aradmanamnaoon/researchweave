@@ -27,11 +27,11 @@ Use `allow_local_writes=True` only after trusted host authorization;
 default. The facade's response envelope is standardized; see `API_CATALOG.md`.
 
 **Latest fully observed quality baseline (2026-10-23):** Windows CPython 3.12.9;
-**153 passing tests**, **89% combined measured coverage**, **44 tracked production modules**,
-**11,579 meaningful token-based Python source lines**, **147 registered facade operations**,
+**176 passing tests**, **87% combined measured coverage**, **44 tracked production modules**,
+**13,774 meaningful token-based Python source lines**, **159 registered facade operations**,
 clean Ruff, strict mypy and compileall. `pypdf 6.21.2` and `cryptography` were available and their
-production paths were exercised. The only unexecuted acceptance class is live public-provider
-network verification. See `TEST_RESULTS.md` for exact commands.
+production paths were exercised. Low-volume public-provider acceptance was executed successfully;
+see `LIVE_PROVIDER_ACCEPTANCE.md` and `TEST_RESULTS.md` for exact observed evidence.
 
 **End-to-end research journeys:** all five dedicated tests in
 `tests/v2/evidence/test_five_journeys.py` passed. Normalized observed call
@@ -41,16 +41,15 @@ PRISMA accounting, a refused fabricated DOI identity, native backup survival,
 and migration preview/fidelity/undo after reopen.
 
 **Acceptance status:** `ACCEPTANCE_MATRIX.md` evaluates every RE-001 through RE-052 requirement.
-The current evidence supports **47 complete / 5 partial**. The only partial rows are RE-014,
-RE-015, RE-016, RE-017 and RE-052 because live Crossref/OpenAlex/PubMed/Europe PMC behavior has
-not been exercised through an explicitly authorized trusted network transport. Their offline
-adapters, pagination, rate limiting, exact DOI matching, provider provenance, opt-in watch checks,
-offline denial and no-silent-metadata-update behavior are implemented and tested.
+The current evidence supports **52 complete / 0 partial**. Crossref, OpenAlex, PubMed and Europe PMC
+exact DOI paths were exercised live using public DOI `10.1056/NEJMoa2034577`, with response hashes
+recorded. An opted-in Crossref watch check also persisted the observation while leaving confirmed
+reference metadata unchanged until human confirmation. Deterministic tests cover pagination,
+rate/error handling, credentials, offline denial and fail-closed scientific integrity behavior.
 
 **For final integrator:** retain this isolated branch until the evidence
 worker's regressions and compatibility contracts are accepted; integrate
 the facade with PyQt6 host permission controls, add optional extras
-`cryptography` and `pypdf` to approved shared packaging, run cross-platform validation, and only
-then perform low-volume live-provider acceptance if the user explicitly authorizes it. Do not
+`cryptography` and `pypdf` to approved shared packaging and run cross-platform validation. Do not
 silently promote PRISMA accounting, provider metadata, identifiers, or quotations to scientific
 truth. This worker has made no remote push or merge.

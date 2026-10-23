@@ -38,7 +38,7 @@ transport**. Network requests never run by default.
 
 `review.*` handles independent screening, adjudication, extraction,
 versioned forms, bias appraisal, findings, gaps, narrative synthesis, PRISMA
-accounting/CSV/Markdown/Mermaid export, and shareable packets.
+accounting/CSV/Markdown/Mermaid export, and redacted/conflict-aware shareable packets.
 `writing.*` handles revisioned manuscript sections, deterministic bibliography,
 claim checks and guarded submission packet previews. `migration.*` provides
 Markdown, user-owned Zotero CSL-JSON and Obsidian vault preview, import, receipt,
@@ -48,10 +48,10 @@ acceptance gaps identified in `ACCEPTANCE_MATRIX.md`.
 Every response uses the common fields `request_id`, `status`, `data`,
 `artifacts`, `warnings`, `error`, `provenance`, `impact`. Host-permission controls
 are required for writes; external-network operations are fail-closed offline.
-The generated manifest's JSON Schemas still lack complete typed property and
-cross-field validation and must be enriched before final public UI integration.
+The generated manifest declares typed/bounded known properties. Deep nested and semantic cross-field
+validation remains operation-specific and is enforced by domain code where required.
 
-Contract update: all **147 operations** now declare JSON Schema 2020-12
+Contract update: all **159 operations** now declare JSON Schema 2020-12
 argument types and bounds for required/known optional fields, shared standard
 response envelopes, sensitivity markers and effect-specific risks. The
 `contracts.py` checks execute before command side effects. Deep nested

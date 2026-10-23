@@ -1,18 +1,19 @@
 # ResearchWeave V2 evidence — remaining limitations and risk register
 
-The governing audit is `ACCEPTANCE_MATRIX.md`: **47 requirements are Complete and 5 are Partial**.
-The five partial rows are RE-014, RE-015, RE-016, RE-017 and RE-052. They share one blocker:
-**live public-provider validation was not explicitly authorized or executed**.
+The governing audit is `ACCEPTANCE_MATRIX.md`: **52 requirements are Complete and 0 are Partial**.
+The items below are integration/confidence limits and explicit scientific boundaries, not hidden
+unimplemented RE-001..RE-052 acceptance items.
 
 1. Crossref, OpenAlex, PubMed and Europe PMC clients have deterministic injected-transport tests
    for provider parsing, pagination, response bounds, malformed payloads, timeouts/errors, rate
    limits, optional credentials, fixed HTTPS hosts and source-response SHA-256 provenance. Exact DOI
    identity and retraction/correction signals are kept separate from scientific claim support.
-   Live endpoint behavior, terms/rate quotas and current provider schemas remain unverified.
+   Low-volume exact DOI acceptance succeeded live on 2026-10-23 for all four providers; provider
+   terms, quotas and schemas can still change after that observation date.
 2. Reference monitoring is fully opt-in and host-driven. A due queue performs no network access;
    `reference.watch_check` requires the facade's explicit external-network permission, reuses the
    saved provider, records exact response hashes and warnings, and **never silently updates confirmed
-   metadata**. Its remaining acceptance gap is the same live-provider validation above.
+   metadata**. A live Crossref watch check confirmed these semantics on 2026-10-23.
 3. PDF parsing was exercised through real `pypdf 6.21.2` using a self-authored text PDF, and an
    actually encrypted PDF was rejected. Scanned/image-only pages are classified without fabricated
    OCR. OCR itself is intentionally not implemented. A larger public-domain PDF corpus and Linux/

@@ -56,7 +56,7 @@ Latest coverage measurement: 24 tests passed; 84% combined line/branch coverage,
 - Five end-to-end journey tests remain passing. Provider verification is
   mocked, and no cross-platform runner results are claimed.
 
-## Final local implementation checkpoint (2026-10-23, Windows)
+## Superseded local implementation checkpoint (2026-10-23, Windows)
 
 - `python -m pytest -q tests/v2/evidence --cov=researchweave.evidence --cov-report=term -o pythonpath=src`:
   **153 passed**, one expected `zipfile` warning from the deliberate duplicate-member adversarial
@@ -74,6 +74,28 @@ Latest coverage measurement: 24 tests passed; 84% combined line/branch coverage,
 - Real optional dependency acceptance: `pypdf 6.21.2` parsed a self-authored text PDF through
   the production adapter and rejected an actually encrypted PDF; `cryptography` is installed and
   encrypted project archives passed wrong-password, tamper, substitution and interruption tests.
-- Public provider adapters remain deterministic/injected-transport tested only. **No live Crossref,
-  OpenAlex, PubMed, or Europe PMC requests were executed.** Linux/macOS runner results are also
+- At this earlier checkpoint, public provider adapters were deterministic/injected-transport tested
+  only and no live Crossref, OpenAlex, PubMed, or Europe PMC requests had been executed. The later
+  final acceptance section below supersedes that provider status. Linux/macOS runner results remain
   unverified.
+
+## Final acceptance verification (2026-10-23, Windows)
+
+- `python -m pytest -q tests/v2/evidence --cov=researchweave.evidence --cov-report=term -o pythonpath=src`:
+  **176 passed**, one expected `zipfile` warning from the deliberate duplicate-member adversarial
+  fixture, **87% combined coverage** (6,193 statements, 1,834 branches).
+- `python -m pytest -q tests/v2/evidence/test_five_journeys.py -o pythonpath=src`:
+  **5/5 named end-to-end journeys passed**.
+- `ruff check src/researchweave/evidence tests/v2/evidence`: **all checks passed**.
+- `mypy src/researchweave/evidence --strict --follow-imports=skip`:
+  **no issues in 44 production source files**.
+- `python -m compileall -q src/researchweave/evidence`: **passed**.
+- `python workstreams/v2/evidence/count_sloc.py`:
+  **44 production modules, 13,774 meaningful source lines**.
+- `build_evidence_facade(...).capability_manifest()`: **159 registered operations**.
+- Live public-provider acceptance: exact DOI `10.1056/NEJMoa2034577` was reported by Crossref,
+  OpenAlex, PubMed and Europe PMC with exact response SHA-256 values recorded in
+  `LIVE_PROVIDER_ACCEPTANCE.md`. A live opted-in Crossref watch check persisted the observation,
+  required human confirmation and left confirmed reference title/year unchanged.
+- Linux/macOS runner results and production-scale benchmarks remain unexecuted and are reported as
+  integration confidence limits rather than inferred successes.

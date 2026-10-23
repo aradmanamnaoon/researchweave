@@ -6,14 +6,15 @@ are superseded by the matrix. Read its per-requirement implementation,
 facade IDs, tests, persistence checks and remaining scientific/security
 limitations before using this branch for integration.
 
-**Final local implementation checkpoint (2026-10-23):** the 52-row matrix now reports
-**47 Complete / 5 Partial**. The only partial requirements are RE-014..RE-017 and RE-052 because
-live public-provider validation was not authorized/executed. Full Windows regression: **153 passed,
-89% coverage, 44 production modules, 11,579 meaningful SLOC, 147 facade operations**; Ruff, strict
-mypy and compileall passed. Five end-to-end journeys passed independently. Real `pypdf 6.21.2`
-text extraction/encrypted-PDF rejection and encrypted archive interruption cleanup were exercised.
-Selective cloning now closes collection/review/protocol dependencies. Provider-watch checks are
-explicit network operations and never silently mutate reference metadata.
+**Final acceptance checkpoint (2026-10-23):** the 52-row matrix now reports
+**52 Complete / 0 Partial**. Full Windows regression: **176 passed, 87% coverage, 44 production
+modules, 13,774 meaningful SLOC, 159 facade operations**; Ruff, strict mypy and compileall passed.
+Five end-to-end journeys passed independently. Real `pypdf 6.21.2` text extraction/encrypted-PDF
+rejection and encrypted archive interruption cleanup were exercised. Selective cloning regenerates
+project-scoped IDs and persists source-origin mappings; review packets redact structured sensitive
+fields and merge with explicit conflict receipts. Crossref/OpenAlex/PubMed/Europe PMC exact DOI
+paths and an opted-in reference-watch check were verified live; hashes are in
+`LIVE_PROVIDER_ACCEPTANCE.md`. Provider-watch checks never silently mutate confirmed metadata.
 
 2026-10-23 contract update: `contracts.py` supplies bounded typed argument
 schemas and runtime enforcement for 104 registered facade operations; public
@@ -38,7 +39,7 @@ before mutations. Full suite 122 passed, 90% coverage, 41 production modules,
 | RE-019 | Rebuildable SQLite FTS5 index with phrase search; search_index.py; test_fts_and_typed_extraction_roundtrip | Implemented with explicit cache rebuild |
 | RE-030, RE-033 | Typed missingness, units, bounds and persisted extraction matrix; extraction.py; test_fts_and_typed_extraction_roundtrip | Partial; full UI and forms pending |
 | RE-041, RE-042 | Safe Markdown export preview, provenance receipt, import and soft-delete undo; migration.py; test_markdown_migration_preview_import_undo_and_reopen | Implemented standard Markdown file handoff; complex Notion formats pending |
-| RE-014..017 | Opt-in public metadata adapters for Crossref, OpenAlex, PubMed and Europe PMC; strict host permission, bounded responses, cooldown and deterministic HTTP fixtures; discovery.py and test_discovery.py | Mocked adapters verified; live requests untested |
+| RE-014..017 | Opt-in public metadata adapters for Crossref, OpenAlex, PubMed and Europe PMC; strict host permission, bounded responses, cooldown and deterministic HTTP fixtures; discovery.py and test_discovery.py | Historical milestone: mocked adapters verified; later live acceptance is recorded in the governing matrix and `LIVE_PROVIDER_ACCEPTANCE.md` |
 | RE-023, RE-024, RE-025 | UTF-8 text extraction, exact/unverifiable quote anchoring, source-backed notebook | Partial; PDF and highlights UI absent |
 | RE-027, RE-028, RE-029 | Review report registration, blinded votes, conflict and adjudication | Implemented basic round |
 | RE-032 | Conservative persisted screening arithmetic | Partial; intentionally incomplete PRISMA flow |
@@ -52,7 +53,7 @@ before mutations. Full suite 122 passed, 90% coverage, 41 production modules,
 | RE-031, RE-034..036 | Manual appraisals, anchored findings, grouping by matching outcomes, evidence gaps and synthesis via `synthesis.py` facade handlers, `test_synthesis_publishing.py`, `test_facade_extensions.py` | Partial: focused tests passed; full scientific templates and comprehensive provenance audits pending |
 | RE-038..040 | `publishing.py` deterministic plain/numbered bibliography, manuscript warnings, explicit unsubmitted publication packet, facade commands | Partial: focused tests passed; full CSL/DOCX/PDF packet export missing |
 | RE-004, RE-014..017, RE-020..022, RE-026, RE-030..031, RE-033..036, RE-038, RE-040..049, RE-051..052 | Not implemented or incomplete; consult NEXT_ACTION.md | Pending |
-| 2026-10-23 V2 capability expansion | Authenticated encryption; recovery and data-management plans; private export packets; Zotero/Obsidian imports; FTS sync; structured PDF/DOCX/EPUB; bibliographic identity, user-attested citation relationships, anchored research timeline, risk appraisal, evidence gaps, synthesis, publishing; `src/researchweave/evidence/` | See `ACCEPTANCE_MATRIX.md` for 52 distinct statuses; source and facade integration tested, live providers untested |
+| 2026-10-23 V2 capability expansion | Authenticated encryption; recovery and data-management plans; private export packets; Zotero/Obsidian imports; FTS sync; structured PDF/DOCX/EPUB; bibliographic identity, user-attested citation relationships, anchored research timeline, risk appraisal, evidence gaps, synthesis, publishing; `src/researchweave/evidence/` | Historical milestone; see `ACCEPTANCE_MATRIX.md` and `LIVE_PROVIDER_ACCEPTANCE.md` for the later 52-row final acceptance state |
 | JOURNEYS-001..005 | `test_five_journeys.py` and immutable normalized `journey_traces/*.json` | Five executed and passed on Windows; tested reopen, wrong provenance, disagreement, archive restore, and migration undo |
 | PRISMA-EXPORT | `prisma_export.py`; `review.prisma_export`, `test_prisma_export.py` | Markdown, CSV and diagnostic Mermaid, unreconciled claims marked incomplete |
 | RE-012-IDENTITY | `identity.py`, `reference_identity.py` with `reference.identity_record`, `reference.compare_metadata`, opt-in `reference.provider_identity` | Candidate mismatches and catalog-reported DOI distinguished; no claim support asserted; mocked network only |

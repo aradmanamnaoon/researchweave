@@ -4,8 +4,9 @@
 
 `from researchweave.evidence import build_evidence_facade` is the single
 headless factory. The trusted host provides a selected workspace root,
-`allow_local_writes`, `allow_remote_queries`, and an optional injected
-`metadata_transport`. Commands are namespaced and return `request_id`,
+`allow_local_writes`, `allow_remote_queries`, an optional injected
+`metadata_transport`, and optional host-owned provider configuration such as an
+OpenAlex API key, Crossref contact email and minimum provider request interval. Commands are namespaced and return `request_id`,
 `status`, `data`, `artifacts`, `warnings`, `error`, `provenance`, and `impact`.
 The facade is synchronous and has no Qt/PyQt6 imports or autonomous network
 access. The integrator is responsible for user interaction and permission
@@ -26,7 +27,8 @@ archives, deterministic manifests and safe fresh-root restores.
 `encrypted_archive.py` adds optional AES-256-GCM/scrypt authenticated
 encryption, keyed on a user-supplied password retained only in process memory.
 `recovery.py` provides explicit snapshots, verification and fresh-copy restore.
-It also exposes a read-only revision/age autosave-due contract; timing and execution remain host-driven.
+It also exposes a read-only revision/age autosave-due contract plus a durable committed-edit journal;
+timing and execution remain host-driven.
 `schema_migrations.py` and legacy store migration perform checked data backup
 and compatibility gates. `diagnostics.py` provides read-only corruption and
 library warnings. `timeline.py` reconstructs verified actions from the event
@@ -40,7 +42,8 @@ ledger and rejects a broken hash chain.
 provider observations, reversible aliases, nested collections, provenance
 of user-attested inter-paper citations, DOI metadata comparisons, reference
 change observations and local FTS5 indexing. `discovery.py` contains fixed
-public-provider clients using a bounded HTTPS transport injected by the host.
+public-provider clients using a bounded HTTPS transport injected by the host, provider-specific
+exact DOI resolution, bounded pagination and per-request throttling.
 It does not independently verify scientific conclusions.
 
 `documents.py` and `fulltext.py` extract bounded text from supported source
@@ -59,14 +62,16 @@ create grounded bibliographies, citation checks and explicitly marked
 submission-preview artifacts. `migration.py`, `interoperability.py` and
 `portability.py` implement Markdown, Zotero CSL-JSON and Obsidian adapters,
 loss/undo receipts, selected clones, artifact exports and privacy-gated
-review packets. These preserve unrecognized metadata rather than silently
+review packets. Review packets support structured redaction and conflict-aware merge receipts.
+These preserve unrecognized metadata rather than silently
 rewriting unknown fields.
 
 Selective cloning performs explicit dependency closure over the current evidence graph: selected
 collections can pull parent collections and references; reviews can pull reports, search/screening/
 retrieval/extraction state and extraction anchors/sources; study links, extraction forms, aliases,
-tags, notes/full-text pages and selected protocol histories are copied only when required. New domain
-tables must add copy rules explicitly.
+tags, notes/full-text pages and selected protocol histories are copied only when required. Destination
+project-scoped entity IDs are regenerated and dependent foreign keys remapped; `clone_origins`
+preserves stable source-project provenance. New domain tables must add copy/remapping rules explicitly.
 
 ## Integrity rules
 
@@ -81,5 +86,5 @@ tables must add copy rules explicitly.
 - Code is owned by `src/researchweave/evidence/`, tests by `tests/v2/evidence/`.
   No main-branch merge, push, UI implementation or shared dependency editing.
 
-The governing 52-row matrix is `ACCEPTANCE_MATRIX.md`; it documents the
-remaining acceptance limitations, test evidence and specific integration needs.
+The governing 52-row matrix is `ACCEPTANCE_MATRIX.md`; it documents the completed headless
+acceptance evidence plus remaining integration-confidence and scientific-boundary notes.
