@@ -7,13 +7,16 @@ from scipy import stats
 from researchweave.analysis.advanced_statistics import (
     ancova,
     approximate_permutation_mean_difference,
+    bca_bootstrap_mean,
     cluster_bootstrap_mean,
     distribution_diagnostics,
     factorial_anova,
     friedman_test,
+    grouped_bootstrap_mean_difference,
     kruskal_wallis,
     linear_mixed_effects,
     ordinal_logistic,
+    paired_bootstrap_mean_difference,
     paired_permutation_mean_difference,
     repeated_measures_anova,
     stratified_permutation_mean_difference,
@@ -222,3 +225,41 @@ def test_seeded_cluster_bootstrap_and_permutations():
     assert stratified == repeated_stratified
     assert stratified["strata"] == ["old", "young"]
     assert len(stratified["distribution_hash"]) == 64
+
+
+def test_dependence_aware_bootstrap_variants_and_bca_oracle():
+    values = [1.0, 2.0, 4.0, 7.0, 11.0, 16.0]
+    bca = bca_bootstrap_mean(values, seed=23, iterations=4000)
+    repeated_bca = bca_bootstrap_mean(values, seed=23, iterations=4000)
+    assert bca == repeated_bca
+    scipy_bca = stats.bootstrap(
+        (np.asarray(values),),
+        np.mean,
+        method="BCa",
+        confidence_level=0.95,
+        n_resamples=4000,
+        rng=np.random.default_rng(23),
+    ).confidence_interval
+    assert bca.estimate == pytest.approx(np.mean(values))
+    assert bca.lower == pytest.approx(scipy_bca.low, abs=0.35)
+    assert bca.upper == pytest.approx(scipy_bca.high, abs=0.35)
+    assert bca.method == "iid_bca"
+    assert len(bca.distribution_hash) == 64
+
+    grouped = grouped_bootstrap_mean_difference(
+        [8, 9, 10, 11], [1, 2, 3, 4], seed=31, iterations=1000
+    )
+    assert grouped.estimate == pytest.approx(7.0)
+    assert grouped.lower < grouped.estimate < grouped.upper
+    assert grouped.method == "independent_groups_percentile"
+
+    paired = paired_bootstrap_mean_difference(
+        [5, 8, 10, 14], [3, 5, 7, 9], seed=31, iterations=1000
+    )
+    assert paired.estimate == pytest.approx(3.25)
+    assert paired.lower <= paired.estimate <= paired.upper
+    assert paired.method == "paired_percentile"
+    with pytest.raises(AnalysisError, match="must align"):
+        paired_bootstrap_mean_difference([1, 2, 3], [1, 2], seed=1)
+    with pytest.raises(AnalysisError, match="constant"):
+        bca_bootstrap_mean([2, 2, 2, 2], seed=1)

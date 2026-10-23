@@ -9,13 +9,16 @@ from typing import Any, Literal, cast
 from .advanced_statistics import (
     ancova,
     approximate_permutation_mean_difference,
+    bca_bootstrap_mean,
     cluster_bootstrap_mean,
     distribution_diagnostics,
     factorial_anova,
     friedman_test,
+    grouped_bootstrap_mean_difference,
     kruskal_wallis,
     linear_mixed_effects,
     ordinal_logistic,
+    paired_bootstrap_mean_difference,
     paired_permutation_mean_difference,
     repeated_measures_anova,
     stratified_permutation_mean_difference,
@@ -216,6 +219,9 @@ class AnalysisFacade:
             "statistics.repeated_anova": "read",
             "statistics.ancova": "read",
             "statistics.bootstrap": "read",
+            "statistics.bootstrap_bca": "read",
+            "statistics.bootstrap_grouped": "read",
+            "statistics.bootstrap_paired": "read",
             "statistics.cluster_bootstrap": "read",
             "statistics.permutation": "read",
             "statistics.permutation_approx": "read",
@@ -390,6 +396,41 @@ class AnalysisFacade:
                     list(arguments["values"]),
                     seed=int(arguments["seed"]),
                     iterations=int(arguments.get("iterations", 2000)),
+                )
+            )
+        elif operation == "statistics.bootstrap_bca":
+            from dataclasses import asdict
+
+            data = asdict(
+                bca_bootstrap_mean(
+                    list(arguments["values"]),
+                    seed=int(arguments["seed"]),
+                    iterations=int(arguments.get("iterations", 2000)),
+                    confidence=float(arguments.get("confidence", 0.95)),
+                )
+            )
+        elif operation == "statistics.bootstrap_grouped":
+            from dataclasses import asdict
+
+            data = asdict(
+                grouped_bootstrap_mean_difference(
+                    list(arguments["first"]),
+                    list(arguments["second"]),
+                    seed=int(arguments["seed"]),
+                    iterations=int(arguments.get("iterations", 2000)),
+                    confidence=float(arguments.get("confidence", 0.95)),
+                )
+            )
+        elif operation == "statistics.bootstrap_paired":
+            from dataclasses import asdict
+
+            data = asdict(
+                paired_bootstrap_mean_difference(
+                    list(arguments["first"]),
+                    list(arguments["second"]),
+                    seed=int(arguments["seed"]),
+                    iterations=int(arguments.get("iterations", 2000)),
+                    confidence=float(arguments.get("confidence", 0.95)),
                 )
             )
         elif operation == "statistics.cluster_bootstrap":

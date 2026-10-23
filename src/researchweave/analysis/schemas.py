@@ -232,6 +232,15 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "statistics.bootstrap": _schema(
         {"values": AN, "seed": INT}, {"iterations": INT, "confidence": N}
     ),
+    "statistics.bootstrap_bca": _schema(
+        {"values": AN, "seed": INT}, {"iterations": INT, "confidence": N}
+    ),
+    "statistics.bootstrap_grouped": _schema(
+        {"first": AN, "second": AN, "seed": INT}, {"iterations": INT, "confidence": N}
+    ),
+    "statistics.bootstrap_paired": _schema(
+        {"first": AN, "second": AN, "seed": INT}, {"iterations": INT, "confidence": N}
+    ),
     "statistics.cluster_bootstrap": _schema(
         {"values": AN, "clusters": AS, "seed": INT}, {"iterations": INT, "confidence": N}
     ),

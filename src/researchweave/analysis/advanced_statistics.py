@@ -881,6 +881,167 @@ class ResamplingInterval:
     distribution_hash: str
 
 
+def _resampling_budget(iterations: int, confidence: float, *, label: str) -> None:
+    require(100 <= iterations <= 100_000, f"{label} iteration budget outside supported range")
+    require(0 < confidence < 1, "Confidence must lie within (0,1)")
+
+
+def _percentile_interval(estimates: np.ndarray, confidence: float) -> tuple[float, float]:
+    tail = (1 - confidence) / 2
+    lower, upper = np.quantile(estimates, [tail, 1 - tail])
+    return float(lower), float(upper)
+
+
+def bca_bootstrap_mean(
+    values: list[float],
+    *,
+    seed: int,
+    iterations: int = 2000,
+    confidence: float = 0.95,
+) -> ResamplingInterval:
+    """Seeded IID BCa interval for a scalar mean.
+
+    BCa is intentionally limited to the ordinary IID mean here. Dependence-aware
+    designs use the paired/cluster/grouped bootstrap operations below instead of
+    pretending that a row-wise jackknife is valid for dependent observations.
+    """
+
+    _resampling_budget(iterations, confidence, label="Bootstrap")
+    sample = np.asarray([finite_number(value) for value in values], dtype=float)
+    require(len(sample) >= 4, "BCa bootstrap requires at least four observations")
+    require(sample.nbytes <= 50_000_000, "Input exceeds memory budget", "RESOURCE_LIMIT")
+    require(bool(np.std(sample, ddof=1) > 0), "BCa bootstrap undefined for constant values")
+
+    estimate = float(np.mean(sample))
+    rng = np.random.default_rng(seed)
+    estimates = np.empty(iterations, dtype=float)
+    for index in range(iterations):
+        draw = sample[rng.integers(0, len(sample), size=len(sample))]
+        estimates[index] = float(np.mean(draw))
+
+    # Bias correction uses a continuity adjustment so finite Monte-Carlo runs do
+    # not create infinite z-scores when every resample falls on one side.
+    below = int(np.count_nonzero(estimates < estimate))
+    proportion = (below + 0.5) / (iterations + 1.0)
+    z0 = float(stats.norm.ppf(proportion))
+
+    jackknife = np.asarray(
+        [float(np.mean(np.delete(sample, index))) for index in range(len(sample))], dtype=float
+    )
+    jackknife_center = float(np.mean(jackknife))
+    centered = jackknife_center - jackknife
+    denominator = 6.0 * float(np.sum(centered**2) ** 1.5)
+    acceleration = 0.0 if denominator == 0 else float(np.sum(centered**3) / denominator)
+
+    tail = (1 - confidence) / 2
+    nominal = np.asarray([tail, 1 - tail], dtype=float)
+    z_alpha = stats.norm.ppf(nominal)
+    denominator_terms = 1.0 - acceleration * (z0 + z_alpha)
+    require(
+        bool(np.all(np.abs(denominator_terms) > 1e-12)),
+        "BCa acceleration produced an unstable confidence transform",
+    )
+    adjusted = stats.norm.cdf(z0 + (z0 + z_alpha) / denominator_terms)
+    require(
+        bool(np.all(np.isfinite(adjusted)))
+        and 0 <= float(adjusted[0]) < float(adjusted[1]) <= 1,
+        "BCa confidence limits are not estimable for this sample",
+    )
+    lower, upper = np.quantile(estimates, adjusted)
+    return ResamplingInterval(
+        estimate,
+        float(lower),
+        float(upper),
+        confidence,
+        iterations,
+        seed,
+        "iid_bca",
+        len(sample),
+        digest(estimates.tolist()),
+    )
+
+
+def grouped_bootstrap_mean_difference(
+    first: list[float],
+    second: list[float],
+    *,
+    seed: int,
+    iterations: int = 2000,
+    confidence: float = 0.95,
+) -> ResamplingInterval:
+    """Bootstrap an independent two-group mean difference within groups."""
+
+    _resampling_budget(iterations, confidence, label="Bootstrap")
+    first_values = np.asarray([finite_number(value) for value in first], dtype=float)
+    second_values = np.asarray([finite_number(value) for value in second], dtype=float)
+    require(
+        len(first_values) >= 2 and len(second_values) >= 2,
+        "Grouped bootstrap requires at least two observations per group",
+    )
+    require(
+        first_values.nbytes + second_values.nbytes <= 50_000_000,
+        "Input exceeds memory budget",
+        "RESOURCE_LIMIT",
+    )
+    estimate = float(np.mean(first_values) - np.mean(second_values))
+    rng = np.random.default_rng(seed)
+    estimates = np.empty(iterations, dtype=float)
+    for index in range(iterations):
+        first_draw = first_values[rng.integers(0, len(first_values), size=len(first_values))]
+        second_draw = second_values[rng.integers(0, len(second_values), size=len(second_values))]
+        estimates[index] = float(np.mean(first_draw) - np.mean(second_draw))
+    lower, upper = _percentile_interval(estimates, confidence)
+    return ResamplingInterval(
+        estimate,
+        lower,
+        upper,
+        confidence,
+        iterations,
+        seed,
+        "independent_groups_percentile",
+        len(first_values) + len(second_values),
+        digest(estimates.tolist()),
+    )
+
+
+def paired_bootstrap_mean_difference(
+    first: list[float],
+    second: list[float],
+    *,
+    seed: int,
+    iterations: int = 2000,
+    confidence: float = 0.95,
+) -> ResamplingInterval:
+    """Bootstrap paired mean differences by resampling complete pairs."""
+
+    _resampling_budget(iterations, confidence, label="Bootstrap")
+    require(len(first) == len(second), "Paired bootstrap inputs must align")
+    require(len(first) >= 3, "Paired bootstrap requires at least three complete pairs")
+    differences = np.asarray(
+        [finite_number(a) - finite_number(b) for a, b in zip(first, second, strict=True)],
+        dtype=float,
+    )
+    require(differences.nbytes <= 50_000_000, "Input exceeds memory budget", "RESOURCE_LIMIT")
+    estimate = float(np.mean(differences))
+    rng = np.random.default_rng(seed)
+    estimates = np.empty(iterations, dtype=float)
+    for index in range(iterations):
+        draw = differences[rng.integers(0, len(differences), size=len(differences))]
+        estimates[index] = float(np.mean(draw))
+    lower, upper = _percentile_interval(estimates, confidence)
+    return ResamplingInterval(
+        estimate,
+        lower,
+        upper,
+        confidence,
+        iterations,
+        seed,
+        "paired_percentile",
+        len(differences),
+        digest(estimates.tolist()),
+    )
+
+
 def cluster_bootstrap_mean(
     values: list[float],
     clusters: list[str],
@@ -890,8 +1051,7 @@ def cluster_bootstrap_mean(
     confidence: float = 0.95,
 ) -> ResamplingInterval:
     require(len(values) == len(clusters) and len(values) >= 3, "Values and clusters must align")
-    require(100 <= iterations <= 100_000, "Bootstrap iteration budget outside supported range")
-    require(0 < confidence < 1, "Confidence must lie within (0,1)")
+    _resampling_budget(iterations, confidence, label="Bootstrap")
     numeric = np.asarray([finite_number(value) for value in values], dtype=float)
     labels = np.asarray([str(cluster) for cluster in clusters], dtype=object)
     unique = np.unique(labels)
@@ -903,12 +1063,11 @@ def cluster_bootstrap_mean(
         chosen = rng.integers(0, len(grouped), size=len(grouped))
         sample = np.concatenate([grouped[i] for i in chosen])
         estimates[index] = float(np.mean(sample))
-    tail = (1 - confidence) / 2
-    lower, upper = np.quantile(estimates, [tail, 1 - tail])
+    lower, upper = _percentile_interval(estimates, confidence)
     return ResamplingInterval(
         float(np.mean(numeric)),
-        float(lower),
-        float(upper),
+        lower,
+        upper,
         confidence,
         iterations,
         seed,
