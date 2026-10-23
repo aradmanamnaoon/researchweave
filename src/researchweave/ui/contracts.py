@@ -122,6 +122,9 @@ class Activity:
     operation: str
     summary: str
     timestamp: str = field(default_factory=utc_now)
+    target_kind: str = ""
+    target_id: str = ""
+    changed_fields: list[str] = field(default_factory=list)
 
 
 @dataclass
@@ -161,6 +164,8 @@ class Project:
     integrations: list[dict[str, Any]] = field(default_factory=list)
     notifications: list[dict[str, Any]] = field(default_factory=list)
     review_flow: dict[str, Any] = field(default_factory=dict)
+    plot_configs: list[dict[str, Any]] = field(default_factory=list)
+    manuscript_sections: list[dict[str, Any]] = field(default_factory=list)
 
 
 @dataclass

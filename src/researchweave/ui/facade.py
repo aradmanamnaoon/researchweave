@@ -88,6 +88,7 @@ MAX_TITLE = 180
 MAX_NOTE = 250_000
 MAX_CSV_CHARS = 2_000_000
 FILENAME = re.compile(r"^[\w .()-]{1,100}\.(?:md|json|csv)$", re.UNICODE)
+CHART_FILENAME = re.compile(r"^[\w .()-]{1,100}\.(?:svg|png)$", re.UNICODE)
 ALLOWED_STUDIES = ("literature", "qualitative", "quantitative", "mixed")
 
 
@@ -107,6 +108,19 @@ def _integer(args: Mapping[str, Any], name: str, *, minimum: int = 0,
         raise UIError("INVALID_INPUT", f"'{name}' must be between {minimum} and {maximum}.",
                       "Choose a whole number in the permitted range.")
     return cast(int, value)
+
+
+def _clean_section_text(value: Any, label: str, limit: int, *, allow_empty: bool = False) -> str:
+    if not isinstance(value, str) or len(value) > limit or (not allow_empty and not value.strip()):
+        raise UIError(
+            "INVALID_INPUT",
+            (
+                f"{label} must be {'text' if allow_empty else 'nonempty text'} "
+                f"under {limit} characters."
+            ),
+            "Correct the manuscript section and try again.",
+        )
+    return value
 
 
 def _required_project(args: Mapping[str, Any], store: ProjectStore) -> Project:
@@ -133,6 +147,16 @@ def _preview_file(name: str) -> str:
     if not FILENAME.fullmatch(name) or name.startswith(".") or ".." in name:
         raise UIError("INVALID_INPUT", "Invalid export file name.",
                       "Use a simple .md, .csv or .json filename.")
+    return name
+
+
+def _preview_chart_file(name: str) -> str:
+    if not CHART_FILENAME.fullmatch(name) or name.startswith(".") or ".." in name:
+        raise UIError(
+            "INVALID_INPUT",
+            "Invalid chart export file name.",
+            "Use a simple .svg or .png filename.",
+        )
     return name
 
 
@@ -189,6 +213,7 @@ class UIFacade:
             "ui.protocol.update": ("Revise draft protocol fields", Effect.WRITE),
             "ui.protocol.complete": ("Validate protocol for human review", Effect.READ),
             "ui.protocol.history": ("Read protocol amendment history", Effect.READ),
+            "ui.protocol.export": ("Export protocol and amendment history", Effect.READ),
             "ui.source.add": ("Import a local text source", Effect.WRITE),
             "ui.source.search": ("Search project library", Effect.READ),
             "ui.source.get": ("Read a local source", Effect.READ),
@@ -216,12 +241,14 @@ class UIFacade:
             "ui.screening.flow": ("Calculate recorded screening stage counts", Effect.READ),
             "ui.prisma.read": ("Read grounded PRISMA flow state", Effect.READ),
             "ui.prisma.update": ("Save explicit PRISMA flow events", Effect.WRITE),
+            "ui.prisma.export": ("Export grounded PRISMA flow state", Effect.READ),
             "ui.extraction.schema": ("Read extraction form schema", Effect.READ),
             "ui.extraction.schema.update": ("Version extraction form schema", Effect.WRITE),
             "ui.extraction.record.save": ("Save validated extraction record", Effect.WRITE),
             "ui.extraction.list": ("List extraction records", Effect.READ),
             "ui.extraction.export": ("Export structured extraction records", Effect.READ),
             "ui.qual.annotate": ("Add a Unicode-safe evidence code", Effect.WRITE),
+            "ui.qual.annotation.update": ("Edit a saved evidence code or memo", Effect.WRITE),
             "ui.qual.list": ("Inspect coded evidence", Effect.READ),
             "ui.dataset.import": ("Import bounded CSV text", Effect.WRITE),
             "ui.dataset.describe": ("Summarize numeric values", Effect.READ),
@@ -234,6 +261,9 @@ class UIFacade:
             "ui.chart.bar": ("Compute descriptive categorical counts", Effect.READ),
             "ui.chart.svg": ("Produce local accessible chart SVG", Effect.READ),
             "ui.chart.png": ("Produce local descriptive chart PNG", Effect.READ),
+            "ui.chart.config.list": ("List saved descriptive plot configurations", Effect.READ),
+            "ui.chart.config.save": ("Save descriptive plot configuration", Effect.WRITE),
+            "ui.chart.export.write": ("Write approved SVG or PNG plot file", Effect.WRITE),
             "ui.analysis.methods": ("List scientific analysis adapter methods", Effect.READ),
             "ui.analysis.run": ("Run and persist a typed scientific analysis", Effect.WRITE),
             "ui.analysis.results": ("List versioned analysis results", Effect.READ),
@@ -244,6 +274,8 @@ class UIFacade:
             "ui.mixed.list": ("List mixed-method evidence links", Effect.READ),
             "ui.mixed.add": ("Link qualitative and quantitative evidence", Effect.WRITE),
             "ui.manuscript.save": ("Save a manuscript draft", Effect.WRITE),
+            "ui.manuscript.sections.read": ("Read structured manuscript sections", Effect.READ),
+            "ui.manuscript.sections.update": ("Save structured manuscript sections", Effect.WRITE),
             "ui.notebook.save": ("Save local research notes", Effect.WRITE),
             "ui.code.execution.status": (
                 "Inspect disabled code execution safety gate",
@@ -399,6 +431,37 @@ class UIFacade:
         }
         schemas["ui.notification.dismiss"] |= {"notification_id": string}
         schemas["ui.prisma.update"] |= {"flow": {"type": "object"}}
+        schemas["ui.qual.annotation.update"] |= {
+            "annotation_id": string, "code": string, "memo": string,
+        }
+        schemas["ui.chart.config.save"] |= {
+            "name": string,
+            "dataset_id": string,
+            "column": string,
+            "plot_type": string,
+            "unit": string,
+            "title": string,
+            "x_label": string,
+            "y_label": string,
+            "bins": {"type": "integer", "minimum": 1, "maximum": 60},
+        }
+        schemas["ui.chart.export.write"] |= {
+            "filename": string,
+            "format": string,
+            "dataset_id": string,
+            "column": string,
+            "plot_type": string,
+            "unit": string,
+            "title": string,
+            "x_label": string,
+            "y_label": string,
+            "bins": {"type": "integer", "minimum": 1, "maximum": 60},
+            "width": {"type": "integer", "minimum": 400, "maximum": 4096},
+            "height": {"type": "integer", "minimum": 240, "maximum": 2160},
+        }
+        schemas["ui.manuscript.sections.update"] |= {
+            "sections": {"type": "array", "items": {"type": "object"}},
+        }
         schemas["ui.activity.list"] |= {
             "operation_filter": string,
             "offset": {"type": "integer", "minimum": 0},
@@ -519,8 +582,32 @@ class UIFacade:
                           "Reload the project and repeat the intended change.")
         data = callback(project)
         project.updated_at = utc_now()
-        project.activity.append(Activity(sequence=len(project.activity) + 1,
-                                         operation=action, summary=action.replace(".", " ")))
+        target_id = ""
+        for key in ("source_id", "dataset_id", "annotation_id", "reference_id", "result_id",
+                    "action_id", "notification_id", "preset_id"):
+            value = args.get(key)
+            if isinstance(value, str) and value:
+                target_id = value
+                break
+        if not target_id:
+            for key in ("source_id", "dataset_id", "annotation_id", "reference_id", "result_id"):
+                value = data.get(key)
+                if isinstance(value, str) and value:
+                    target_id = value
+                    break
+        changed_fields = sorted(
+            key for key in args
+            if key not in {"project_id", "expected_revision", "request_id"}
+            and key not in {"text", "manuscript", "notebook", "csv_text"}
+        )
+        project.activity.append(Activity(
+            sequence=len(project.activity) + 1,
+            operation=action,
+            summary=action.replace(".", " "),
+            target_kind=action.removeprefix("ui.").split(".", 1)[0],
+            target_id=target_id,
+            changed_fields=changed_fields,
+        ))
         project.activity = project.activity[-1000:]
         self.store.save(project, expected_revision=revision)
         return {"project_id": project.id, "revision": project.revision, **data}
@@ -702,6 +789,31 @@ class UIFacade:
     def _do_ui_protocol_history(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
         return {"entries": list(project.protocol_history), "revision": project.revision}
+
+    def _do_ui_protocol_export(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        payload = json.dumps(
+            {
+                "schema_version": 1,
+                "project_id": project.id,
+                "project_revision": project.revision,
+                "protocol": project.protocol,
+                "history": project.protocol_history,
+                "warning": (
+                    "Protocol state is user-authored planning material and does not certify "
+                    "ethics, registration or scientific validity."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        return {
+            "format": "application/json",
+            "content": payload,
+            "sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+            "entries": len(project.protocol_history),
+        }
 
     def _do_ui_source_add(self, args: Mapping[str, Any]) -> dict[str, Any]:
         title = _string(args, "title", MAX_TITLE)
@@ -1000,6 +1112,35 @@ class UIFacade:
 
         return self._mutate(args, "ui.prisma.update", update)
 
+    def _do_ui_prisma_export(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        flow = combined_prisma(project, screening_flow(project))
+        payload = json.dumps(
+            {
+                "schema_version": 1,
+                "project_id": project.id,
+                "project_revision": project.revision,
+                "flow": flow,
+                "derivation": (
+                    "Recorded screening events are derived locally; upstream search, "
+                    "deduplication and retrieval stages remain explicit user-entered values "
+                    "when no source-system events exist."
+                ),
+            },
+            ensure_ascii=False,
+            indent=2,
+            sort_keys=True,
+        )
+        return {
+            "format": "application/json",
+            "content": payload,
+            "sha256": hashlib.sha256(payload.encode("utf-8")).hexdigest(),
+            "unknown_fields": sorted(
+                key for key, value in flow.items()
+                if value is None
+            ),
+        }
+
     def _do_ui_extraction_schema(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
         return {
@@ -1058,6 +1199,35 @@ class UIFacade:
             return {"annotation": asdict(annotation)}
 
         return self._mutate(args, "ui.qual.annotate", update)
+
+    def _do_ui_qual_annotation_update(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        annotation_id = _string(args, "annotation_id", 36)
+        code = _string(args, "code", 80)
+        memo = _string(args, "memo", 2000, required=False)
+
+        def update(project: Project) -> dict[str, Any]:
+            annotation = next(
+                (item for item in project.annotations if item.id == annotation_id),
+                None,
+            )
+            if annotation is None:
+                raise UIError(
+                    "NOT_FOUND",
+                    "Annotation was not found.",
+                    "Refresh the qualitative coding list and select an existing annotation.",
+                )
+            source = _source(project, annotation.source_id)
+            if source.text[annotation.start:annotation.end] != annotation.quote:
+                raise UIError(
+                    "INTEGRITY_FAILURE",
+                    "Annotation source span no longer matches its saved quote.",
+                    "Inspect the source version before editing the code or memo.",
+                )
+            annotation.code = code
+            annotation.memo = memo
+            return {"annotation": asdict(annotation), "annotation_id": annotation.id}
+
+        return self._mutate(args, "ui.qual.annotation.update", update)
 
     def _do_ui_qual_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
@@ -1461,10 +1631,200 @@ class UIFacade:
             "warnings": ["Descriptive display only; no statistical inference."],
         }
 
+    def _do_ui_chart_config_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {
+            "configs": list(project.plot_configs),
+            "revision": project.revision,
+        }
+
+    def _do_ui_chart_config_save(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        name = _string(args, "name", 120)
+        dataset_id = _string(args, "dataset_id", 36)
+        column = _string(args, "column", 100)
+        plot_type = _string(args, "plot_type", 20)
+        unit = _string(args, "unit", 60, required=False)
+        title = _string(args, "title", 180, required=False)
+        x_label = _string(args, "x_label", 120, required=False)
+        y_label = _string(args, "y_label", 120, required=False)
+        bins = _integer(args, "bins", minimum=1, maximum=60, default=10)
+
+        def update(project: Project) -> dict[str, Any]:
+            dataset = _dataset(project, dataset_id)
+            if column not in dataset.columns:
+                raise UIError(
+                    "NOT_FOUND",
+                    "Plot variable was not found.",
+                    "Choose a variable from the current dataset.",
+                )
+            if plot_type not in {"histogram", "bar"}:
+                raise UIError(
+                    "INVALID_INPUT",
+                    "Unknown descriptive plot type.",
+                    "Choose histogram or bar.",
+                )
+            record = {
+                "id": new_id(),
+                "name": name,
+                "dataset_id": dataset_id,
+                "column": column,
+                "plot_type": plot_type,
+                "unit": unit,
+                "title": title,
+                "x_label": x_label,
+                "y_label": y_label,
+                "bins": bins,
+                "created_at": utc_now(),
+            }
+            project.plot_configs.append(record)
+            project.plot_configs = project.plot_configs[-200:]
+            return {"config": record}
+
+        return self._mutate(args, "ui.chart.config.save", update)
+
+    def _write_export_bytes(self, filename: str, content: bytes) -> dict[str, Any]:
+        name = _preview_chart_file(filename)
+        if self.export_authorizer is None or not self.export_authorizer(name):
+            raise UIError(
+                "NEEDS_APPROVAL",
+                "Export needs explicit local user approval.",
+                "Review the export preview and approve in the desktop dialog.",
+            )
+        destination = self.export_root / name
+        if destination.is_symlink():
+            raise UIError(
+                "INTEGRITY_FAILURE",
+                "Export destination cannot be a symbolic link.",
+                "Choose a normal local file destination.",
+            )
+        if destination.exists():
+            raise UIError(
+                "CONFLICT",
+                "An export with this name already exists.",
+                "Choose a different filename to preserve existing work.",
+            )
+        self.export_root.mkdir(parents=True, exist_ok=True)
+        temporary: Path | None = None
+        try:
+            with tempfile.NamedTemporaryFile(
+                mode="wb",
+                dir=self.export_root,
+                prefix=f".{name}.",
+                suffix=".tmp",
+                delete=False,
+            ) as stream:
+                temporary = Path(stream.name)
+                stream.write(content)
+                stream.flush()
+                os.fsync(stream.fileno())
+            os.link(temporary, destination)
+        except FileExistsError as exc:
+            raise UIError(
+                "CONFLICT",
+                "Export filename was taken.",
+                "Choose a new name and retry.",
+            ) from exc
+        except OSError as exc:
+            raise UIError(
+                "WRITE_FAILED",
+                "Export could not be committed atomically.",
+                "Check the local export folder and retry; existing files were not overwritten.",
+            ) from exc
+        finally:
+            if temporary is not None:
+                temporary.unlink(missing_ok=True)
+        return {
+            "filename": name,
+            "path": str(destination),
+            "sha256": hashlib.sha256(content).hexdigest(),
+            "bytes": len(content),
+            "collision_policy": "refuse-existing",
+            "atomic_write": True,
+        }
+
+    def _do_ui_chart_export_write(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        requested = _string(args, "format", 10).lower()
+        if requested not in {"svg", "png"}:
+            raise UIError(
+                "INVALID_INPUT",
+                "Chart export format must be SVG or PNG.",
+                "Choose SVG or PNG.",
+            )
+        filename = _string(args, "filename", 100)
+        expected_suffix = f".{requested}"
+        if not filename.lower().endswith(expected_suffix):
+            raise UIError(
+                "INVALID_INPUT",
+                f"{requested.upper()} export filename must end with {expected_suffix}.",
+                f"Use a filename such as plot{expected_suffix}.",
+            )
+        spec = self._chart(args)
+        width = _integer(args, "width", minimum=400, maximum=4096, default=900)
+        height = _integer(args, "height", minimum=240, maximum=2160, default=500)
+        if requested == "svg":
+            content = chart_svg(spec, width=width, height=height).encode("utf-8")
+        else:
+            content = chart_png(spec, width=width, height=height)
+        receipt = self._write_export_bytes(filename, content)
+        return {
+            **receipt,
+            "format": f"image/{'svg+xml' if requested == 'svg' else 'png'}",
+            "source_metadata": {
+                "project_id": project.id,
+                "project_revision": project.revision,
+                "dataset_id": _string(args, "dataset_id", 36),
+                "column": _string(args, "column", 100),
+                "descriptive_only": True,
+            },
+            "warnings": ["Descriptive display only; no statistical inference."],
+        }
+
     def _do_ui_manuscript_save(self, args: Mapping[str, Any]) -> dict[str, Any]:
         manuscript = _string(args, "manuscript", MAX_NOTE, required=False)
         return self._mutate(args, "ui.manuscript.save",
                             lambda project: self._set_text(project, "manuscript", manuscript))
+
+    def _do_ui_manuscript_sections_read(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {
+            "sections": list(project.manuscript_sections),
+            "revision": project.revision,
+        }
+
+    def _do_ui_manuscript_sections_update(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        raw = args.get("sections", [])
+        if not isinstance(raw, list) or any(not isinstance(item, Mapping) for item in raw):
+            raise UIError(
+                "INVALID_INPUT",
+                "Manuscript sections must be structured records.",
+                "Use the manuscript section editor.",
+            )
+        if len(raw) > 50:
+            raise UIError(
+                "RESOURCE_LIMIT",
+                "Too many manuscript sections.",
+                "Combine related sections before saving.",
+            )
+        sections: list[dict[str, Any]] = []
+        for index, item in enumerate(raw):
+            title = _clean_section_text(item.get("title"), "Section title", 160)
+            body = _clean_section_text(item.get("body"), "Section body", 100_000, allow_empty=True)
+            sections.append({
+                "id": str(item.get("id") or new_id()),
+                "title": title,
+                "body": body,
+                "order": index,
+            })
+
+        def update(project: Project) -> dict[str, Any]:
+            project.manuscript_sections = sections
+            project.manuscript = "\n\n".join(
+                f"## {item['title']}\n\n{item['body']}" for item in sections
+            )
+            return {"sections": sections, "manuscript_characters": len(project.manuscript)}
+
+        return self._mutate(args, "ui.manuscript.sections.update", update)
 
     def _do_ui_notebook_save(self, args: Mapping[str, Any]) -> dict[str, Any]:
         notebook = _string(args, "notebook", MAX_NOTE, required=False)

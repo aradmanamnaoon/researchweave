@@ -367,8 +367,16 @@ class ResearchWindow(QMainWindow):
         self.protocol_scroll.setWidget(self.protocol_content)
         named(self.protocol_scroll, "Research protocol form")
         layout.addWidget(self.protocol_scroll)
-        layout.addWidget(button("Save protocol draft", self.save_protocol))
-        layout.addWidget(button("Check required fields", self.validate_protocol))
+        protocol_actions = QHBoxLayout()
+        protocol_actions.addWidget(button("Save protocol draft", self.save_protocol))
+        protocol_actions.addWidget(button("Check required fields", self.validate_protocol))
+        protocol_actions.addWidget(
+            button("Preview protocol JSON export", self.preview_protocol_export)
+        )
+        layout.addLayout(protocol_actions)
+        self.protocol_history = QListWidget()
+        named(self.protocol_history, "Protocol amendment history")
+        layout.addWidget(self.protocol_history)
         self._refresh_templates()
 
         layout = self._page("Library", "Search local sources; sample records are always labeled.")
@@ -531,7 +539,12 @@ class ResearchWindow(QMainWindow):
         named(self.prisma_reasons, "PRISMA exclusion reason counts")
         layout.addWidget(self.prisma_reasons)
         layout.addWidget(button("Save measured review-flow events", self.save_prisma, primary=True))
-        layout.addWidget(button("Refresh PRISMA state", self.refresh_prisma))
+        prisma_actions = QHBoxLayout()
+        prisma_actions.addWidget(button("Refresh PRISMA state", self.refresh_prisma))
+        prisma_actions.addWidget(
+            button("Preview structured PRISMA export", self.preview_prisma_export)
+        )
+        layout.addLayout(prisma_actions)
         self.prisma_summary = QPlainTextEdit()
         self.prisma_summary.setReadOnly(True)
         named(self.prisma_summary, "Grounded PRISMA flow summary")
@@ -665,10 +678,14 @@ class ResearchWindow(QMainWindow):
         self.plot_x_label = QLineEdit()
         self.plot_y_label = QLineEdit()
         self.plot_unit = QLineEdit()
+        self.plot_config_name = QLineEdit()
+        self.plot_config_name.setPlaceholderText("Saved plot configuration name")
+        self.plot_export_name = QLineEdit("plot.svg")
         for label, widget in (
             ("Plot type", self.plot_type), ("Title", self.plot_title),
             ("X-axis label", self.plot_x_label), ("Y-axis label", self.plot_y_label),
-            ("Units", self.plot_unit),
+            ("Units", self.plot_unit), ("Config name", self.plot_config_name),
+            ("Export filename", self.plot_export_name),
         ):
             named(widget, f"Plot {label.lower()}")
             plot_form.addRow(label, widget)
@@ -676,7 +693,13 @@ class ResearchWindow(QMainWindow):
         plot_actions = QHBoxLayout()
         plot_actions.addWidget(button("Render configured plot", self.render_configured_plot))
         plot_actions.addWidget(button("Preview SVG + PNG receipts", self.preview_plot_exports))
+        plot_actions.addWidget(button("Save plot config", self.save_plot_config))
+        plot_actions.addWidget(button("Write approved plot file", self.export_plot_file))
         layout.addLayout(plot_actions)
+        self.plot_configs = QListWidget()
+        named(self.plot_configs, "Saved descriptive plot configurations")
+        self.plot_configs.itemActivated.connect(self.restore_plot_config)
+        layout.addWidget(self.plot_configs)
         self.histogram_chart = HistogramWidget()
         named(self.histogram_chart, "Observed value histogram")
         layout.addWidget(self.histogram_chart)
@@ -707,7 +730,17 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(button("Code selection in Reader", self.annotate_selection))
         self.annotation_list = QListWidget()
         named(self.annotation_list, "Saved text annotations")
+        self.annotation_list.currentItemChanged.connect(self.load_annotation_for_edit)
         layout.addWidget(self.annotation_list)
+        annotation_form = QFormLayout()
+        self.annotation_code = QLineEdit()
+        self.annotation_memo = QLineEdit()
+        named(self.annotation_code, "Selected annotation code")
+        named(self.annotation_memo, "Selected annotation memo")
+        annotation_form.addRow("Code", self.annotation_code)
+        annotation_form.addRow("Memo", self.annotation_memo)
+        layout.addLayout(annotation_form)
+        layout.addWidget(button("Update selected annotation", self.update_annotation))
 
         layout = self._page(
             "Codebook",
@@ -775,10 +808,33 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.mixed_links)
 
         layout = self._page("Manuscript", "Verify each manuscript claim against its source.")
+        manuscript_sections = QHBoxLayout()
+        self.manuscript_section_list = QListWidget()
+        named(self.manuscript_section_list, "Structured manuscript sections")
+        self.manuscript_section_list.currentItemChanged.connect(self.load_manuscript_section)
+        manuscript_sections.addWidget(self.manuscript_section_list)
+        section_editor = QVBoxLayout()
+        self.manuscript_section_title = QLineEdit()
+        self.manuscript_section_body = QPlainTextEdit()
+        named(self.manuscript_section_title, "Manuscript section title")
+        named(self.manuscript_section_body, "Manuscript section body")
+        section_editor.addWidget(self.manuscript_section_title)
+        section_editor.addWidget(self.manuscript_section_body)
+        section_editor.addWidget(button("Add / update section", self.upsert_manuscript_section))
+        section_editor.addWidget(button("Remove selected section", self.remove_manuscript_section))
+        manuscript_sections.addLayout(section_editor)
+        layout.addLayout(manuscript_sections)
         self.manuscript_editor = QPlainTextEdit()
         named(self.manuscript_editor, "Editable manuscript draft")
         layout.addWidget(self.manuscript_editor)
-        layout.addWidget(button("Save manuscript · Ctrl+S", lambda: self.save_text("manuscript")))
+        manuscript_actions = QHBoxLayout()
+        manuscript_actions.addWidget(
+            button("Save manuscript · Ctrl+S", lambda: self.save_text("manuscript"))
+        )
+        manuscript_actions.addWidget(
+            button("Save structured sections", self.save_manuscript_sections)
+        )
+        layout.addLayout(manuscript_actions)
 
         layout = self._page(
             "References",
@@ -1154,6 +1210,7 @@ class ResearchWindow(QMainWindow):
         layout.addLayout(activity_controls)
         self.activity_list = QListWidget()
         named(self.activity_list, "Project activity audit")
+        self.activity_list.itemActivated.connect(self.open_activity_event)
         layout.addWidget(self.activity_list)
         self.activity_status = QLabel("Activity records are local provenance, not authentication.")
         self.activity_status.setWordWrap(True)
@@ -1183,13 +1240,15 @@ class ResearchWindow(QMainWindow):
             values.setdefault("project_id", self.project_id)
         if operation in {
             "ui.project.update", "ui.source.add", "ui.review.vote", "ui.qual.annotate",
+            "ui.qual.annotation.update",
             "ui.screening.vote", "ui.screening.adjudicate",
-            "ui.dataset.import", "ui.manuscript.save", "ui.notebook.save", "ui.tutorial.step",
+            "ui.dataset.import", "ui.manuscript.save", "ui.manuscript.sections.update",
+            "ui.notebook.save", "ui.tutorial.step",
             "ui.protocol.start", "ui.protocol.update",
             "ui.evidence.capture", "ui.claim.create",
             "ui.question.update", "ui.prisma.update",
             "ui.extraction.schema.update", "ui.extraction.record.save",
-            "ui.variable.metadata.update", "ui.analysis.run",
+            "ui.variable.metadata.update", "ui.analysis.run", "ui.chart.config.save",
             "ui.codebook.upsert", "ui.codebook.merge", "ui.mixed.add",
             "ui.reference.upsert", "ui.agent.action.propose", "ui.agent.action.approve",
             "ui.agent.action.deny", "ui.agent.action.record", "ui.provider.update",
@@ -1254,6 +1313,8 @@ class ResearchWindow(QMainWindow):
             self.refresh_activity()
         elif name == "Protocol":
             self.refresh_protocol()
+        elif name == "Manuscript":
+            self.refresh_manuscript_sections()
         elif name == "Guidance":
             self.refresh_guidance()
         elif name == "Backups":
@@ -1266,6 +1327,8 @@ class ResearchWindow(QMainWindow):
             self.preview_publishing()
         elif name in ("Data View", "Variable View", "Statistics"):
             self.refresh_datasets()
+            if name == "Statistics":
+                self.refresh_plot_configs()
         self.prefs.selected_screen = name
 
     def show_palette(self) -> None:
@@ -2009,6 +2072,18 @@ class ResearchWindow(QMainWindow):
         lines.append(flow["warning"])
         self.prisma_summary.setPlainText("\n".join(lines))
 
+    def preview_prisma_export(self) -> None:
+        response = self._call("ui.prisma.export")
+        if response is None:
+            return
+        unknown = ", ".join(response["unknown_fields"]) or "none"
+        self.prisma_summary.appendPlainText(
+            "\n\nStructured export preview:\n"
+            f"SHA-256: {response['sha256']}\n"
+            f"Unknown fields preserved: {unknown}\n"
+            "No missing flow count was synthesized."
+        )
+
     def add_extraction_field(self) -> None:
         name = self.extraction_field_name.text().strip()
         if not name:
@@ -2168,7 +2243,40 @@ class ResearchWindow(QMainWindow):
         value = self._call("ui.qual.list")
         if value:
             for item in value["annotations"]:
-                self.annotation_list.addItem(f"{item['code']}: {item['quote'][:120]}")
+                row = QListWidgetItem(f"{item['code']}: {item['quote'][:120]}")
+                row.setData(Qt.ItemDataRole.UserRole, item)
+                self.annotation_list.addItem(row)
+
+    def load_annotation_for_edit(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
+        if current is None:
+            self.annotation_code.clear()
+            self.annotation_memo.clear()
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(record, dict):
+            return
+        self.annotation_code.setText(str(record.get("code", "")))
+        self.annotation_memo.setText(str(record.get("memo", "")))
+
+    def update_annotation(self) -> None:
+        current = self.annotation_list.currentItem()
+        if current is None:
+            self._set_status("Select an annotation to edit.")
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(record, dict):
+            return
+        response = self._call(
+            "ui.qual.annotation.update",
+            annotation_id=str(record["id"]),
+            code=self.annotation_code.text(),
+            memo=self.annotation_memo.text(),
+        )
+        if response is not None:
+            self.refresh_annotations()
+            self._set_status("Updated annotation code and memo without changing its source span.")
 
     def refresh_codebook(self) -> None:
         self.codebook_list.clear()
@@ -2320,6 +2428,89 @@ class ResearchWindow(QMainWindow):
         if document is not None:
             document.setModified(True)
         self.navigate("Manuscript")
+
+    def refresh_manuscript_sections(self) -> None:
+        self.manuscript_section_list.clear()
+        if not self.project_id:
+            return
+        response = self._call("ui.manuscript.sections.read")
+        if response is None:
+            return
+        for section in response["sections"]:
+            item = QListWidgetItem(f"{section['order'] + 1}. {section['title']}")
+            item.setData(Qt.ItemDataRole.UserRole, section)
+            self.manuscript_section_list.addItem(item)
+
+    def load_manuscript_section(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
+        if current is None:
+            self.manuscript_section_title.clear()
+            self.manuscript_section_body.clear()
+            return
+        section = current.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(section, dict):
+            return
+        self.manuscript_section_title.setText(str(section.get("title", "")))
+        self.manuscript_section_body.setPlainText(str(section.get("body", "")))
+
+    def upsert_manuscript_section(self) -> None:
+        title = self.manuscript_section_title.text().strip()
+        if not title:
+            self._set_status("Enter a manuscript section title.")
+            return
+        current = self.manuscript_section_list.currentItem()
+        section = (
+            dict(current.data(Qt.ItemDataRole.UserRole))
+            if current is not None and isinstance(current.data(Qt.ItemDataRole.UserRole), dict)
+            else {"id": "", "order": self.manuscript_section_list.count()}
+        )
+        section["title"] = title
+        section["body"] = self.manuscript_section_body.toPlainText()
+        if current is None:
+            item = QListWidgetItem(title)
+            item.setData(Qt.ItemDataRole.UserRole, section)
+            self.manuscript_section_list.addItem(item)
+            self.manuscript_section_list.setCurrentItem(item)
+        else:
+            current.setText(title)
+            current.setData(Qt.ItemDataRole.UserRole, section)
+        self._set_status("Section staged locally; save structured sections to persist it.")
+
+    def remove_manuscript_section(self) -> None:
+        row = self.manuscript_section_list.currentRow()
+        if row < 0:
+            self._set_status("Select a manuscript section to remove.")
+            return
+        self.manuscript_section_list.takeItem(row)
+        self.manuscript_section_title.clear()
+        self.manuscript_section_body.clear()
+        self._set_status("Section removed locally; save structured sections to persist the change.")
+
+    def save_manuscript_sections(self) -> None:
+        sections: list[dict[str, Any]] = []
+        for row in range(self.manuscript_section_list.count()):
+            item = self.manuscript_section_list.item(row)
+            if item is None:
+                continue
+            section = item.data(Qt.ItemDataRole.UserRole)
+            if not isinstance(section, dict):
+                continue
+            sections.append({
+                "id": str(section.get("id", "")),
+                "title": str(section.get("title", "")),
+                "body": str(section.get("body", "")),
+            })
+        response = self._call("ui.manuscript.sections.update", sections=sections)
+        if response is not None:
+            project = self._call("ui.project.open", project_id=self.project_id)
+            if project is not None:
+                self.manuscript_editor.setPlainText(project["project"]["manuscript"])
+                document = self.manuscript_editor.document()
+                if document is not None:
+                    document.setModified(False)
+            self.refresh_manuscript_sections()
+            self._set_status("Saved structured manuscript sections and regenerated the draft.")
 
     def import_csv(self) -> None:
         if not self.project_id:
@@ -2534,6 +2725,92 @@ class ResearchWindow(QMainWindow):
             "Both outputs represent the same descriptive configuration; "
             "no inferential result is added."
         )
+
+    def save_plot_config(self) -> None:
+        if not self.current_dataset_id or not self.variable_picker.currentText():
+            self._set_status("Choose a dataset and variable before saving a plot config.")
+            return
+        name = self.plot_config_name.text().strip()
+        if not name:
+            self._set_status("Enter a plot configuration name.")
+            return
+        response = self._call("ui.chart.config.save", name=name, **self._configured_plot_args())
+        if response is not None:
+            self.refresh_plot_configs()
+            self._set_status(f"Saved plot configuration {response['config']['name']}.")
+
+    def refresh_plot_configs(self) -> None:
+        self.plot_configs.clear()
+        if not self.project_id:
+            return
+        response = self._call("ui.chart.config.list")
+        if response is None:
+            return
+        for config in response["configs"]:
+            item = QListWidgetItem(
+                f"{config['name']} · {config['plot_type']} · {config['column']}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, config)
+            self.plot_configs.addItem(item)
+
+    def restore_plot_config(self, item: QListWidgetItem) -> None:
+        config = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(config, dict):
+            return
+        dataset_index = self.dataset_picker.findData(config["dataset_id"])
+        if dataset_index >= 0:
+            self.dataset_picker.setCurrentIndex(dataset_index)
+        variable_index = self.variable_picker.findText(config["column"])
+        if variable_index >= 0:
+            self.variable_picker.setCurrentIndex(variable_index)
+        self.plot_type.setCurrentText(config["plot_type"])
+        self.plot_title.setText(config["title"])
+        self.plot_x_label.setText(config["x_label"])
+        self.plot_y_label.setText(config["y_label"])
+        self.plot_unit.setText(config["unit"])
+        self.plot_config_name.setText(config["name"])
+        self.render_configured_plot()
+
+    def export_plot_file(self) -> None:
+        if not self.current_dataset_id or not self.variable_picker.currentText():
+            self._set_status("Choose a dataset and variable before exporting a plot.")
+            return
+        filename = self.plot_export_name.text().strip()
+        requested = "png" if filename.lower().endswith(".png") else "svg"
+        args = self._configured_plot_args()
+        preview_operation = "ui.chart.png" if requested == "png" else "ui.chart.svg"
+        preview = self._call(preview_operation, **args, width=900, height=500)
+        if preview is None:
+            return
+        outcome = QMessageBox.question(
+            self,
+            "Approve local plot export",
+            f"Write {filename} to the local export folder?\nSHA-256: {preview['sha256']}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if outcome != QMessageBox.StandardButton.Yes:
+            self._set_status("Plot export cancelled. No file was written.")
+            return
+        previous = self.facade.export_authorizer
+        self.facade.export_authorizer = lambda approved: approved == filename
+        try:
+            receipt = self._call(
+                "ui.chart.export.write",
+                filename=filename,
+                format=requested,
+                width=900,
+                height=500,
+                **args,
+            )
+        finally:
+            self.facade.export_authorizer = previous
+        if receipt is not None:
+            self.stats_result.appendPlainText(
+                f"\n\nPlot file written: {receipt['path']}\n"
+                f"SHA-256: {receipt['sha256']}\n"
+                "Descriptive display only."
+            )
 
     def refresh_code_execution(self) -> None:
         if not self.project_id:
@@ -3390,15 +3667,58 @@ class ResearchWindow(QMainWindow):
             )
             if value:
                 for event in value["events"]:
+                    target = (
+                        f" · {event['target_kind']}:{event['target_id']}"
+                        if event.get("target_id")
+                        else f" · {event.get('target_kind', 'project')}"
+                    )
                     item = QListWidgetItem(
-                        f"{event['sequence']} · {event['operation']} · {event['timestamp']}"
+                        f"{event['sequence']} · {event['operation']}{target} · {event['timestamp']}"
                     )
                     item.setData(Qt.ItemDataRole.UserRole, event)
+                    fields = ", ".join(event.get("changed_fields", [])) or "none"
+                    item.setToolTip(f"Changed fields: {fields}")
                     self.activity_list.addItem(item)
                 self.activity_status.setText(
                     f"Showing {len(value['events'])} of {value['total']} matching local events. "
                     f"{value['limitation']}"
                 )
+
+    def open_activity_event(self, item: QListWidgetItem) -> None:
+        event = item.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(event, dict):
+            return
+        target_kind = str(event.get("target_kind", ""))
+        target_id = str(event.get("target_id", ""))
+        screen_by_kind = {
+            "source": "Library",
+            "qual": "Qualitative",
+            "dataset": "Data View",
+            "variable": "Variable View",
+            "chart": "Statistics",
+            "protocol": "Protocol",
+            "prisma": "PRISMA",
+            "manuscript": "Manuscript",
+            "reference": "References",
+            "analysis": "Analysis Results",
+            "screening": "Review",
+        }
+        screen = screen_by_kind.get(target_kind)
+        if screen is None:
+            self._set_status("This activity record has no specialized navigation target.")
+            return
+        self.navigate(screen)
+        if target_kind == "source" and target_id:
+            response = self._call("ui.source.get", source_id=target_id)
+            if response is not None:
+                source = response["source"]
+                self.current_source_id = target_id
+                self.reader_meta.setText(
+                    f"{source['title']} · {source['source_label']} · "
+                    f"SHA-256 {source['content_hash']}"
+                )
+                self.reader_text.setPlainText(source["text"])
+                self.navigate("Reader")
 
     def _refresh_templates(self) -> None:
         response = self._call("ui.templates.list")
@@ -3447,6 +3767,14 @@ class ResearchWindow(QMainWindow):
         if response is None:
             return
         record = response["protocol"]
+        self.protocol_history.clear()
+        history = self._call("ui.protocol.history")
+        if history is not None:
+            for entry in history["entries"][-100:]:
+                self.protocol_history.addItem(
+                    f"{entry['timestamp']} · {entry['action']} · "
+                    f"{', '.join(entry.get('changed_fields', [])) or 'no field diff'}"
+                )
         if not record:
             self.protocol_summary.setText(
                 "No protocol draft yet. Select a research design and start a template."
@@ -3479,6 +3807,17 @@ class ResearchWindow(QMainWindow):
                 f"{spec['label']} {'*' if spec['required'] else ''}", editor,
             )
             self.protocol_fields[spec["name"]] = editor
+
+    def preview_protocol_export(self) -> None:
+        response = self._call("ui.protocol.export")
+        if response is None:
+            return
+        self.protocol_summary.setText(
+            self.protocol_summary.text()
+            + "\n\nStructured export preview:"
+            + f" {response['entries']} history entries · SHA-256 {response['sha256']}\n"
+            + "Export preserves user-authored protocol/history without certifying validity."
+        )
 
     def save_protocol(self) -> None:
         if not self.protocol_fields:
