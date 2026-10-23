@@ -1,6 +1,6 @@
 # Execution ledger
 
-`SOURCE_LAYOUT_VERIFIED`: package installed and imported from worktree using `uv sync --offline --extra dev`; tracked Git index check pending final local commit. Worker source: `D:\coding\codex\researchweave-v2-ai\src\researchweave\ai`. Intended final path: `D:\coding\codex\researchweave\src\researchweave\ai`. Production count: 14 Python files / 1,515 token-bearing SLOC (see `CODE_METRICS.json`).
+`SOURCE_LAYOUT_VERIFIED`: package installed and imported from worktree using `uv sync --offline --extra dev`; tracked Git index check pending final local commit. Worker source: `D:\coding\codex\researchweave-v2-ai\src\researchweave\ai`. Intended final path: `D:\coding\codex\researchweave\src\researchweave\ai`. Production count: 16 Python files / 1,735 token-bearing SLOC (see `CODE_METRICS.json`).
 
 | ID | Capability | Real files | Test evidence | Status |
 |---|---|---|---|---|
@@ -19,7 +19,9 @@
 | AI-018/020/048 | Host-defined tool manifest validation, acyclic dependency plan compilation and human-edit revalidation | `planner.py`, `test_planner.py` | `test_graph_topological_order_and_approval_preview`, `test_human_revision_recompiles_and_invalidates_approval`, invalid-plan cases | Implemented compiler slice; durable DAG execution pending |
 | AI-038 | Host-owned connector registry and read-only Markdown vault | `integrations.py`, `test_integrations.py` | `test_vault_scopes_and_notes_are_untrusted`, invalid path and size tests | Implemented local connector slice; cloud connectors pending |
 | AI-029/047 | Durable token budgeting, request reservations and privacy-safe usage diagnostics | `budgets.py`, `test_budgets.py` | `test_token_budget_reserves_and_reopens`, `test_failed_request_release_and_idempotency` | Implemented local budget store; provider wiring pending |
-| QA-001 | Hostile and failure-state regression | `test_edge_cases.py` | Six explicit success+denial tests | 48 total tests passing; 81% coverage |
+| AI-010 | OS-keyring-backed opaque credential references | `secrets.py`, `test_secrets.py` | `test_opaque_keyring_reference_roundtrip_and_delete` using in-memory backend | Adapter complete; UI and protected host permissions pending |
+| AI-037 | Authenticated project-bound encrypted backup envelopes and snapshot adapter | `crypto.py`, `test_crypto.py` | Real AES-GCM/Scrypt `test_crypto_roundtrip_randomized_and_project_bound`, `test_encrypted_snapshot_restore_with_wrong_password` | Encrypted local snapshot slice; remote adapters pending |
+| QA-001 | Hostile and failure-state regression | `test_edge_cases.py` | Six explicit success+denial tests | 57 total tests passing; 81% coverage |
 
 All other AI-001–AI-050 tasks remain pending or partial; no missing task is implicitly marked implemented. Synthetic test data are original and distributable; no external fixture license applies. GUI wiring is pending for all operations. Full validation and precise remaining work are in `TEST_RESULTS.md` and `NEXT_ACTION.md`.
 

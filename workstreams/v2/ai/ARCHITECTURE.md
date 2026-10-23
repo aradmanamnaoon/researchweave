@@ -10,3 +10,5 @@ Local retrieval remains usable with zero model or internet connectivity. Provide
 
 Local folder HEAD conflict protection only detects sequential revisions. Concurrent writers in separate processes can race during pointer replacement; it is not a full remote CAS implementation. Snapshot bytes are unencrypted and should remain on a trusted local filesystem until encryption and remote sync are implemented.
 
+`EncryptedSnapshotService` now optionally wraps `FolderSnapshotStore` with authenticated AES-256-GCM and a scrypt password KDF. Fresh random salt/nonce and project-bound authenticated associated data protect each sealed snapshot; failed authentication never emits plaintext. The bare `FolderSnapshotStore` remains intentionally unencrypted, and callers must explicitly select the encrypted wrapper for private backups. The password is never persisted by this adapter; loss of the password makes encrypted backup recovery impossible. `KeyringSecretStore` separately stores external provider credentials using OS keyring references and no project-embedded token bytes.
+

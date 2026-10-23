@@ -10,5 +10,7 @@ The Markdown connector supports read-only, scope-gated local notes; it does not 
 
 Durable project-level token budgets and reservations exist as a separate host service. The current `ProviderRegistry.complete` path has not yet been bound to `BudgetStore` at the application composition root, and its admission token estimate is conservative rather than tokenizer-exact; unknown monetary pricing remains unknown.
 
+Cryptography and OS keyring adapters have been exercised with the installed optional libraries and synthetic fixtures. They are not yet wired into the main facade or packaged as canonical project extras. Encrypted backup does not imply complete cloud sync: ETag/CAS, cross-process coordination, metadata confidentiality, platform keyring availability and credential lifecycle controls must still be assessed during integration.
+
 No live hosted model, real user files, or external network was used during tests. Do not enable experimental remote transport in a sensitive production installation until DNS rebinding, proxy handling, cancellation, audit and credential storage are completed.
 

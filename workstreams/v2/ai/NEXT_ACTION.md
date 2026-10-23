@@ -6,5 +6,6 @@
 4. Build encrypted immutable snapshot storage and compare-and-swap sync with conflict branches.
 5. Build on the completed local Markdown vault connector with Zotero, DOI/OpenAlex and explicitly authorized remote integrations.
 6. Wire the durable `BudgetStore` into the production provider call boundary with usage reconciliation, and add privacy-safe diagnostics views.
-7. Expand regression matrix and measured SLOC; finish AI-001 through AI-050 and five prescribed journeys. Current audited milestone has 48 passing tests and 81% aggregate coverage, with 1,515 meaningful source lines toward 6,000.
+7. Complete encrypted remote sync with ETag/CAS, operation-scoped keyring approvals, and cross-process atomic HEAD updates; merge optional dependencies at final integration.
+8. Expand regression matrix and measured SLOC; finish AI-001 through AI-050 and five prescribed journeys. Current audited milestone has 57 passing tests and 81% aggregate coverage, with 1,735 meaningful source lines toward 6,000.
 
