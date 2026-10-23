@@ -6,6 +6,7 @@ from pathlib import Path
 
 import pytest
 
+import researchweave.evidence.project_format as project_format
 from researchweave.evidence.data_management import DataManagementPlanService
 from researchweave.evidence.diagnostics import library_diagnostics
 from researchweave.evidence.errors import EvidenceError
@@ -48,6 +49,33 @@ def test_recovery_snapshot_restore_and_corruption_detection(tmp_path: Path) -> N
     with ProjectStore(root) as store:
         listed = list_recovery_snapshots(store)
         assert listed[0]["ok"] is False
+
+
+def test_interrupted_recovery_export_preserves_verified_prior_snapshot(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    root = tmp_path / "project"
+    with ProjectStore.create(root, "Recovery", "Can state recover?", "exploratory") as store:
+        library = LibraryService(store)
+        library.import_document(b"revision one", "Source 1", "text/plain")
+        prior = create_recovery_snapshot(store, "autosave")
+        library.import_document(b"revision two", "Source 2", "text/plain")
+        expected_failed = root / ".recovery" / "000000000002-autosave.rwproj"
+        original_replace = project_format.os.replace
+
+        def interrupted_replace(source: str | Path, destination: str | Path) -> None:
+            if Path(destination) == expected_failed:
+                raise OSError("synthetic interruption before atomic replacement")
+            original_replace(source, destination)
+
+        monkeypatch.setattr(project_format.os, "replace", interrupted_replace)
+        with pytest.raises(OSError, match="synthetic interruption"):
+            create_recovery_snapshot(store, "autosave")
+        assert not expected_failed.exists()
+        assert not list((root / ".recovery").glob(".rw-export-*.tmp"))
+        listed = list_recovery_snapshots(store)
+        assert [item["snapshot"] for item in listed] == [prior["snapshot"]]
+        assert listed[0]["ok"] is True
 
 
 def test_library_diagnostics_is_read_only_and_actionable(tmp_path: Path) -> None:

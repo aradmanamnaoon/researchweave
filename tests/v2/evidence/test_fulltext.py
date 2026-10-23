@@ -78,6 +78,41 @@ def test_pdf_rotated_and_scan_pages_have_no_fake_ocr() -> None:
     assert FullText.from_json(document.to_json()) == document
 
 
+def test_real_pypdf_extracts_self_authored_rotated_text() -> None:
+    pypdf = pytest.importorskip("pypdf")
+    generic = pytest.importorskip("pypdf.generic")
+    writer = pypdf.PdfWriter()
+    page = writer.add_blank_page(width=300, height=300)
+    font = generic.DictionaryObject(
+        {
+            generic.NameObject("/Type"): generic.NameObject("/Font"),
+            generic.NameObject("/Subtype"): generic.NameObject("/Type1"),
+            generic.NameObject("/BaseFont"): generic.NameObject("/Helvetica"),
+        }
+    )
+    font_ref = writer._add_object(font)
+    page[generic.NameObject("/Resources")] = generic.DictionaryObject(
+        {
+            generic.NameObject("/Font"): generic.DictionaryObject(
+                {generic.NameObject("/F1"): font_ref}
+            )
+        }
+    )
+    stream = generic.DecodedStreamObject()
+    stream.set_data(b"BT /F1 12 Tf 72 200 Td (Golden evidence text) Tj ET")
+    page[generic.NameObject("/Contents")] = writer._add_object(stream)
+    page.rotate(90)
+    binary = BytesIO()
+    writer.write(binary)
+
+    document = import_document(binary.getvalue(), "application/pdf")
+    assert document.extraction_version == "rw-fulltext-1"
+    assert document.pages[0].rotation == 90
+    assert document.pages[0].text.strip() == "Golden evidence text"
+    assert document.pages[0].status == "text"
+    assert document.pages[0].sha256
+
+
 def test_pdf_no_parser_and_corruption() -> None:
     with pytest.raises(EvidenceError) as exc:
         import_document(b"not pdf", "application/pdf")
