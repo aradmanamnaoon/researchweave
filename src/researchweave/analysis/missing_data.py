@@ -128,6 +128,7 @@ def simple_impute(
             [finite_number(value, name=column) for value in observed_raw], dtype=float
         )
         fill = float(np.mean(observed) if strategy == "mean" else np.median(observed))
+        require(math.isfinite(fill), "Imputation summary is non-finite")
     rows = [dict(row) for row in dataset.records]
     for index in missing:
         rows[index][column] = fill
@@ -165,6 +166,10 @@ def _normal_parameters(matrix: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     scale = max(float(np.trace(covariance)) / max(1, covariance.shape[0]), 1.0)
     covariance = covariance + np.eye(covariance.shape[0]) * scale * 1e-8
     require(bool(np.all(np.isfinite(covariance))), "Imputation covariance is non-finite")
+    require(
+        bool(np.all(np.linalg.eigvalsh(covariance) > 0)),
+        "Imputation covariance must be positive definite",
+    )
     return means, covariance
 
 
