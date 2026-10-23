@@ -13,8 +13,12 @@ acceptance mismatch is observed.
 
 ## Integration confidence work
 
-- Run the existing suite on Linux and macOS if runners are available. Record real results; never
-  invent cross-platform status.
+- Linux WSL compatibility smoke is now observed: all **176** tests passed under Ubuntu with
+  CPython **3.14.4** after ephemeral `/tmp` installation of the optional `pypdf` and
+  `python-docx` dependencies. This is useful compatibility evidence but is not the target Python
+  3.12 baseline.
+- Run the existing suite on Linux with Python 3.12 and on macOS if suitable runners are available.
+  Record real results; never infer unexecuted platform status.
 - Add production-scale benchmarks only if the final integrator needs concrete performance gates.
 - Wire PyQt6/UI host permissions around the existing facade; keep evidence business logic headless.
 

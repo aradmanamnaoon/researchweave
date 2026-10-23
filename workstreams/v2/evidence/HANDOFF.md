@@ -33,6 +33,11 @@ clean Ruff, strict mypy and compileall. `pypdf 6.21.2` and `cryptography` were a
 production paths were exercised. Low-volume public-provider acceptance was executed successfully;
 see `LIVE_PROVIDER_ACCEPTANCE.md` and `TEST_RESULTS.md` for exact observed evidence.
 
+An additional Ubuntu WSL compatibility smoke was run on **CPython 3.14.4**. After installing
+`pypdf 6.21.2` and `python-docx 1.2.0` into an ephemeral `/tmp` target outside the repository, the
+full evidence suite also passed **176/176** on Linux. Treat this as extra compatibility evidence,
+not as a substitute for the still-unexecuted Linux Python 3.12 and macOS release-baseline runs.
+
 **End-to-end research journeys:** all five dedicated tests in
 `tests/v2/evidence/test_five_journeys.py` passed. Normalized observed call
 traces are stored in `workstreams/v2/evidence/journey_traces/`. They cover a

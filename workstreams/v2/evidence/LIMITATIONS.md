@@ -36,9 +36,11 @@ unimplemented RE-001..RE-052 acceptance items.
    notes, anchors/full-text pages, reviews/search/screening/retrieval/extractions, study-report links,
    extraction forms and selected protocol histories. Future domain tables must add explicit copy
    rules rather than being silently copied.
-9. The Windows CPython 3.12.9 test baseline is authoritative for this checkpoint. Linux/macOS
-   runners, production-scale performance benchmarks and deployment-specific privacy audits were not
-   executed. These are integration risks, not hidden claims of success.
+9. The Windows CPython 3.12.9 test baseline is authoritative for this checkpoint. An additional
+   Ubuntu WSL smoke passed all 176 tests under CPython 3.14.4 after optional `pypdf`/`python-docx`
+   dependencies were installed only into an ephemeral `/tmp` target. Linux Python 3.12 and macOS
+   release-baseline runs, production-scale performance benchmarks and deployment-specific privacy
+   audits remain unexecuted. These are integration risks, not hidden claims of success.
 
 Original source data is preserved by default. Integrity scanners remain read-only; cleanup, repair,
 network access and privacy-sensitive sharing all require explicit user/host action.

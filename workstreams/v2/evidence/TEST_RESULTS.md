@@ -99,3 +99,19 @@ Latest coverage measurement: 24 tests passed; 84% combined line/branch coverage,
   required human confirmation and left confirmed reference title/year unchanged.
 - Linux/macOS runner results and production-scale benchmarks remain unexecuted and are reported as
   integration confidence limits rather than inferred successes.
+
+## Additional Linux WSL compatibility smoke (2026-10-23)
+
+- Runner: Ubuntu under WSL2 on the same Windows host; `python3` was **CPython 3.14.4** rather than
+  the project baseline of Python 3.12.
+- The first collection attempt failed because the WSL environment did not have the optional
+  `pypdf`/`python-docx` packages installed. This was an environment dependency gap, not a product
+  assertion failure.
+- Installed only into an ephemeral `/tmp/rw-evidence-deps` target outside the repository:
+  `pypdf 6.21.2`, `python-docx 1.2.0` and their transitive dependencies. Shared packaging and the
+  worktree were not modified.
+- `PYTHONPATH=/tmp/rw-evidence-deps:src python3 -m pytest -q tests/v2/evidence -o pythonpath=src`:
+  **176 passed**, one expected duplicate-ZIP warning, in 4.68s.
+- This increases Linux compatibility confidence, but does **not** replace a Linux Python 3.12 run
+  and does not provide any macOS result. Windows CPython 3.12.9 remains the authoritative release
+  baseline recorded above.
