@@ -53,6 +53,7 @@ from .publishing import PublishingService
 from .recovery import (
     create_recovery_snapshot,
     list_recovery_snapshots,
+    recovery_status,
     restore_recovery_snapshot,
 )
 from .reference_identity import compare_reference, reconcile_catalog_candidates
@@ -105,6 +106,8 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
         "local-write", ("project_id",), "Create verified local recovery snapshot"),
     "project.recovery_list": (
         "read", ("project_id",), "List and verify local recovery snapshots"),
+    "project.recovery_status": (
+        "read", ("project_id",), "Report whether host-driven recovery autosave is due"),
     "project.recovery_restore": (
         "local-write", ("project_id", "snapshot"),
         "Restore recovery snapshot to a fresh project copy"),
@@ -803,6 +806,14 @@ class EvidenceFacade:
                 return create_recovery_snapshot(store, str(args.get("label", "autosave")))
             if operation == "project.recovery_list":
                 return {"snapshots": list_recovery_snapshots(store)}
+            if operation == "project.recovery_status":
+                now = args.get("now")
+                require(now is None or isinstance(now, str), "Invalid recovery clock")
+                return recovery_status(
+                    store,
+                    now=now,
+                    max_age_minutes=int(args.get("max_age_minutes", 15)),
+                )
             if operation == "project.recovery_restore":
                 recovery_root = self.workspace_root / "recovery-restores"
                 recovery_root.mkdir(exist_ok=True)
