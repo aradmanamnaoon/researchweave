@@ -1,11 +1,12 @@
 {
   "definition": "token-bearing lines excluding blanks, comments and AST docstring spans",
   "source_root": "src/researchweave/ai",
-  "python_file_count": 16,
-  "python_sloc": 1735,
+  "python_file_count": 18,
+  "python_sloc": 2003,
   "files": {
     "__init__.py": 4,
     "agents.py": 137,
+    "audit.py": 156,
     "budgets.py": 161,
     "crypto.py": 159,
     "embeddings.py": 154,
@@ -14,6 +15,7 @@
     "grounding.py": 63,
     "integrations.py": 144,
     "local_runtime.py": 78,
+    "pdf_ingest.py": 112,
     "planner.py": 185,
     "policy.py": 90,
     "providers.py": 92,

@@ -7,5 +7,6 @@
 5. Build on the completed local Markdown vault connector with Zotero, DOI/OpenAlex and explicitly authorized remote integrations.
 6. Wire the durable `BudgetStore` into the production provider call boundary with usage reconciliation, and add privacy-safe diagnostics views.
 7. Complete encrypted remote sync with ETag/CAS, operation-scoped keyring approvals, and cross-process atomic HEAD updates; merge optional dependencies at final integration.
-8. Expand regression matrix and measured SLOC; finish AI-001 through AI-050 and five prescribed journeys. Current audited milestone has 57 passing tests and 81% aggregate coverage, with 1,735 meaningful source lines toward 6,000.
+8. Integrate PDF parsing and the authenticated audit journal with the typed desktop command layer and prove the five journeys through actual GUI behavior. Synthetic headless traces are retained in `JOURNEYS.md`.
+9. Expand regression matrix and measured SLOC; finish AI-001 through AI-050. Current audited milestone has 63 passing tests and 82% aggregate coverage, with 2,003 meaningful source lines toward 6,000.
 
