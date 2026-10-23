@@ -5,7 +5,7 @@ from __future__ import annotations
 from collections import Counter
 from typing import Any, Literal
 
-from .datasets import MAX_ROWS, revise
+from .datasets import MAX_ROWS, revise, revise_schema
 from .errors import require
 from .models import Dataset, Variable, digest, finite_number, utc_now
 
@@ -384,23 +384,11 @@ def aggregate_groups(
         "functions": functions,
         "source_revision": dataset.revision,
     }
-    revision = digest(
-        {
-            "parent": dataset.revision,
-            "columns": output_columns,
-            "rows": rows,
-            "operation": operation,
-        }
-    )
-    return Dataset(
-        dataset.dataset_id,
-        revision,
-        dataset.revision,
-        dataset.source_hash,
-        utc_now(),
+    return revise_schema(
+        dataset,
+        rows,
         output_columns,
         tuple([*group_variables, *aggregate_variables]),
-        tuple(rows),
         operation,
     )
 
@@ -461,18 +449,7 @@ def pivot_longer(
         "names_to": names_to,
         "values_to": values_to,
     }
-    revision = digest({"parent": dataset.revision, "rows": rows, "operation": operation})
-    return Dataset(
-        dataset.dataset_id,
-        revision,
-        dataset.revision,
-        dataset.source_hash,
-        utc_now(),
-        columns,
-        variables,
-        tuple(rows),
-        operation,
-    )
+    return revise_schema(dataset, rows, columns, variables, operation)
 
 
 def pivot_wider(
@@ -529,15 +506,4 @@ def pivot_wider(
         "values_from": values_from,
         "levels": levels,
     }
-    revision = digest({"parent": dataset.revision, "rows": rows, "operation": operation})
-    return Dataset(
-        dataset.dataset_id,
-        revision,
-        dataset.revision,
-        dataset.source_hash,
-        utc_now(),
-        columns,
-        variables,
-        tuple(rows),
-        operation,
-    )
+    return revise_schema(dataset, rows, columns, variables, operation)

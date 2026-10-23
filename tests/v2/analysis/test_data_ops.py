@@ -2,6 +2,7 @@ from pathlib import Path
 
 import pytest
 
+from researchweave.analysis import build_analysis_facade
 from researchweave.analysis.data_ops import (
     aggregate_groups,
     case_selection,
@@ -112,3 +113,65 @@ def test_wide_reshape_rejects_duplicate_cells(tmp_path):
     )
     with pytest.raises(AnalysisError, match="Duplicate ID/name cell"):
         pivot_wider(dataset, id_columns=["id"], names_from="variable", values_from="value")
+
+
+def _authorized(facade, operation: str, arguments: dict):
+    capability = facade.issue_authorization(operation, arguments)
+    return facade.execute(operation, arguments, {"host_capability": capability})
+
+
+def test_join_and_reshape_are_facade_wired_and_restart_safe(tmp_path: Path):
+    left = _table(tmp_path, "facade_left.csv", "id,group,t1,t2\na,A,1,2\nb,B,3,4\n")
+    right = _table(tmp_path, "facade_right.csv", "id,site\na,X\nb,Y\n")
+    store = tmp_path / "store"
+    facade = build_analysis_facade(store)
+    facade.store.save(left)
+    facade.store.save(right)
+    join_args = {
+        "dataset_id": left.dataset_id,
+        "revision": left.revision,
+        "right_dataset_id": right.dataset_id,
+        "right_revision": right.revision,
+        "left_on": "id",
+        "right_on": "id",
+        "how": "left",
+        "cardinality": "one_to_one",
+    }
+    joined = _authorized(facade, "dataset.join", join_args)
+    assert joined["status"] == "ok"
+    joined_id = joined["data"]["dataset_id"]
+    joined_revision = joined["data"]["revision"]
+    reopened = build_analysis_facade(store)
+    assert reopened.store.load(joined_id, joined_revision).records[0]["site"] == "X"
+
+    longer_args = {
+        "dataset_id": left.dataset_id,
+        "revision": left.revision,
+        "id_columns": ["id", "group"],
+        "value_columns": ["t1", "t2"],
+    }
+    longer = _authorized(facade, "dataset.pivot_longer", longer_args)
+    assert longer["status"] == "ok"
+    wider_args = {
+        "dataset_id": longer["data"]["dataset_id"],
+        "revision": longer["data"]["revision"],
+        "id_columns": ["id", "group"],
+        "names_from": "variable",
+        "values_from": "value",
+    }
+    wider = _authorized(facade, "dataset.pivot_wider", wider_args)
+    assert wider["status"] == "ok"
+    recovered = facade.store.load(wider["data"]["dataset_id"], wider["data"]["revision"])
+    assert recovered.columns == left.columns
+    assert recovered.records == left.records
+
+    aggregate_args = {
+        "dataset_id": left.dataset_id,
+        "revision": left.revision,
+        "by": ["group"],
+        "values": ["t1"],
+        "functions": ["count", "mean"],
+    }
+    aggregated = _authorized(facade, "dataset.aggregate", aggregate_args)
+    assert aggregated["status"] == "ok"
+    assert aggregated["data"]["columns"] == ["group", "t1_count", "t1_mean"]

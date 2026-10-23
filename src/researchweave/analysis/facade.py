@@ -24,10 +24,14 @@ from .advanced_statistics import (
 )
 from .authorization import CapabilityIssuer, HostCapability, HostPaths
 from .data_ops import (
+    aggregate_groups,
     analytic_weighted_mean,
     case_selection,
     frequency_weighted_mean,
+    join_tables,
     missingness,
+    pivot_longer,
+    pivot_wider,
     recode_missing,
 )
 from .datasets import (
@@ -163,6 +167,10 @@ class AnalysisFacade:
             "dataset.complete_case": "local-write",
             "dataset.simple_impute": "local-write",
             "dataset.multiple_impute": "local-write",
+            "dataset.join": "local-write",
+            "dataset.aggregate": "local-write",
+            "dataset.pivot_longer": "local-write",
+            "dataset.pivot_wider": "local-write",
             "statistics.weighted_mean": "read",
             "statistics.analytic_weighted_mean": "read",
             "statistics.available_case": "read",
@@ -509,6 +517,62 @@ class AnalysisFacade:
                 "seed": generated.seed,
                 "missing_counts": generated.missing_counts,
                 "assumptions": list(generated.assumptions),
+            }
+        elif operation == "dataset.join":
+            left = self._dataset(arguments)
+            right = self.store.load(
+                str(arguments["right_dataset_id"]), str(arguments["right_revision"])
+            )
+            updated, receipt = join_tables(
+                left,
+                right,
+                left_on=str(arguments["left_on"]),
+                right_on=str(arguments["right_on"]),
+                how=str(arguments.get("how", "inner")),
+                cardinality=str(arguments.get("cardinality", "one_to_one")),
+                max_expansion=int(arguments.get("max_expansion", 5)),
+            )
+            self.store.save(updated)
+            data = {
+                "dataset_id": updated.dataset_id,
+                "revision": updated.revision,
+                "parent_revision": left.revision,
+                "right_revision": right.revision,
+                "n": len(updated.records),
+                "receipt": receipt,
+            }
+        elif operation in {"dataset.aggregate", "dataset.pivot_longer", "dataset.pivot_wider"}:
+            obj = self._dataset(arguments)
+            if operation == "dataset.aggregate":
+                updated = aggregate_groups(
+                    obj,
+                    by=list(arguments["by"]),
+                    values=list(arguments["values"]),
+                    functions=list(arguments["functions"]),
+                )
+            elif operation == "dataset.pivot_longer":
+                updated = pivot_longer(
+                    obj,
+                    id_columns=list(arguments["id_columns"]),
+                    value_columns=list(arguments["value_columns"]),
+                    names_to=str(arguments.get("names_to", "variable")),
+                    values_to=str(arguments.get("values_to", "value")),
+                )
+            else:
+                updated = pivot_wider(
+                    obj,
+                    id_columns=list(arguments["id_columns"]),
+                    names_from=str(arguments["names_from"]),
+                    values_from=str(arguments["values_from"]),
+                )
+            self.store.save(updated)
+            data = {
+                "dataset_id": updated.dataset_id,
+                "revision": updated.revision,
+                "parent_revision": obj.revision,
+                "n": len(updated.records),
+                "columns": list(updated.columns),
+                "operation": updated.operation,
             }
         elif operation in ("dataset.inspect", "dataset.page", "dataset.view"):
             obj = self._dataset(arguments)

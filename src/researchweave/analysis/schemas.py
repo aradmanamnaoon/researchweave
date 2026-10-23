@@ -129,6 +129,26 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "dataset.complete_case": _schema({**IDENTITY, "columns": AS}),
     "dataset.simple_impute": _schema({**IDENTITY, "column": S, "strategy": S}),
     "dataset.multiple_impute": _schema({**IDENTITY, "columns": AS, "seed": INT}, {"m": INT}),
+    "dataset.join": _schema(
+        {
+            **IDENTITY,
+            "right_dataset_id": S,
+            "right_revision": S,
+            "left_on": S,
+            "right_on": S,
+        },
+        {"how": S, "cardinality": S, "max_expansion": INT},
+    ),
+    "dataset.aggregate": _schema(
+        {**IDENTITY, "by": AS, "values": AS, "functions": AS}
+    ),
+    "dataset.pivot_longer": _schema(
+        {**IDENTITY, "id_columns": AS, "value_columns": AS},
+        {"names_to": S, "values_to": S},
+    ),
+    "dataset.pivot_wider": _schema(
+        {**IDENTITY, "id_columns": AS, "names_from": S, "values_from": S}
+    ),
     "statistics.weighted_mean": _schema({**IDENTITY, "column": S, "weight": S}),
     "statistics.analytic_weighted_mean": _schema({**IDENTITY, "column": S, "weight": S}),
     "statistics.available_case": _schema({**IDENTITY, "columns": AS}),

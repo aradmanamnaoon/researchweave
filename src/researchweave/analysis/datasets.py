@@ -699,7 +699,6 @@ def revise_schema(
     identity = digest(
         {
             "parent": dataset.revision,
-            "columns": columns,
             "records": records,
             "variables": [v.__dict__ for v in variables],
             "operation": operation,
