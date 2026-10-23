@@ -66,3 +66,9 @@ Overall: **52/52 assessed individually; implementation remains partial.** Tests 
 synthetic, self-authored research data. See `TEST_RESULTS.md`, `journey_traces/`, `LIMITATIONS.md`
 and `NEXT_ACTION.md` for observed evidence and remaining work. Production module existence is
 not treated as scientific validation.
+
+Contract checkpoint: 104 operations now declare executable typed and bounded
+arguments, shared result envelopes and risks. Most recent full suite: 122
+passed; 90% coverage; 41 modules; 9,443 meaningful Python SLOC. The 11/41
+status split remains conservatively unchanged because deeper format,
+scientific and interoperability acceptance remains unresolved.

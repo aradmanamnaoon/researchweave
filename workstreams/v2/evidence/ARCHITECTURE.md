@@ -10,6 +10,9 @@ headless factory. The trusted host provides a selected workspace root,
 The facade is synchronous and has no Qt/PyQt6 imports or autonomous network
 access. The integrator is responsible for user interaction and permission
 approval. A command declares its effect in `capability_manifest()`.
+`contracts.py` generates typed, bounded argument schemas with executable
+type, enum and resource checks in `execute` and `preview`; domain services
+continue to validate deeper scientific and cross-field invariants.
 
 ## Persistence, integrity and recovery
 

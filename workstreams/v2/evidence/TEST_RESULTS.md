@@ -43,3 +43,15 @@ Latest coverage measurement: 24 tests passed; 84% combined line/branch coverage,
 - `tests/v2/evidence/test_five_journeys.py`: **5/5 passed**, with normalized persisted call traces under `workstreams/v2/evidence/journey_traces/`.
 - Unit tests include fail-closed malicious path inputs, duplicate references, wrong-password encrypted archives, tampering, independent blinded reviewers, migration rollback and network-denial fixtures.
 - Parser testing remains synthetic/injected for PDF, and all remote provider tests are mocked; no live network or Linux/macOS runner was claimed. Re-run all commands after additional source changes because other local workers have committed to this same branch concurrently.
+
+## Executable facade contracts and feature expansion
+
+- Full pytest/coverage: **122 passed**, one expected duplicate-ZIP fixture
+  warning, **90% combined coverage** (4,735 statements and 1,290 branches).
+- Ruff all checks passed; strict mypy passed 41 production modules;
+  compileall passed.
+- Token-based source count: **41 modules, 9,443 meaningful lines**.
+- `test_contracts.py`: 3 passing tests validate advertised typed argument
+  schemas, write/network risks, failure before I/O and type rejection.
+- Five end-to-end journey tests remain passing. Provider verification is
+  mocked, and no cross-platform runner results are claimed.

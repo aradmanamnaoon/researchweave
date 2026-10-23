@@ -33,6 +33,13 @@ compileall. The branch has advanced concurrently with additional tested
 scientific services; re-run `TEST_RESULTS.md` commands before merge and record
 the final exact SHA, source count, test count and working-tree state.
 
+**Newer observed contract checkpoint:** 122 passing tests, 90% combined
+coverage, 41 production modules, 9,443 meaningful source lines and 104 facade
+operations. Ruff, strict mypy (41 source modules), and compileall passed.
+This supersedes the older baseline above. `contracts.py` adds actual bounded
+argument validation and risk metadata; comprehensive domain-specific result
+schemas and cross-field validation remain unfinished.
+
 **End-to-end research journeys:** all five dedicated tests in
 `tests/v2/evidence/test_five_journeys.py` passed. Normalized observed call
 traces are stored in `workstreams/v2/evidence/journey_traces/`. They cover a

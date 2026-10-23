@@ -6,6 +6,13 @@ are superseded by the matrix. Read its per-requirement implementation,
 facade IDs, tests, persistence checks and remaining scientific/security
 limitations before using this branch for integration.
 
+2026-10-23 contract update: `contracts.py` supplies bounded typed argument
+schemas and runtime enforcement for 104 registered facade operations; public
+envelope schemas, write/network/privacy risk and constraints accompany the
+capability manifest. `test_contracts.py` proves invalid types are rejected
+before mutations. Full suite 122 passed, 90% coverage, 41 production modules,
+9,443 meaningful SLOC; Ruff, strict mypy and compile passed.
+
 | IDs | Observed behavior and owned files | Status |
 |---|---|---|
 | AUDIT-001 | Git base audit, initial audit recorded, distinct clean worktree created | Verified |
