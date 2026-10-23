@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 
+from researchweave.evidence import build_evidence_facade
 from researchweave.evidence.errors import EvidenceError
 from researchweave.evidence.schema_migrations import inspect_schema, migrate_project
 from researchweave.evidence.storage import ProjectStore
@@ -108,3 +109,31 @@ def test_migration_rejects_future_or_unrecognized_schema(tmp_path: Path) -> None
     assert preview["compatibility"] == "unsupported_legacy"
     with pytest.raises(EvidenceError):
         migrate_project(invalid)
+
+
+def test_migration_is_available_before_legacy_project_open_through_facade(
+    tmp_path: Path,
+) -> None:
+    workspace = tmp_path / "workspace"
+    workspace.mkdir()
+    temporary = workspace / "temporary"
+    project_id = _downgrade(temporary, 0)
+    destination = workspace / project_id
+    temporary.rename(destination)
+
+    read_only = build_evidence_facade(workspace)
+    preview = read_only.execute(
+        "project.migration_preview", {"project_id": project_id}, {}
+    )
+    assert preview["status"] == "ok"
+    assert preview["data"]["current_version"] == 0
+    blocked = read_only.execute("project.migrate", {"project_id": project_id}, {})
+    assert blocked["status"] == "failed"
+    assert blocked["error"]["code"] == "NEEDS_APPROVAL"
+
+    writer = build_evidence_facade(workspace, allow_local_writes=True)
+    migrated = writer.execute("project.migrate", {"project_id": project_id}, {})
+    assert migrated["status"] == "ok"
+    reopened = writer.execute("project.open", {"project_id": project_id}, {})
+    assert reopened["status"] == "ok"
+    assert reopened["data"]["id"] == project_id

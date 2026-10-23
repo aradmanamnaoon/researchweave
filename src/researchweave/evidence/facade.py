@@ -49,6 +49,7 @@ from .recovery import (
 )
 from .reference_monitor import ReferenceUpdateMonitor
 from .reviews import ReviewService
+from .schema_migrations import inspect_schema, migrate_project
 from .search_index import LocalIndex
 from .storage import ProjectStore
 from .synthesis import Finding, SynthesisService
@@ -59,6 +60,10 @@ from .writing import WritingService
 OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "project.create": ("local-write", ("title", "question", "design"), "Create a local project"),
     "project.open": ("read", ("project_id",), "Read local project identity"),
+    "project.migration_preview": (
+        "read", ("project_id",), "Inspect legacy SQLite migration compatibility"),
+    "project.migrate": (
+        "local-write", ("project_id",), "Upgrade a supported legacy SQLite project"),
     "project.integrity": ("read", ("project_id",), "Audit project hashes"),
     "project.timeline": ("read", ("project_id",), "Read verified chronological project events"),
     "project.timeline_export": ("read", ("project_id",), "Export verified timeline JSON"),
@@ -461,6 +466,14 @@ class EvidenceFacade:
             ) as store:
                 return {"project_id": project_id, "revision": store.info().revision,
                         "privacy": store.info().privacy}
+        if operation == "project.migration_preview":
+            return inspect_schema(
+                self.workspace_root / _uuid(_value(args, "project_id", str))
+            )
+        if operation == "project.migrate":
+            return migrate_project(
+                self.workspace_root / _uuid(_value(args, "project_id", str))
+            )
         if operation == "library.bibliography_preview":
             references = parse_bibliography(_bytes(args), _value(args, "format", str))
             return {"count": len(references),
