@@ -499,7 +499,7 @@ class SynthesisService:
     ) -> dict[str, Any]:
         require(bool(title.strip()) and 0 < len(sections) <= 100, "Title and sections required")
         # Preview must not alter project state or schema.
-        validated = []
+        validated: list[dict[str, Any]] = []
         for section in sections:
             heading, narrative = section.get("heading"), section.get("narrative")
             ids = section.get("finding_ids", [])
@@ -517,18 +517,40 @@ class SynthesisService:
             evidence = []
             for finding_id in ids:
                 record = self.store.conn.execute(
-                    "SELECT f.id,f.statement,f.anchor_id,f.source_id FROM synthesis_findings f "
+                    "SELECT f.id,f.statement,f.anchor_id,f.source_id,f.population,f.outcome,"
+                    "f.measure,f.unit,f.timepoint,f.direction FROM synthesis_findings f "
                     "JOIN anchors a ON a.id=f.anchor_id JOIN sources s ON s.id=f.source_id "
                     "WHERE f.id=? AND a.verified=1 AND s.deleted=0",
                     (finding_id,),
                 ).fetchone()
                 require(record is not None, "Unverified or missing finding", "INTEGRITY_FAILURE")
                 evidence.append(dict(record))
+            comparable: dict[tuple[str, str, str, str, str], set[str]] = {}
+            for item in evidence:
+                key = (
+                    str(item["population"]), str(item["outcome"]), str(item["measure"]),
+                    str(item["unit"]), str(item["timepoint"]),
+                )
+                comparable.setdefault(key, set()).add(str(item["direction"]))
+            contradictions = [
+                {"population": key[0], "outcome": key[1], "measure": key[2],
+                 "unit": key[3], "timepoint": key[4], "directions": sorted(directions)}
+                for key, directions in sorted(comparable.items()) if len(directions) > 1
+            ]
+            warnings = []
+            if not evidence:
+                warnings.append("UNSUPPORTED_NARRATIVE_NO_FINDINGS")
+            if contradictions:
+                warnings.append("UNRESOLVED_COMPARABLE_FINDING_CONTRADICTION")
+            if evidence:
+                warnings.append("EVIDENCE_STRENGTH_NOT_AUTOMATICALLY_ASSESSED")
             validated.append(
                 {
                     "heading": heading,
                     "narrative": narrative,
                     "evidence": evidence,
+                    "contradictions": contradictions,
+                    "warnings": warnings,
                     "attribution_status": "anchored_findings_with_unverified_narrative"
                     if evidence
                     else "UNCITED_INTERPRETATION",
@@ -540,6 +562,10 @@ class SynthesisService:
             "sections": validated,
             "content_hash": sha256(document.encode()),
             "scientific_conclusions_verified": False,
+            "unresolved_contradictions": sum(
+                len(section["contradictions"]) for section in validated
+            ),
+            "unsupported_sections": sum(1 for section in validated if not section["evidence"]),
         }
         if save:
             outline_id = new_id()
@@ -589,4 +615,8 @@ class SynthesisService:
                 lines.append("")
             else:
                 lines.extend(["- UNCITED_INTERPRETATION", ""])
+            if section.get("warnings"):
+                lines.extend(["Warnings:", ""])
+                lines.extend(f"- {warning}" for warning in section["warnings"])
+                lines.append("")
         return "\n".join(lines)
