@@ -1,0 +1,15 @@
+{
+  "audit_count": 2,
+  "audit_redacted": true,
+  "audit_reopened_and_verified": true,
+  "destination": "https://example.org/v1",
+  "journey": "bring-your-own-cloud-approval",
+  "mock_transport_requests": 1,
+  "modified_payload_error": "PERMISSION_DENIED",
+  "no_approval_error": "NEEDS_APPROVAL",
+  "payload_bytes_preview": 40,
+  "payload_sha256_preview": "ff34c9b379b3a5c5629a5ded22f47bb0a577ea4545308c5011cd861610ad8320",
+  "privacy_class": "private",
+  "privacy_requires_approval": true,
+  "provider_transport": "deterministic fake; no actual cloud request"
+}

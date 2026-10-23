@@ -1,0 +1,18 @@
+{
+  "citations": [
+    {
+      "chunk_id": "3b45e14b7ed89d1a8590898c6a5c7149a24313a478d35ea45845cac0c5e8da08",
+      "quote": "The synthetic trial measured memory tasks and recorded baseline ratings.",
+      "sha256": "05eb40d90603b27b2fdaad3c97b013c101aaa880203eef9edc848a49c82d199c",
+      "source_id": "synthetic-study"
+    }
+  ],
+  "fake_transport_calls": 2,
+  "index_reopened": true,
+  "journey": "no-cloud-assistant",
+  "malformed_response_error": "SCHEMA_MISMATCH",
+  "model_transport": "deterministic fake loopback, zero real network requests",
+  "observed_local_model_answer": "The synthetic trial measured memory tasks.",
+  "recovered_citation_count": 1,
+  "scientific_validity_inferred": false
+}

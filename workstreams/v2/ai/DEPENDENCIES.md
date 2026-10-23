@@ -1,0 +1,4 @@
+# Dependencies
+
+Most modules use Python 3.12 standard library only. Deterministic tests require pytest from the existing dev extra. Optional authenticated backup, OS keyring and PDF parsing dependencies are in `requirements-optional.txt`, observed locally as `cryptography==47.0.0`, `keyring==25.7.0` and `pypdf==6.21.2`. Synthetic PDF generation additionally uses test-only `reportlab==4.5.1` from `requirements-optional-test.txt`. These packages were installed into the isolated worker `.venv`; no root pyproject/lock or global Python environment was changed. Integration should add versioned project extras, regenerate the lock and run dependency auditing. Optional functionality fails closed with `DEPENDENCY_MISSING` if its runtime library is absent; optional-library tests skip when the corresponding library is not installed.
+

@@ -1,0 +1,9 @@
+{
+  "external_requests": 0,
+  "hits_after_restart": 1,
+  "journey": "no-model-manual-research",
+  "manual_hits": 1,
+  "providers_configured": 0,
+  "unconfigured_model_call": "NEEDS_APPROVAL",
+  "user_option": "Continue manual evidence search or configure an explicit local model"
+}
