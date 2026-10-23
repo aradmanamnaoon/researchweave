@@ -29,6 +29,22 @@ ASSESSMENT_DOMAINS: dict[str, tuple[str, ...]] = {
         "outcome_measurement",
         "reporting",
     ),
+    "rob2-compatible-v1": (
+        "randomization",
+        "deviations",
+        "missing_outcomes",
+        "outcome_measurement",
+        "reported_result_selection",
+    ),
+    "robins-i-compatible-v1": (
+        "confounding",
+        "participant_selection",
+        "exposure_classification",
+        "deviations",
+        "missing_data",
+        "outcome_measurement",
+        "reported_result_selection",
+    ),
 }
 JUDGMENTS = {"low", "some_concerns", "high", "unclear"}
 
@@ -57,6 +73,13 @@ CREATE TABLE IF NOT EXISTS synthesis_outlines (
  id TEXT PRIMARY KEY, title TEXT NOT NULL, sections_json TEXT NOT NULL,
  content_hash TEXT NOT NULL, created_at TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS synthesis_gap_updates (
+ id TEXT PRIMARY KEY, gap_id TEXT NOT NULL REFERENCES synthesis_gaps(id),
+ status TEXT NOT NULL CHECK(status IN ('open','addressed')),
+ priority TEXT NOT NULL CHECK(priority IN ('low','medium','high','critical')),
+ rationale TEXT NOT NULL, actor TEXT NOT NULL, created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS synthesis_gap_updates_gap ON synthesis_gap_updates(gap_id,created_at);
 """
 
 
@@ -110,6 +133,26 @@ class SynthesisService:
                 isinstance(answer.get("explanation"), str) and bool(answer["explanation"].strip()),
                 f"Missing explanation for {domain}",
             )
+            uncertainty = answer.get("uncertainty")
+            require(
+                uncertainty is None
+                or uncertainty in {"low", "moderate", "high", "unknown"},
+                f"Invalid uncertainty for {domain}",
+            )
+            anchor_id = answer.get("anchor_id")
+            require(anchor_id is None or isinstance(anchor_id, str),
+                    f"Invalid anchor for {domain}")
+            if anchor_id:
+                anchor = self.store.conn.execute(
+                    "SELECT a.verified,s.deleted FROM anchors a "
+                    "JOIN sources s ON s.id=a.source_id WHERE a.id=?",
+                    (anchor_id,),
+                ).fetchone()
+                require(
+                    anchor is not None and bool(anchor["verified"]) and not bool(anchor["deleted"]),
+                    f"Risk-of-bias anchor for {domain} is missing or unverified",
+                    "INTEGRITY_FAILURE",
+                )
         document = canonical_json(responses)
         appraisal_id = new_id()
 
@@ -150,6 +193,7 @@ class SynthesisService:
             "domains": responses,
             "overall": "requires_manual_interpretation",
             "medical_decision_support": False,
+            "framework_certification": "compatible_workflow_not_official_instrument",
         }
 
     def appraisals(self, record_id: str) -> list[dict[str, Any]]:
@@ -313,19 +357,97 @@ class SynthesisService:
             ),
         }
 
+    def update_gap(
+        self,
+        gap_id: str,
+        status: str,
+        priority: str,
+        rationale: str,
+        actor: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        require(status in {"open", "addressed"}, "Unknown evidence-gap status")
+        require(priority in {"low", "medium", "high", "critical"},
+                "Unknown evidence-gap priority")
+        require(bool(rationale.strip()) and len(rationale) <= 5000,
+                "Gap update rationale is required")
+        require(bool(actor.strip()) and len(actor) <= 255, "Gap update actor is required")
+        require(
+            self._has_table("synthesis_gaps")
+            and self.store.conn.execute(
+                "SELECT 1 FROM synthesis_gaps WHERE id=?", (gap_id,)
+            ).fetchone() is not None,
+            "Evidence gap not found",
+            "NOT_FOUND",
+        )
+        update_id = new_id()
+
+        def persist(conn: Any) -> None:
+            self._tables(conn)
+            conn.execute(
+                "INSERT INTO synthesis_gap_updates VALUES (?,?,?,?,?,?,?)",
+                (
+                    update_id,
+                    gap_id,
+                    status,
+                    priority,
+                    rationale.strip(),
+                    actor.strip(),
+                    now_utc(),
+                ),
+            )
+            conn.execute(
+                "UPDATE synthesis_gaps SET status=? WHERE id=?", (status, gap_id)
+            )
+
+        _, revision = self.store.mutate(
+            "evidence.synthesis.update_gap",
+            {
+                "gap_id": gap_id,
+                "status": status,
+                "priority": priority,
+                "actor": actor.strip(),
+            },
+            persist,
+            expected_revision=expected_revision,
+        )
+        return {
+            "update_id": update_id,
+            "gap_id": gap_id,
+            "status": status,
+            "priority": priority,
+            "revision": revision,
+        }
+
     def gaps(self) -> list[dict[str, Any]]:
         if not self._has_table("synthesis_gaps"):
             return []
-        return [
-            {
+        updates_exist = self._has_table("synthesis_gap_updates")
+        output = []
+        for row in self.store.conn.execute(
+            "SELECT * FROM synthesis_gaps ORDER BY created_at,id"
+        ):
+            updates = (
+                [
+                    dict(item)
+                    for item in self.store.conn.execute(
+                        "SELECT * FROM synthesis_gap_updates WHERE gap_id=? "
+                        "ORDER BY rowid",
+                        (row["id"],),
+                    )
+                ]
+                if updates_exist
+                else []
+            )
+            output.append({
                 **dict(row),
                 "searches": json.loads(row["search_json"]),
+                "updates": updates,
+                "priority": updates[-1]["priority"] if updates else "unprioritized",
                 "interpretation": "Evidence not identified; absence not established",
-            }
-            for row in self.store.conn.execute(
-                "SELECT * FROM synthesis_gaps ORDER BY created_at,id"
-            )
-        ]
+            })
+        return output
 
     def compose(
         self,
@@ -405,3 +527,26 @@ class SynthesisService:
         ).fetchone()
         require(row is not None, "Outline not found", "NOT_FOUND")
         return {**dict(row), "sections": json.loads(row["sections_json"])}
+
+    def export_outline_markdown(self, outline_id: str) -> str:
+        outline = self.outline(outline_id)
+        lines = [
+            f"# {outline['title']}",
+            "",
+            "Scientific conclusions are not automatically verified; each evidence entry "
+            "retains its source and anchor identifiers.",
+            "",
+        ]
+        for section in outline["sections"]:
+            lines.extend([f"## {section['heading']}", "", section["narrative"], ""])
+            if section["evidence"]:
+                lines.extend(["Evidence:", ""])
+                for evidence in section["evidence"]:
+                    lines.append(
+                        f"- {evidence['statement']} "
+                        f"[source={evidence['source_id']}; anchor={evidence['anchor_id']}]"
+                    )
+                lines.append("")
+            else:
+                lines.extend(["- UNCITED_INTERPRETATION", ""])
+        return "\n".join(lines)
