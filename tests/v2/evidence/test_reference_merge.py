@@ -24,6 +24,14 @@ def test_merge_unmerge_preserves_raw_metadata_and_reopens(tmp_path):
         "project_id": project_id, "canonical_id": left,
         "duplicate_id": right, "rationale": "Same work confirmed by reviewer"},
         {"expected_revision": imported["data"]["revision"]})["status"] == "ok"
+    resolution = facade.execute("reference.resolve", {
+        "project_id": project_id, "reference_id": right}, {})
+    assert resolution["data"]["is_alias"] is True
+    assert resolution["data"]["canonical_id"] == left
+    assert resolution["data"]["original"]["id"] == right
+    canonical = facade.execute("reference.resolve", {
+        "project_id": project_id, "reference_id": left}, {})
+    assert canonical["data"]["aliases"][0]["reference_id"] == right
     reopened = build_evidence_facade(tmp_path, allow_local_writes=True)
     with sqlite3.connect(tmp_path / project_id / "data" / "project.sqlite") as conn:
         alias = conn.execute("SELECT original_id,canonical_id FROM reference_alias").fetchone()
@@ -41,6 +49,28 @@ def test_merge_unmerge_preserves_raw_metadata_and_reopens(tmp_path):
         assert conn.execute("SELECT COUNT(*) FROM reference").fetchone()[0] == 2
     assert reopened.execute("project.integrity", {"project_id": project_id}, {})[
         "data"]["ok"]
+
+
+def test_merge_reports_conflicting_metadata_without_overwriting(tmp_path):
+    facade = build_evidence_facade(tmp_path, allow_local_writes=True)
+    created = facade.execute("project.create", {"title": "Conflicts",
+        "question": "Are these records identical?", "design": "exploratory"}, {})
+    pid = created["data"]["project_id"]
+    raw = ("@article{a,title={Alpha},author={Doe, Ada},year={2020},doi={10.1000/a}}\n"
+           "@article{b,title={Beta},author={Roe, Bea},year={2021},doi={10.1000/b}}")
+    imported = facade.execute("library.bibliography_import", {"project_id": pid,
+        "format": "bibtex", "data_base64": base64.b64encode(raw.encode()).decode()}, {})
+    first, second = [item["id"] for item in imported["data"]["references"]]
+    merged = facade.execute("reference.merge", {"project_id": pid, "canonical_id": first,
+        "duplicate_id": second, "rationale": "Reviewer confirmed same underlying work"}, {})
+    assert merged["status"] == "ok", merged
+    fields = {entry["field"] for entry in merged["data"]["metadata_differences"]}
+    assert {"title", "authors", "year", "doi"} <= fields
+    assert merged["data"]["metadata_resolution"] == "preserved_both_records_no_auto_overwrite"
+    resolved = facade.execute("reference.resolve", {"project_id": pid,
+        "reference_id": second}, {})["data"]
+    assert resolved["original"]["title"] == "Beta"
+    assert resolved["canonical"]["title"] == "Alpha"
 
 
 def test_merge_requires_review_and_valid_ids(tmp_path):

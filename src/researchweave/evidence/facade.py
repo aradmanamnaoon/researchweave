@@ -169,6 +169,8 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
                         "Record reversible user-reviewed reference identity merge"),
     "reference.unmerge": ("local-write", ("project_id", "duplicate_id", "rationale"),
                           "Undo reference alias while retaining original metadata"),
+    "reference.resolve": ("read", ("project_id", "reference_id"),
+                          "Read canonical and alias provenance for a reference"),
     "reference.watch": (
         "local-write", ("project_id", "reference_id", "provider"),
         "Opt reference into metadata update monitoring"),
@@ -934,6 +936,8 @@ class EvidenceFacade:
             if operation == "reference.unmerge":
                 return library.unmerge_reference(_value(args, "duplicate_id", str),
                     _value(args, "rationale", str), expected_revision=expected)
+            if operation == "reference.resolve":
+                return library.resolve_reference(_value(args, "reference_id", str))
             identity = IdentityService(store)
             if operation == "reference.identity_record":
                 return identity.record(

@@ -38,6 +38,45 @@ class LibraryService:
                                 "Choose an available reference from the library.")
         return reference_from_row(row)
 
+    def resolve_reference(self, reference_id: str) -> dict[str, Any]:
+        """Expose canonical/alias state without deleting or rewriting either record."""
+        record = self.get_reference(reference_id)
+        alias = self.store.conn.execute(
+            "SELECT canonical_id,reason FROM reference_alias WHERE original_id=?",
+            (reference_id,),
+        ).fetchone()
+        aliases = [
+            {"reference_id": str(row["original_id"]), "reason": str(row["reason"])}
+            for row in self.store.conn.execute(
+                "SELECT original_id,reason FROM reference_alias WHERE canonical_id=? "
+                "ORDER BY original_id",
+                (reference_id,),
+            )
+        ]
+        if alias is None:
+            return {"reference_id": reference_id, "canonical_id": reference_id,
+                    "is_alias": False, "alias_reason": None,
+                    "canonical": record.as_wire(), "aliases": aliases}
+        canonical = self.get_reference(str(alias["canonical_id"]))
+        return {"reference_id": reference_id, "canonical_id": canonical.id,
+                "is_alias": True, "alias_reason": str(alias["reason"]),
+                "canonical": canonical.as_wire(), "original": record.as_wire(),
+                "aliases": []}
+
+    @staticmethod
+    def _merge_differences(canonical: Reference, duplicate: Reference) -> list[dict[str, Any]]:
+        differences: list[dict[str, Any]] = []
+        for field in ("title", "authors", "year", "doi", "kind"):
+            left = getattr(canonical, field)
+            right = getattr(duplicate, field)
+            if left != right:
+                differences.append({"field": field,
+                                    "canonical": list(left) if isinstance(left, tuple) else left,
+                                    "duplicate": (
+                                        list(right) if isinstance(right, tuple) else right
+                                    )})
+        return differences
+
     def merge_references(self, canonical_id: str, duplicate_id: str, rationale: str, *,
                          expected_revision: int | None = None) -> dict[str, Any]:
         """Record an explicit, reversible identity decision without deleting source data.
@@ -48,6 +87,9 @@ class LibraryService:
         require(canonical_id != duplicate_id, "Cannot merge a reference with itself")
         require(bool(rationale.strip()) and len(rationale) <= 2000,
                 "An explicit reviewer rationale is required")
+        canonical = self.get_reference(canonical_id)
+        duplicate = self.get_reference(duplicate_id)
+        differences = self._merge_differences(canonical, duplicate)
 
         def insert(conn: Any) -> None:
             for identifier in (canonical_id, duplicate_id):
@@ -72,7 +114,9 @@ class LibraryService:
                                          "rationale": rationale.strip()}, insert,
                                         expected_revision=expected_revision)
         return {"canonical_id": canonical_id, "alias_id": duplicate_id,
-                "reversible": True, "revision": revision}
+                "reversible": True, "revision": revision,
+                "metadata_differences": differences,
+                "metadata_resolution": "preserved_both_records_no_auto_overwrite"}
 
     def unmerge_reference(self, duplicate_id: str, rationale: str, *,
                           expected_revision: int | None = None) -> dict[str, Any]:

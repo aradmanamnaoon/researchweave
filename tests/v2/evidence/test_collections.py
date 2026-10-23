@@ -49,3 +49,24 @@ def test_collection_batch_remove_is_reversible_by_readding(tmp_path: Path) -> No
         assert service.search(collection_id=collection_id) == []
         service.add_members(collection_id, [reference_id])
         assert service.search(collection_id=collection_id)[0]["id"] == reference_id
+
+
+def test_collection_export_exposes_alias_provenance(tmp_path: Path) -> None:
+    with ProjectStore.create(
+        tmp_path / "project", "Collections", "Question", "exploratory"
+    ) as store:
+        library = LibraryService(store)
+        imported = library.import_bibliography(
+            b"@article{a,title={Same},author={Doe, Ada},year={2024}}\n"
+            b"@article{b,title={Same},author={Doe, Ada},year={2024}}", "bibtex")
+        canonical, alias = [record["id"] for record in imported["references"]]
+        library.merge_references(canonical, alias, "Reviewer confirmed duplicate")
+        service = CollectionService(store)
+        collection = service.create("Aliases")["collection_id"]
+        service.add_members(collection, [alias])
+        record = service.search(collection_id=collection)[0]
+        assert record["id"] == alias
+        assert record["canonical_id"] == canonical
+        assert record["is_alias"] is True
+        exported = service.export_csv(collection)
+        assert canonical in exported and alias in exported

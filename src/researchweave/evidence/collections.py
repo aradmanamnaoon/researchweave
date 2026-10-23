@@ -231,8 +231,10 @@ class CollectionService:
             escaped = text.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
             pattern = f"%{escaped}%"
         rows = self.store.conn.execute(
-            "SELECT DISTINCT r.id,r.title,r.authors_json,r.year,r.doi,r.kind,r.status "
+            "SELECT DISTINCT r.id,r.title,r.authors_json,r.year,r.doi,r.kind,r.status,"
+            "ra.canonical_id,ra.reason AS alias_reason "
             "FROM reference r "
+            "LEFT JOIN reference_alias ra ON ra.original_id=r.id "
             "LEFT JOIN collection_members cm ON cm.reference_id=r.id "
             "LEFT JOIN reference_tags rt ON rt.reference_id=r.id "
             "WHERE (? IS NULL OR cm.collection_id=?) "
@@ -260,6 +262,9 @@ class CollectionService:
                 "doi": row["doi"],
                 "kind": row["kind"],
                 "status": row["status"],
+                "canonical_id": row["canonical_id"] or row["id"],
+                "is_alias": row["canonical_id"] is not None,
+                "alias_reason": row["alias_reason"],
             }
             for row in rows
         ]
@@ -268,7 +273,8 @@ class CollectionService:
         records = self.search(collection_id=collection_id, limit=500)
         output = io.StringIO(newline="")
         writer = csv.DictWriter(
-            output, fieldnames=["id", "title", "authors", "year", "doi", "kind", "status"]
+            output, fieldnames=["id", "canonical_id", "is_alias", "alias_reason", "title",
+                                "authors", "year", "doi", "kind", "status"]
         )
         writer.writeheader()
         for record in records:
