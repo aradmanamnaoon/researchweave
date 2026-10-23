@@ -15,7 +15,7 @@ from pathlib import Path
 from typing import Any
 
 from .errors import EvidenceError, require
-from .models import canonical_json, new_id, sha256
+from .models import canonical_json, new_id, now_utc, sha256
 from .provenance import export_provenance
 from .reviews import ReviewService
 from .storage import ProjectStore
@@ -688,6 +688,56 @@ def selective_clone(
     temporary_root = Path(tempfile.mkdtemp(prefix=".rw-clone-", dir=destination.parent))
     project_root = temporary_root / "project"
     clone_id = new_id()
+    source_id_map = {str(row["id"]): new_id() for row in sources}
+    reference_id_map = {str(row["id"]): new_id() for row in references}
+    note_id_map = {str(row["id"]): new_id() for row in notes}
+    anchor_id_map = {str(row["id"]): new_id() for row in anchors}
+    highlight_id_map = {str(row["id"]): new_id() for row in highlight_rows}
+    relocation_id_map = {str(row["id"]): new_id() for row in relocation_rows}
+    citation_edge_id_map = {str(row["id"]): new_id() for row in citation_edges}
+    citation_assertion_id_map = {str(row["id"]): new_id() for row in citation_assertions}
+    claim_id_map = {str(row["id"]): new_id() for row in claims}
+    collection_id_map = {str(row["id"]): new_id() for row in collection_rows}
+    review_id_map = {review_id: new_id() for review_id in review_ids}
+    review_record_id_map = {str(row["id"]): new_id() for row in review_records}
+    search_run_id_map = {str(row["id"]): new_id() for row in search_runs}
+    search_hit_id_map = {str(row["id"]): new_id() for row in search_hits}
+    study_id_map = {str(row["id"]): new_id() for row in studies}
+    extraction_id_map = {str(row["id"]): new_id() for row in extractions}
+    form_id_map = {str(row["id"]): new_id() for row in forms}
+    form_value_id_map = {str(row["id"]): new_id() for row in form_values}
+    protocol_id_map = {protocol_id: new_id() for protocol_id in protocol_ids}
+
+    entity_maps: dict[str, dict[str, str]] = {
+        "source": source_id_map,
+        "reference": reference_id_map,
+        "note": note_id_map,
+        "anchor": anchor_id_map,
+        "highlight": highlight_id_map,
+        "highlight_relocation": relocation_id_map,
+        "citation": citation_edge_id_map,
+        "citation_assertion": citation_assertion_id_map,
+        "claim": claim_id_map,
+        "collection": collection_id_map,
+        "review": review_id_map,
+        "review_record": review_record_id_map,
+        "review_search_run": search_run_id_map,
+        "review_search_hit": search_hit_id_map,
+        "review_study": study_id_map,
+        "extraction": extraction_id_map,
+        "extraction_form": form_id_map,
+        "extraction_form_value": form_value_id_map,
+        "protocol": protocol_id_map,
+    }
+    object_id_map: dict[str, str] = {}
+    for mapping in (
+        source_id_map,
+        reference_id_map,
+        note_id_map,
+        anchor_id_map,
+        review_record_id_map,
+    ):
+        object_id_map.update(mapping)
     try:
         with ProjectStore.create(
             project_root,
@@ -702,28 +752,49 @@ def selective_clone(
                 clone.put_object(store.get_object(str(source["digest"])))
 
             def persist(conn: Any) -> None:
+                conn.execute(
+                    "CREATE TABLE clone_origins ("
+                    "entity_kind TEXT NOT NULL,destination_id TEXT NOT NULL,"
+                    "source_project_id TEXT NOT NULL,source_id TEXT NOT NULL,"
+                    "source_project_revision INTEGER NOT NULL,cloned_at TEXT NOT NULL,"
+                    "PRIMARY KEY(entity_kind,destination_id),"
+                    "UNIQUE(entity_kind,source_project_id,source_id))"
+                )
+                cloned_at = now_utc()
+                for entity_kind, mapping in entity_maps.items():
+                    for source_id, destination_id in sorted(mapping.items()):
+                        conn.execute(
+                            "INSERT INTO clone_origins VALUES (?,?,?,?,?,?)",
+                            (
+                                entity_kind,
+                                destination_id,
+                                info.id,
+                                source_id,
+                                info.revision,
+                                cloned_at,
+                            ),
+                        )
                 for source in sources:
                     conn.execute(
                         "INSERT INTO sources VALUES (?,?,?,?,?,?,?)",
-                        tuple(
-                            source[key]
-                            for key in (
-                                "id",
-                                "title",
-                                "media_type",
-                                "digest",
-                                "imported_at",
-                                "origin",
-                                "deleted",
-                            )
+                        (
+                            source_id_map[str(source["id"])],
+                            source["title"],
+                            source["media_type"],
+                            source["digest"],
+                            source["imported_at"],
+                            source["origin"],
+                            source["deleted"],
                         ),
                     )
                 for row in text_rows:
                     conn.execute(
                         "INSERT INTO document_text VALUES (?,?,?,?)",
-                        tuple(
-                            row[key]
-                            for key in ("source_id", "body", "extraction_version", "body_hash")
+                        (
+                            source_id_map[str(row["source_id"])],
+                            row["body"],
+                            row["extraction_version"],
+                            row["body_hash"],
                         ),
                     )
                 if fulltext_pages:
@@ -738,51 +809,53 @@ def selective_clone(
                     for row in fulltext_pages:
                         conn.execute(
                             "INSERT INTO fulltext_pages VALUES (?,?,?,?,?,?,?,?,?)",
-                            tuple(
-                                row.get(key)
-                                for key in (
-                                    "source_id",
-                                    "page_number",
-                                    "text",
-                                    "page_sha256",
-                                    "status",
-                                    "rotation",
-                                    "label",
-                                    "section_kind",
-                                    "heading",
-                                )
+                            (
+                                source_id_map[str(row["source_id"])],
+                                row.get("page_number"),
+                                row.get("text"),
+                                row.get("page_sha256"),
+                                row.get("status"),
+                                row.get("rotation"),
+                                row.get("label"),
+                                row.get("section_kind"),
+                                row.get("heading"),
                             ),
                         )
                 for reference in references:
                     conn.execute(
                         "INSERT INTO reference VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                        tuple(
-                            reference[key]
-                            for key in (
-                                "id",
-                                "title",
-                                "authors_json",
-                                "year",
-                                "doi",
-                                "kind",
-                                "format",
-                                "raw",
-                                "metadata_json",
-                                "status",
-                                "imported_at",
-                            )
+                        (
+                            reference_id_map[str(reference["id"])],
+                            reference["title"],
+                            reference["authors_json"],
+                            reference["year"],
+                            reference["doi"],
+                            reference["kind"],
+                            reference["format"],
+                            reference["raw"],
+                            reference["metadata_json"],
+                            reference["status"],
+                            reference["imported_at"],
                         ),
                     )
                 for alias in aliases:
                     conn.execute(
                         "INSERT INTO reference_alias VALUES (?,?,?)",
-                        (alias["original_id"], alias["canonical_id"], alias["reason"]),
+                        (
+                            reference_id_map[str(alias["original_id"])],
+                            reference_id_map[str(alias["canonical_id"])],
+                            alias["reason"],
+                        ),
                     )
                 for note in notes:
                     conn.execute(
                         "INSERT INTO notes VALUES (?,?,?,?,?)",
-                        tuple(
-                            note[key] for key in ("id", "source_id", "title", "body", "created_at")
+                        (
+                            note_id_map[str(note["id"])],
+                            source_id_map[str(note["source_id"])],
+                            note["title"],
+                            note["body"],
+                            note["created_at"],
                         ),
                     )
                 if note_revisions:
@@ -796,17 +869,14 @@ def selective_clone(
                     for row in note_revisions:
                         conn.execute(
                             "INSERT INTO note_revisions VALUES (?,?,?,?,?,?,?)",
-                            tuple(
-                                row[key]
-                                for key in (
-                                    "note_id",
-                                    "revision",
-                                    "title",
-                                    "body",
-                                    "rationale",
-                                    "actor",
-                                    "recorded_at",
-                                )
+                            (
+                                note_id_map[str(row["note_id"])],
+                                row["revision"],
+                                row["title"],
+                                row["body"],
+                                row["rationale"],
+                                row["actor"],
+                                row["recorded_at"],
                             ),
                         )
                 if note_tombstones:
@@ -818,23 +888,25 @@ def selective_clone(
                     for row in note_tombstones:
                         conn.execute(
                             "INSERT INTO note_tombstones VALUES (?,?,?,?)",
-                            tuple(row[key] for key in ("note_id", "reason", "actor", "deleted_at")),
+                            (
+                                note_id_map[str(row["note_id"])],
+                                row["reason"],
+                                row["actor"],
+                                row["deleted_at"],
+                            ),
                         )
                 for anchor in anchors:
                     conn.execute(
                         "INSERT INTO anchors VALUES (?,?,?,?,?,?,?,?)",
-                        tuple(
-                            anchor[key]
-                            for key in (
-                                "id",
-                                "source_id",
-                                "quote",
-                                "start",
-                                "end",
-                                "page",
-                                "body_hash",
-                                "verified",
-                            )
+                        (
+                            anchor_id_map[str(anchor["id"])],
+                            source_id_map[str(anchor["source_id"])],
+                            anchor["quote"],
+                            anchor["start"],
+                            anchor["end"],
+                            anchor["page"],
+                            anchor["body_hash"],
+                            anchor["verified"],
                         ),
                     )
                 if highlight_rows:
@@ -850,20 +922,17 @@ def selective_clone(
                     for row in highlight_rows:
                         conn.execute(
                             "INSERT INTO evidence_highlights VALUES (?,?,?,?,?,?,?,?,?,?)",
-                            tuple(
-                                row[key]
-                                for key in (
-                                    "id",
-                                    "source_id",
-                                    "page_number",
-                                    "start_offset",
-                                    "end_offset",
-                                    "quote",
-                                    "source_sha256",
-                                    "page_sha256",
-                                    "extraction_version",
-                                    "created_at",
-                                )
+                            (
+                                highlight_id_map[str(row["id"])],
+                                source_id_map[str(row["source_id"])],
+                                row["page_number"],
+                                row["start_offset"],
+                                row["end_offset"],
+                                row["quote"],
+                                row["source_sha256"],
+                                row["page_sha256"],
+                                row["extraction_version"],
+                                row["created_at"],
                             ),
                         )
                 if relocation_rows:
@@ -882,21 +951,18 @@ def selective_clone(
                         conn.execute(
                             "INSERT INTO evidence_highlight_relocations "
                             "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                            tuple(
-                                row[key]
-                                for key in (
-                                    "id",
-                                    "highlight_id",
-                                    "target_source_id",
-                                    "status",
-                                    "target_page",
-                                    "target_start",
-                                    "target_end",
-                                    "target_page_sha256",
-                                    "candidate_count",
-                                    "review_required",
-                                    "recorded_at",
-                                )
+                            (
+                                relocation_id_map[str(row["id"])],
+                                highlight_id_map[str(row["highlight_id"])],
+                                source_id_map[str(row["target_source_id"])],
+                                row["status"],
+                                row["target_page"],
+                                row["target_start"],
+                                row["target_end"],
+                                row["target_page_sha256"],
+                                row["candidate_count"],
+                                row["review_required"],
+                                row["recorded_at"],
                             ),
                         )
                 if citation_edges:
@@ -911,21 +977,18 @@ def selective_clone(
                     for row in citation_edges:
                         conn.execute(
                             "INSERT INTO reference_citations VALUES (?,?,?,?,?,?,?,?,?,?,?)",
-                            tuple(
-                                row[key]
-                                for key in (
-                                    "id",
-                                    "citing_id",
-                                    "cited_id",
-                                    "anchor_id",
-                                    "anchor_sha256",
-                                    "actor",
-                                    "rationale",
-                                    "created_at",
-                                    "revoked_at",
-                                    "revocation_reason",
-                                    "revoked_by",
-                                )
+                            (
+                                citation_edge_id_map[str(row["id"])],
+                                reference_id_map[str(row["citing_id"])],
+                                reference_id_map[str(row["cited_id"])],
+                                anchor_id_map[str(row["anchor_id"])],
+                                row["anchor_sha256"],
+                                row["actor"],
+                                row["rationale"],
+                                row["created_at"],
+                                row["revoked_at"],
+                                row["revocation_reason"],
+                                row["revoked_by"],
                             ),
                         )
                 if citation_assertions:
@@ -939,152 +1002,149 @@ def selective_clone(
                     for row in citation_assertions:
                         conn.execute(
                             "INSERT INTO citation_assertions VALUES (?,?,?,?,?,?)",
-                            tuple(
-                                row[key]
-                                for key in (
-                                    "id",
-                                    "citing_id",
-                                    "cited_id",
-                                    "provenance",
-                                    "confirmed_by",
-                                    "created_at",
-                                )
+                            (
+                                citation_assertion_id_map[str(row["id"])],
+                                reference_id_map[str(row["citing_id"])],
+                                reference_id_map[str(row["cited_id"])],
+                                row["provenance"],
+                                row["confirmed_by"],
+                                row["created_at"],
                             ),
                         )
                 for row in claims:
                     conn.execute(
                         "INSERT INTO claims VALUES (?,?,?,?,?)",
-                        tuple(
-                            row[key]
-                            for key in ("id", "note_id", "anchor_id", "statement", "interpretation")
+                        (
+                            claim_id_map[str(row["id"])],
+                            note_id_map[str(row["note_id"])]
+                            if row["note_id"] is not None
+                            else None,
+                            anchor_id_map[str(row["anchor_id"])]
+                            if row["anchor_id"] is not None
+                            else None,
+                            row["statement"],
+                            row["interpretation"],
                         ),
                     )
                 for row in lineage:
                     conn.execute(
                         "INSERT INTO lineage VALUES (?,?,?)",
-                        tuple(row[key] for key in ("child_id", "parent_id", "kind")),
+                        (
+                            object_id_map[str(row["child_id"])],
+                            object_id_map[str(row["parent_id"])],
+                            row["kind"],
+                        ),
                     )
                 for protocol in protocol_rows:
                     conn.execute(
                         "INSERT INTO protocols VALUES (?,?,?,?,?,?,?)",
-                        tuple(
-                            protocol[key]
-                            for key in (
-                                "id",
-                                "version",
-                                "title",
-                                "body_json",
-                                "rationale",
-                                "author",
-                                "recorded_at",
-                            )
+                        (
+                            protocol_id_map[str(protocol["id"])],
+                            protocol["version"],
+                            protocol["title"],
+                            protocol["body_json"],
+                            protocol["rationale"],
+                            protocol["author"],
+                            protocol["recorded_at"],
                         ),
                     )
                 for record in review_records:
+                    legacy_study_id = record["study_id"]
                     conn.execute(
                         "INSERT INTO review_records VALUES (?,?,?,?,?)",
-                        tuple(
-                            record[key]
-                            for key in ("id", "review_id", "reference_id", "study_id", "stage")
+                        (
+                            review_record_id_map[str(record["id"])],
+                            review_id_map[str(record["review_id"])],
+                            reference_id_map[str(record["reference_id"])],
+                            study_id_map.get(str(legacy_study_id), legacy_study_id)
+                            if legacy_study_id is not None
+                            else None,
+                            record["stage"],
                         ),
                     )
                 for run in search_runs:
                     conn.execute(
                         "INSERT INTO review_search_runs VALUES (?,?,?,?,?,?,?,?,?)",
-                        tuple(
-                            run[key]
-                            for key in (
-                                "id",
-                                "review_id",
-                                "provider",
-                                "original_query",
-                                "filters_json",
-                                "searched_at",
-                                "response_sha256",
-                                "expected_records",
-                                "finalized",
-                            )
+                        (
+                            search_run_id_map[str(run["id"])],
+                            review_id_map[str(run["review_id"])],
+                            run["provider"],
+                            run["original_query"],
+                            run["filters_json"],
+                            run["searched_at"],
+                            run["response_sha256"],
+                            run["expected_records"],
+                            run["finalized"],
                         ),
                     )
                 for hit in search_hits:
                     conn.execute(
                         "INSERT INTO review_search_hits VALUES (?,?,?,?,?,?,?,?)",
-                        tuple(
-                            hit[key]
-                            for key in (
-                                "id",
-                                "run_id",
-                                "reference_id",
-                                "record_id",
-                                "disposition",
-                                "rationale",
-                                "actor",
-                                "recorded_at",
-                            )
+                        (
+                            search_hit_id_map[str(hit["id"])],
+                            search_run_id_map[str(hit["run_id"])],
+                            reference_id_map[str(hit["reference_id"])],
+                            review_record_id_map[str(hit["record_id"])]
+                            if hit["record_id"] is not None
+                            else None,
+                            hit["disposition"],
+                            hit["rationale"],
+                            hit["actor"],
+                            hit["recorded_at"],
                         ),
                     )
                 for vote in votes:
                     conn.execute(
                         "INSERT INTO votes VALUES (?,?,?,?,?,?,?)",
-                        tuple(
-                            vote[key]
-                            for key in (
-                                "review_id",
-                                "record_id",
-                                "reviewer",
-                                "stage",
-                                "decision",
-                                "reason",
-                                "recorded_at",
-                            )
+                        (
+                            review_id_map[str(vote["review_id"])],
+                            review_record_id_map[str(vote["record_id"])],
+                            vote["reviewer"],
+                            vote["stage"],
+                            vote["decision"],
+                            vote["reason"],
+                            vote["recorded_at"],
                         ),
                     )
                 for row in adjudications:
                     conn.execute(
                         "INSERT INTO adjudications VALUES (?,?,?,?,?,?,?)",
-                        tuple(
-                            row[key]
-                            for key in (
-                                "review_id",
-                                "record_id",
-                                "stage",
-                                "decision",
-                                "reason",
-                                "adjudicator",
-                                "recorded_at",
-                            )
+                        (
+                            review_id_map[str(row["review_id"])],
+                            review_record_id_map[str(row["record_id"])],
+                            row["stage"],
+                            row["decision"],
+                            row["reason"],
+                            row["adjudicator"],
+                            row["recorded_at"],
                         ),
                     )
                 for row in retrievals:
                     conn.execute(
                         "INSERT INTO review_retrieval VALUES (?,?,?,?,?,?)",
-                        tuple(
-                            row[key]
-                            for key in (
-                                "record_id",
-                                "review_id",
-                                "outcome",
-                                "reason",
-                                "actor",
-                                "recorded_at",
-                            )
+                        (
+                            review_record_id_map[str(row["record_id"])],
+                            review_id_map[str(row["review_id"])],
+                            row["outcome"],
+                            row["reason"],
+                            row["actor"],
+                            row["recorded_at"],
                         ),
                     )
                 for row in extractions:
                     conn.execute(
                         "INSERT INTO extractions VALUES (?,?,?,?,?,?,?,?)",
-                        tuple(
-                            row[key]
-                            for key in (
-                                "id",
-                                "record_id",
-                                "field_name",
-                                "value_json",
-                                "unit",
-                                "source_anchor",
-                                "reviewer",
-                                "recorded_at",
-                            )
+                        (
+                            extraction_id_map[str(row["id"])],
+                            review_record_id_map[str(row["record_id"])],
+                            row["field_name"],
+                            row["value_json"],
+                            row["unit"],
+                            anchor_id_map[str(row["source_anchor"])]
+                            if row["source_anchor"] is not None
+                            else None,
+                            row["reviewer"],
+                            row["recorded_at"],
                         ),
                     )
                 if collection_rows:
@@ -1107,19 +1167,32 @@ def selective_clone(
                     for row in collection_rows:
                         conn.execute(
                             "INSERT INTO library_collections VALUES (?,?,?,?)",
-                            tuple(row[key] for key in ("id", "parent_id", "name", "created_at")),
+                            (
+                                collection_id_map[str(row["id"])],
+                                collection_id_map[str(row["parent_id"])]
+                                if row["parent_id"] is not None
+                                else None,
+                                row["name"],
+                                row["created_at"],
+                            ),
                         )
                     for row in collection_members:
                         conn.execute(
                             "INSERT INTO collection_members VALUES (?,?,?)",
-                            tuple(
-                                row[key] for key in ("collection_id", "reference_id", "added_at")
+                            (
+                                collection_id_map[str(row["collection_id"])],
+                                reference_id_map[str(row["reference_id"])],
+                                row["added_at"],
                             ),
                         )
                     for row in reference_tags:
                         conn.execute(
                             "INSERT INTO reference_tags VALUES (?,?,?)",
-                            tuple(row[key] for key in ("reference_id", "tag", "added_at")),
+                            (
+                                reference_id_map[str(row["reference_id"])],
+                                row["tag"],
+                                row["added_at"],
+                            ),
                         )
                 if studies:
                     conn.execute(
@@ -1137,29 +1210,23 @@ def selective_clone(
                     for row in studies:
                         conn.execute(
                             "INSERT INTO review_studies VALUES (?,?,?,?,?)",
-                            tuple(
-                                row[key]
-                                for key in (
-                                    "id",
-                                    "review_id",
-                                    "label",
-                                    "metadata_json",
-                                    "created_at",
-                                )
+                            (
+                                study_id_map[str(row["id"])],
+                                review_id_map[str(row["review_id"])],
+                                row["label"],
+                                row["metadata_json"],
+                                row["created_at"],
                             ),
                         )
                     for row in study_reports:
                         conn.execute(
                             "INSERT INTO review_study_reports VALUES (?,?,?,?,?)",
-                            tuple(
-                                row[key]
-                                for key in (
-                                    "study_id",
-                                    "record_id",
-                                    "relationship",
-                                    "rationale",
-                                    "linked_at",
-                                )
+                            (
+                                study_id_map[str(row["study_id"])],
+                                review_record_id_map[str(row["record_id"])],
+                                row["relationship"],
+                                row["rationale"],
+                                row["linked_at"],
                             ),
                         )
                 if forms:
@@ -1181,35 +1248,33 @@ def selective_clone(
                     for row in forms:
                         conn.execute(
                             "INSERT INTO extraction_forms VALUES (?,?,?,?,?,?,?,?)",
-                            tuple(
-                                row[key]
-                                for key in (
-                                    "id",
-                                    "version",
-                                    "name",
-                                    "schema_json",
-                                    "rationale",
-                                    "author",
-                                    "recorded_at",
-                                    "schema_sha256",
-                                )
+                            (
+                                form_id_map[str(row["id"])],
+                                row["version"],
+                                row["name"],
+                                row["schema_json"],
+                                row["rationale"],
+                                row["author"],
+                                row["recorded_at"],
+                                row["schema_sha256"],
                             ),
                         )
                     for row in form_values:
                         conn.execute(
                             "INSERT INTO extraction_form_values VALUES (?,?,?,?,?,?,?,?)",
-                            tuple(
-                                row[key]
-                                for key in (
-                                    "id",
-                                    "form_id",
-                                    "form_version",
-                                    "record_id",
-                                    "values_json",
-                                    "reviewer",
-                                    "migrated_from",
-                                    "recorded_at",
+                            (
+                                form_value_id_map[str(row["id"])],
+                                form_id_map[str(row["form_id"])],
+                                row["form_version"],
+                                review_record_id_map[str(row["record_id"])],
+                                row["values_json"],
+                                row["reviewer"],
+                                form_value_id_map.get(
+                                    str(row["migrated_from"]), row["migrated_from"]
                                 )
+                                if row["migrated_from"] is not None
+                                else None,
+                                row["recorded_at"],
                             ),
                         )
 
@@ -1223,6 +1288,7 @@ def selective_clone(
                     "selected_collection_ids": collection_ids,
                     "selected_review_ids": review_ids,
                     "selected_protocol_ids": protocol_ids,
+                    "origin_mapping_count": sum(len(mapping) for mapping in entity_maps.values()),
                 },
                 persist,
                 expected_revision=0,
@@ -1246,6 +1312,11 @@ def selective_clone(
             "note_revisions": len(note_revisions),
             "highlights": len(highlight_rows),
             "citation_relations": len(citation_edges) + len(citation_assertions),
+            "origin_mappings": sum(len(mapping) for mapping in entity_maps.values()),
+            "destination_review_ids": {
+                source_id: destination_id
+                for source_id, destination_id in sorted(review_id_map.items())
+            },
             "dependency_closed_source_ids": sorted(source_set),
             "dependency_closed_reference_ids": sorted(reference_set),
             "destination": str(destination),

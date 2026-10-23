@@ -68,12 +68,23 @@ def test_clone_collection_review_and_protocol_closes_dependencies(tmp_path: Path
         assert receipt["dependency_closed_reference_ids"] == [reference_id]
         assert receipt["note_revisions"] == 2
         assert receipt["highlights"] == 1
+        assert receipt["origin_mappings"] > 0
+        cloned_review_id = receipt["destination_review_ids"]["review"]
+        assert cloned_review_id != "review"
     with ProjectStore(tmp_path / "clone") as clone:
         assert clone.audit()["ok"]
         assert clone.conn.execute("SELECT COUNT(*) FROM library_collections").fetchone()[0] == 1
         assert clone.conn.execute("SELECT COUNT(*) FROM collection_members").fetchone()[0] == 1
         assert clone.conn.execute("SELECT COUNT(*) FROM review_records").fetchone()[0] == 1
-        assert clone.conn.execute("SELECT source_anchor FROM extractions").fetchone()[0] == anchor
+        cloned_anchor = clone.conn.execute(
+            "SELECT destination_id FROM clone_origins WHERE entity_kind='anchor' AND source_id=?",
+            (anchor,),
+        ).fetchone()[0]
+        assert cloned_anchor != anchor
+        assert (
+            clone.conn.execute("SELECT source_anchor FROM extractions").fetchone()[0]
+            == cloned_anchor
+        )
         assert clone.conn.execute("SELECT COUNT(*) FROM protocols").fetchone()[0] == 1
         assert clone.conn.execute("SELECT COUNT(*) FROM note_revisions").fetchone()[0] == 2
         assert clone.conn.execute("SELECT COUNT(*) FROM evidence_highlights").fetchone()[0] == 1
@@ -82,6 +93,37 @@ def test_clone_collection_review_and_protocol_closes_dependencies(tmp_path: Path
             == 1
         )
         assert clone.get_object(source["sha256"]) == b"effect 2 points"
+        origin_rows = clone.conn.execute(
+            "SELECT entity_kind,destination_id,source_project_id,source_id,source_project_revision "
+            "FROM clone_origins ORDER BY entity_kind,source_id"
+        ).fetchall()
+        assert len(origin_rows) == receipt["origin_mappings"]
+        assert all(row["destination_id"] != row["source_id"] for row in origin_rows)
+        assert all(row["source_project_id"] != clone.info().id for row in origin_rows)
+        assert all(row["source_project_revision"] > 0 for row in origin_rows)
+
+        cloned_source = clone.conn.execute("SELECT id,digest FROM sources").fetchone()
+        assert cloned_source["id"] != source["source_id"]
+        assert cloned_source["digest"] == source["sha256"]
+        cloned_reference = clone.conn.execute(
+            "SELECT id,title FROM reference WHERE title='Trial'"
+        ).fetchone()
+        assert cloned_reference["id"] != reference_id
+        cloned_record = clone.conn.execute(
+            "SELECT id,review_id,reference_id FROM review_records"
+        ).fetchone()
+        assert cloned_record["id"] != record["record_id"]
+        assert cloned_record["review_id"] == cloned_review_id
+        assert cloned_record["reference_id"] == cloned_reference["id"]
+
+    with ProjectStore(tmp_path / "clone") as reopened:
+        assert reopened.audit()["ok"]
+        assert reopened.conn.execute("SELECT COUNT(*) FROM clone_origins").fetchone()[0] == receipt[
+            "origin_mappings"
+        ]
+        assert reopened.conn.execute(
+            "SELECT review_id FROM review_records"
+        ).fetchone()[0] == cloned_review_id
 
 
 def test_clone_missing_review_is_rejected_without_destination(tmp_path: Path) -> None:
