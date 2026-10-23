@@ -27,6 +27,11 @@
 | SA-048/050 | `mixed_methods.py` | code-by-case linkage, small-cell disclosure guards, overlap provenance | Working slice |
 | SA-049 | `coding_review.py` | two-reviewer adjudication and source-anchor relocation | Working slice |
 | SA-045 | `script_exports.py` | generated Python script reproduced actual result in fresh interpreter; R unverified | Working slice |
+| SA-028 | `longitudinal.py` | balanced difference-in-differences, GEE sandwich SE versus statsmodels; duplicate-key rejection | Working slice |
+| SA-029 | `survival.py` | Kaplan-Meier/Greenwood and logrank compared with statsmodels; Cox input validation | Working slice |
+| SA-036 | `measurement.py` | KMO/Bartlett, exploratory factors, Fleiss agreement and ICC with reference checks | Working slice |
+| SA-042 | `survey.py` | stratified PSU Taylor mean with hand-computed variance and singleton rejection | Working slice |
+| SECURITY | `datasets.py` | checked hex-only IDs, content-derived revision verification and tampered saved JSON rejection | Working slice |
 | SOURCE_LAYOUT_VERIFIED | `src/researchweave/analysis` | compileall, imported install, git index checked on local commit | See TEST_RESULTS |
 
 Actual observed results and metrics belong to `TEST_RESULTS.md` and `CODE_METRICS.json`. Status is intentionally limited to features with observed checks; remaining 52 backlog tasks are captured in `NEXT_ACTION.md` and `LIMITATIONS.md`.

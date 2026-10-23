@@ -19,6 +19,66 @@ MAX_ROWS = 500_000
 MAX_COLUMNS = 2000
 
 
+def validate_dataset_identity(dataset_id: str, revision: str | None = None) -> None:
+    """Identifiers are hex digests, never filesystem paths or user-supplied labels."""
+    require(
+        isinstance(dataset_id, str)
+        and len(dataset_id) == 24
+        and all(c in "0123456789abcdef" for c in dataset_id),
+        "Invalid dataset ID; expected 24 lowercase hex characters",
+    )
+    if revision is not None:
+        require(
+            isinstance(revision, str)
+            and len(revision) == 64
+            and all(c in "0123456789abcdef" for c in revision),
+            "Invalid revision; expected 64 lowercase hex characters",
+        )
+
+
+def expected_revision(dataset: Dataset) -> str:
+    """Reconstruct content-derived dataset revisions from supported constructors."""
+    record_list = list(dataset.records)
+    variables = [v.__dict__ for v in dataset.variables]
+    operation = dataset.operation
+    if dataset.parent_revision is None:
+        if operation.get("type") == "import_csv":
+            payload = {
+                "id": dataset.dataset_id,
+                "source": dataset.source_hash,
+                "rows": record_list,
+                "variables": variables,
+                "operation": operation,
+            }
+        elif operation.get("type") == "import_table":
+            payload = {
+                "id": dataset.dataset_id,
+                "source": dataset.source_hash,
+                "rows": record_list,
+                "variables": variables,
+                "operation": operation,
+            }
+        else:
+            raise AnalysisError("INTEGRITY_FAILURE", "Unknown root revision constructor")
+    elif operation.get("type") == "join":
+        payload = {
+            "columns": dataset.columns,
+            "rows": record_list,
+            "variables": variables,
+            "operation": operation,
+        }
+    elif operation.get("type") == "survey_indicator":
+        payload = {"operation": operation, "records": record_list}
+    else:
+        payload = {
+            "parent": dataset.parent_revision,
+            "records": record_list,
+            "variables": variables,
+            "operation": operation,
+        }
+    return digest(payload)
+
+
 def import_csv(
     path: Path,
     *,
@@ -71,6 +131,7 @@ def import_csv(
     variables = tuple(Variable(name=c, missing_values=missing) for c in columns)
     source_hash = hashlib.sha256(content).hexdigest()
     identifier = dataset_id or digest({"source_hash": source_hash})[:24]
+    validate_dataset_identity(identifier)
     op = {
         "type": "import_csv",
         "encoding": encoding,
@@ -137,6 +198,7 @@ def import_table(
     )
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     identifier = dataset_id or digest({"source": source_hash})[:24]
+    validate_dataset_identity(identifier)
     operation = {"type": "import_table", "format": kind, "sheet": sheet}
     revision = digest(
         {
@@ -219,10 +281,19 @@ class DatasetStore:
         self.root.mkdir(parents=True, exist_ok=True)
 
     def save(self, dataset: Dataset) -> Path:
+        validate_dataset_identity(dataset.dataset_id, dataset.revision)
+        require(
+            expected_revision(dataset) == dataset.revision,
+            "Dataset revision checksum does not match content",
+            "INTEGRITY_FAILURE",
+        )
         directory = self.root / dataset.dataset_id
         directory.mkdir(parents=True, exist_ok=True)
         target = directory / f"{dataset.revision}.json"
-        content = canonical_json(dataset.as_json())
+        record = dataset.as_json()
+        content = canonical_json(
+            {"schema_version": 2, "dataset": record, "content_sha256": digest(record)}
+        )
         if target.exists():
             require(
                 target.read_bytes() == content, "Existing revision differs", "INTEGRITY_FAILURE"
@@ -240,23 +311,35 @@ class DatasetStore:
         return target
 
     def load(self, dataset_id: str, revision: str) -> Dataset:
-        require(
-            len(dataset_id) == 24 and all(c in "0123456789abcdef" for c in dataset_id),
-            "Invalid dataset ID",
-        )
-        require(
-            len(revision) == 64 and all(c in "0123456789abcdef" for c in revision),
-            "Invalid revision",
-        )
+        validate_dataset_identity(dataset_id, revision)
         path = self.root / dataset_id / f"{revision}.json"
         require(path.is_file(), "Revision not found", "NOT_FOUND")
-        obj = json.loads(path.read_bytes())
+        require(
+            path.stat().st_size <= MAX_BYTES * 4,
+            "Stored dataset exceeds read budget",
+            "RESOURCE_LIMIT",
+        )
+        try:
+            envelope = json.loads(path.read_bytes())
+        except (ValueError, UnicodeError) as exc:
+            raise AnalysisError("INTEGRITY_FAILURE", "Saved revision is not valid JSON") from exc
+        require(
+            envelope.get("schema_version") == 2 and isinstance(envelope.get("dataset"), dict),
+            "Unsupported or unauthenticated dataset snapshot",
+            "INTEGRITY_FAILURE",
+        )
+        obj = envelope["dataset"]
+        require(
+            digest(obj) == envelope.get("content_sha256"),
+            "Saved dataset checksum mismatch",
+            "INTEGRITY_FAILURE",
+        )
         require(
             obj["revision"] == revision and obj["dataset_id"] == dataset_id,
             "Revision identity mismatch",
             "INTEGRITY_FAILURE",
         )
-        return Dataset(
+        result = Dataset(
             dataset_id,
             revision,
             obj["parent_revision"],
@@ -270,3 +353,9 @@ class DatasetStore:
             tuple(obj["records"]),
             obj["operation"],
         )
+        require(
+            expected_revision(result) == revision,
+            "Revision does not match restored dataset",
+            "INTEGRITY_FAILURE",
+        )
+        return result

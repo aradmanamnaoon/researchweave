@@ -18,6 +18,13 @@ from .inference import (
     independent_rank_test,
     one_way_anova,
 )
+from .longitudinal import difference_in_differences, gaussian_gee
+from .measurement import (
+    correlation_suitability,
+    exploratory_factors,
+    fleiss_agreement,
+    icc_two_way_absolute,
+)
 from .modeling import adjust_pvalues, linear_regression, pooled_effects
 from .models import Dataset, digest
 from .multivariate import hierarchical_clusters, kmeans_clusters, principal_components
@@ -26,6 +33,8 @@ from .power import two_sample_t_power, two_sample_t_required
 from .runtime import run_script
 from .scale_scoring import ScaleDefinition, item_total_diagnostics, score_scale
 from .statistics import correlation, describe, reliability, t_test
+from .survey import design_weighted_mean, survey_proportions
+from .survival import cox_proportional_hazards, kaplan_meier, logrank_test
 from .time_series import adf_stationarity, causal_features, parse_chronology
 from .transformations import transform
 
@@ -70,6 +79,17 @@ class AnalysisFacade:
             "statistics.item_total": "read",
             "statistics.time_features": "read",
             "statistics.adf": "read",
+            "statistics.survival": "read",
+            "statistics.logrank": "read",
+            "statistics.cox": "read",
+            "statistics.gee": "read",
+            "statistics.did": "read",
+            "statistics.survey_mean": "read",
+            "statistics.survey_proportions": "read",
+            "statistics.factor_suitability": "read",
+            "statistics.efa": "read",
+            "statistics.fleiss": "read",
+            "statistics.icc": "read",
             "plot.render": "local-write",
             "runtime.python": "code-execution",
             "runtime.r": "code-execution",
@@ -198,6 +218,10 @@ class AnalysisFacade:
                 data = asdict(two_sample_t_power(**options))
             else:
                 data = asdict(two_sample_t_required(**options))
+        elif operation == "statistics.fleiss":
+            data = fleiss_agreement(list(arguments["rating_counts"]))
+        elif operation == "statistics.icc":
+            data = icc_two_way_absolute(list(arguments["ratings"]))
         elif operation in ("runtime.python", "runtime.r"):
             data = run_script(
                 str(arguments["source"]),
@@ -372,6 +396,74 @@ class AnalysisFacade:
                     )
                 else:
                     data = adf_stationarity(chronology)
+            elif operation == "statistics.survival":
+                data = kaplan_meier(
+                    obj,
+                    str(arguments["duration"]),
+                    str(arguments["event"]),
+                    group=arguments.get("group"),
+                    level=arguments.get("level"),
+                )
+            elif operation == "statistics.logrank":
+                levels = tuple(arguments["levels"])
+                require(len(levels) == 2, "Logrank requires two groups")
+                data = logrank_test(
+                    obj,
+                    str(arguments["duration"]),
+                    str(arguments["event"]),
+                    str(arguments["group"]),
+                    levels=levels,
+                )
+            elif operation == "statistics.cox":
+                data = cox_proportional_hazards(
+                    obj,
+                    str(arguments["duration"]),
+                    str(arguments["event"]),
+                    list(arguments["predictors"]),
+                )
+            elif operation == "statistics.gee":
+                data = gaussian_gee(
+                    obj,
+                    subject=str(arguments["subject"]),
+                    time=str(arguments["time"]),
+                    outcome=str(arguments["outcome"]),
+                    predictors=list(arguments["predictors"]),
+                    correlation=str(arguments.get("correlation", "exchangeable")),
+                )
+            elif operation == "statistics.did":
+                data = difference_in_differences(
+                    obj,
+                    subject=str(arguments["subject"]),
+                    time=str(arguments["time"]),
+                    treatment=str(arguments["treatment"]),
+                    outcome=str(arguments["outcome"]),
+                )
+            elif operation == "statistics.survey_mean":
+                data = design_weighted_mean(
+                    obj,
+                    outcome=str(arguments["outcome"]),
+                    weight=str(arguments["weight"]),
+                    stratum=str(arguments["stratum"]),
+                    psu=str(arguments["psu"]),
+                )
+            elif operation == "statistics.survey_proportions":
+                data = survey_proportions(
+                    obj,
+                    category=str(arguments["category"]),
+                    weight=str(arguments["weight"]),
+                    stratum=str(arguments["stratum"]),
+                    psu=str(arguments["psu"]),
+                    levels=list(arguments["levels"]),
+                )
+            elif operation == "statistics.factor_suitability":
+                data = correlation_suitability(obj, list(arguments["columns"]))
+            elif operation == "statistics.efa":
+                data = exploratory_factors(
+                    obj,
+                    list(arguments["columns"]),
+                    n_factors=int(arguments["n_factors"]),
+                    rotate=str(arguments.get("rotate", "varimax")),
+                )
             elif operation == "plot.render":
                 output_root = context.get("trusted_export_root")
                 require(
