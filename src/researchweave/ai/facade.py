@@ -7,6 +7,7 @@ from typing import Any
 from .agents import AgentRuntime, Capability
 from .errors import AIError
 from .grounding import GroundingVerifier
+from .ollama import OllamaAdapter, OllamaMessage, OllamaOptions
 from .policy import Approval, ApprovalIssuer, EgressPolicy
 from .providers import ProviderRegistry
 from .retrieval import EvidenceIndex
@@ -19,12 +20,14 @@ class AIFacade:
         policy: EgressPolicy | None = None,
         providers: ProviderRegistry | None = None,
         issuer: ApprovalIssuer | None = None,
+        ollama: OllamaAdapter | None = None,
     ) -> None:
         if not storage.is_dir():
             raise AIError("NOT_FOUND", "An existing host-controlled storage directory is required")
         self.policy = policy or EgressPolicy()
         self.providers = providers or ProviderRegistry()
         self.issuer = issuer
+        self.ollama = ollama
         self.retrieval = EvidenceIndex(storage / "evidence.sqlite")
         self.grounding = GroundingVerifier(self.retrieval)
         self.agents = AgentRuntime(storage / "agents.sqlite", issuer)
@@ -45,6 +48,8 @@ class AIFacade:
         return [
             {"operation": "provider.list", "effect": "read", "offline": True},
             {"operation": "provider.complete", "effect": "external-network", "offline": False},
+            {"operation": "local.chat", "effect": "local-write", "offline": True},
+            {"operation": "local.embed", "effect": "local-write", "offline": True},
             {"operation": "retrieval.ingest", "effect": "local-write", "offline": True},
             {"operation": "retrieval.query", "effect": "read", "offline": True},
             {"operation": "retrieval.answer", "effect": "read", "offline": True},
@@ -104,6 +109,33 @@ class AIFacade:
                 result = self.providers.complete(
                     args["provider"], args["prompt"], self.policy, args.get("max_tokens", 512)
                 )
+            elif operation == "local.chat":
+                if self.ollama is None:
+                    raise AIError("NOT_FOUND", "Local model runtime is not configured")
+                messages = [
+                    OllamaMessage(item["role"], item["content"]) for item in args["messages"]
+                ]
+                result = vars(
+                    self.ollama.chat(
+                        args["model"],
+                        messages,
+                        OllamaOptions(
+                            temperature=args.get("temperature", 0.0),
+                            max_output_tokens=args.get("max_output_tokens", 512),
+                            context_tokens=args.get("context_tokens", 4096),
+                            seed=args.get("seed", 42),
+                        ),
+                    )
+                )
+            elif operation == "local.embed":
+                if self.ollama is None:
+                    raise AIError("NOT_FOUND", "Local model runtime is not configured")
+                result = {
+                    "model": args["model"],
+                    "vectors": self.ollama.embed(
+                        args["model"], args["texts"], dimension=args["dimension"]
+                    ),
+                }
             elif operation == "retrieval.ingest":
                 result = self.retrieval.ingest(
                     args["source_id"], args["content"], args.get("classification", "private")
@@ -193,5 +225,6 @@ def build_ai_facade(
     policy: EgressPolicy | None = None,
     providers: ProviderRegistry | None = None,
     issuer: ApprovalIssuer | None = None,
+    ollama: OllamaAdapter | None = None,
 ) -> AIFacade:
-    return AIFacade(storage, policy, providers, issuer)
+    return AIFacade(storage, policy, providers, issuer, ollama)
