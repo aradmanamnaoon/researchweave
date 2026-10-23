@@ -95,7 +95,7 @@ def test_public_facade_exposes_portability_monitoring_and_management(tmp_path: P
         project_id=project_id,
         reference_id=reference_id,
         provider="manual",
-        observed={"title": "Traceable Trial", "is_corrected": True},
+        observed={"title": "Traceable Trial", "doi": "10.1000/trace", "is_corrected": True},
     )
     assert observation["correction_reported"] is True
     history = _call(
