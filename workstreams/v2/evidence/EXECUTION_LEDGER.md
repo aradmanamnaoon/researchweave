@@ -26,6 +26,9 @@
 | RE-050 | Provenance graph with orphan/cycle checks | Implemented service; further adversarial tests pending |
 | RE-050-VERIFY | Reopen graph equivalence, persisted source/note/anchor causal links, orphan and cycle detection; test_provenance.py | 2 local tests passed |
 | RE-049 | Verified chronological event projection, operation filtering, deterministic JSON export and fail-closed detection of tampered events; timeline.py, facade.py, test_timeline.py | Partial: 2 new tests pass, full 26-test suite passes; research-specific presentation and timestamp migration diagnostics remain |
+| RE-020..022 | `fulltext.py` bounded PDF adapter, no-text scan flag, DOCX/EPUB extraction and ZIP checks; `library.import` persists page hashes in project SQLite, `library.source_pages` rechecks hashes; tests `test_fulltext.py`, `test_facade_extensions.py` | Partial: synthetic DOCX and EPUB plus injected PDF parser tests pass; live pypdf and cross-platform verification unavailable |
+| RE-031, RE-034..036 | Manual appraisals, anchored findings, grouping by matching outcomes, evidence gaps and synthesis via `synthesis.py` facade handlers, `test_synthesis_publishing.py`, `test_facade_extensions.py` | Partial: focused tests passed; full scientific templates and comprehensive provenance audits pending |
+| RE-038..040 | `publishing.py` deterministic plain/numbered bibliography, manuscript warnings, explicit unsubmitted publication packet, facade commands | Partial: focused tests passed; full CSL/DOCX/PDF packet export missing |
 | RE-004, RE-014..017, RE-020..022, RE-026, RE-030..031, RE-033..036, RE-038, RE-040..049, RE-051..052 | Not implemented or incomplete; consult NEXT_ACTION.md | Pending |
 
 The source is tracked at relative `src/researchweave/evidence/` in isolated branch `rebuild/v2-evidence`. Source layout verification, measured meaningful SLOC, test count and commit SHA are recorded in TEST_RESULTS.md and HANDOFF.md after final local checks.

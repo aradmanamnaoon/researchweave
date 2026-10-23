@@ -24,9 +24,11 @@ from .models import new_id
 from .project_format import archive_project, restore_archive, verify_archive
 from .protocols import ProtocolService, question_feedback
 from .provenance import export_provenance
+from .publishing import PublishingService
 from .reviews import ReviewService
 from .search_index import LocalIndex
 from .storage import ProjectStore
+from .synthesis import Finding, SynthesisService
 from .timeline import research_timeline, timeline_json
 from .writing import WritingService
 
@@ -47,6 +49,8 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "library.import": ("local-write", ("project_id", "title", "media_type", "data_base64"),
                        "Import local document"),
     "library.source_text": ("read", ("project_id", "source_id"), "Read source text"),
+    "library.source_pages": ("read", ("project_id", "source_id"),
+                             "Read and verify page-level document extraction"),
     "discovery.search": ("read", ("project_id", "query"), "Offline library search"),
     "discovery.provider_search": ("external-network", ("project_id", "query", "provider"),
                                    "Opt-in public catalog metadata lookup"),
@@ -94,10 +98,30 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
                                        "extracted", "reviewer"), "Create validated extraction"),
     "review.evidence_matrix": ("read", ("project_id", "review_id"),
                                "Read attributed study outcome fields"),
+    "review.bias_assess": ("local-write", ("project_id", "record_id", "template",
+                                          "assessor", "responses"),
+                           "Record evidence-backed manual bias appraisal"),
+    "review.bias_history": ("read", ("project_id", "record_id"), "List human appraisal history"),
+    "review.finding_add": ("local-write", ("project_id", "finding"),
+                           "Register anchored study finding"),
+    "review.contradictions": ("read", ("project_id", "question"),
+                              "Group potentially conflicting findings"),
+    "review.gap_add": ("local-write", ("project_id", "question", "searches", "limitations"),
+                       "Record reproducible evidence gap"),
+    "review.gaps": ("read", ("project_id",), "Read evidence gap registry"),
+    "review.synthesis_compose": ("local-write", ("project_id", "title", "sections"),
+                                 "Save attributed narrative synthesis"),
+    "review.synthesis_outline": ("read", ("project_id", "outline_id"), "Read saved synthesis"),
     "writing.section_save": ("local-write", ("project_id", "manuscript_id", "section",
                                            "body", "citations"), "Save manuscript section"),
     "writing.inspect": ("read", ("project_id", "manuscript_id"), "Inspect citations"),
     "writing.render": ("read", ("project_id", "manuscript_id"), "Export manuscript Markdown"),
+    "writing.bibliography": ("read", ("project_id", "manuscript_id"),
+                             "Render basic validated bibliography"),
+    "writing.check": ("read", ("project_id", "manuscript_id"),
+                      "Inspect manuscript submission issues"),
+    "writing.submission_packet": ("read", ("project_id", "manuscript_id", "journal"),
+                                  "Prepare unsubmitted publication packet"),
     "provenance.graph": ("read", ("project_id",), "Export provenance graph"),
     "migration.markdown_preview": ("read", ("files",), "Preview user-owned Markdown files"),
     "migration.markdown_import": ("local-write", ("project_id", "files"),
@@ -335,6 +359,8 @@ class EvidenceFacade:
                     expected_revision=expected)
             if operation == "library.source_text":
                 return {"text": library.source_text(_value(args, "source_id", str))}
+            if operation == "library.source_pages":
+                return library.source_pages(_value(args, "source_id", str))
             if operation == "discovery.search":
                 return library.search(_value(args, "query", str),
                                       int(args.get("limit", 50)))
@@ -430,6 +456,29 @@ class EvidenceFacade:
             if operation == "review.evidence_matrix":
                 return {"records": ExtractionService(store).matrix(
                     _value(args, "review_id", str))}
+            synthesis = SynthesisService(store)
+            if operation == "review.bias_assess":
+                return synthesis.assess_bias(_value(args, "record_id", str),
+                    _value(args, "template", str), _value(args, "assessor", str),
+                    _value(args, "responses", dict), expected_revision=expected)
+            if operation == "review.bias_history":
+                return {"records": synthesis.appraisals(_value(args, "record_id", str))}
+            if operation == "review.finding_add":
+                return synthesis.add_finding(Finding(**_value(args, "finding", dict)),
+                                             expected_revision=expected)
+            if operation == "review.contradictions":
+                return synthesis.compare(_value(args, "question", str))
+            if operation == "review.gap_add":
+                return synthesis.register_gap(_value(args, "question", str),
+                    _value(args, "searches", list), _value(args, "limitations", str),
+                    expected_revision=expected)
+            if operation == "review.gaps":
+                return {"records": synthesis.gaps()}
+            if operation == "review.synthesis_compose":
+                return synthesis.compose(_value(args, "title", str),
+                    _value(args, "sections", list), expected_revision=expected)
+            if operation == "review.synthesis_outline":
+                return synthesis.outline(_value(args, "outline_id", str))
             writing = WritingService(store)
             if operation == "writing.section_save":
                 return writing.save_section(_value(args, "manuscript_id", str),
@@ -440,6 +489,16 @@ class EvidenceFacade:
             if operation == "writing.render":
                 return {"format": "markdown", "text": writing.render_markdown(
                     _value(args, "manuscript_id", str))}
+            publishing = PublishingService(store)
+            if operation == "writing.bibliography":
+                return publishing.bibliography(_value(args, "manuscript_id", str),
+                                               str(args.get("style", "plain")))
+            if operation == "writing.check":
+                return publishing.check_manuscript(_value(args, "manuscript_id", str))
+            if operation == "writing.submission_packet":
+                return publishing.submission_packet(_value(args, "manuscript_id", str),
+                    _value(args, "journal", str),
+                    allow_incomplete=args.get("allow_incomplete") is True)
             if operation == "provenance.graph":
                 return export_provenance(store)
             if operation == "migration.markdown_import":

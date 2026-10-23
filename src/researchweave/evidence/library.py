@@ -13,6 +13,8 @@ from .bibliography import (
 )
 from .documents import extract_text, make_anchor
 from .errors import EvidenceError, require
+from .fulltext import FullText
+from .fulltext import import_document as extract_fulltext
 from .models import ImportReceipt, Reference, new_id, now_utc, sha256
 from .storage import MAX_BLOB_BYTES, ProjectStore
 
@@ -149,7 +151,16 @@ class LibraryService:
         require(bool(title.strip()) and len(title) <= 300, "Document title required")
         require(len(data) <= MAX_BLOB_BYTES, "Document exceeds size limit", "RESOURCE_LIMIT")
         require(len(origin) <= 300, "Origin label too long")
-        body, extraction = extract_text(data, media_type)
+        structured: FullText | None = None
+        if media_type in {"application/pdf", "application/epub+zip",
+                          "application/vnd.openxmlformats-officedocument.wordprocessingml.document"}:
+            structured = extract_fulltext(data, media_type)
+            body = "\n\n".join(page.text for page in structured.pages)
+            extraction = {"body_sha256": sha256(body.encode("utf-8")),
+                          "extraction_version": structured.extraction_version,
+                          "source_type": media_type}
+        else:
+            body, extraction = extract_text(data, media_type)
         digest = self.store.put_object(data)
         source_id = new_id()
 
@@ -159,13 +170,43 @@ class LibraryService:
             conn.execute("INSERT INTO document_text VALUES (?,?,?,?)",
                          (source_id, body, extraction["extraction_version"],
                           extraction["body_sha256"]))
+            if structured is not None:
+                conn.execute("CREATE TABLE IF NOT EXISTS fulltext_pages ("
+                             "source_id TEXT NOT NULL REFERENCES sources(id),"
+                             "page_number INTEGER NOT NULL CHECK(page_number > 0),"
+                             "text TEXT NOT NULL, page_sha256 TEXT NOT NULL,"
+                             "status TEXT NOT NULL, rotation INTEGER NOT NULL,"
+                             "label TEXT, PRIMARY KEY(source_id,page_number))")
+                for page in structured.pages:
+                    conn.execute("INSERT INTO fulltext_pages VALUES (?,?,?,?,?,?,?)",
+                                 (source_id, page.number, page.text, page.sha256,
+                                  page.status, page.rotation, page.label))
 
         _, revision = self.store.mutate("library.import",
                                         {"source_id": source_id, "content_sha256": digest,
                                          "media_type": media_type}, insert,
                                         expected_revision=expected_revision)
         return {"source_id": source_id, "sha256": digest, "characters": len(body),
-                "extraction": extraction, "revision": revision}
+                "extraction": extraction, "pages": len(structured.pages) if structured else 1,
+                "revision": revision}
+
+    def source_pages(self, source_id: str) -> dict[str, Any]:
+        """Read and verify per-page extracted text, when structured extraction exists."""
+        source = self.store.conn.execute("SELECT digest FROM sources WHERE id=? AND deleted=0",
+                                         (source_id,)).fetchone()
+        require(source is not None, "Source is missing", "NOT_FOUND")
+        exists = self.store.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='fulltext_pages'").fetchone()
+        if not exists:
+            return {"source_id": source_id, "pages": [], "available": False}
+        rows = self.store.conn.execute("SELECT * FROM fulltext_pages WHERE source_id=? "
+                                       "ORDER BY page_number", (source_id,)).fetchall()
+        pages = [dict(row) for row in rows]
+        for page in pages:
+            require(sha256(page["text"].encode("utf-8")) == page["page_sha256"],
+                    "Stored document page checksum mismatch", "INTEGRITY_FAILURE")
+        return {"source_id": source_id, "source_sha256": source["digest"],
+                "pages": pages, "available": bool(pages)}
 
     def source_text(self, source_id: str) -> str:
         row = self.store.conn.execute("SELECT body,body_hash FROM document_text "
