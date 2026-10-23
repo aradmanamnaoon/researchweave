@@ -5,6 +5,7 @@ import pyarrow as pa
 import pyarrow.parquet as pq
 import pyreadstat
 import pytest
+from openpyxl import Workbook
 
 from researchweave.analysis.datasets import (
     MAX_ROWS,
@@ -80,3 +81,74 @@ def test_parquet_budget_checked_from_metadata_before_materialization(tmp_path: P
     pq.write_table(table, path, compression="zstd")
     with pytest.raises(AnalysisError, match="Parquet metadata exceeds"):
         import_table(path)
+
+
+def test_parquet_uses_batched_reader_and_preserves_nullable_values(tmp_path: Path):
+    path = tmp_path / "batched.parquet"
+    table = pa.table({"x": [1, None, 3], "label": ["a", "b", "c"]})
+    pq.write_table(table, path)
+    dataset = import_table(path)
+    assert dataset.operation["reader"] == "pyarrow.iter_batches"
+    assert dataset.operation["batch_size"] == 65_536
+    assert dataset.records[1]["x"] is None
+    assert dataset.variables[0].dtype == "number"
+
+
+def test_xlsx_sheet_range_and_formula_policy(tmp_path: Path):
+    path = tmp_path / "book.xlsx"
+    workbook = Workbook()
+    first = workbook.active
+    first.title = "Raw"
+    first.append(["id", "value", "formula"])
+    first.append(["a", 2, "=B2*2"])
+    first.append(["b", 3, "=B3*2"])
+    second = workbook.create_sheet("Other")
+    second.append(["id", "value"])
+    second.append(["z", 99])
+    workbook.save(path)
+    formulas = import_table(path, sheet="Raw", data_only=False, min_col=1, max_col=3)
+    assert formulas.records[0]["formula"] == "=B2*2"
+    assert formulas.operation["data_only"] is False
+    values_only = import_table(path, sheet=1, min_row=1, max_row=2, min_col=1, max_col=2)
+    assert values_only.columns == ("id", "value")
+    assert values_only.records == ({"id": "z", "value": 99},)
+    with pytest.raises(AnalysisError, match="sheet does not exist"):
+        import_table(path, sheet="Missing")
+
+
+def test_por_reader_supported_and_preserves_column_label(tmp_path: Path):
+    frame = pd.DataFrame({"score": [1.0, 2.0, 3.0]})
+    path = tmp_path / "fixture.por"
+    pyreadstat.write_por(frame, path, column_labels={"score": "Portable score"})
+    dataset = import_table(path)
+    assert dataset.records[0][dataset.columns[0]] == 1.0
+    assert dataset.operation["metadata_limitations"]
+
+
+def test_variable_dictionary_extended_metadata_survives_restart(tmp_path: Path):
+    source = tmp_path / "dictionary.csv"
+    source.write_text("group,score\nlow,1\nhigh,5\n", encoding="utf-8")
+    dataset = import_csv(source)
+    from researchweave.analysis.datasets import DatasetStore, set_variable
+
+    updated = set_variable(
+        dataset,
+        "score",
+        units="points",
+        scale="ordinal",
+        allowed_min=1,
+        allowed_max=5,
+        privacy_class="sensitive",
+        category_order=("1", "2", "3", "4", "5"),
+    )
+    store = DatasetStore(tmp_path / "store")
+    store.save(updated)
+    reopened = store.load(updated.dataset_id, updated.revision)
+    variable = next(value for value in reopened.variables if value.name == "score")
+    assert variable.units == "points"
+    assert variable.allowed_min == 1
+    assert variable.allowed_max == 5
+    assert variable.privacy_class == "sensitive"
+    assert variable.category_order == ("1", "2", "3", "4", "5")
+    with pytest.raises(AnalysisError, match="allowed range is inverted"):
+        set_variable(dataset, "score", allowed_min=5, allowed_max=1)

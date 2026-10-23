@@ -54,6 +54,10 @@ class Variable:
     scale: Literal["nominal", "ordinal", "interval", "ratio", "unknown"] = "unknown"
     missing_values: tuple[str, ...] = ()
     value_labels: dict[str, str] = field(default_factory=dict)
+    category_order: tuple[str, ...] = ()
+    allowed_min: float | None = None
+    allowed_max: float | None = None
+    privacy_class: Literal["public", "internal", "sensitive", "restricted"] = "public"
     private: bool = False
 
 

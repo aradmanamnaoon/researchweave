@@ -29,6 +29,10 @@ def test_missingness_system_user_codes_and_retained_original(tmp_path):
     assert summary["groups"]["A"]["x"]["user_missing"] == 1
     assert summary["groups"]["B"]["x"]["system_missing"] == 1
     assert summary["groups"]["A"]["x"]["n_valid"] == 1
+    assert summary["denominators"]["listwise_all_columns"] == 2
+    assert summary["denominators"]["pairwise_valid_n"]["x"]["g"] == 2
+    assert sum(pattern["n"] for pattern in summary["patterns"]) == len(labelled.records)
+    assert summary["policy_preview"]["complete_case"]["n_excluded"] == 2
     assert labelled.records == dataset.records
     assert labelled.revision != dataset.revision
     picked = case_selection(labelled, "g", ["A"])

@@ -14,6 +14,13 @@ def missingness(dataset: Dataset, *, by: str | None = None) -> dict[str, Any]:
     """Report system missing and declared user missing separately by variable and group."""
     require(by is None or by in dataset.columns, "Unknown missingness group")
     variable_index = {v.name: v for v in dataset.variables}
+
+    def is_missing(row: dict[str, Any], column: str) -> bool:
+        value = row[column]
+        return value is None or (
+            value is not None and str(value) in set(variable_index[column].missing_values)
+        )
+
     groups = {str(row[by]) for row in dataset.records} if by else {"all"}
     require(len(groups) <= 1000, "Too many missingness groups", "RESOURCE_LIMIT")
     data: dict[str, Any] = {}
@@ -34,11 +41,47 @@ def missingness(dataset: Dataset, *, by: str | None = None) -> dict[str, Any]:
                 "missing_percent": (system + custom) / len(selected) * 100 if selected else 0.0,
             }
         data[group] = variables
+    patterns: Counter[str] = Counter()
+    for row in dataset.records:
+        missing_columns = [column for column in dataset.columns if is_missing(row, column)]
+        key = "<complete>" if not missing_columns else "|".join(missing_columns)
+        patterns[key] += 1
+    pairwise_n = {
+        first: {
+            second: sum(
+                not is_missing(row, first) and not is_missing(row, second)
+                for row in dataset.records
+            )
+            for second in dataset.columns
+        }
+        for first in dataset.columns
+    }
+    listwise_n = sum(
+        not any(is_missing(row, column) for column in dataset.columns) for row in dataset.records
+    )
     return {
         "dataset_revision": dataset.revision,
         "group_column": by,
         "n_total": len(dataset.records),
         "groups": data,
+        "patterns": [
+            {"missing_columns": [] if key == "<complete>" else key.split("|"), "n": count}
+            for key, count in sorted(patterns.items(), key=lambda item: (-item[1], item[0]))
+        ],
+        "denominators": {
+            "listwise_all_columns": listwise_n,
+            "pairwise_valid_n": pairwise_n,
+        },
+        "policy_preview": {
+            "complete_case": {
+                "n_used": listwise_n,
+                "n_excluded": len(dataset.records) - listwise_n,
+            },
+            "available_case": {
+                "warning": "Pairwise denominators can differ by variable pair",
+                "pairwise_valid_n": pairwise_n,
+            },
+        },
     }
 
 

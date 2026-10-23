@@ -230,7 +230,16 @@ def export_csv(
 
 
 def import_table(
-    path: Path, *, format: str | None = None, sheet: int | str = 0, dataset_id: str | None = None
+    path: Path,
+    *,
+    format: str | None = None,
+    sheet: int | str = 0,
+    dataset_id: str | None = None,
+    data_only: bool = True,
+    min_row: int = 1,
+    max_row: int | None = None,
+    min_col: int = 1,
+    max_col: int | None = None,
 ) -> Dataset:
     """Import nonexecuting structured formats through opt-in vetted readers."""
     import pandas as pd
@@ -238,6 +247,9 @@ def import_table(
     require(path.is_file(), "Import source does not exist", "NOT_FOUND")
     require(path.stat().st_size <= MAX_BYTES, "Source exceeds byte budget", "RESOURCE_LIMIT")
     kind = (format or path.suffix.lower().lstrip(".")).lower()
+    require(min_row >= 1 and min_col >= 1, "Workbook ranges use positive one-based indices")
+    require(max_row is None or max_row >= min_row, "Invalid workbook row range")
+    require(max_col is None or max_col >= min_col, "Invalid workbook column range")
     if kind in ("csv", "tsv"):
         return import_csv(path, delimiter="\t" if kind == "tsv" else None, dataset_id=dataset_id)
     if kind == "parquet":
@@ -255,13 +267,73 @@ def import_table(
                 "Parquet metadata exceeds row/column budget",
                 "RESOURCE_LIMIT",
             )
-            frame = parquet.read().to_pandas()
+            names = tuple(str(name) for name in parquet.schema_arrow.names)
+            require(
+                len(names) == len(set(names)) and all(names),
+                "Duplicate/empty columns prohibited",
+            )
+            rows: list[dict[str, Any]] = []
+            for batch in parquet.iter_batches(batch_size=65_536):
+                batch_rows = batch.to_pylist()
+                require(
+                    len(rows) + len(batch_rows) <= MAX_ROWS,
+                    "Parquet row budget exceeded during scan",
+                    "RESOURCE_LIMIT",
+                )
+                rows.extend({str(key): value for key, value in row.items()} for row in batch_rows)
+            numeric_prefixes = (
+                "int",
+                "uint",
+                "float",
+                "double",
+                "halffloat",
+                "decimal",
+            )
+            labels = tuple(
+                Variable(
+                    name=name,
+                    dtype=(
+                        "number"
+                        if str(parquet.schema_arrow.field(index).type).startswith(numeric_prefixes)
+                        else "text"
+                    ),
+                )
+                for index, name in enumerate(names)
+            )
+            source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
+            identifier = dataset_id or digest({"source": source_hash})[:24]
+            validate_dataset_identity(identifier)
+            operation = {
+                "type": "import_table",
+                "format": kind,
+                "reader": "pyarrow.iter_batches",
+                "batch_size": 65_536,
+            }
+            revision = digest(
+                {
+                    "id": identifier,
+                    "source": source_hash,
+                    "rows": rows,
+                    "variables": [v.__dict__ for v in labels],
+                    "operation": operation,
+                }
+            )
+            return Dataset(
+                identifier,
+                revision,
+                None,
+                source_hash,
+                utc_now(),
+                names,
+                labels,
+                tuple(rows),
+                operation,
+            )
         except AnalysisError:
             raise
         except (ValueError, TypeError, OSError) as exc:
             raise AnalysisError("INVALID_INPUT", "Could not parse parquet source") from exc
-        metadata_variables = None
-    elif kind in {"sav", "zsav", "dta", "xpt"}:
+    elif kind in {"sav", "zsav", "por", "dta", "xpt"}:
         try:
             import pyreadstat
         except ImportError as exc:
@@ -271,6 +343,7 @@ def import_table(
         readstat = {
             "sav": pyreadstat.read_sav,
             "zsav": pyreadstat.read_sav,
+            "por": pyreadstat.read_por,
             "dta": pyreadstat.read_dta,
             "xpt": pyreadstat.read_xport,
         }[kind]
@@ -302,27 +375,83 @@ def import_table(
                         if not isinstance(entry, dict)
                     ]
                 ),
-                "scale": str(measure.get(name) or "unknown"),
+                "scale": (
+                    "ordinal"
+                    if str(measure.get(name) or "unknown").lower() == "ordinal"
+                    else "nominal"
+                    if str(measure.get(name) or "unknown").lower() == "nominal"
+                    else "interval"
+                    if str(measure.get(name) or "unknown").lower() == "scale"
+                    else "unknown"
+                ),
             }
             for name in frame.columns
         }
     else:
         metadata_variables = None
         readers = {
-            "xlsx": lambda: pd.read_excel(path, sheet_name=sheet),
             "ods": lambda: pd.read_excel(path, sheet_name=sheet, engine="odf"),
             "json": lambda: pd.read_json(path),
             "jsonl": lambda: pd.read_json(path, lines=True),
         }
-        require(kind in readers, f"Unsupported import format: {kind}", "UNSUPPORTED_FORMAT")
-        try:
-            frame = readers[kind]()
-        except ImportError as exc:
-            raise AnalysisError(
-                "DEPENDENCY_MISSING", f"Reader for {kind} is not installed"
-            ) from exc
-        except (ValueError, TypeError, OSError) as exc:
-            raise AnalysisError("INVALID_INPUT", f"Could not parse {kind} source") from exc
+        if kind == "xlsx":
+            try:
+                from openpyxl import load_workbook
+            except ImportError as exc:
+                raise AnalysisError(
+                    "DEPENDENCY_MISSING", "Reader for xlsx is not installed"
+                ) from exc
+            try:
+                workbook = load_workbook(path, read_only=True, data_only=data_only)
+                if isinstance(sheet, int):
+                    require(
+                        0 <= sheet < len(workbook.sheetnames),
+                        "Workbook sheet index out of range",
+                    )
+                    worksheet = workbook[workbook.sheetnames[sheet]]
+                else:
+                    require(
+                        sheet in workbook.sheetnames, "Workbook sheet does not exist", "NOT_FOUND"
+                    )
+                    worksheet = workbook[str(sheet)]
+                selected_max_row = min(max_row or worksheet.max_row, worksheet.max_row)
+                selected_max_col = min(max_col or worksheet.max_column, worksheet.max_column)
+                require(
+                    selected_max_row - min_row + 1 <= MAX_ROWS + 1
+                    and selected_max_col - min_col + 1 <= MAX_COLUMNS,
+                    "Workbook range exceeds row/column budget",
+                    "RESOURCE_LIMIT",
+                )
+                values = list(
+                    worksheet.iter_rows(
+                        min_row=min_row,
+                        max_row=selected_max_row,
+                        min_col=min_col,
+                        max_col=selected_max_col,
+                        values_only=True,
+                    )
+                )
+                require(bool(values), "Workbook range is empty")
+                header = ["" if value is None else str(value) for value in values[0]]
+                require(
+                    all(header) and len(header) == len(set(header)),
+                    "Workbook header has duplicates/empties",
+                )
+                frame = pd.DataFrame(values[1:], columns=header)
+            except AnalysisError:
+                raise
+            except (ValueError, TypeError, OSError, KeyError) as exc:
+                raise AnalysisError("INVALID_INPUT", "Could not parse xlsx source") from exc
+        else:
+            require(kind in readers, f"Unsupported import format: {kind}", "UNSUPPORTED_FORMAT")
+            try:
+                frame = readers[kind]()
+            except ImportError as exc:
+                raise AnalysisError(
+                    "DEPENDENCY_MISSING", f"Reader for {kind} is not installed"
+                ) from exc
+            except (ValueError, TypeError, OSError) as exc:
+                raise AnalysisError("INVALID_INPUT", f"Could not parse {kind} source") from exc
     require(
         len(frame) <= MAX_ROWS and len(frame.columns) <= MAX_COLUMNS,
         "Parsed table exceeds row/column budget",
@@ -348,7 +477,22 @@ def import_table(
     source_hash = hashlib.sha256(path.read_bytes()).hexdigest()
     identifier = dataset_id or digest({"source": source_hash})[:24]
     validate_dataset_identity(identifier)
-    operation = {"type": "import_table", "format": kind, "sheet": sheet}
+    operation = {
+        "type": "import_table",
+        "format": kind,
+        "sheet": sheet,
+        "data_only": data_only if kind == "xlsx" else None,
+        "range": (
+            {"min_row": min_row, "max_row": max_row, "min_col": min_col, "max_col": max_col}
+            if kind == "xlsx"
+            else None
+        ),
+        "metadata_limitations": (
+            ["POR metadata exposed by pyreadstat may omit column labels/value labels"]
+            if kind == "por"
+            else []
+        ),
+    }
     revision = digest(
         {
             "id": identifier,
@@ -438,8 +582,44 @@ def revise_schema(
 
 def set_variable(dataset: Dataset, name: str, **updates: Any) -> Dataset:
     require(name in dataset.columns, "Unknown variable", "NOT_FOUND")
-    allowed = {"label", "units", "scale", "value_labels", "missing_values", "private", "dtype"}
+    allowed = {
+        "label",
+        "units",
+        "scale",
+        "value_labels",
+        "missing_values",
+        "category_order",
+        "allowed_min",
+        "allowed_max",
+        "privacy_class",
+        "private",
+        "dtype",
+    }
     require(set(updates) <= allowed, "Unsupported metadata property")
+    if "scale" in updates:
+        require(
+            updates["scale"] in {"nominal", "ordinal", "interval", "ratio", "unknown"},
+            "Invalid measurement scale",
+        )
+    if "privacy_class" in updates:
+        require(
+            updates["privacy_class"] in {"public", "internal", "sensitive", "restricted"},
+            "Invalid privacy class",
+        )
+    if "category_order" in updates:
+        category_order = tuple(str(value) for value in updates["category_order"])
+        require(len(category_order) == len(set(category_order)), "Duplicate category order entry")
+        updates["category_order"] = category_order
+    if "missing_values" in updates:
+        updates["missing_values"] = tuple(str(value) for value in updates["missing_values"])
+    if "allowed_min" in updates or "allowed_max" in updates:
+        current = next(variable for variable in dataset.variables if variable.name == name)
+        lower = updates.get("allowed_min", current.allowed_min)
+        upper = updates.get("allowed_max", current.allowed_max)
+        require(
+            lower is None or upper is None or float(lower) <= float(upper),
+            "Variable allowed range is inverted",
+        )
     metadata = tuple(
         replace(variable, **updates) if variable.name == name else variable
         for variable in dataset.variables
@@ -593,7 +773,13 @@ class DatasetStore:
             obj["created_at"],
             tuple(obj["columns"]),
             tuple(
-                Variable(**{**v, "missing_values": tuple(v["missing_values"])})
+                Variable(
+                    **{
+                        **v,
+                        "missing_values": tuple(v.get("missing_values", ())),
+                        "category_order": tuple(v.get("category_order", ())),
+                    }
+                )
                 for v in obj["variables"]
             ),
             tuple(obj["records"]),
