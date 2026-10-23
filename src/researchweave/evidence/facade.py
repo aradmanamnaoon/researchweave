@@ -140,6 +140,9 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "discovery.search": ("read", ("project_id", "query"), "Offline library search"),
     "discovery.provider_search": ("external-network", ("project_id", "query", "provider"),
                                    "Opt-in public catalog metadata lookup"),
+    "discovery.provider_search_pages": (
+        "external-network", ("project_id", "query", "provider"),
+        "Opt-in bounded paged catalog metadata lookup"),
     "library.fts_search": ("read", ("project_id", "query"), "Rebuildable offline FTS5 search"),
     "library.index_rebuild": ("local-write", ("project_id",), "Rebuild local search cache"),
     "library.index_sync": (
@@ -625,11 +628,20 @@ class EvidenceFacade:
     def __init__(self, workspace_root: Path, *, allow_local_writes: bool = False,
                  allow_remote_queries: bool = False,
                  metadata_transport: HTTPTransport | None = None,
-                 zotero_transport: ZoteroLocalTransport | None = None) -> None:
+                 zotero_transport: ZoteroLocalTransport | None = None,
+                 openalex_key: str | None = None,
+                 contact_email: str | None = None,
+                 provider_min_interval_seconds: float = 1.0) -> None:
         self.workspace_root = workspace_root.resolve()
         self.allow_local_writes = allow_local_writes
         self.allow_remote_queries = allow_remote_queries and metadata_transport is not None
-        self.catalog = CatalogClient(metadata_transport, offline=not self.allow_remote_queries)
+        self.catalog = CatalogClient(
+            metadata_transport,
+            offline=not self.allow_remote_queries,
+            openalex_key=openalex_key,
+            contact_email=contact_email,
+            min_interval_seconds=provider_min_interval_seconds,
+        )
         self.zotero_bridge = (
             ZoteroLocalBridge(zotero_transport) if zotero_transport is not None else None
         )
@@ -947,6 +959,13 @@ class EvidenceFacade:
                 return self.catalog.search(_value(args, "provider", str),
                                            _value(args, "query", str),
                                            int(args.get("limit", 20)))
+            if operation == "discovery.provider_search_pages":
+                return self.catalog.search_pages(
+                    _value(args, "provider", str),
+                    _value(args, "query", str),
+                    total_limit=int(args.get("total_limit", 100)),
+                    page_size=int(args.get("page_size", 25)),
+                )
             if operation == "library.fts_search":
                 return LocalIndex(store).search(_value(args, "query", str),
                     limit=int(args.get("limit", 25)), kind=args.get("kind"),

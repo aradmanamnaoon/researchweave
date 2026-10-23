@@ -36,6 +36,8 @@ _INTEGERS = {
     "statement_start",
     "to_revision",
     "to_version",
+    "total_limit",
+    "page_size",
     "version",
 }
 _OPTIONAL: dict[str, str] = {
@@ -58,6 +60,7 @@ _OPTIONAL: dict[str, str] = {
     "version": "integer", "requirements": "object", "supplied_metadata": "object",
     "reference_ids": "array", "redact_fields": "array",
     "destination_review_id": "string",
+    "total_limit": "integer", "page_size": "integer",
 }
 _NUMERIC_MIN = {
     "start": 0,
@@ -72,6 +75,8 @@ _NUMERIC_MIN = {
     "statement_end": 1,
     "to_revision": 1,
     "to_version": 1,
+    "total_limit": 1,
+    "page_size": 1,
     "version": 1,
 }
 _ENUMS = {
@@ -138,6 +143,10 @@ def _schema_for(name: str, operation: str) -> dict[str, Any]:
             result["minimum"] = _NUMERIC_MIN[name]
         if name == "limit":
             result["maximum"] = 1000
+        if name == "total_limit":
+            result["maximum"] = 200
+        if name == "page_size":
+            result["maximum"] = 50
         return result
     if name in _OPTIONAL and _OPTIONAL[name] == "boolean":
         return {"type": "boolean"}

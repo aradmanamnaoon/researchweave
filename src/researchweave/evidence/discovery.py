@@ -260,12 +260,26 @@ class CatalogClient:
                  offline: bool = True, openalex_key: str | None = None,
                  contact_email: str | None = None,
                  clock: Callable[[], float] = time.monotonic,
+                 sleeper: Callable[[float], None] = time.sleep,
                  min_interval_seconds: float = 1.0) -> None:
         self.transport = transport
         self.offline = offline
+        require(
+            openalex_key is None or 0 < len(openalex_key) <= 2048,
+            "OpenAlex API key is invalid",
+        )
+        require(
+            contact_email is None or 0 < len(contact_email) <= 320,
+            "Provider contact email is invalid",
+        )
         self.openalex_key = openalex_key
         self.contact_email = contact_email
         self.clock = clock
+        self.sleeper = sleeper
+        require(
+            0 <= min_interval_seconds <= 60,
+            "Provider request interval must be between 0 and 60 seconds",
+        )
         self.min_interval_seconds = min_interval_seconds
         self.last_request: dict[str, float] = {}
         self.cooldown_until: dict[str, float] = {}
@@ -279,6 +293,20 @@ class CatalogClient:
         host, _ = HOSTS[provider]
         require(endpoint.startswith("/") and ".." not in endpoint,
                 "Catalog endpoint must be a safe fixed route", "PERMISSION_DENIED")
+        instant = self.clock()
+        if instant < self.cooldown_until.get(provider, float("-inf")):
+            raise EvidenceError(
+                "RATE_LIMITED",
+                "Provider requested cooldown",
+                "Retry after the provider's Retry-After interval.",
+            )
+        previous = self.last_request.get(provider)
+        if previous is not None and self.min_interval_seconds > 0:
+            remaining = self.min_interval_seconds - (instant - previous)
+            if remaining > 0:
+                self.sleeper(remaining)
+                instant = max(self.clock(), previous + self.min_interval_seconds)
+        self.last_request[provider] = instant
         uri = f"https://{host}{endpoint}?{urllib.parse.urlencode(params)}"
         require(len(uri) <= 5000, "Provider URL exceeds limit", "RESOURCE_LIMIT")
         response = self.transport.get(uri, headers=headers, timeout=10.0)
@@ -324,15 +352,6 @@ class CatalogClient:
             result = dict(self.cache[cache_key])
             result["cache"] = "memory"
             return result
-        instant = self.clock()
-        if instant < self.cooldown_until.get(provider, float("-inf")):
-            raise EvidenceError("RATE_LIMITED", "Provider requested cooldown",
-                                "Retry after the provider's Retry-After interval.")
-        previous = self.last_request.get(provider)
-        if previous is not None and instant - previous < self.min_interval_seconds:
-            raise EvidenceError("RATE_LIMITED", "Provider cooldown has not elapsed",
-                                "Wait for the provider's rate window before retrying.")
-        self.last_request[provider] = instant
         headers: dict[str, str] = {"Accept": "application/json", "Accept-Encoding": "identity",
                                    "User-Agent": "ResearchWeave/0.1 (opt-in metadata lookup)"}
         host, endpoint = HOSTS[provider]
@@ -391,7 +410,99 @@ class CatalogClient:
         normalized = normalize_doi(doi)
         require(normalized is not None, "Valid DOI syntax required for provider lookup")
         exact_doi = cast(str, normalized)
-        result = self.search(provider, exact_doi, limit=10, use_cache=True)
+        require(provider in HOSTS, "Unsupported catalog provider", "UNSUPPORTED_FORMAT")
+        headers: dict[str, str] = {
+            "Accept": "application/json",
+            "Accept-Encoding": "identity",
+            "User-Agent": "ResearchWeave/0.1 (opt-in DOI lookup)",
+        }
+        response_hashes: list[str] = []
+        host, _ = HOSTS[provider]
+        if provider == "crossref":
+            endpoint = "/works/" + urllib.parse.quote(exact_doi, safe="")
+            params = {"mailto": self.contact_email} if self.contact_email else {}
+            payload, digest = self._call(provider, endpoint, params, headers)
+            response_hashes.append(digest)
+            message = payload.get("message", {})
+            payload = {"message": {"items": [message] if isinstance(message, dict) else []}}
+        elif provider == "openalex":
+            if self.openalex_key:
+                headers["Authorization"] = f"Bearer {self.openalex_key}"
+            payload, digest = self._call(
+                provider,
+                "/works",
+                {"filter": f"doi:https://doi.org/{exact_doi}", "per_page": "10"},
+                headers,
+            )
+            response_hashes.append(digest)
+        elif provider == "europepmc":
+            payload, digest = self._call(
+                provider,
+                "/europepmc/webservices/rest/search",
+                {
+                    "query": f"DOI:{exact_doi}",
+                    "format": "json",
+                    "pageSize": "10",
+                    "resultType": "lite",
+                },
+                headers,
+            )
+            response_hashes.append(digest)
+        else:
+            payload, digest = self._call(
+                provider,
+                "/entrez/eutils/esearch.fcgi",
+                {
+                    "db": "pubmed",
+                    "term": f'"{exact_doi}"[aid]',
+                    "retmode": "json",
+                    "retmax": "10",
+                },
+                headers,
+            )
+            response_hashes.append(digest)
+            search_block = payload.get("esearchresult", {})
+            uids = search_block.get("idlist", []) if isinstance(search_block, dict) else []
+            require(
+                isinstance(uids, list)
+                and len(uids) <= 10
+                and all(isinstance(uid, str) and uid.isdigit() for uid in uids),
+                "Invalid PubMed identifier list",
+                "PROVIDER_UNAVAILABLE",
+            )
+            if uids:
+                payload, digest = self._call(
+                    provider,
+                    "/entrez/eutils/esummary.fcgi",
+                    {"db": "pubmed", "id": ",".join(uids), "retmode": "json"},
+                    headers,
+                )
+                response_hashes.append(digest)
+            else:
+                payload = {"result": {"uids": []}}
+        try:
+            records = PARSERS[provider](payload)
+        except (ValueError, TypeError, KeyError, IndexError) as exc:
+            raise EvidenceError(
+                "PROVIDER_UNAVAILABLE",
+                "Malformed metadata record",
+                "Retry or inspect an exported provider response.",
+            ) from exc
+        result = {
+            "provider": provider,
+            "records": [
+                {
+                    **record,
+                    "provider": provider,
+                    "metadata_status": "unverified",
+                    "full_text_access": "unknown",
+                }
+                for record in records
+            ],
+            "raw_response_sha256": response_hashes,
+            "network_hosts": [host],
+            "fetched_at_utc": now_utc(),
+        }
         exact = [record for record in result["records"]
                  if normalize_doi(record.get("doi") if
                  isinstance(record.get("doi"), str) else None) == exact_doi]
@@ -437,21 +548,6 @@ class CatalogClient:
                 "Remote catalog pagination needs approval",
                 "Use offline references or allow provider access through host.",
             )
-        instant = self.clock()
-        if instant < self.cooldown_until.get(provider, float("-inf")):
-            raise EvidenceError(
-                "RATE_LIMITED",
-                "Provider requested cooldown",
-                "Retry after the provider's Retry-After interval.",
-            )
-        previous = self.last_request.get(provider)
-        if previous is not None and instant - previous < self.min_interval_seconds:
-            raise EvidenceError(
-                "RATE_LIMITED",
-                "Provider cooldown has not elapsed",
-                "Wait for the provider's rate window before retrying.",
-            )
-        self.last_request[provider] = instant
         headers: dict[str, str] = {
             "Accept": "application/json",
             "Accept-Encoding": "identity",

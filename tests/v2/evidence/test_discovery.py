@@ -225,3 +225,116 @@ def test_batch_search_preserves_success_when_an_independent_query_fails() -> Non
     assert result["results"][0]["query"] == "first"
     assert result["failures"][0]["query"] == "second"
     assert result["failures"][0]["error"]["code"] == "PROVIDER_UNAVAILABLE"
+
+
+@pytest.mark.parametrize(
+    ("provider", "responses", "expected_query_fragment"),
+    [
+        (
+            "crossref",
+            [fixture({"message": {"DOI": "10.1000/exact", "title": ["Exact"]}})],
+            "/works/10.1000%2Fexact",
+        ),
+        (
+            "openalex",
+            [fixture({"results": [{
+                "id": "https://openalex.org/W1",
+                "doi": "https://doi.org/10.1000/exact",
+                "title": "Exact",
+            }]})],
+            "filter=doi%3Ahttps%3A%2F%2Fdoi.org%2F10.1000%2Fexact",
+        ),
+        (
+            "europepmc",
+            [fixture({"resultList": {"result": [{
+                "id": "1", "doi": "10.1000/exact", "title": "Exact",
+            }]}})],
+            "query=DOI%3A10.1000%2Fexact",
+        ),
+    ],
+)
+def test_exact_doi_lookup_uses_provider_specific_identity_query(
+    provider: str,
+    responses: list[HTTPResponse],
+    expected_query_fragment: str,
+) -> None:
+    transport = FixtureTransport(*responses)
+    result = CatalogClient(transport, offline=False, min_interval_seconds=0).lookup_doi(
+        provider, "https://doi.org/10.1000/EXACT"
+    )
+    assert result["catalog_presence"] == "reported"
+    assert result["candidate_count"] == 1
+    assert result["records"][0]["doi"] == "10.1000/exact"
+    assert expected_query_fragment in transport.calls[0][0]
+
+
+def test_pubmed_exact_doi_lookup_throttles_each_http_request() -> None:
+    now = [100.0]
+    sleeps: list[float] = []
+
+    def sleep(seconds: float) -> None:
+        sleeps.append(seconds)
+        now[0] += seconds
+
+    transport = FixtureTransport(
+        fixture({"esearchresult": {"idlist": ["123"]}}),
+        fixture({"result": {"uids": ["123"], "123": {
+            "title": "Exact", "articleids": [
+                {"idtype": "doi", "value": "10.1000/exact"}
+            ],
+        }}}),
+    )
+    client = CatalogClient(
+        transport,
+        offline=False,
+        clock=lambda: now[0],
+        sleeper=sleep,
+        min_interval_seconds=0.5,
+    )
+    result = client.lookup_doi("pubmed", "10.1000/exact")
+    assert result["catalog_presence"] == "reported"
+    assert sleeps == [0.5]
+    assert 'term=%2210.1000%2Fexact%22%5Baid%5D' in transport.calls[0][0]
+
+
+def test_provider_credentials_and_paged_search_are_available_through_public_facade(
+    tmp_path: Path,
+) -> None:
+    transport = FixtureTransport(fixture({
+        "results": [{"id": "W1", "title": "One", "doi": "10.1000/one"}],
+        "meta": {"next_cursor": None},
+    }))
+    facade = build_evidence_facade(
+        tmp_path,
+        allow_local_writes=True,
+        allow_remote_queries=True,
+        metadata_transport=transport,
+        openalex_key="fixture-key",
+        contact_email="researcher@example.org",
+        provider_min_interval_seconds=0,
+    )
+    project_id = facade.execute(
+        "project.create",
+        {"title": "Paged", "question": "What exists?", "design": "exploratory"},
+        {},
+    )["data"]["project_id"]
+    result = facade.execute(
+        "discovery.provider_search_pages",
+        {
+            "project_id": project_id,
+            "provider": "openalex",
+            "query": "cognition",
+            "total_limit": 10,
+            "page_size": 5,
+        },
+        {},
+    )
+    assert result["status"] == "ok", result
+    assert result["data"]["count"] == 1
+    assert transport.calls[0][1]["Authorization"] == "Bearer fixture-key"
+    manifest = {
+        item["operation"]: item for item in facade.capability_manifest()
+    }["discovery.provider_search_pages"]
+    properties = manifest["arguments_schema"]["properties"]
+    assert properties["total_limit"]["maximum"] == 200
+    assert properties["page_size"]["maximum"] == 50

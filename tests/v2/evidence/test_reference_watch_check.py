@@ -10,13 +10,14 @@ from researchweave.evidence.discovery import HTTPResponse
 class Transport:
     def get(self, url, *, headers, timeout):
         assert "crossref.org" in url
-        return HTTPResponse(200, json.dumps({"message": {"items": [{
+        assert "/works/10.1000%2Fwatch" in url
+        return HTTPResponse(200, json.dumps({"message": {
             "DOI": "10.1000/watch",
             "title": ["Updated title from provider"],
             "author": [{"given": "Ada", "family": "Doe"}],
             "published": {"date-parts": [[2025]]},
             "relation": {"is-corrected-by": [{"id": "10.1000/correction"}]},
-        }]}}).encode())
+        }}).encode())
 
 
 def test_opted_in_watch_check_records_provider_observation_without_metadata_overwrite(tmp_path):

@@ -52,12 +52,13 @@ def test_facade_offline_refusal_local_comparison_and_network_provenance(tmp_path
     class Transport:
         def get(self, url, *, headers, timeout):
             assert "crossref.org" in url
-            return HTTPResponse(200, json.dumps({"message": {"items": [{
+            assert "/works/10.1000%2Fabc" in url
+            return HTTPResponse(200, json.dumps({"message": {
                 "DOI": "10.1000/abc", "title": ["Study of memory"],
                 "author": [{"given": "Ada", "family": "Doe"}],
                 "published": {"date-parts": [[2024]]},
                 "relation": {"is-corrected-by": [{"id": "10.1000/correction"}]},
-            }]}}).encode())
+            }}).encode())
 
     workspace = tmp_path / "projects"
     facade = build_evidence_facade(workspace, allow_local_writes=True)
@@ -97,11 +98,11 @@ def test_facade_offline_refusal_local_comparison_and_network_provenance(tmp_path
 def test_provider_lookup_filters_nearby_but_wrong_dois():
     class Transport:
         def get(self, url, *, headers, timeout):
-            return HTTPResponse(200, json.dumps({"message": {"items": [
-                {"DOI": "10.1000/other", "title": ["Nearby record"]},
-                {"DOI": "10.1000/abc", "title": ["Requested record"],
-                 "relation": {"is-retracted-by": [{"id": "10.1000/retraction"}]}},
-            ]}}).encode())
+            assert "/works/10.1000%2Fabc" in url
+            return HTTPResponse(200, json.dumps({"message": {
+                "DOI": "10.1000/abc", "title": ["Requested record"],
+                "relation": {"is-retracted-by": [{"id": "10.1000/retraction"}]},
+            }}).encode())
 
     from researchweave.evidence.discovery import CatalogClient
 
