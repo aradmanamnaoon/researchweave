@@ -8,6 +8,14 @@ from typing import Any
 
 from .datasets import DatasetStore, import_csv, import_table, page, set_variable
 from .errors import AnalysisError, require
+from .generalized import logistic_regression, poisson_regression
+from .inference import (
+    bootstrap_mean,
+    contingency,
+    exact_permutation_mean_difference,
+    independent_rank_test,
+    one_way_anova,
+)
 from .modeling import adjust_pvalues, linear_regression, pooled_effects
 from .models import Dataset, digest
 from .plots import render_plot
@@ -32,8 +40,15 @@ class AnalysisFacade:
             "statistics.correlate": "read",
             "statistics.psychometric": "read",
             "statistics.model": "read",
+            "statistics.logistic": "read",
+            "statistics.poisson": "read",
             "statistics.meta": "read",
             "statistics.adjust": "read",
+            "statistics.contingency": "read",
+            "statistics.rank": "read",
+            "statistics.anova": "read",
+            "statistics.bootstrap": "read",
+            "statistics.permutation": "read",
             "plot.render": "local-write",
             "runtime.python": "code-execution",
             "runtime.r": "code-execution",
@@ -138,6 +153,22 @@ class AnalysisFacade:
                     list(arguments["pvalues"]), method=str(arguments.get("method", "holm"))
                 )
             }
+        elif operation == "statistics.bootstrap":
+            from dataclasses import asdict
+
+            data = asdict(
+                bootstrap_mean(
+                    list(arguments["values"]),
+                    seed=int(arguments["seed"]),
+                    iterations=int(arguments.get("iterations", 2000)),
+                )
+            )
+        elif operation == "statistics.permutation":
+            data = exact_permutation_mean_difference(
+                list(arguments["first"]),
+                list(arguments["second"]),
+                alternative=str(arguments.get("alternative", "two-sided")),
+            )
         elif operation in ("runtime.python", "runtime.r"):
             data = run_script(
                 str(arguments["source"]),
@@ -215,6 +246,35 @@ class AnalysisFacade:
                     str(arguments["outcome"]),
                     list(arguments["predictors"]),
                     robust=str(arguments.get("covariance", "nonrobust")),
+                ).as_json()
+            elif operation == "statistics.logistic":
+                data = logistic_regression(
+                    obj,
+                    str(arguments["outcome"]),
+                    list(arguments["predictors"]),
+                    max_iterations=int(arguments.get("max_iterations", 200)),
+                ).as_json()
+            elif operation == "statistics.poisson":
+                data = poisson_regression(
+                    obj,
+                    str(arguments["outcome"]),
+                    list(arguments["predictors"]),
+                    offset=arguments.get("offset"),
+                ).as_json()
+            elif operation == "statistics.contingency":
+                data = contingency(obj, str(arguments["first"]), str(arguments["second"]))
+            elif operation == "statistics.rank":
+                levels = tuple(arguments["levels"])
+                require(len(levels) == 2, "Exactly two rank-test groups required")
+                data = independent_rank_test(
+                    obj, str(arguments["outcome"]), str(arguments["group"]), levels
+                ).as_json()
+            elif operation == "statistics.anova":
+                data = one_way_anova(
+                    obj,
+                    str(arguments["outcome"]),
+                    str(arguments["group"]),
+                    levels=list(arguments["levels"]),
                 ).as_json()
             elif operation == "plot.render":
                 output_root = context.get("trusted_export_root")

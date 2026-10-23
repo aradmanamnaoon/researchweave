@@ -15,6 +15,13 @@
     "statistics.model",
     "statistics.meta",
     "statistics.adjust",
+    "statistics.contingency",
+    "statistics.rank",
+    "statistics.anova",
+    "statistics.bootstrap",
+    "statistics.permutation",
+    "statistics.logistic",
+    "statistics.poisson",
     "plot.render",
     "runtime.python",
     "runtime.r"
