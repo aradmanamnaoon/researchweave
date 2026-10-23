@@ -1,34 +1,94 @@
-# Execution ledger
+# ResearchWeave V2 AI execution ledger
 
-`SOURCE_LAYOUT_VERIFIED`: package installed and imported from worktree using `uv sync --offline --extra dev`; tracked Git index check pending final local commit. Worker source: `D:\coding\codex\researchweave-v2-ai\src\researchweave\ai`. Intended final path: `D:\coding\codex\researchweave\src\researchweave\ai`. Production count: 19 Python files / 2,197 token-bearing SLOC (see `CODE_METRICS.json`).
+Authoritative source: prompts/03_AI_AGENTS_INTEGRATIONS_V2.md. Branch: rebuild/v2-ai.
+Production subtree: src/researchweave/ai/.
 
-| ID | Capability | Real files | Test evidence | Status |
-|---|---|---|---|---|
-| AUDIT-001 | Independent V2 checkout and source ownership | `INITIAL_AUDIT.md` | Git worktree/branch/status inspected | Complete |
-| AI-001 | Provider list without credential exposure | `providers.py`, `facade.py` | `test_network_offline_blocks_before_transport` | Implemented slice |
-| AI-002 | OpenAI-compatible completion through controlled transport | `providers.py`, `policy.py` | `test_provider_success_and_malformed_response`, offline test | Experimental; transport hardening pending |
-| AI-002-TRANSPORT | DNS-pinned direct HTTP(S), no ambient proxies, all DNS answers must satisfy public/loopback policy, no redirects, typed 401/429/5xx | `http_transport.py`, `test_http_transport.py` | `test_public_dns_pinning_preserves_tls_host_and_bypasses_proxy`, `test_remote_private_dns_injection_denied_before_any_network`, HTTP status/error tests | Deterministically verified; live TLS provider smoke test pending |
-| AI-015 | Persistent bounded passage search, hash verification | `retrieval.py` | `test_persistent_retrieval_and_revocation` | Implemented local lexical slice |
-| AI-019 | Signed host approvals | `policy.py`, `facade.py` | `test_agent_requires_host_signed_exact_approval`, `test_facade_roundtrip_and_no_ai_fallback` | Partial: injection of persistent host secret pending |
-| AI-020/021 | Ordered bounded agent plans, durable receipts | `agents.py` | `test_agent_requires_host_signed_exact_approval` | Partial: non-atomic effect replay risk |
-| AI-030 | Provider egress disclosure | `facade.py` | Facade test | Partial |
-| AI-031/049 | Offline deny and forged authority tests | `policy.py`, `tests/v2/ai` | `test_unsafe_remote_endpoints`, approval test | Partial |
-| AI-035/036/050 | Local immutable snapshot push, optimistic revision conflict, hash-verified restore | `sync.py`, `test_sync.py` | `test_snapshot_conflict_and_restore`, `test_corrupted_blob_fails_closed` | Partial: no remote CAS/encryption |
-| AI-003/004 | Explicit loopback model discovery | `local_runtime.py`, `test_local_runtime.py` | `test_local_ollama_discovery_in_offline_mode`, catalog rejection tests | Partial: no model text generation |
-| AI-005/012 | Native Ollama loopback chat and embeddings | `ollama.py`, `test_ollama.py` | `test_native_offline_chat_with_version_and_usage`, `test_local_embeddings_normalized_and_fingerprinted` | Fake transport passed, live runtime unverified |
-| AI-005-FACADE | Host-authorized local chat and embeddings through typed facade operations | `facade.py`, `test_ollama_facade.py` | `test_facade_local_inference_requires_exact_host_approval`, disabled local runtime test | Working facade integration with deterministic loopback fakes; live runtime pending |
-| AI-016 | Verify source-bound quotes and offer no-model evidence-only response | `grounding.py`, `test_grounding.py` | `test_offline_evidence_anchors_and_stale_citation_rejection` | Implemented lexical evidence-only slice |
-| AI-013/014 | Fingerprinted local vector index with exact cosine search, evidence checks and hybrid rank fusion | `embeddings.py`, `test_embeddings.py` | `test_versioned_vector_index_hybrid_ranks_and_source_delete`, `test_invalid_embedding_fails_closed` | Implemented local vector slice; external embedder pending |
-| AI-018/020/048 | Host-defined tool manifest validation, acyclic dependency plan compilation and human-edit revalidation | `planner.py`, `test_planner.py` | `test_graph_topological_order_and_approval_preview`, `test_human_revision_recompiles_and_invalidates_approval`, invalid-plan cases | Implemented compiler slice; durable DAG execution pending |
-| AI-038 | Host-owned connector registry and read-only Markdown vault | `integrations.py`, `test_integrations.py` | `test_vault_scopes_and_notes_are_untrusted`, invalid path and size tests | Implemented local connector slice; cloud connectors pending |
-| AI-029/047 | Durable token budgeting, request reservations and privacy-safe usage diagnostics | `budgets.py`, `test_budgets.py` | `test_token_budget_reserves_and_reopens`, `test_failed_request_release_and_idempotency` | Implemented local budget store; provider wiring pending |
-| AI-010 | OS-keyring-backed opaque credential references | `secrets.py`, `test_secrets.py` | `test_opaque_keyring_reference_roundtrip_and_delete` using in-memory backend | Adapter complete; UI and protected host permissions pending |
-| AI-037 | Authenticated project-bound encrypted backup envelopes and snapshot adapter | `crypto.py`, `test_crypto.py` | Real AES-GCM/Scrypt `test_crypto_roundtrip_randomized_and_project_bound`, `test_encrypted_snapshot_restore_with_wrong_password` | Encrypted local snapshot slice; remote adapters pending |
-| AI-015/049 | Offline PDF text extraction, document hashes, stable page references and hostile-prompt policy fixture | `pdf_ingest.py`, `test_pdf_ingest.py`, `fixtures/synthetic_malicious.pdf` | `test_offline_pdf_page_anchors_and_source_refresh`, `test_malicious_pdf_text_is_stored_as_untrusted_source` | Working text PDF slice; no OCR, malformed or huge PDFs bounded |
-| AI-015-ATOMIC | All-or-nothing multi-source/page replacement | `retrieval.py` `ingest_many`, `pdf_ingest.py` | `test_pdf_import_rollback_preserves_all_prior_page_evidence` with injected SQLite trigger failure and reopen verification | Complete for local SQLite evidence batch |
-| AI-041 | Host-keyed append-only authenticated audit chain; arguments and results hashed | `audit.py`, `test_audit.py` | `test_redacted_audit_survives_restart_and_detects_tampering` | Working local audit slice; host app wiring pending |
-| JOURNEY-1..5 | Complete synthetic acceptance runner with offline, manual, hostile document, approved fake cloud, and encrypted conflict recovery | `run_journeys.py`, `test_journeys.py`, `traces/*.json` | `test_five_reproducible_journeys_and_redacted_persistent_traces` | All five headless fake/local paths passed; no live UI/provider integration |
-| QA-001 | Hostile and failure-state regression | `test_edge_cases.py` | Six explicit success+denial tests | 75 total tests passing; 82% aggregate coverage |
+Status vocabulary:
 
-All other AI-001–AI-050 tasks remain pending or partial; no missing task is implicitly marked implemented. Synthetic test data are original and distributable; no external fixture license applies. GUI wiring is pending for all operations. Full validation and precise remaining work are in `TEST_RESULTS.md` and `NEXT_ACTION.md`.
+- **Implemented**: the required domain behavior exists and has deterministic success,
+  denial/failure and persistence/recovery tests where applicable.
+- **Implemented; external verification pending**: the adapter/contract and deterministic
+  failure tests exist, but no real third-party account/service was contacted.
+- **Partial**: a useful implementation exists but one or more source-assignment details
+  still require integration work.
 
+The feature IDs below match the original assignment exactly. This corrects the previous
+ledger's mis-numbering of AI-005, AI-012, AI-015 and AI-041.
+
+| ID | Original capability | Primary evidence | Status |
+|---|---|---|---|
+| AI-001 | Provider registry | providers.py, provider_services.py, facade.py; provider/foundation tests | Implemented |
+| AI-002 | OpenAI-compatible HTTP adapter | provider_adapters.py, http_transport.py; provider/transport tests | Implemented; external verification pending |
+| AI-003 | Ollama discovery | local_runtime.py, ollama.py; local runtime tests | Implemented; live runtime verification pending |
+| AI-004 | LM Studio adapter | provider_adapters.py; provider edge tests | Implemented; live runtime verification pending |
+| AI-005 | Anthropic adapter | provider_adapters.py; provider stack tests | Partial; deterministic message/usage mapping exists, live API and Anthropic-native streaming remain unverified |
+| AI-006 | Gemini adapter | provider_adapters.py; provider stack tests | Partial; deterministic generation mapping exists, live capability/quota probing remains unverified |
+| AI-007 | DeepSeek adapter | provider_adapters.py; provider stack tests | Implemented; external verification pending |
+| AI-008 | Model chooser | provider_services.py; provider tests | Implemented for privacy/offline/local preference; richer task-quality scoring remains future work |
+| AI-009 | Provider health checks | provider_services.py; schema/stream security edge tests | Implemented |
+| AI-010 | Key management | secrets.py; secret-store tests | Implemented adapter; production host/keyring lifecycle wiring pending |
+| AI-011 | Streaming chunk assembler | streaming.py, provider_adapters.py; stream edge tests | Implemented for OpenAI-compatible SSE with bounded partial recovery |
+| AI-012 | Structured output validator | structured_output.py; structured-output edge tests | Implemented safe JSON-Schema subset |
+| AI-013 | Embeddings abstraction | embeddings.py, ollama.py; embedding tests | Implemented local abstraction |
+| AI-014 | Hybrid retrieval | embeddings.py, retrieval.py; embedding tests | Implemented |
+| AI-015 | Chunking engine | retrieval.py, retrieval_security.py, pdf_ingest.py; retrieval/PDF tests | Implemented deterministic anchored chunking and atomic replacement |
+| AI-016 | Citation enforcement | grounding.py, retrieval_security.py; grounding/retrieval-security tests | Implemented |
+| AI-017 | Prompt injection firewall | retrieval_security.py; retrieval-security/journey tests | Implemented deterministic policy layer; independent red-team review pending |
+| AI-018 | Tool manifest registry | planner.py, agent_runtime_v2.py; planner/runtime tests | Implemented |
+| AI-019 | Approval token scope | policy.py, agent_runtime_v2.py; approval/runtime tests | Implemented exact project/plan revision/step/argument binding |
+| AI-020 | Plan graph compiler | planner.py, agent_runtime_v2.py; planner/runtime tests | Implemented |
+| AI-021 | Agent executor | agent_runtime_v2.py; runtime/facade tests | Implemented durable execution with replay-safe results and uncertain-effect recovery |
+| AI-022 | Research librarian persona | research_agents.py; research-agent/facade tests | Implemented local evidence librarian; external discovery is connector-driven |
+| AI-023 | Methodologist persona | research_agents.py; research-agent tests | Implemented deterministic critique checks |
+| AI-024 | Statistics copilot | research_agents.py; research-agent tests | Partial; capability planning/failure interpretation exists, statistical engine execution remains separate |
+| AI-025 | Qualitative copilot | research_agents.py; research-agent tests | Implemented draft source-span coding with explicit acceptance |
+| AI-026 | Manuscript copilot | research_agents.py; research-agent tests | Implemented evidence-bound section preparation |
+| AI-027 | Scientific reviewer persona | research_agents.py; research-agent tests | Implemented bounded automated finding matrix; never claims peer-review acceptance |
+| AI-028 | RAG answer diff | retrieval_security.py; retrieval-security tests | Implemented |
+| AI-029 | Token/budget tracker | budgets.py, usage_privacy.py; budget/privacy tests | Implemented token reservation/finalization; unknown monetary pricing remains unknown |
+| AI-030 | Privacy egress engine | usage_privacy.py, facade.py; privacy/journey tests | Implemented |
+| AI-031 | Endpoint guard | policy.py, http_transport.py; transport/edge tests | Implemented deterministic DNS pinning, SSRF, redirect and proxy denial; live network audit pending |
+| AI-032 | Zotero connector | external_connectors.py; connector tests | Implemented; external verification pending |
+| AI-033 | WebDAV connector | external_connectors.py; connector tests | Partial; ETag/digest conflict contract exists, real auth/server interoperability pending |
+| AI-034 | S3-compatible adapter | external_connectors.py; connector tests | Partial; explicit host-injected object contract exists, no paid resource or live S3 service used |
+| AI-035 | Folder sync adapter | sync.py, crypto.py; sync/crypto tests | Implemented local folder adapter |
+| AI-036 | Sync revision protocol | remote_sync.py, sync.py; connector/journey tests | Implemented CAS protocol/reference backend; real distributed backend verification pending |
+| AI-037 | Encryption for sync | crypto.py, remote_sync.py; crypto/connector tests | Implemented AES-256-GCM plus scrypt authenticated snapshots |
+| AI-038 | Connector registry | integrations.py, external_connectors.py, facade.py; connector/facade tests | Implemented |
+| AI-039 | MCP bridge | external_connectors.py; connector tests | Implemented permission/schema boundary; live MCP interoperability pending |
+| AI-040 | Offline simulation runner | orchestration.py; orchestration tests | Implemented |
+| AI-041 | Agent run ledger | agent_runtime_v2.py, audit.py; runtime/audit tests | Implemented durable event ledger plus authenticated host audit journal |
+| AI-042 | Long task orchestration | orchestration.py; orchestration tests | Implemented bounded retry, cancel, checkpoint, dead-letter and restart handling |
+| AI-043 | Model context compaction | agent_runtime_v2.py; runtime tests | Implemented protected restriction/source-anchor preserving compaction |
+| AI-044 | Prompt template versioning | agent_runtime_v2.py, facade.py; runtime/facade tests | Implemented |
+| AI-045 | Privacy classification | retrieval_security.py, usage_privacy.py; privacy tests | Implemented conservative project classification floor |
+| AI-046 | Provider failover | provider_services.py; provider tests | Implemented bounded explicit failover; local-to-cloud fallback requires explicit opt-in |
+| AI-047 | Usage diagnostics | usage_privacy.py; privacy tests | Implemented payload/credential-free local diagnostics |
+| AI-048 | Human correction loop | planner.py, agent_runtime_v2.py; planner/runtime tests | Implemented; edit increments revision and invalidates stale approval |
+| AI-049 | Agent security regression | orchestration.py, retrieval_security.py; orchestration/journey tests | Implemented deterministic adversarial suite |
+| AI-050 | Sync restore workflow | remote_sync.py, sync.py; connector/sync/journey tests | Implemented safe-new-target restore with authenticated integrity verification |
+
+## Five original acceptance journeys
+
+All five execute headlessly with synthetic data and zero real external network requests:
+
+1. No-cloud assistant: persistent evidence, source citations, local-model-shaped deterministic
+   transport, malformed response recovery and restart.
+2. No-model mode: manual retrieval remains usable across restart.
+3. Adversarial injection: malicious PDF instructions are detected by the firewall and
+   blocked before external action.
+4. BYO cloud safe path: exact egress preview, host approval binding, one fake transport
+   call and redacted authenticated audit.
+5. Sync conflicting revisions: encrypted CAS divergence preserves both revisions and
+   supports safe restore.
+
+## Verification snapshot
+
+- 31 production Python files.
+- 6,163 meaningful production SLOC under measure_source.py.
+- 143 passing V2 AI tests.
+- 81% aggregate branch coverage.
+- Ruff lint clean and Ruff format clean.
+- strict mypy clean for all 31 production modules.
+- compile/import checks pass from this worktree.
+- no live hosted provider, Zotero, WebDAV, S3 or MCP service was contacted.

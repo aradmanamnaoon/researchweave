@@ -1,71 +1,112 @@
 # AI API catalog
 
-```python
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from researchweave.ai import build_ai_facade
+The supported application entry point remains researchweave.ai.build_ai_facade. The facade
+returns structured envelopes with request_id, status, data, artifacts, warnings, error,
+provenance and impact. capability_manifest() is also exported to
+workstreams/v2/ai/capabilities.v1.json.
 
-with TemporaryDirectory() as folder:
-    ai = build_ai_facade(Path(folder))
-    # The trusted host signs local writes via ApprovalIssuer.
-    # Read-only search works even without a model or an approval issuer.
-    from researchweave.ai.policy import ApprovalIssuer
-    from datetime import datetime, timedelta, UTC
-    issuer = ApprovalIssuer(b"test-host-key-placeholder-32-bytes!!")
-    ai.close()
-    ai = build_ai_facade(Path(folder), issuer=issuer)
-    args = {"source_id": "study", "content": "Synthetic observations support testing."}
-    approval = issuer.issue("p", "retrieval.ingest", args, datetime.now(UTC) + timedelta(minutes=1))
-    ai.execute_authorized("retrieval.ingest", args, {"project_id": "p"}, approval=approval)
-    evidence = ai.execute("retrieval.query", {"query": "synthetic testing"}, {})
-    assert evidence["data"]["hits"][0]["source_id"] == "study"
-    ai.close()
-```
+## Compatibility operations
 
-Public `AIFacade` methods: `capability_manifest`, `preview`, `execute`, `execute_authorized`, `health`, `close`. Operations currently implemented: `provider.list`, `provider.complete` (experimental remote), `retrieval.ingest`, `retrieval.query`, `retrieval.answer` (verified source quotations without model), `agent.plan`, `agent.preview`, `agent.execute` (read-only registered capability; effects need a host issuer), `agent.cancel`, `privacy.preview`. No GUI binding yet.
+| Operation | Effect | Offline | Purpose |
+|---|---|---|---|
+| provider.list | read | yes | List legacy ProviderRegistry entries without exposing credentials |
+| provider.complete | external-network | no | Legacy controlled OpenAI-compatible completion |
+| local.chat | local-write | yes | Host-authorized Ollama loopback chat |
+| local.embed | local-write | yes | Host-authorized Ollama loopback embeddings |
+| retrieval.ingest | local-write | yes | Persist/revise source evidence |
+| retrieval.query | read | yes | Search local evidence |
+| retrieval.answer | read | yes | Return evidence-only grounded response |
+| agent.plan / preview / execute / cancel | mixed | yes | Original ordered agent runtime |
+| privacy.preview | read | yes | Legacy provider destination/payload preview |
 
-Local runtime model discovery is available separately via `LocalRuntimeDiscovery("http://127.0.0.1:11434").discover(EgressPolicy())`. It probes only the explicit loopback endpoint; no model downloads or ambient port scans occur.
+## V2 facade operations
 
-Native local generation: `OllamaAdapter("http://127.0.0.1:11434").chat("model:tag", [OllamaMessage("user", "Summarize evidence")])`. Native embeddings: `OllamaEmbedder(adapter, "embedding-model", dimension=768, digest="model-digest").embed(["evidence"])`. Both require a separately running local server; tests use a deterministic fake transport.
+| Operation | Effect | Notes |
+|---|---|---|
+| provider.v2.list | read | Lists typed advanced provider adapters/capabilities |
+| provider.v2.health | read | Configuration-only by default; explicit perform_request enables probe |
+| retrieval.citations.verify | read | Revalidates exact source/chunk/quote digests |
+| agent.v2.plan | local-write | Persists validated DAG steps |
+| agent.v2.preview | read | Shows effect/dependency/approval/idempotency summary |
+| agent.v2.execute | conditional | Durable execution; step-level approval is verified by DurableAgentRuntime |
+| agent.v2.cancel | local-write | Cancels pending/failed work |
+| agent.v2.recover | read | Reports completed, retryable and uncertain side effects |
+| research.librarian.search | read | Returns only indexed/verified evidence |
+| research.methodology.critique | read | Deterministic study-design/claim checks |
+| research.qualitative.suggest | read | Draft source-span coding suggestions |
+| privacy.classify | read | Applies project classification as a conservative floor |
+| usage.summary | read | Aggregate payload-free provider usage diagnostics |
+| prompt.add | local-write | Adds versioned trusted prompt template |
+| prompt.render | read | Inserts project text only into user-data placeholder |
+| connector.list | read | Lists host-registered connector manifests |
+| sync.push | external-network | Available only when EncryptedRemoteSync is injected |
+| sync.pull | external-network | Available only when EncryptedRemoteSync is injected |
 
-By default, `ProviderRegistry` now uses `PinnedHTTPTransport`: it resolves the host once, validates every returned IP, connects directly to one validated IP, and preserves the original TLS hostname. A host may inject a fake `HTTPTransport` implementation for synthetic offline tests and development without network access. Live hosted-provider compatibility has not been verified.
+Operations with effects local-write or external-network require a host ApprovalIssuer through
+the public facade. agent.v2.execute performs its own exact step-level authorization because
+the required approval digest includes plan ID, plan revision, step ID, operation and arguments.
 
-Local embedding index usage:
+## Provider contracts
 
-```python
-from researchweave.ai.embeddings import EmbeddingIndex, HybridRetriever
+provider_adapters.py provides OpenAICompatibleAdapter, LMStudioAdapter, AnthropicAdapter,
+GeminiAdapter and DeepSeekAdapter. ProviderCatalog, ModelChooser, ProviderHealthService and
+ProviderFailover live in provider_services.py. Streaming uses a bounded incremental UTF-8
+SSE decoder and OpenAI-style assembler. structured_output.py implements an intentionally
+small strict JSON-Schema subset and rejects duplicate JSON properties, non-finite constants,
+unknown schema keywords and extra object properties when disallowed.
 
-# Reuse the EvidenceIndex already opened by the host at a trusted path.
-# The injected embedding model produces matching fixed-width vectors.
-vectors = EmbeddingIndex(Path(folder) / "vectors.sqlite", fingerprint="model:v1", dimension=2)
-hit = ai.retrieval.query("synthetic")[0]
-vectors.put(hit, [1.0, 0.0], ai.retrieval)
-results = HybridRetriever(ai.retrieval, vectors).search("synthetic", [1.0, 0.0])
-assert results and results[0].source_id == hit.source_id
-vectors.close()
-```
+PinnedHTTPTransport is the default direct HTTP(S) safety boundary for the legacy provider
+registry: public DNS validation, DNS pinning, TLS hostname preservation, no ambient proxy,
+no redirects and typed HTTP failures. Tests inject transports so no live network is needed.
 
-The return envelope contains `request_id`, `status`, `data`, `artifacts`, `warnings`, `error`, `provenance`, `impact`. Errors are structured; source text is never treated as policy authority. This is an initial slice, not a complete versioned schema contract.
+## Retrieval and research services
 
-Snapshot demonstration:
+EvidenceIndex persists source-bound chunks. AnchoredChunker adds stable offsets and digests.
+CitationEnforcer checks that quoted content still resolves to the recorded source/chunk digest.
+PromptInjectionFirewall detects instruction override, credential exfiltration, authority
+spoofing, role spoofing and selected local-resource probes before external actions.
 
-```python
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from researchweave.ai.sync import FolderSnapshotStore
+ResearchLibrarian, Methodologist, StatisticsCopilot, QualitativeCopilot, ManuscriptCopilot and
+ScientificReviewer expose bounded research assistance. Their outputs remain suggestions or
+structured findings; none can create approval authority or certify scientific validity.
 
-with TemporaryDirectory() as folder:
-    store = FolderSnapshotStore(Path(folder))
-    first = store.push(b"synthetic research backup", expected_revision=None)
-    assert store.pull(first.revision) == b"synthetic research backup"
-    store.restore_to_new_file(first.revision, Path(folder) / "restored.rwproj")
-```
+## Agent and orchestration contracts
 
-Structured graph planning is available headlessly with `PlanCompiler`, `ToolManifest`, and `PlannedStep` from `researchweave.ai.planner`. The host defines exact allowed operation names and argument keys. `compile(project_id, steps)` performs stable topological sorting, schema constraints and offline checks; `revise(compiled, {step_id: new_arguments})` recompiles the plan and reports approval invalidation. The durable executor currently accepts ordered steps; the integrator must connect graph dependencies and authority at the trusted composition root before exposing general multi-step execution.
+DurableAgentRuntime stores DAG plans, step states, intent digests, results and event receipts
+in SQLite. Completed steps replay their persisted result. An interrupted non-idempotent step
+is classified as RECOVERY_REQUIRED unless a trusted caller explicitly resolves it.
 
-The read-only Markdown connector is available through `ConnectorRegistry` and `MarkdownVault` in `researchweave.ai.integrations`. It is constructed with a trusted existing vault directory and requires `granted_scopes=frozenset({"notes.read"})` for `registry.invoke("local.markdown", "read", {"path": "paper.md"}, ...)`. It returns raw UTF-8 Markdown, a SHA-256 checksum, and `untrusted=True`. Imported instructions cannot grant tool authority.
+LongTaskOrchestrator supplies bounded retry policies, cancellation, checkpoints, restart and
+dead-letter behavior. OfflineSimulationRunner produces deterministic no-network/no-write tool
+traces. AgentSecurityRegressionHarness combines untrusted-content detection with EgressPolicy.
 
-The optional `BudgetStore` in `researchweave.ai.budgets` supports `configure(Budget(...))`, `reserve(project_id, token_limit)`, `close_reservation(reservation, actual_tokens=...)`, and `summary(project_id)`. Reservations survive process restarts; they are finalized exactly once, and an interrupted request stays reserved pending explicit reconciliation. Provider integration should reserve before the call and finalize from observed provider usage.
+## Connector contracts
 
-Optional encrypted backup API: `encrypt_backup(project_id, plaintext_bytes, password)` returns the AES-256-GCM envelope and digest metadata; `decrypt_backup(project_id, envelope_bytes, password)` verifies authentication and returns plaintext. `EncryptedSnapshotService(FolderSnapshotStore(owned_directory), project_id).push(content, password, expected_revision)` commits an encrypted immutable snapshot; `.pull(revision, password)` verifies both storage and encryption. Password recovery is impossible if lost. Credentials belong in `KeyringSecretStore`, accessed by opaque `SecretReference(provider, profile)` values; storing, retrieving and deleting are host-authorized actions.
+external_connectors.py contains:
 
+- ZoteroConnector for bounded library item reads and explicitly approved writes.
+- ScholarlyMetadataConnector for normalized Crossref DOI and OpenAlex work metadata.
+- WebDAVConnector with digest verification and ETag/If-Match conflict behavior.
+- S3CompatibleConnector over a host-injected object backend; it never creates cloud resources.
+- MCPBridge that filters host-allowlisted tools, validates arguments/scopes and returns results
+  as untrusted data without changing authority.
+
+All external connectors require user/host configuration and are still pending live service
+interoperability verification.
+
+## Encrypted sync
+
+EncryptedRemoteSync uses encrypt_backup/decrypt_backup for project-bound AES-256-GCM +
+scrypt envelopes. RevisionBackend separates immutable object storage from compare-and-swap
+HEAD updates. Divergent pushes preserve an encrypted conflict revision instead of overwriting
+either branch. restore_to_new_file verifies encrypted and plaintext hashes and refuses an
+existing destination.
+
+## Usage and privacy
+
+PrivacyEgressEngine reports destination host, byte count, SHA-256 digest, effective privacy
+class, whether data may leave the device, whether approval is required and redaction count.
+BudgetedCompletionService reserves a BudgetStore allocation before model execution and
+finalizes it from observed usage when available. UsageDiagnostics records provider/model,
+status, token totals, latency and error code only; it does not persist prompts, responses or
+credentials.

@@ -1,12 +1,22 @@
-# Next actions — AI subsystem
+# Next integration actions
 
-1. Complete live TLS validation, retry and cancellation semantics for the now DNS-pinned, proxy-independent provider transport; retain mandatory host approval and signed egress scopes.
-2. Wire the tested native Ollama chat and embedding adapter into the facade and verify with a real local model where available; no automatic model download.
-3. Add host-approved facade mutation APIs, durable atomic effect receipts and cancellation-safe retries.
-4. Build encrypted immutable snapshot storage and compare-and-swap sync with conflict branches.
-5. Build on the completed local Markdown vault connector with Zotero, DOI/OpenAlex and explicitly authorized remote integrations.
-6. Wire the durable `BudgetStore` into the production provider call boundary with usage reconciliation, and add privacy-safe diagnostics views.
-7. Complete encrypted remote sync with ETag/CAS, operation-scoped keyring approvals, and cross-process atomic HEAD updates; merge optional dependencies at final integration.
-8. Integrate PDF parsing and the authenticated audit journal with the typed desktop command layer and prove the five journeys through actual GUI behavior. Synthetic headless traces are retained in `JOURNEYS.md`.
-9. Expand regression matrix and measured SLOC; finish AI-001 through AI-050. Current milestone has 85 passing tests and 2,377 meaningful source lines toward 6,000; latest coverage measurement is in TEST_RESULTS.md.
+The V2 AI domain implementation is locally integration-ready. The remaining work is
+primarily external-system and application-shell verification rather than missing core
+domain code.
 
+1. Wire AIFacade capability_manifest into the desktop/UI command registry and render
+   effect, offline, configured and approval requirements before execution.
+2. Inject the production ApprovalIssuer key material from the trusted host and the OS
+   keyring implementation; never derive authorization from model/source text.
+3. Run opt-in live smoke tests with user-owned accounts for OpenAI-compatible, Anthropic,
+   Gemini and DeepSeek endpoints. Record date/model/API version and preserve redacted logs.
+4. Run opt-in interoperability tests against a real local Ollama and LM Studio runtime.
+5. Validate Zotero, WebDAV, S3-compatible and MCP adapters against user-owned test
+   services. Do not create paid cloud resources automatically.
+6. Bind a production remote RevisionBackend to WebDAV/S3 conditional writes and verify
+   multi-process/device CAS behavior, interrupted uploads and conflict recovery.
+7. Run UI accessibility/focus/approval-flow tests in the final application checkout.
+8. Re-run the documented quality gates after integration and merge only if the same
+   143+ tests, >=80% branch coverage, strict typing, lint and journeys remain green.
+
+No source deletion, push or merge is required from this worker branch.

@@ -1,16 +1,51 @@
 # AI subsystem architecture
 
-`AIFacade` presents namespaced operations, while `ProviderRegistry` controls model endpoints through `EgressPolicy`, `EvidenceIndex` persists source-bound text chunks in SQLite, and `AgentRuntime` persists ordered plans and receipts. `ApprovalIssuer` signs an exact project/operation/argument digest with an independent host-owned HMAC key; neither content nor model output creates this authorization.
+AIFacade is the typed application boundary. It owns local EvidenceIndex state, legacy
+compatibility operations and V2 services while accepting optional provider, connector and
+remote-sync dependencies from the trusted composition root.
 
-Local retrieval remains usable with zero model or internet connectivity. Provider HTTP requests are bounded and endpoint restricted. SQL databases stay within a host supplied existing project directory. Integrator must implement a trusted composition root and inject a persisted host approval issuer into agent runtime for effects.
+Provider execution is split into adapters and policy. provider_adapters.py implements
+OpenAI-compatible/LM Studio, Anthropic, Gemini and DeepSeek request/response mapping.
+provider_services.py owns discovery metadata, health, model choice and explicit failover.
+PinnedHTTPTransport performs direct DNS-pinned HTTP(S) without ambient proxy use, validates
+all resolved addresses and blocks redirects/private remote targets. EgressPolicy decides
+whether the endpoint class is allowed before transport.
 
-`FolderSnapshotStore` provides a user-owned local folder simulation of a revisioned content-addressed snapshot backend. Snapshot blobs and manifests use exclusive immutable object creation, with a separately updated HEAD pointer. It verifies checksums before restoring only into a previously nonexistent file.
+Retrieval stays usable without a model. EvidenceIndex persists source text and exact digests.
+AnchoredChunker preserves source offsets, CitationEnforcer re-verifies source/chunk/quote
+digests, RagAnswerDiffer compares revisions and PromptInjectionFirewall treats retrieved
+instructions as untrusted data.
 
-**Known security limitations:** `PinnedHTTPTransport` now resolves names once, checks all IP addresses, connects directly to a selected validated IP, preserves original hostname for TLS identity checks, blocks redirects and bypasses environment proxy settings. Deterministic tests cover private and mixed DNS resolutions, 401/429/503 errors, and malformed replies; **live internet/TLS provider validation and independent security auditing are still pending**. Agent side-effect callbacks are synchronous; interrupted execution after callback and before receipt persistence may replay effects. Only idempotent callbacks are safe until atomic operation coordination is implemented.
+DurableAgentRuntime persists DAG plans, per-step state, intent digests, results and events.
+Exact ApprovalIssuer tokens bind project, plan revision, step, operation and arguments.
+Completed results replay without repeating effects. A crashed non-idempotent step becomes an
+explicit RECOVERY_REQUIRED state rather than auto-replaying an uncertain side effect.
+LongTaskOrchestrator separately handles bounded retries, cancellation, checkpoints and
+dead-letter recovery for long-running idempotent jobs.
 
-Local folder HEAD conflict protection only detects sequential revisions. Concurrent writers in separate processes can race during pointer replacement; it is not a full remote CAS implementation. Snapshot bytes are unencrypted and should remain on a trusted local filesystem until encryption and remote sync are implemented.
+Research assistants in research_agents.py are evidence-bounded services: librarian,
+methodologist, statistics planner, qualitative coding suggestions, manuscript preparation
+and scientific-review findings. None may grant tool authority or claim scientific validity.
 
-`EncryptedSnapshotService` now optionally wraps `FolderSnapshotStore` with authenticated AES-256-GCM and a scrypt password KDF. Fresh random salt/nonce and project-bound authenticated associated data protect each sealed snapshot; failed authentication never emits plaintext. The bare `FolderSnapshotStore` remains intentionally unencrypted, and callers must explicitly select the encrypted wrapper for private backups. The password is never persisted by this adapter; loss of the password makes encrypted backup recovery impossible. `KeyringSecretStore` separately stores external provider credentials using OS keyring references and no project-embedded token bytes.
+PrivacyEgressEngine computes destination, payload size/hash, classification and redaction
+preview before remote use. BudgetedCompletionService reserves/finalizes token budgets around
+provider calls and UsageDiagnostics stores only aggregate metadata, never prompts,
+responses or credentials.
 
-`OfflinePDFImporter` extracts bounded PDF text per page using optional pypdf without following embedded URLs, marking page citations under stable `pdf:document_id:page:n` source IDs. A host should classify imported text as untrusted and apply the same approval policy as any other source. `AuditJournal` uses host-keyed HMAC chains to record operation and result digests while never persisting the plaintext content or credentials. All five synthetic journeys now have persisted, independently reproducible traces and a small malicious PDF fixture (see `JOURNEYS.md`).
+External connectors use host-injected transports/backends. Zotero, Crossref/OpenAlex,
+WebDAV, S3-compatible and MCP contracts validate inputs and preserve effect/scope boundaries.
+MCP results are returned explicitly as untrusted data and cannot change host authority.
 
+Sync separates encryption from transport. crypto.py seals project-bound snapshots with
+AES-256-GCM and scrypt. EncryptedRemoteSync stores immutable encrypted blobs/manifests and
+updates HEAD using RevisionBackend.compare_and_swap_head. Divergent writes preserve the
+encrypted local candidate as an addressable conflict revision. Restore verifies both
+encrypted and plaintext digests and only materializes to a new destination.
+
+AuditJournal supplies a separate host-keyed append-only HMAC chain of operation/result
+digests. KeyringSecretStore keeps provider credentials behind opaque OS-keyring references.
+
+The architecture deliberately keeps live network clients and paid/cloud resource creation
+outside import-time behavior. Deterministic tests inject transports and backends so offline
+denial, malformed replies, stale approvals, restart and conflict behavior are testable with
+zero real external traffic.

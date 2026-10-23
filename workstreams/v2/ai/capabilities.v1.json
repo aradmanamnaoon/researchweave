@@ -1,1 +1,248 @@
-{"protocol_version":1,"implemented":[{"operation":"provider.list","effect":"read","offline":true},{"operation":"provider.complete","effect":"external-network","offline":false,"production_ready":false},{"operation":"retrieval.ingest","effect":"local-write","offline":true},{"operation":"retrieval.query","effect":"read","offline":true},{"operation":"retrieval.answer","effect":"read","offline":true},{"operation":"agent.plan","effect":"local-write","offline":true},{"operation":"agent.preview","effect":"read","offline":true},{"operation":"agent.cancel","effect":"local-write","offline":true},{"operation":"privacy.preview","effect":"read","offline":true}]}
+{
+  "implemented": [
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "provider.list"
+    },
+    {
+      "arguments": [
+        "provider",
+        "prompt"
+      ],
+      "configured": true,
+      "effect": "external-network",
+      "offline": false,
+      "operation": "provider.complete"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "provider.v2.list"
+    },
+    {
+      "arguments": [
+        "provider"
+      ],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "provider.v2.health"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "local-write",
+      "offline": true,
+      "operation": "local.chat"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "local-write",
+      "offline": true,
+      "operation": "local.embed"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "local-write",
+      "offline": true,
+      "operation": "retrieval.ingest"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "retrieval.query"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "retrieval.answer"
+    },
+    {
+      "arguments": [
+        "claims"
+      ],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "retrieval.citations.verify"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "local-write",
+      "offline": true,
+      "operation": "agent.plan"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "agent.preview"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "conditional",
+      "offline": true,
+      "operation": "agent.execute"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "local-write",
+      "offline": true,
+      "operation": "agent.cancel"
+    },
+    {
+      "arguments": [
+        "project_id",
+        "steps"
+      ],
+      "configured": true,
+      "effect": "local-write",
+      "offline": true,
+      "operation": "agent.v2.plan"
+    },
+    {
+      "arguments": [
+        "plan_id"
+      ],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "agent.v2.preview"
+    },
+    {
+      "arguments": [
+        "plan_id",
+        "step_id"
+      ],
+      "configured": true,
+      "effect": "conditional",
+      "offline": true,
+      "operation": "agent.v2.execute"
+    },
+    {
+      "arguments": [
+        "plan_id"
+      ],
+      "configured": true,
+      "effect": "local-write",
+      "offline": true,
+      "operation": "agent.v2.cancel"
+    },
+    {
+      "arguments": [
+        "plan_id"
+      ],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "agent.v2.recover"
+    },
+    {
+      "arguments": [
+        "query"
+      ],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "research.librarian.search"
+    },
+    {
+      "arguments": [
+        "design",
+        "claim",
+        "assumptions"
+      ],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "research.methodology.critique"
+    },
+    {
+      "arguments": [
+        "text",
+        "vocabulary"
+      ],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "research.qualitative.suggest"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "privacy.preview"
+    },
+    {
+      "arguments": [
+        "project_class",
+        "provider_local"
+      ],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "privacy.classify"
+    },
+    {
+      "arguments": [
+        "project_id"
+      ],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "usage.summary"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "local-write",
+      "offline": true,
+      "operation": "prompt.add"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "prompt.render"
+    },
+    {
+      "arguments": [],
+      "configured": true,
+      "effect": "read",
+      "offline": true,
+      "operation": "connector.list"
+    },
+    {
+      "arguments": [],
+      "configured": false,
+      "effect": "external-network",
+      "offline": false,
+      "operation": "sync.push"
+    },
+    {
+      "arguments": [],
+      "configured": false,
+      "effect": "external-network",
+      "offline": false,
+      "operation": "sync.pull"
+    }
+  ],
+  "protocol_version": 2
+}
