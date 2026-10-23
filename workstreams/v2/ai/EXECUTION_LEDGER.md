@@ -1,12 +1,13 @@
 # Execution ledger
 
-`SOURCE_LAYOUT_VERIFIED`: package installed and imported from worktree using `uv sync --offline --extra dev`; tracked Git index check pending final local commit. Worker source: `D:\coding\codex\researchweave-v2-ai\src\researchweave\ai`. Intended final path: `D:\coding\codex\researchweave\src\researchweave\ai`. Production count: 18 Python files / 2,037 token-bearing SLOC (see `CODE_METRICS.json`).
+`SOURCE_LAYOUT_VERIFIED`: package installed and imported from worktree using `uv sync --offline --extra dev`; tracked Git index check pending final local commit. Worker source: `D:\coding\codex\researchweave-v2-ai\src\researchweave\ai`. Intended final path: `D:\coding\codex\researchweave\src\researchweave\ai`. Production count: 19 Python files / 2,197 token-bearing SLOC (see `CODE_METRICS.json`).
 
 | ID | Capability | Real files | Test evidence | Status |
 |---|---|---|---|---|
 | AUDIT-001 | Independent V2 checkout and source ownership | `INITIAL_AUDIT.md` | Git worktree/branch/status inspected | Complete |
 | AI-001 | Provider list without credential exposure | `providers.py`, `facade.py` | `test_network_offline_blocks_before_transport` | Implemented slice |
 | AI-002 | OpenAI-compatible completion through controlled transport | `providers.py`, `policy.py` | `test_provider_success_and_malformed_response`, offline test | Experimental; transport hardening pending |
+| AI-002-TRANSPORT | DNS-pinned direct HTTP(S), no ambient proxies, all DNS answers must satisfy public/loopback policy, no redirects, typed 401/429/5xx | `http_transport.py`, `test_http_transport.py` | `test_public_dns_pinning_preserves_tls_host_and_bypasses_proxy`, `test_remote_private_dns_injection_denied_before_any_network`, HTTP status/error tests | Deterministically verified; live TLS provider smoke test pending |
 | AI-015 | Persistent bounded passage search, hash verification | `retrieval.py` | `test_persistent_retrieval_and_revocation` | Implemented local lexical slice |
 | AI-019 | Signed host approvals | `policy.py`, `facade.py` | `test_agent_requires_host_signed_exact_approval`, `test_facade_roundtrip_and_no_ai_fallback` | Partial: injection of persistent host secret pending |
 | AI-020/021 | Ordered bounded agent plans, durable receipts | `agents.py` | `test_agent_requires_host_signed_exact_approval` | Partial: non-atomic effect replay risk |
@@ -25,7 +26,7 @@
 | AI-015-ATOMIC | All-or-nothing multi-source/page replacement | `retrieval.py` `ingest_many`, `pdf_ingest.py` | `test_pdf_import_rollback_preserves_all_prior_page_evidence` with injected SQLite trigger failure and reopen verification | Complete for local SQLite evidence batch |
 | AI-041 | Host-keyed append-only authenticated audit chain; arguments and results hashed | `audit.py`, `test_audit.py` | `test_redacted_audit_survives_restart_and_detects_tampering` | Working local audit slice; host app wiring pending |
 | JOURNEY-1..5 | Complete synthetic acceptance runner with offline, manual, hostile document, approved fake cloud, and encrypted conflict recovery | `run_journeys.py`, `test_journeys.py`, `traces/*.json` | `test_five_reproducible_journeys_and_redacted_persistent_traces` | All five headless fake/local paths passed; no live UI/provider integration |
-| QA-001 | Hostile and failure-state regression | `test_edge_cases.py` | Six explicit success+denial tests | 64 total tests passing; coverage previously 82%, pending new measurement |
+| QA-001 | Hostile and failure-state regression | `test_edge_cases.py` | Six explicit success+denial tests | 75 total tests passing; 82% aggregate coverage |
 
 All other AI-001–AI-050 tasks remain pending or partial; no missing task is implicitly marked implemented. Synthetic test data are original and distributable; no external fixture license applies. GUI wiring is pending for all operations. Full validation and precise remaining work are in `TEST_RESULTS.md` and `NEXT_ACTION.md`.
 

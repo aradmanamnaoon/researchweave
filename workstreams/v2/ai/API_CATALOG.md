@@ -26,6 +26,8 @@ Public `AIFacade` methods: `capability_manifest`, `preview`, `execute`, `execute
 
 Local runtime model discovery is available separately via `LocalRuntimeDiscovery("http://127.0.0.1:11434").discover(EgressPolicy())`. It probes only the explicit loopback endpoint; no model downloads or ambient port scans occur.
 
+By default, `ProviderRegistry` now uses `PinnedHTTPTransport`: it resolves the host once, validates every returned IP, connects directly to one validated IP, and preserves the original TLS hostname. A host may inject a fake `HTTPTransport` implementation for synthetic offline tests and development without network access. Live hosted-provider compatibility has not been verified.
+
 Local embedding index usage:
 
 ```python

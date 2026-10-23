@@ -1,6 +1,6 @@
 # Next actions — AI subsystem
 
-1. Secure hostname DNS resolution and transport redirects/proxies end-to-end, add deterministic adapter failure tests.
+1. Complete live TLS validation, retry and cancellation semantics for the now DNS-pinned, proxy-independent provider transport; retain mandatory host approval and signed egress scopes.
 2. Extend existing loopback Ollama and OpenAI-compatible model discovery to actual no-cloud generation and local embedding adapters.
 3. Add host-approved facade mutation APIs, durable atomic effect receipts and cancellation-safe retries.
 4. Build encrypted immutable snapshot storage and compare-and-swap sync with conflict branches.

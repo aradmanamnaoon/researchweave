@@ -14,5 +14,5 @@ Cryptography and OS keyring adapters have been exercised with the installed opti
 
 PDF extraction accepts text-layer PDFs with a page and byte budget; scanned pages require separate OCR and text extraction cannot certify document truth. Multi-page source replacement now commits within a single local SQLite transaction and has a deliberately injected mid-write failure test. The five domain journeys are headless and use deterministic fake provider transports; no real GUI, hosted AI account or consumer subscription path has been verified.
 
-No live hosted model, real user files, or external network was used during tests. Do not enable experimental remote transport in a sensitive production installation until DNS rebinding, proxy handling, cancellation, audit and credential storage are completed.
+No live hosted model, real user files, or external network was used during tests. DNS-pinned direct sockets now address the prior private-DNS and ambient-proxy vulnerability in the default transport. Production hosted-model integration still requires live TLS, cancellation, consent/audit wiring, credentials and threat-model validation. All confidence statements reflect only deterministic fake-transport test coverage.
 
