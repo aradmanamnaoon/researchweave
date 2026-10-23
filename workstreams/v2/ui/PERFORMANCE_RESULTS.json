@@ -1,0 +1,45 @@
+{
+  "schema_version": 1,
+  "measurement": "Wall time uses time.perf_counter; memory is peak Python allocation from tracemalloc and is not whole-process RSS.",
+  "fixtures": "Synthetic deterministic local-only data; no network calls.",
+  "observations": {
+    "dataset_10000_rows": {
+      "import_seconds": 0.17943740001646802,
+      "import_python_peak_bytes": 5842335,
+      "page_seconds": 0.009324399987235665,
+      "page_python_peak_bytes": 2028381,
+      "total_rows": 10000,
+      "page_rows": 250
+    },
+    "source_library_2000": {
+      "search_seconds": 0.08877319999737665,
+      "search_python_peak_bytes": 3882,
+      "matches": 1
+    },
+    "long_manuscript": {
+      "characters": 210011,
+      "preview_seconds": 0.0014630999648943543,
+      "preview_python_peak_bytes": 210720,
+      "submission_approved": false
+    },
+    "chart_50000_observations": {
+      "seconds": 0.17908799997530878,
+      "python_peak_bytes": 464673,
+      "n": 50000,
+      "bins": 60
+    },
+    "large_recovery_journal": {
+      "characters": 160000,
+      "roundtrip_seconds": 0.009845799999311566,
+      "python_peak_bytes": 1751509,
+      "conflict": false
+    }
+  },
+  "additional_observed_tests": {
+    "zip_bomb_ratio": "Rejected with RESOURCE_LIMIT in test_performance_resources.py.",
+    "job_cancellation": "Observed terminal state cancelled in test_performance_resources.py.",
+    "bounded_pdf": "Valid/corrupt local PDF behavior covered by test_pdf_reader.py.",
+    "narrow_200_percent": "Offscreen 200% scale and narrow screenshot evidence covered by test_accessibility.py and capture-matrix.json."
+  },
+  "network_calls_observed": 0
+}
