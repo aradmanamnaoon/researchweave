@@ -3,19 +3,19 @@
 - **Branch:** `rebuild/v2-ui`
 - **Worktree:** `D:\coding\codex\researchweave-v2-ui`
 - **Owned production root:** `src/researchweave/ui/`
-- **Current implementation commit validated by final gates:** `64d8443`
+- **Validated source tip:** `80ec481`
 - **Production Python modules:** 24
-- **Meaningful production SLOC:** 9,968
-- **Facade operations:** 105
-- **Final UI gate:** 133 passed, 82% branch-aware coverage
-- **Final repository gate:** 137 passed
-- **UX matrix:** 27 complete / 23 partial / 0 missing / 0 blocked
+- **Meaningful production SLOC:** 11,053
+- **Facade operations:** 115
+- **Final UI gate:** 141 passed, 81% branch-aware coverage
+- **Final repository gate:** 145 passed
+- **UX matrix:** 35 complete / 15 partial / 0 missing / 0 blocked
 
-Import surface: `from researchweave.ui import build_ui_facade, build_ui_shell`. Core local workflows are fully usable without account/provider/network. Scientific domain methods remain outside Qt through typed integration interfaces.
+Core local workflows are fully usable without account/provider/network. The continuation beyond the earlier handoff added durable protocol/PRISMA exports and deviations, editable/overlap-aware qualitative coding, persistent plot configurations and approved SVG/PNG writes, structured manuscript sections, typed activity targets/changed fields, safe notification retry, selectable export directory, QtPdf local text-layer search/page references, exact Unicode evidence navigation, dashboard job state, and a real abrupt-child-process recovery test.
 
-Required evidence is current: 50-story acceptance matrix, execution ledger, test results, next actions, API catalog, generated capability manifest, code metrics, user guide, accessibility limitations, integration contracts, asset manifest, screenshot manifests, performance fixtures/results and five journey JSON receipts.
+Required evidence is current: 50-story acceptance matrix, execution ledger, test results, next actions, generated API/capability artifacts, code metrics, user guide, accessibility limitations, integration contracts, asset/screenshot manifests, performance results and five journey receipts.
 
-External/native blockers are intentionally explicit: no production inferential backend; no provider/network execution; no safe notebook sandbox; no authenticated reviewer identity service; no remote sync; no durable external job runner; incomplete professional PDF text-anchor/citation integration; no native NVDA/VoiceOver/Orca or multi-OS/HiDPI/multi-monitor pass; no separate-process forced-crash test. The Windows Qt offscreen long QTest keyboard sequence is unstable, so native keyboard success is not claimed.
+Remaining external/native blockers are explicit: no production inferential backend; no live provider/network execution; no safe notebook runtime; no authenticated reviewer identity service; no remote sync; no durable external job runner; no native NVDA/VoiceOver/Orca or multi-OS/HiDPI/multi-monitor/full-keyboard validation; and no upstream search/registry integration for fully event-derived protocol/PRISMA stages.
 
 No push or merge was performed from this worktree, and the canonical `D:\coding\codex\researchweave` checkout was not modified by this worker.
 

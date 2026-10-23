@@ -1,6 +1,6 @@
 # UI facade API catalog
 
-Generated from `UIFacade.capability_manifest()` at the current branch state. Registered operations: **105**.
+Generated from `UIFacade.capability_manifest()` at source commit `80ec481`. Registered operations: **115**.
 
 | Operation | Effect | Approval | Summary |
 | --- | --- | --- | --- |
@@ -18,6 +18,8 @@ Generated from `UIFacade.capability_manifest()` at the current branch state. Reg
 | `ui.protocol.update` | `local-write` | no | Revise draft protocol fields |
 | `ui.protocol.complete` | `read` | no | Validate protocol for human review |
 | `ui.protocol.history` | `read` | no | Read protocol amendment history |
+| `ui.protocol.deviation.add` | `local-write` | no | Record protocol deviation |
+| `ui.protocol.export` | `read` | no | Export protocol and amendment history |
 | `ui.source.add` | `local-write` | no | Import a local text source |
 | `ui.source.search` | `read` | no | Search project library |
 | `ui.source.get` | `read` | no | Read a local source |
@@ -45,12 +47,14 @@ Generated from `UIFacade.capability_manifest()` at the current branch state. Reg
 | `ui.screening.flow` | `read` | no | Calculate recorded screening stage counts |
 | `ui.prisma.read` | `read` | no | Read grounded PRISMA flow state |
 | `ui.prisma.update` | `local-write` | no | Save explicit PRISMA flow events |
+| `ui.prisma.export` | `read` | no | Export grounded PRISMA flow state |
 | `ui.extraction.schema` | `read` | no | Read extraction form schema |
 | `ui.extraction.schema.update` | `local-write` | no | Version extraction form schema |
 | `ui.extraction.record.save` | `local-write` | no | Save validated extraction record |
 | `ui.extraction.list` | `read` | no | List extraction records |
 | `ui.extraction.export` | `read` | no | Export structured extraction records |
 | `ui.qual.annotate` | `local-write` | no | Add a Unicode-safe evidence code |
+| `ui.qual.annotation.update` | `local-write` | no | Edit a saved evidence code or memo |
 | `ui.qual.list` | `read` | no | Inspect coded evidence |
 | `ui.dataset.import` | `local-write` | no | Import bounded CSV text |
 | `ui.dataset.describe` | `read` | no | Summarize numeric values |
@@ -63,6 +67,9 @@ Generated from `UIFacade.capability_manifest()` at the current branch state. Reg
 | `ui.chart.bar` | `read` | no | Compute descriptive categorical counts |
 | `ui.chart.svg` | `read` | no | Produce local accessible chart SVG |
 | `ui.chart.png` | `read` | no | Produce local descriptive chart PNG |
+| `ui.chart.config.list` | `read` | no | List saved descriptive plot configurations |
+| `ui.chart.config.save` | `local-write` | no | Save descriptive plot configuration |
+| `ui.chart.export.write` | `local-write` | no | Write approved SVG or PNG plot file |
 | `ui.analysis.methods` | `read` | no | List scientific analysis adapter methods |
 | `ui.analysis.run` | `local-write` | no | Run and persist a typed scientific analysis |
 | `ui.analysis.results` | `read` | no | List versioned analysis results |
@@ -73,6 +80,8 @@ Generated from `UIFacade.capability_manifest()` at the current branch state. Reg
 | `ui.mixed.list` | `read` | no | List mixed-method evidence links |
 | `ui.mixed.add` | `local-write` | no | Link qualitative and quantitative evidence |
 | `ui.manuscript.save` | `local-write` | no | Save a manuscript draft |
+| `ui.manuscript.sections.read` | `read` | no | Read structured manuscript sections |
+| `ui.manuscript.sections.update` | `local-write` | no | Save structured manuscript sections |
 | `ui.notebook.save` | `local-write` | no | Save local research notes |
 | `ui.code.execution.status` | `read` | no | Inspect disabled code execution safety gate |
 | `ui.reference.list` | `read` | no | List manuscript references |
@@ -109,5 +118,6 @@ Generated from `UIFacade.capability_manifest()` at the current branch state. Reg
 | `ui.notification.list` | `read` | no | List persistent actionable notifications |
 | `ui.notification.add` | `local-write` | no | Persist redacted actionable notification |
 | `ui.notification.dismiss` | `local-write` | no | Dismiss persistent notification |
+| `ui.notification.retry` | `read` | no | Retry an allowlisted read-only recovery operation |
 
 All capabilities are offline-available in this UI workstream. Network/provider execution is not implied by catalog presence; provider and integration records expose configuration/status only unless an external adapter is supplied.

@@ -327,6 +327,61 @@
       "reversible": true
     },
     {
+      "operation": "ui.protocol.deviation.add",
+      "version": "1.0.0",
+      "summary": "Record protocol deviation",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "description": {
+            "type": "string"
+          },
+          "reason": {
+            "type": "string"
+          },
+          "impact": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object"
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.protocol.export",
+      "version": "1.0.0",
+      "summary": "Export protocol and amendment history",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object"
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
       "operation": "ui.source.add",
       "version": "1.0.0",
       "summary": "Import a local text source",
@@ -981,6 +1036,27 @@
       "reversible": true
     },
     {
+      "operation": "ui.prisma.export",
+      "version": "1.0.0",
+      "summary": "Export grounded PRISMA flow state",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object"
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
       "operation": "ui.extraction.schema",
       "version": "1.0.0",
       "summary": "Read extraction form schema",
@@ -1119,6 +1195,40 @@
           "expected_revision": {
             "type": "integer",
             "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object"
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.qual.annotation.update",
+      "version": "1.0.0",
+      "summary": "Edit a saved evidence code or memo",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "annotation_id": {
+            "type": "string"
+          },
+          "code": {
+            "type": "string"
+          },
+          "memo": {
+            "type": "string"
           }
         },
         "additionalProperties": false
@@ -1421,6 +1531,148 @@
       "reversible": true
     },
     {
+      "operation": "ui.chart.config.list",
+      "version": "1.0.0",
+      "summary": "List saved descriptive plot configurations",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object"
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.chart.config.save",
+      "version": "1.0.0",
+      "summary": "Save descriptive plot configuration",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "name": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "column": {
+            "type": "string"
+          },
+          "plot_type": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "x_label": {
+            "type": "string"
+          },
+          "y_label": {
+            "type": "string"
+          },
+          "bins": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object"
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.chart.export.write",
+      "version": "1.0.0",
+      "summary": "Write approved SVG or PNG plot file",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "filename": {
+            "type": "string"
+          },
+          "format": {
+            "type": "string"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "column": {
+            "type": "string"
+          },
+          "plot_type": {
+            "type": "string"
+          },
+          "unit": {
+            "type": "string"
+          },
+          "title": {
+            "type": "string"
+          },
+          "x_label": {
+            "type": "string"
+          },
+          "y_label": {
+            "type": "string"
+          },
+          "bins": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 60
+          },
+          "width": {
+            "type": "integer",
+            "minimum": 400,
+            "maximum": 4096
+          },
+          "height": {
+            "type": "integer",
+            "minimum": 240,
+            "maximum": 2160
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object"
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
       "operation": "ui.analysis.methods",
       "version": "1.0.0",
       "summary": "List scientific analysis adapter methods",
@@ -1681,6 +1933,58 @@
           "expected_revision": {
             "type": "integer",
             "minimum": 0
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object"
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.manuscript.sections.read",
+      "version": "1.0.0",
+      "summary": "Read structured manuscript sections",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object"
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.manuscript.sections.update",
+      "version": "1.0.0",
+      "summary": "Save structured manuscript sections",
+      "effect": "local-write",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
+          },
+          "expected_revision": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "sections": {
+            "type": "array",
+            "items": {
+              "type": "object"
+            }
           }
         },
         "additionalProperties": false
@@ -2531,6 +2835,30 @@
           "expected_revision": {
             "type": "integer",
             "minimum": 0
+          },
+          "notification_id": {
+            "type": "string"
+          }
+        },
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object"
+      },
+      "approval_required": false,
+      "offline_available": true,
+      "reversible": true
+    },
+    {
+      "operation": "ui.notification.retry",
+      "version": "1.0.0",
+      "summary": "Retry an allowlisted read-only recovery operation",
+      "effect": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "project_id": {
+            "type": "string"
           },
           "notification_id": {
             "type": "string"

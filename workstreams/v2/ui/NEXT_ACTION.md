@@ -1,13 +1,13 @@
 ﻿# Next actions after Worker 4
 
-All independently feasible local UI work in this branch is implemented and validated. Remaining work depends on integration or native-platform validation rather than more local scaffolding:
+All independently feasible local UI work identified in the Worker 4 acceptance matrix is implemented and validated. Remaining work requires integration infrastructure or native platform observation rather than more local scaffolding:
 
-1. Connect a production scientific analysis backend to the typed `AnalysisBackend` interface for regression/correlation/group-comparison methods and domain diagnostics. Descriptive analysis already runs locally; unavailable inferential methods correctly return `DEPENDENCY_MISSING`.
-2. Integrate an isolated notebook execution host only if it provides process boundaries, explicit confirmation, time/resource limits, cancellation, bounded working directory, stdout/stderr capture and provenance. The current UI intentionally disables arbitrary Python/R execution.
-3. Add real provider/integration hosts for AI or external services with explicit egress approval, credentials outside logs/state, rate-limit/error handling and truthful availability. Current provider/agent screens do not execute network calls.
-4. Add optional remote sync/conflict handling; current backups are local, approval-gated, checksum verified and restore into a new project.
-5. Run native accessibility/platform QA: NVDA/VoiceOver/Orca, real Windows/Linux/macOS keyboard/focus, multi-monitor/HiDPI at 100/150/200%, and forced-process crash recovery.
-6. Deepen professional PDF text-anchor/search/highlight/page-citation integration and structured manuscript/evidence cross-navigation.
-7. If desired, add durable external job-runner persistence, typed activity target links, unified SVG/PNG file export, and fuller protocol/PRISMA upstream event integrations.
+1. Supply a production scientific `AnalysisBackend` for regression/correlation/group-comparison methods and domain diagnostics. Descriptive analysis is already real; unsupported inferential methods remain `DEPENDENCY_MISSING`.
+2. Supply a safe isolated notebook runtime only if it provides process isolation, explicit confirmation, time/resource limits, cancellation, bounded working directory, stdout/stderr capture and provenance.
+3. Integrate real AI/provider and optional external adapters with explicit egress approval, external credential handling, truthful availability, rate-limit/error behavior and no consumer-subscription impersonation.
+4. Add optional remote sync/conflict resolution. Local backups already provide preview, integrity verification, attack-resistant archive handling and restore-to-new-project behavior.
+5. Supply a durable external job runner if background tasks must survive process restart; process-local callbacks are intentionally not serialized.
+6. Perform native release QA: NVDA/VoiceOver/Orca, real keyboard/focus behavior, Windows/Linux/macOS rendering, multi-monitor geometry and 100/150/200% native DPI.
+7. Connect real upstream source/search/registry events if PRISMA/protocol state must be derived beyond the local screening/deviation records already supported.
 
-Do not push or merge from this worker worktree. The integration owner should review the conservative UX matrix and external blockers before fast-forwarding the final integration branch.
+Do not push or merge from this worker worktree. Integration should review the current 50-story matrix and these explicit blockers before fast-forwarding the final integration branch.
