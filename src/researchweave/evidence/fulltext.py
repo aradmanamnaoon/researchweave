@@ -37,6 +37,7 @@ class TextPage:
     status: str  # text, empty, needs_ocr
     rotation: int = 0
     label: str | None = None
+    scan_evidence: str = "not_applicable"
 
 
 @dataclass(frozen=True)
@@ -88,10 +89,25 @@ def _digest(value: bytes) -> str:
 
 
 def _page(number: int, text: str, *, status: str = "text", rotation: int = 0,
-          label: str | None = None) -> TextPage:
+          label: str | None = None, scan_evidence: str = "not_applicable") -> TextPage:
     require(len(text) <= MAX_SECTION_CHARS, "Extracted section too large", "RESOURCE_LIMIT")
     require(rotation in (0, 90, 180, 270), "Invalid PDF page rotation")
-    return TextPage(number, text, _digest(text.encode("utf-8")), status, rotation, label)
+    require(scan_evidence in {
+        "not_applicable", "image_detected", "no_image_detected", "unknown_no_text",
+    }, "Invalid scan evidence classification")
+    return TextPage(number, text, _digest(text.encode("utf-8")), status, rotation, label,
+                    scan_evidence)
+
+
+def _pdf_scan_evidence(pdf_page: PdfPage) -> str:
+    """Classify only explicit page-image evidence; never invent OCR results."""
+    marker = getattr(pdf_page, "images", None)
+    if marker is None:
+        return "unknown_no_text"
+    try:
+        return "image_detected" if len(marker) > 0 else "no_image_detected"
+    except (TypeError, AttributeError):
+        return "unknown_no_text"
 
 
 def _validated_zip(data: bytes) -> dict[str, bytes]:
@@ -245,8 +261,13 @@ def _pdf(data: bytes, reader_factory: Any = None) -> tuple[TextPage, ...]:
             rotation = int(getattr(pdf_page, "rotation", 0) or 0) % 360
             extracted = pdf_page.extract_text() or ""
             require(isinstance(extracted, str), "PDF returned invalid page content")
-            status = "text" if extracted.strip() else "needs_ocr"
-            pages.append(_page(index, extracted, status=status, rotation=rotation))
+            if extracted.strip():
+                status, scan_evidence = "text", "not_applicable"
+            else:
+                scan_evidence = _pdf_scan_evidence(pdf_page)
+                status = "empty" if scan_evidence == "no_image_detected" else "needs_ocr"
+            pages.append(_page(index, extracted, status=status, rotation=rotation,
+                               scan_evidence=scan_evidence))
         return tuple(pages)
     except EvidenceError:
         raise
