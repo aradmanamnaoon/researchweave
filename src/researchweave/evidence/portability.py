@@ -570,7 +570,10 @@ def preview_review_packet_merge(store: ProjectStore, packet: Path) -> dict[str, 
         isinstance(source_project_id, str) and bool(source_project_id),
         "Packet project ID is missing",
     )
-    require(isinstance(source_review_id, str) and source_review_id, "Packet review ID is missing")
+    require(
+        isinstance(source_review_id, str) and bool(source_review_id),
+        "Packet review ID is missing",
+    )
     references = payloads["references.json"]
     doi_conflicts: list[dict[str, Any]] = []
     for row in references:
@@ -716,7 +719,7 @@ def merge_review_packet(
         reference_map: dict[str, str] = {}
         for row in references:
             source_id = str(row.get("id", ""))
-            require(source_id, "Packet reference ID is missing")
+            require(bool(source_id), "Packet reference ID is missing")
             mapped = origin_lookup("reference", source_id)
             if mapped is not None:
                 require(
@@ -787,7 +790,7 @@ def merge_review_packet(
         for row in records:
             source_id = str(row.get("id", ""))
             source_reference_id = str(row.get("reference_id", ""))
-            require(source_id and source_reference_id, "Packet review record is incomplete")
+            require(bool(source_id and source_reference_id), "Packet review record is incomplete")
             if source_reference_id not in reference_map:
                 conflicts.append(
                     {"entity": "review_record", "source_id": source_id,
@@ -945,7 +948,7 @@ def merge_review_packet(
         protocol_map: dict[str, str] = {}
         for row in protocols:
             source_id = str(row.get("id", ""))
-            require(source_id, "Packet protocol ID is missing")
+            require(bool(source_id), "Packet protocol ID is missing")
             mapped_protocol = origin_lookup("protocol", source_id)
             if mapped_protocol is None:
                 mapped_protocol = protocol_map.setdefault(source_id, new_id())

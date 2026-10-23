@@ -488,24 +488,30 @@ class CatalogClient:
                 "Malformed metadata record",
                 "Retry or inspect an exported provider response.",
             ) from exc
-        result = {
+        normalized_records: list[dict[str, Any]] = [
+            {
+                **record,
+                "provider": provider,
+                "metadata_status": "unverified",
+                "full_text_access": "unknown",
+            }
+            for record in records
+        ]
+        result: dict[str, Any] = {
             "provider": provider,
-            "records": [
-                {
-                    **record,
-                    "provider": provider,
-                    "metadata_status": "unverified",
-                    "full_text_access": "unknown",
-                }
-                for record in records
-            ],
+            "records": normalized_records,
             "raw_response_sha256": response_hashes,
             "network_hosts": [host],
             "fetched_at_utc": now_utc(),
         }
-        exact = [record for record in result["records"]
-                 if normalize_doi(record.get("doi") if
-                 isinstance(record.get("doi"), str) else None) == exact_doi]
+        exact = [
+            record
+            for record in normalized_records
+            if normalize_doi(
+                record.get("doi") if isinstance(record.get("doi"), str) else None
+            )
+            == exact_doi
+        ]
         return {
             "provider": provider,
             "doi": exact_doi,
