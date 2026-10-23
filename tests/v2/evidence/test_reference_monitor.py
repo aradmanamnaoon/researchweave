@@ -105,3 +105,54 @@ def test_due_watches_are_read_only_and_require_host_network_execution(tmp_path: 
         assert due["requires_explicit_network_execution"] is True
         assert due["network_queries"] == 0
         assert store.info().revision == before == subscribed["revision"]
+
+
+def test_reference_monitor_does_not_accept_retraction_from_unconfirmed_identity(
+    tmp_path: Path,
+) -> None:
+    with ProjectStore.create(tmp_path / "project", "Monitor", "Updates?", "exploratory") as store:
+        imported = LibraryService(store).import_bibliography(
+            (
+                b"@article{x,title={Canonical Record},author={Doe, Ada},"
+                b"year={2024},doi={10.1000/right}}"
+            ),
+            "bibtex",
+        )
+        reference_id = imported["references"][0]["id"]
+        monitor = ReferenceUpdateMonitor(store)
+        monitor.subscribe(reference_id, "crossref")
+        result = monitor.record_observation(
+            reference_id,
+            "crossref",
+            {
+                "title": "Different Paper",
+                "year": 2020,
+                "authors": ["Other, Author"],
+                "is_retracted": True,
+                "provider_record_id": "provider-unrelated",
+            },
+            checked_at="2026-10-23T12:00:00+00:00",
+        )
+        assert result["status"] == "identity_unconfirmed"
+        assert result["identity_confirmed"] is False
+        assert result["provider_retraction_signal"] is True
+        assert result["retraction_reported"] is False
+        assert monitor.history(reference_id)[0]["retraction_reported"] is False
+
+
+def test_reference_monitor_rejects_naive_checked_timestamp(tmp_path: Path) -> None:
+    with ProjectStore.create(tmp_path / "project", "Monitor", "Updates?", "exploratory") as store:
+        imported = LibraryService(store).import_bibliography(
+            b"@article{x,title={Record},author={Doe, Ada},year={2024},doi={10.1000/time}}",
+            "bibtex",
+        )
+        reference_id = imported["references"][0]["id"]
+        monitor = ReferenceUpdateMonitor(store)
+        monitor.subscribe(reference_id, "manual")
+        with pytest.raises(EvidenceError):
+            monitor.record_observation(
+                reference_id,
+                "manual",
+                {"doi": "10.1000/time"},
+                checked_at="2026-10-23T12:00:00",
+            )

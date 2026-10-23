@@ -42,3 +42,18 @@ def test_provenance_detects_orphan_and_cycles(tmp_path: Path) -> None:
         assert not result["valid"]
         assert result["cycles"]
         assert any("missing-resource" in orphan for orphan in result["orphan_edges"])
+
+
+def test_provenance_rejects_tampered_attachment_hash(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    with ProjectStore.create(root, "Graph", "Hash integrity?", "exploratory") as store:
+        source = LibraryService(store).import_document(
+            b"Synthetic attachment", "Synthetic", "text/plain"
+        )
+        digest = source["sha256"]
+        store.object_path(digest).write_bytes(b"tampered attachment")
+        graph = export_provenance(store)
+        assert graph["valid"] is False
+        assert graph["attachment_hashes_verified"] is False
+        assert graph["nodes"][source["source_id"]]["attachment_integrity"] == "invalid"
+        assert graph["attachment_issues"][0]["digest"] == digest

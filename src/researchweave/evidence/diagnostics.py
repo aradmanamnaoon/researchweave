@@ -144,3 +144,50 @@ def library_diagnostics(store: ProjectStore) -> dict[str, Any]:
             "Restore missing or corrupt attachments from a verified backup.",
         ],
     }
+
+
+def repair_library_diagnostics(
+    store: ProjectStore,
+    actions: list[str],
+) -> dict[str, Any]:
+    """Apply only explicitly selected, mechanically safe diagnostic repairs."""
+    allowed = {"rebuild_search_index"}
+    if len(actions) != len(set(actions)) or not set(actions).issubset(allowed):
+        from .errors import EvidenceError
+
+        raise EvidenceError(
+            "INVALID_INPUT",
+            "Unsupported or duplicate diagnostic repair action",
+            "Choose only rebuild_search_index; review destructive repairs manually.",
+        )
+    before = library_diagnostics(store)
+    automatic: list[dict[str, Any]] = []
+    for action in actions:
+        if action == "rebuild_search_index":
+            rebuilt = LocalIndex(store).rebuild()
+            automatic.append(
+                {
+                    "action": action,
+                    "status": "completed",
+                    "result": rebuilt,
+                    "network_queries": 0,
+                }
+            )
+    after = library_diagnostics(store)
+    return {
+        "read_only": False,
+        "requested_actions": actions,
+        "automatic_repairs": automatic,
+        "automatic_repairs_performed": len(automatic),
+        "manual_repairs_performed": 0,
+        "manual_actions": after["manual_actions"],
+        "before_issue_codes": sorted(
+            str(issue.get("code", "UNKNOWN")) for issue in before["issues"]
+        ),
+        "after_issue_codes": sorted(
+            str(issue.get("code", "UNKNOWN")) for issue in after["issues"]
+        ),
+        "remaining_issues": after["issues"],
+        "ok": after["ok"],
+        "network_queries": 0,
+    }

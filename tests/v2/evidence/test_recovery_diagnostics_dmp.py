@@ -8,7 +8,7 @@ import pytest
 
 import researchweave.evidence.project_format as project_format
 from researchweave.evidence.data_management import DataManagementPlanService
-from researchweave.evidence.diagnostics import library_diagnostics
+from researchweave.evidence.diagnostics import library_diagnostics, repair_library_diagnostics
 from researchweave.evidence.errors import EvidenceError
 from researchweave.evidence.library import LibraryService
 from researchweave.evidence.recovery import (
@@ -95,6 +95,25 @@ def test_library_diagnostics_is_read_only_and_actionable(tmp_path: Path) -> None
         assert report["automatic_repairs_performed"] == 0
         assert report["duplicate_candidates"]
         assert any(issue["code"] == "STALE_SEARCH_INDEX" for issue in report["issues"])
+
+
+def test_library_diagnostics_repair_reports_automatic_and_manual_work(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    with ProjectStore.create(root, "Diagnostics", "What is wrong?", "exploratory") as store:
+        LibraryService(store).import_bibliography(
+            b"@article{a,title={Incomplete},year={2024}}", "bibtex"
+        )
+        before = library_diagnostics(store)
+        assert any(issue["code"] == "STALE_SEARCH_INDEX" for issue in before["issues"])
+        repaired = repair_library_diagnostics(store, ["rebuild_search_index"])
+        assert repaired["automatic_repairs_performed"] == 1
+        assert repaired["manual_repairs_performed"] == 0
+        assert "STALE_SEARCH_INDEX" not in repaired["after_issue_codes"]
+        assert "INCOMPLETE_REFERENCE_METADATA" in repaired["after_issue_codes"]
+        assert repaired["network_queries"] == 0
+    with ProjectStore(root) as reopened:
+        after = library_diagnostics(reopened)
+        assert after["search_index"]["consistent"] is True
 
 
 def test_data_management_plan_versions_export_and_reopen(tmp_path: Path) -> None:

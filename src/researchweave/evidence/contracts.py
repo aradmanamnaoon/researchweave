@@ -15,7 +15,7 @@ from .errors import require
 
 _ARRAYS = {
     "files", "inventory", "reference_ids", "source_ids", "collection_ids",
-    "review_ids", "protocol_ids", "tags", "searches", "sections", "unresolved",
+    "review_ids", "protocol_ids", "tags", "searches", "sections", "unresolved", "actions",
 }
 _OBJECTS = {
     "advanced", "candidate", "citations", "extracted", "finding", "metadata",
@@ -81,7 +81,7 @@ _ENUMS = {
 _MAX_ITEMS = {"files": 1000, "reference_ids": 5000, "source_ids": 5000,
               "collection_ids": 5000, "review_ids": 5000, "protocol_ids": 5000,
               "tags": 500, "searches": 2000, "sections": 1000,
-              "inventory": 10000, "unresolved": 10000}
+              "inventory": 10000, "unresolved": 10000, "actions": 20}
 
 
 def _schema_for(name: str, operation: str) -> dict[str, Any]:

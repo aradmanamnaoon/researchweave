@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Mapping
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
@@ -13,6 +14,23 @@ from .models import canonical_json, new_id, now_utc, sha256
 from .storage import ProjectStore
 
 _PROVIDERS = {"crossref", "openalex", "pubmed", "europepmc", "manual"}
+
+
+def _normalized_identity_text(value: str) -> str:
+    return " ".join(re.sub(r"[^\w]+", " ", value.casefold(), flags=re.UNICODE).split())
+
+
+def _checked_timestamp(value: str) -> str:
+    try:
+        instant = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    except ValueError as exc:
+        raise EvidenceError(
+            "INVALID_INPUT", "Invalid reference-check timestamp",
+            "Use an ISO-8601 timestamp with an explicit timezone.",
+        ) from exc
+    require(instant.tzinfo is not None and instant.utcoffset() is not None,
+            "Reference-check timestamp must include timezone")
+    return instant.astimezone(UTC).isoformat()
 
 
 def _tables_exist(store: ProjectStore) -> bool:
@@ -229,18 +247,49 @@ class ReferenceUpdateMonitor:
                 "current": list(reference.authors),
                 "observed": list(authors),
             })
-        identifier_conflict = bool(reference.doi and doi and doi != reference.doi)
-        retracted = bool(observed.get("is_retracted", False))
-        corrected = bool(observed.get("is_corrected", False))
+        canonical_doi = reference.doi.casefold() if reference.doi else None
+        observed_doi = doi.casefold() if isinstance(doi, str) else None
+        provider_record_id = observed.get("provider_record_id")
+        provider_identity = (
+            provider_record_id.casefold()
+            if isinstance(provider_record_id, str)
+            else None
+        )
+        identifier_conflict = bool(canonical_doi and observed_doi and observed_doi != canonical_doi)
+        if canonical_doi:
+            identity_confirmed = bool(
+                observed_doi == canonical_doi or provider_identity == canonical_doi
+            )
+        else:
+            title_matches = bool(
+                isinstance(title, str)
+                and _normalized_identity_text(title) == _normalized_identity_text(reference.title)
+            )
+            year_matches = (
+                year is not None and reference.year is not None and year == reference.year
+            )
+            authors_match = bool(
+                authors is not None
+                and reference.authors
+                and tuple(_normalized_identity_text(author) for author in authors)
+                == tuple(_normalized_identity_text(author) for author in reference.authors)
+            )
+            identity_confirmed = title_matches and year_matches and authors_match
+        provider_retracted = bool(observed.get("is_retracted", False))
+        provider_corrected = bool(observed.get("is_corrected", False))
+        retracted = provider_retracted and identity_confirmed and not identifier_conflict
+        corrected = provider_corrected and identity_confirmed and not identifier_conflict
         status = (
             "identity_mismatch" if identifier_conflict
+            else "identity_unconfirmed"
+            if (provider_retracted or provider_corrected) and not identity_confirmed
             else "retraction_reported" if retracted
             else "correction_reported" if corrected
             else "doi_not_observed" if catalog_presence == "not_observed"
             else "metadata_changed" if changes
             else "no_change"
         )
-        timestamp = checked_at or now_utc()
+        timestamp = _checked_timestamp(checked_at or now_utc())
         payload = canonical_json(dict(observed))
         check_id = new_id()
 
@@ -277,8 +326,13 @@ class ReferenceUpdateMonitor:
             "changes": changes,
             "retraction_reported": retracted,
             "correction_reported": corrected,
+            "provider_retraction_signal": provider_retracted,
+            "provider_correction_signal": provider_corrected,
+            "identity_confirmed": identity_confirmed,
             "metadata_updated": False,
-            "requires_human_confirmation": bool(changes or retracted or corrected),
+            "requires_human_confirmation": bool(
+                changes or provider_retracted or provider_corrected or not identity_confirmed
+            ),
             "revision": revision,
         }
 

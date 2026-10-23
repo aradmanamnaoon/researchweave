@@ -21,7 +21,7 @@ from .claim_support import ClaimSupportService
 from .collections import CollectionService
 from .contracts import arguments_schema, response_schema, risk_metadata, validate_arguments
 from .data_management import DataManagementPlanService
-from .diagnostics import library_diagnostics
+from .diagnostics import library_diagnostics, repair_library_diagnostics
 from .discovery import CatalogClient, HTTPTransport
 from .encrypted_archive import (
     encrypt_project_archive,
@@ -137,6 +137,9 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "library.index_health": ("read", ("project_id",), "Inspect search cache state"),
     "library.diagnostics": (
         "read", ("project_id",), "Run read-only library diagnostics"),
+    "library.diagnostics_repair": (
+        "local-write", ("project_id", "actions"),
+        "Apply explicitly selected safe local diagnostic repairs and report remaining work"),
     "library.collection_create": (
         "local-write", ("project_id", "name"), "Create structured reference collection"),
     "library.collection_tree": (
@@ -933,6 +936,11 @@ class EvidenceFacade:
                 return LocalIndex(store).diagnostics()
             if operation == "library.diagnostics":
                 return library_diagnostics(store)
+            if operation == "library.diagnostics_repair":
+                actions = _value(args, "actions", list)
+                require(all(isinstance(item, str) for item in actions),
+                        "Diagnostic repair actions must be strings")
+                return repair_library_diagnostics(store, actions)
             collections = CollectionService(store)
             if operation == "library.collection_create":
                 parent_id = args.get("parent_id")
