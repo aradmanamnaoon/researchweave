@@ -49,6 +49,7 @@ class Capability:
     summary: str
     effect: Effect
     args: dict[str, Any]
+    result: dict[str, Any] = field(default_factory=lambda: {"type": "object"})
     approval: bool = False
     offline: bool = True
     reversible: bool = True
@@ -64,6 +65,7 @@ class Capability:
                 "properties": self.args,
                 "additionalProperties": False,
             },
+            "result_schema": self.result,
             "approval_required": self.approval,
             "offline_available": self.offline,
             "reversible": self.reversible,
@@ -144,6 +146,21 @@ class Project:
     claims: list[ClaimRecord] = field(default_factory=list)
     activity: list[Activity] = field(default_factory=list)
     tutorial_steps: list[str] = field(default_factory=list)
+    question_structure: dict[str, str] = field(default_factory=dict)
+    protocol_history: list[dict[str, Any]] = field(default_factory=list)
+    extraction_schema: dict[str, Any] = field(default_factory=dict)
+    extractions: list[dict[str, Any]] = field(default_factory=list)
+    variable_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
+    analysis_results: list[dict[str, Any]] = field(default_factory=list)
+    codebook: list[dict[str, Any]] = field(default_factory=list)
+    recoding_trace: list[dict[str, Any]] = field(default_factory=list)
+    mixed_method_links: list[dict[str, Any]] = field(default_factory=list)
+    references: list[dict[str, Any]] = field(default_factory=list)
+    agent_actions: list[dict[str, Any]] = field(default_factory=list)
+    provider_config: dict[str, Any] = field(default_factory=dict)
+    integrations: list[dict[str, Any]] = field(default_factory=list)
+    notifications: list[dict[str, Any]] = field(default_factory=list)
+    review_flow: dict[str, Any] = field(default_factory=dict)
 
 
 @dataclass
@@ -157,6 +174,13 @@ class Preferences:
     last_project_id: str = ""
     sidebar_width: int = 214
     selected_screen: str = "Dashboard"
+    window_width: int = 1260
+    window_height: int = 780
+    panel_visibility: dict[str, bool] = field(default_factory=dict)
+    panel_sizes: dict[str, int] = field(default_factory=dict)
+    workspace_presets: list[dict[str, Any]] = field(default_factory=list)
+    locale: str = "en"
+    onboarding_complete: bool = False
 
 
 def display_status(status: str) -> str:

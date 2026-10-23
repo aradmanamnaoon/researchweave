@@ -49,6 +49,36 @@ from .search import search_project
 from .snapshots import SnapshotManager
 from .store import MAX_ROWS, MAX_SOURCE_CHARS, PreferenceStore, ProjectStore
 from .visualization import ChartSpec, chart_svg, histogram
+from .workflows import (
+    AnalysisBackend,
+    add_mixed_method_link,
+    add_notification,
+    analysis_result_export,
+    approve_action,
+    citation_text,
+    combined_prisma,
+    configure_provider,
+    deny_action,
+    dismiss_notification,
+    extraction_export,
+    integration_catalog,
+    list_extractions,
+    merge_codes,
+    privacy_report,
+    propose_action,
+    protocol_history_entry,
+    provider_status,
+    record_action_execution,
+    save_extraction,
+    set_extraction_schema,
+    set_integration,
+    set_review_flow,
+    set_variable_metadata,
+    store_analysis_result,
+    update_question_structure,
+    upsert_code,
+    upsert_reference,
+)
 
 MAX_TITLE = 180
 MAX_NOTE = 250_000
@@ -129,12 +159,14 @@ class UIFacade:
         export_root: Path | None = None,
         export_authorizer: Callable[[str], bool] | None = None,
         backup_authorizer: Callable[[str, str], bool] | None = None,
+        analysis_backend: AnalysisBackend | None = None,
     ) -> None:
         self.store = ProjectStore(root)
         self.settings = PreferenceStore(root)
         self.export_root = (export_root or (root / "exports")).resolve()
         self.export_authorizer = export_authorizer
         self.backup_authorizer = backup_authorizer
+        self.analysis_backend = analysis_backend
         self.snapshots = SnapshotManager(self.store)
         self.recovery = RecoveryJournal(self.store)
         self._recent: dict[str, dict[str, Any]] = {}
@@ -143,12 +175,16 @@ class UIFacade:
             "ui.project.create": ("Create a local research project", Effect.WRITE),
             "ui.project.open": ("Reopen a saved project", Effect.READ),
             "ui.project.update": ("Update research question", Effect.WRITE),
+            "ui.project.dashboard": ("Summarize current project state", Effect.READ),
+            "ui.question.read": ("Read structured research question", Effect.READ),
+            "ui.question.update": ("Update structured research question", Effect.WRITE),
             "ui.templates.list": ("List editable study designs", Effect.READ),
             "ui.guidance.search": ("Find research method explanations", Effect.READ),
             "ui.protocol.read": ("Read project research protocol", Effect.READ),
             "ui.protocol.start": ("Create an editable protocol draft", Effect.WRITE),
             "ui.protocol.update": ("Revise draft protocol fields", Effect.WRITE),
             "ui.protocol.complete": ("Validate protocol for human review", Effect.READ),
+            "ui.protocol.history": ("Read protocol amendment history", Effect.READ),
             "ui.source.add": ("Import a local text source", Effect.WRITE),
             "ui.source.search": ("Search project library", Effect.READ),
             "ui.source.get": ("Read a local source", Effect.READ),
@@ -174,6 +210,13 @@ class UIFacade:
             "ui.screening.queue": ("Inspect reviewer-blinded screening records", Effect.READ),
             "ui.screening.adjudicate": ("Resolve independent reviewer disagreement", Effect.WRITE),
             "ui.screening.flow": ("Calculate recorded screening stage counts", Effect.READ),
+            "ui.prisma.read": ("Read grounded PRISMA flow state", Effect.READ),
+            "ui.prisma.update": ("Save explicit PRISMA flow events", Effect.WRITE),
+            "ui.extraction.schema": ("Read extraction form schema", Effect.READ),
+            "ui.extraction.schema.update": ("Version extraction form schema", Effect.WRITE),
+            "ui.extraction.record.save": ("Save validated extraction record", Effect.WRITE),
+            "ui.extraction.list": ("List extraction records", Effect.READ),
+            "ui.extraction.export": ("Export structured extraction records", Effect.READ),
             "ui.qual.annotate": ("Add a Unicode-safe evidence code", Effect.WRITE),
             "ui.qual.list": ("Inspect coded evidence", Effect.READ),
             "ui.dataset.import": ("Import bounded CSV text", Effect.WRITE),
@@ -181,11 +224,26 @@ class UIFacade:
             "ui.dataset.list": ("Show project data tables", Effect.READ),
             "ui.dataset.page": ("Read bounded dataset page", Effect.READ),
             "ui.dataset.variables": ("Inspect column types and missingness", Effect.READ),
+            "ui.variable.metadata": ("Read variable metadata", Effect.READ),
+            "ui.variable.metadata.update": ("Save variable metadata", Effect.WRITE),
             "ui.chart.histogram": ("Compute descriptive histogram counts", Effect.READ),
             "ui.chart.svg": ("Produce local accessible chart SVG", Effect.READ),
+            "ui.analysis.methods": ("List scientific analysis adapter methods", Effect.READ),
+            "ui.analysis.run": ("Run and persist a typed scientific analysis", Effect.WRITE),
+            "ui.analysis.results": ("List versioned analysis results", Effect.READ),
+            "ui.analysis.export": ("Export one analysis result", Effect.READ),
+            "ui.codebook.list": ("List qualitative codebook", Effect.READ),
+            "ui.codebook.upsert": ("Create or edit qualitative code", Effect.WRITE),
+            "ui.codebook.merge": ("Merge codes with recoding trace", Effect.WRITE),
+            "ui.mixed.list": ("List mixed-method evidence links", Effect.READ),
+            "ui.mixed.add": ("Link qualitative and quantitative evidence", Effect.WRITE),
             "ui.manuscript.save": ("Save a manuscript draft", Effect.WRITE),
             "ui.notebook.save": ("Save local research notes", Effect.WRITE),
+            "ui.reference.list": ("List manuscript references", Effect.READ),
+            "ui.reference.upsert": ("Create or correct reference metadata", Effect.WRITE),
+            "ui.reference.citation": ("Format user-entered citation metadata", Effect.READ),
             "ui.tutorial.step": ("Mark local tutorial step", Effect.WRITE),
+            "ui.tutorial.status": ("Read tutorial completion state", Effect.READ),
             "ui.activity.list": ("Read local audit history", Effect.READ),
             "ui.preferences.read": ("Read desktop preferences", Effect.READ),
             "ui.preferences.update": ("Save validated preferences", Effect.WRITE),
@@ -198,17 +256,119 @@ class UIFacade:
             "ui.backup.restore": ("Restore approved backup to new project", Effect.WRITE),
             "ui.agent.propose": ("Preview untrusted agent proposal", Effect.READ),
             "ui.agent.deny": ("Reject untrusted proposed action", Effect.READ),
+            "ui.agent.action.propose": ("Persist exact agent action proposal", Effect.WRITE),
+            "ui.agent.action.approve": ("Approve exact agent action fingerprint", Effect.WRITE),
+            "ui.agent.action.deny": ("Deny exact agent action proposal", Effect.WRITE),
+            "ui.agent.action.record": ("Record approved agent execution state", Effect.WRITE),
+            "ui.agent.timeline": ("Read persistent agent action timeline", Effect.READ),
+            "ui.provider.read": ("Read provider mode and availability state", Effect.READ),
+            "ui.provider.update": ("Configure provider metadata without secrets", Effect.WRITE),
+            "ui.privacy.read": ("Inspect local privacy and egress state", Effect.READ),
+            "ui.integration.list": ("List optional integration adapter states", Effect.READ),
+            "ui.integration.disconnect": ("Keep optional integration disconnected", Effect.WRITE),
+            "ui.notification.list": ("List persistent actionable notifications", Effect.READ),
+            "ui.notification.add": ("Persist redacted actionable notification", Effect.WRITE),
+            "ui.notification.dismiss": ("Dismiss persistent notification", Effect.WRITE),
         }
+        self._argument_schemas = self._build_argument_schemas()
 
     def capability_manifest(self) -> list[Mapping[str, Any]]:
         return [
-            Capability(name, summary, effect,
-                       {"project_id": {"type": "string"},
-                        "expected_revision": {"type": "integer", "minimum": 0}},
-                       approval=name in ("ui.export.write", "ui.backup.create",
-                                         "ui.backup.restore")).as_dict()
+            Capability(
+                name,
+                summary,
+                effect,
+                self._argument_schemas.get(name, {}),
+                {"type": "object"},
+                approval=name in (
+                    "ui.export.write", "ui.backup.create", "ui.backup.restore",
+                    "ui.agent.action.approve",
+                ),
+            ).as_dict()
             for name, (summary, effect) in self._operations.items()
         ]
+
+    def _build_argument_schemas(self) -> dict[str, dict[str, Any]]:
+        string = {"type": "string"}
+        revision = {"type": "integer", "minimum": 0}
+        project = {"project_id": string}
+        mutation = {"project_id": string, "expected_revision": revision}
+        schemas: dict[str, dict[str, Any]] = {
+            name: dict(project if effect == Effect.READ else mutation)
+            for name, (_, effect) in self._operations.items()
+        }
+        no_project = (
+            "ui.project.list", "ui.project.create", "ui.project.open",
+            "ui.templates.list", "ui.guidance.search", "ui.backup.list",
+            "ui.backup.inspect", "ui.backup.restore", "ui.preferences.read",
+            "ui.preferences.update", "ui.agent.propose", "ui.agent.deny",
+        )
+        for name in no_project:
+            schemas[name] = {}
+        schemas["ui.project.create"] = {
+            "title": string, "question": string, "study_type": string,
+        }
+        schemas["ui.project.open"] = {"project_id": string}
+        schemas["ui.project.update"] |= {"question": string}
+        schemas["ui.question.update"] |= {
+            "topic": string, "population_context": string,
+            "exposure_phenomenon": string, "outcome_target": string,
+            "question_type": string, "editable_question": string,
+        }
+        schemas["ui.source.add"] |= {
+            "title": string, "text": string, "kind": string,
+            "citation": string, "source_label": string,
+        }
+        schemas["ui.search.global"] |= {
+            "query": string, "category": string,
+            "offset": {"type": "integer", "minimum": 0},
+            "limit": {"type": "integer", "minimum": 1, "maximum": 500},
+        }
+        schemas["ui.extraction.schema.update"] |= {
+            "title": string, "fields": {"type": "array"},
+        }
+        schemas["ui.extraction.record.save"] |= {
+            "source_id": string, "values": {"type": "object"},
+        }
+        schemas["ui.variable.metadata.update"] |= {
+            "dataset_id": string, "variable": string, "metadata": {"type": "object"},
+        }
+        schemas["ui.analysis.run"] |= {
+            "method": string, "inputs": {"type": "object"},
+        }
+        schemas["ui.analysis.export"] |= {"result_id": string}
+        schemas["ui.codebook.upsert"] |= {
+            "code_id": string, "name": string, "description": string,
+            "inclusion_rule": string, "exclusion_rule": string, "marker": string,
+        }
+        schemas["ui.codebook.merge"] |= {
+            "source_ids": {"type": "array", "items": string},
+            "target_id": string, "conflict_note": string,
+        }
+        schemas["ui.mixed.add"] |= {"link": {"type": "object"}}
+        schemas["ui.reference.upsert"] |= {"reference": {"type": "object"}}
+        schemas["ui.reference.citation"] |= {"reference_id": string}
+        schemas["ui.agent.action.propose"] |= {"proposal": {"type": "object"}}
+        schemas["ui.agent.action.approve"] |= {
+            "action_id": string, "expected_fingerprint": string,
+        }
+        schemas["ui.agent.action.deny"] |= {"action_id": string, "reason": string}
+        schemas["ui.agent.action.record"] |= {
+            "action_id": string, "approval_id": string, "event": string,
+            "output_refs": {"type": "array", "items": string}, "message": string,
+        }
+        schemas["ui.provider.update"] |= {"provider": {"type": "object"}}
+        schemas["ui.integration.disconnect"] |= {
+            "integration_id": string,
+            "permissions": {"type": "array", "items": string},
+        }
+        schemas["ui.notification.add"] |= {
+            "code": string, "severity": string, "message": string,
+            "recovery": string, "linkage": {"type": "object"},
+        }
+        schemas["ui.notification.dismiss"] |= {"notification_id": string}
+        schemas["ui.prisma.update"] |= {"flow": {"type": "object"}}
+        return schemas
 
     def health(self) -> Mapping[str, Any]:
         return {
@@ -360,6 +520,79 @@ class UIFacade:
 
         return self._mutate(args, "ui.project.update", update)
 
+    def _do_ui_project_dashboard(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        screening = screening_flow(project)
+        protocol_state = None
+        if project.protocol:
+            template_id = str(project.protocol.get("template_id", ""))
+            values = dict(project.protocol.get("values", {}))
+            try:
+                protocol_state = protocol_completion(template_id, values)
+            except UIError:
+                protocol_state = {"invalid": True}
+        latest_jobs: list[dict[str, Any]] = []
+        latest_activity = [asdict(item) for item in project.activity[-10:]]
+        warnings: list[str] = []
+        if not project.sources:
+            warnings.append("No sources are attached to this project.")
+        if project.claims and not project.references:
+            warnings.append("Draft claims exist without verified reference records.")
+        if screening["status_counts"]["conflict"]:
+            warnings.append("Screening disagreements require adjudication.")
+        next_steps: list[str] = []
+        if not project.question_structure:
+            next_steps.append("Structure the research question.")
+        if not project.protocol:
+            next_steps.append("Choose a study design and draft a protocol.")
+        if not project.sources:
+            next_steps.append("Import or create a source.")
+        elif not project.evidence:
+            next_steps.append("Capture evidence from a source.")
+        if project.datasets and not project.variable_metadata:
+            next_steps.append("Review variable roles, units and missing codes.")
+        if not next_steps:
+            next_steps.append("Review diagnostics and unresolved warnings.")
+        return {
+            "title": project.title,
+            "question": project.question,
+            "revision": project.revision,
+            "protocol": protocol_state,
+            "source_count": len(project.sources),
+            "screening": screening,
+            "dataset_count": len(project.datasets),
+            "draft": {
+                "manuscript_characters": len(project.manuscript),
+                "notebook_characters": len(project.notebook),
+            },
+            "recent_activity": latest_activity,
+            "recent_jobs": latest_jobs,
+            "next_steps": next_steps,
+            "warnings": warnings,
+        }
+
+    def _do_ui_question_read(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {
+            "question_structure": dict(project.question_structure),
+            "fallback_question": project.question,
+            "revision": project.revision,
+        }
+
+    def _do_ui_question_update(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        payload = {
+            key: args.get(key)
+            for key in (
+                "topic", "population_context", "exposure_phenomenon",
+                "outcome_target", "question_type", "editable_question",
+            )
+        }
+
+        def update(project: Project) -> dict[str, Any]:
+            return {"question_structure": update_question_structure(project, payload)}
+
+        return self._mutate(args, "ui.question.update", update)
+
     def _do_ui_templates_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
         approach = _string(args, "study_type", 30, required=False)
         return {"templates": list_templates(study_type=approach or None)}
@@ -380,8 +613,12 @@ class UIFacade:
             if project.protocol:
                 raise UIError("CONFLICT", "This project already has a protocol.",
                               "Edit the existing protocol or create a separate project.")
+            previous = dict(project.protocol)
             project.protocol = record
-            return {"protocol": record}
+            history = protocol_history_entry(
+                project, action="start", previous=previous, current=project.protocol
+            )
+            return {"protocol": record, "history": history}
 
         return self._mutate(args, "ui.protocol.start", update)
 
@@ -395,6 +632,7 @@ class UIFacade:
             if not project.protocol:
                 raise UIError("NOT_FOUND", "No protocol is attached to this project.",
                               "Start from a research design template.")
+            previous = json.loads(json.dumps(project.protocol, ensure_ascii=False))
             template_id = str(project.protocol.get("template_id", ""))
             merged = dict(project.protocol.get("values", {}))
             merged.update(values)
@@ -402,7 +640,12 @@ class UIFacade:
             project.protocol["values"] = validated
             project.protocol["status"] = "draft"
             progress = protocol_completion(template_id, validated)
-            return {"protocol": project.protocol, "completion": progress}
+            history = protocol_history_entry(
+                project, action="update", previous=previous, current=project.protocol
+            )
+            return {
+                "protocol": project.protocol, "completion": progress, "history": history,
+            }
 
         return self._mutate(args, "ui.protocol.update", update)
 
@@ -417,6 +660,10 @@ class UIFacade:
         return {"template": get_template(template_id).title,
                 "completion": protocol_completion(template_id, validated),
                 "note": "Ready for human methodology review; never ethics-approved automatically."}
+
+    def _do_ui_protocol_history(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {"entries": list(project.protocol_history), "revision": project.revision}
 
     def _do_ui_source_add(self, args: Mapping[str, Any]) -> dict[str, Any]:
         title = _string(args, "title", MAX_TITLE)
@@ -655,6 +902,68 @@ class UIFacade:
     def _do_ui_screening_flow(self, args: Mapping[str, Any]) -> dict[str, Any]:
         return screening_flow(_required_project(args, self.store))
 
+    def _do_ui_prisma_read(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {
+            "flow": combined_prisma(project, screening_flow(project)),
+            "revision": project.revision,
+        }
+
+    def _do_ui_prisma_update(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        flow = args.get("flow", {})
+        if not isinstance(flow, Mapping):
+            raise UIError("INVALID_INPUT", "PRISMA flow must be a structured object.",
+                          "Enter measured stage counts or leave stages unknown.")
+
+        def update(project: Project) -> dict[str, Any]:
+            saved = set_review_flow(project, flow)
+            return {
+                "saved": saved,
+                "flow": combined_prisma(project, screening_flow(project)),
+            }
+
+        return self._mutate(args, "ui.prisma.update", update)
+
+    def _do_ui_extraction_schema(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {
+            "schema": project.extraction_schema or None,
+            "revision": project.revision,
+        }
+
+    def _do_ui_extraction_schema_update(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        title = _string(args, "title", 160)
+        raw_fields = args.get("fields", [])
+        if not isinstance(raw_fields, list) or any(
+            not isinstance(item, Mapping) for item in raw_fields
+        ):
+            raise UIError("INVALID_INPUT", "Extraction fields must be structured records.",
+                          "Use the extraction form builder.")
+        fields = [cast(Mapping[str, Any], item) for item in raw_fields]
+
+        def update(project: Project) -> dict[str, Any]:
+            return {"schema": set_extraction_schema(project, title=title, fields=fields)}
+
+        return self._mutate(args, "ui.extraction.schema.update", update)
+
+    def _do_ui_extraction_record_save(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        source_id = _string(args, "source_id", 36)
+        values = args.get("values", {})
+        if not isinstance(values, Mapping):
+            raise UIError("INVALID_INPUT", "Extraction values must be an object.",
+                          "Complete the generated extraction form.")
+
+        def update(project: Project) -> dict[str, Any]:
+            return {"record": save_extraction(project, source_id=source_id, values=values)}
+
+        return self._mutate(args, "ui.extraction.record.save", update)
+
+    def _do_ui_extraction_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return list_extractions(_required_project(args, self.store))
+
+    def _do_ui_extraction_export(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return extraction_export(_required_project(args, self.store))
+
     def _do_ui_qual_annotate(self, args: Mapping[str, Any]) -> dict[str, Any]:
         source_id = _string(args, "source_id", 36)
         start = _integer(args, "start")
@@ -754,6 +1063,32 @@ class UIFacade:
         return {"dataset_id": dataset.id, "variables": variables,
                 "total_rows": len(dataset.rows)}
 
+    def _do_ui_variable_metadata(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        dataset_id = _string(args, "dataset_id", 36, required=False)
+        records = [
+            value for value in project.variable_metadata.values()
+            if not dataset_id or value.get("dataset_id") == dataset_id
+        ]
+        return {"records": records, "revision": project.revision}
+
+    def _do_ui_variable_metadata_update(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        dataset_id = _string(args, "dataset_id", 36)
+        variable = _string(args, "variable", 100)
+        metadata = args.get("metadata", {})
+        if not isinstance(metadata, Mapping):
+            raise UIError("INVALID_INPUT", "Variable metadata must be structured.",
+                          "Use the variable metadata editor.")
+
+        def update(project: Project) -> dict[str, Any]:
+            return {
+                "metadata": set_variable_metadata(
+                    project, dataset_id=dataset_id, variable=variable, metadata=metadata
+                )
+            }
+
+        return self._mutate(args, "ui.variable.metadata.update", update)
+
     def _do_ui_dataset_describe(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
         dataset = _dataset(project, _string(args, "dataset_id", 36))
@@ -776,6 +1111,177 @@ class UIFacade:
             "method": "descriptive statistics only",
             "warning": "Non-numeric and non-finite cells were excluded; inspect missingness.",
         }
+
+    def _do_ui_analysis_methods(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        methods: list[Mapping[str, Any]] = [{
+            "id": "descriptive",
+            "label": "Descriptive statistics",
+            "available": True,
+            "arguments": {
+                "dataset_id": {"type": "string"},
+                "column": {"type": "string"},
+            },
+            "note": "Local descriptive summary only; no inferential claim is produced.",
+        }]
+        if self.analysis_backend is not None:
+            methods.extend(self.analysis_backend.methods())
+        else:
+            methods.extend([
+                {
+                    "id": "group-comparison",
+                    "label": "Group comparison",
+                    "available": False,
+                    "blocker": "Scientific analysis adapter is not connected.",
+                },
+                {
+                    "id": "correlation",
+                    "label": "Correlation",
+                    "available": False,
+                    "blocker": "Scientific analysis adapter is not connected.",
+                },
+                {
+                    "id": "regression",
+                    "label": "Regression explorer",
+                    "available": False,
+                    "blocker": "Scientific analysis adapter is not connected.",
+                },
+            ])
+        return {"methods": [dict(item) for item in methods]}
+
+    def _do_ui_analysis_run(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        method = _string(args, "method", 120)
+        inputs = args.get("inputs", {})
+        if not isinstance(inputs, Mapping):
+            raise UIError("INVALID_INPUT", "Analysis inputs must be structured.",
+                          "Review variables, groups and missing-data settings.")
+
+        def update(project: Project) -> dict[str, Any]:
+            if method == "descriptive":
+                dataset_id = str(inputs.get("dataset_id", ""))
+                column = str(inputs.get("column", ""))
+                dataset = _dataset(project, dataset_id)
+                if column not in dataset.columns:
+                    raise UIError("NOT_FOUND", "Unknown analysis variable.",
+                                  "Choose a variable from the active dataset.")
+                index = dataset.columns.index(column)
+                values = [_safe_number(row[index]) for row in dataset.rows]
+                numbers = [value for value in values if value is not None]
+                if not numbers:
+                    raise UIError("INVALID_INPUT", "No numeric observations are available.",
+                                  "Choose a numeric variable and review missing codes.")
+                raw_result: Mapping[str, Any] = {
+                    "method": "descriptive statistics",
+                    "method_version": "python-statistics-v1",
+                    "inputs": {
+                        "dataset_id": dataset.id,
+                        "column": column,
+                        "rows": len(dataset.rows),
+                    },
+                    "assumptions": [
+                        "Values must be interpretable as finite numeric observations."
+                    ],
+                    "warnings": [
+                        "Non-numeric and non-finite cells are excluded from this summary."
+                    ],
+                    "estimates": {
+                        "n": len(numbers),
+                        "mean": statistics.fmean(numbers),
+                        "median": statistics.median(numbers),
+                        "minimum": min(numbers),
+                        "maximum": max(numbers),
+                        "sample_sd": (
+                            statistics.stdev(numbers) if len(numbers) >= 2 else None
+                        ),
+                    },
+                    "uncertainty": {},
+                    "diagnostics": {
+                        "excluded_n": len(values) - len(numbers),
+                        "missing_data_handling": "listwise exclusion for this variable",
+                    },
+                    "provenance": {
+                        "dataset_origin": dataset.origin,
+                        "project_revision": project.revision,
+                    },
+                }
+            else:
+                if self.analysis_backend is None:
+                    raise UIError(
+                        "DEPENDENCY_MISSING",
+                        "This scientific method is unavailable in the UI-only workstream.",
+                        "Connect the typed analysis adapter during final integration.",
+                    )
+                raw_result = self.analysis_backend.run(method, inputs)
+            result = store_analysis_result(project, raw_result)
+            return {"result": result}
+
+        return self._mutate(args, "ui.analysis.run", update)
+
+    def _do_ui_analysis_results(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {"results": list(project.analysis_results), "revision": project.revision}
+
+    def _do_ui_analysis_export(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return analysis_result_export(project, _string(args, "result_id", 60))
+
+    def _do_ui_codebook_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {
+            "codes": list(project.codebook),
+            "recoding_trace": list(project.recoding_trace[-200:]),
+            "revision": project.revision,
+        }
+
+    def _do_ui_codebook_upsert(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        def update(project: Project) -> dict[str, Any]:
+            return {
+                "code": upsert_code(
+                    project,
+                    code_id=_string(args, "code_id", 60, required=False),
+                    name=_string(args, "name", 100),
+                    description=_string(args, "description", 1_000, required=False),
+                    inclusion_rule=_string(args, "inclusion_rule", 1_000, required=False),
+                    exclusion_rule=_string(args, "exclusion_rule", 1_000, required=False),
+                    marker=_string(args, "marker", 8, required=False) or "●",
+                )
+            }
+
+        return self._mutate(args, "ui.codebook.upsert", update)
+
+    def _do_ui_codebook_merge(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        source_ids = args.get("source_ids", [])
+        if not isinstance(source_ids, list) or any(
+            not isinstance(item, str) for item in source_ids
+        ):
+            raise UIError("INVALID_INPUT", "Source code identifiers must be a list.",
+                          "Select codes from the codebook.")
+
+        def update(project: Project) -> dict[str, Any]:
+            return {
+                "trace": merge_codes(
+                    project,
+                    source_ids=cast(list[str], source_ids),
+                    target_id=_string(args, "target_id", 60),
+                    conflict_note=_string(args, "conflict_note", 2_000),
+                )
+            }
+
+        return self._mutate(args, "ui.codebook.merge", update)
+
+    def _do_ui_mixed_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {"links": list(project.mixed_method_links), "revision": project.revision}
+
+    def _do_ui_mixed_add(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        link = args.get("link", {})
+        if not isinstance(link, Mapping):
+            raise UIError("INVALID_INPUT", "Mixed-method link must be structured.",
+                          "Use the mixed-method matrix editor.")
+
+        def update(project: Project) -> dict[str, Any]:
+            return {"link": add_mixed_method_link(project, link)}
+
+        return self._mutate(args, "ui.mixed.add", update)
 
     def _chart(self, args: Mapping[str, Any]) -> ChartSpec:
         project = _required_project(args, self.store)
@@ -824,7 +1330,10 @@ class UIFacade:
 
     def _do_ui_tutorial_step(self, args: Mapping[str, Any]) -> dict[str, Any]:
         step = _string(args, "step", 100)
-        valid = {"create-project", "add-source", "write-note", "export"}
+        valid = {
+            "create-project", "research-question", "add-source", "source-import",
+            "screening", "data", "evidence", "write-note", "writing", "export", "privacy",
+        }
         if step not in valid:
             raise UIError("INVALID_INPUT", "Unknown tutorial step.",
                           "Choose a listed learning step.")
@@ -836,9 +1345,58 @@ class UIFacade:
 
         return self._mutate(args, "ui.tutorial.step", update)
 
+    def _do_ui_tutorial_status(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        required = (
+            "research-question", "source-import", "screening", "data",
+            "evidence", "writing", "export", "privacy",
+        )
+        completed = list(project.tutorial_steps)
+        return {
+            "completed": completed,
+            "remaining": [step for step in required if step not in completed],
+            "complete": all(step in completed for step in required),
+            "synthetic_examples_only": True,
+        }
+
+    def _do_ui_reference_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {"references": list(project.references), "revision": project.revision}
+
+    def _do_ui_reference_upsert(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        reference = args.get("reference", {})
+        if not isinstance(reference, Mapping):
+            raise UIError("INVALID_INPUT", "Reference metadata must be structured.",
+                          "Use the reference editor and enter metadata manually.")
+
+        def update(project: Project) -> dict[str, Any]:
+            return {"reference": upsert_reference(project, reference)}
+
+        return self._mutate(args, "ui.reference.upsert", update)
+
+    def _do_ui_reference_citation(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return citation_text(project, _string(args, "reference_id", 60))
+
     def _do_ui_activity_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
-        return {"events": [asdict(item) for item in project.activity]}
+        offset = _integer(args, "offset", maximum=1000)
+        limit = _integer(args, "limit", minimum=1, maximum=500, default=100)
+        operation = _string(args, "operation", 200, required=False)
+        events = [
+            asdict(item) for item in project.activity
+            if not operation or item.operation == operation
+        ]
+        return {
+            "total": len(events),
+            "offset": offset,
+            "limit": limit,
+            "events": events[offset:offset + limit],
+            "actor_authentication": False,
+            "limitation": (
+                "Activity records describe local operations, not authenticated identities."
+            ),
+        }
 
     def _do_ui_preferences_read(self, args: Mapping[str, Any]) -> dict[str, Any]:
         return {"preferences": asdict(self.settings.load())}
@@ -954,14 +1512,170 @@ class UIFacade:
         return {"denied": True, "executed": False, "description": summary,
                 "message": "Human denied proposed action; no changes made."}
 
+    def _do_ui_agent_action_propose(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        proposal = args.get("proposal", {})
+        if not isinstance(proposal, Mapping):
+            raise UIError("INVALID_INPUT", "Agent proposal must be structured.",
+                          "Review the exact operation, target and affected data.")
 
-def build_ui_facade(root: Path | str | None = None, *,
-                    export_authorizer: Callable[[str], bool] | None = None,
-                    backup_authorizer: Callable[[str, str], bool] | None = None) -> UIFacade:
+        def update(project: Project) -> dict[str, Any]:
+            return {"action": propose_action(project, proposal)}
+
+        return self._mutate(args, "ui.agent.action.propose", update)
+
+    def _do_ui_agent_action_approve(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        action_id = _string(args, "action_id", 60)
+        fingerprint = _string(args, "expected_fingerprint", 64)
+
+        def update(project: Project) -> dict[str, Any]:
+            return {
+                "action": approve_action(
+                    project, action_id=action_id, expected_fingerprint=fingerprint
+                )
+            }
+
+        return self._mutate(args, "ui.agent.action.approve", update)
+
+    def _do_ui_agent_action_deny(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        action_id = _string(args, "action_id", 60)
+        reason = _string(args, "reason", 1_000)
+
+        def update(project: Project) -> dict[str, Any]:
+            return {"action": deny_action(project, action_id=action_id, reason=reason)}
+
+        return self._mutate(args, "ui.agent.action.deny", update)
+
+    def _do_ui_agent_action_record(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        output_refs = args.get("output_refs", [])
+        if not isinstance(output_refs, list) or any(
+            not isinstance(item, str) for item in output_refs
+        ):
+            raise UIError("INVALID_INPUT", "Output references must be a list of identifiers.",
+                          "Use identifiers emitted by the approved execution host.")
+
+        def update(project: Project) -> dict[str, Any]:
+            return {
+                "action": record_action_execution(
+                    project,
+                    action_id=_string(args, "action_id", 60),
+                    approval_id=_string(args, "approval_id", 60),
+                    event=_string(args, "event", 30),
+                    output_refs=cast(list[str], output_refs),
+                    message=_string(args, "message", 1_000, required=False),
+                )
+            }
+
+        return self._mutate(args, "ui.agent.action.record", update)
+
+    def _do_ui_agent_timeline(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {
+            "events": list(project.agent_actions),
+            "revision": project.revision,
+            "note": "Timeline identities are local labels, not authenticated user identities.",
+        }
+
+    def _do_ui_provider_read(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return provider_status(project, offline=self.settings.load().offline)
+
+    def _do_ui_provider_update(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        provider = args.get("provider", {})
+        if not isinstance(provider, Mapping):
+            raise UIError("INVALID_INPUT", "Provider configuration must be structured.",
+                          "Use the provider manager.")
+
+        def update(project: Project) -> dict[str, Any]:
+            return {"provider": configure_provider(project, provider)}
+
+        return self._mutate(args, "ui.provider.update", update)
+
+    def _do_ui_privacy_read(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return privacy_report(
+            project,
+            offline=self.settings.load().offline,
+            backup_root=str(self.snapshots.root),
+        )
+
+    def _do_ui_integration_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {"integrations": integration_catalog(project), "revision": project.revision}
+
+    def _do_ui_integration_disconnect(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        permissions = args.get("permissions", [])
+        if not isinstance(permissions, list) or any(
+            not isinstance(item, str) for item in permissions
+        ):
+            raise UIError("INVALID_INPUT", "Integration permissions must be a list.",
+                          "Review the adapter permission scope.")
+
+        def update(project: Project) -> dict[str, Any]:
+            return {
+                "integration": set_integration(
+                    project,
+                    integration_id=_string(args, "integration_id", 80),
+                    connected=False,
+                    permissions=cast(list[str], permissions),
+                )
+            }
+
+        return self._mutate(args, "ui.integration.disconnect", update)
+
+    def _do_ui_notification_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        include_dismissed = bool(args.get("include_dismissed", False))
+        records = [
+            item for item in project.notifications
+            if include_dismissed or not item.get("dismissed")
+        ]
+        return {"notifications": records, "revision": project.revision}
+
+    def _do_ui_notification_add(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        linkage = args.get("linkage", {})
+        if not isinstance(linkage, Mapping):
+            raise UIError("INVALID_INPUT", "Notification linkage must be structured.",
+                          "Link only known project, job, source or operation identifiers.")
+
+        def update(project: Project) -> dict[str, Any]:
+            return {
+                "notification": add_notification(
+                    project,
+                    code=_string(args, "code", 80),
+                    severity=_string(args, "severity", 20),
+                    message=_string(args, "message", 1_000),
+                    recovery=_string(args, "recovery", 1_000),
+                    linkage=linkage,
+                )
+            }
+
+        return self._mutate(args, "ui.notification.add", update)
+
+    def _do_ui_notification_dismiss(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        notification_id = _string(args, "notification_id", 60)
+
+        def update(project: Project) -> dict[str, Any]:
+            return {
+                "notification": dismiss_notification(project, notification_id)
+            }
+
+        return self._mutate(args, "ui.notification.dismiss", update)
+
+
+def build_ui_facade(
+    root: Path | str | None = None, *,
+    export_authorizer: Callable[[str], bool] | None = None,
+    backup_authorizer: Callable[[str, str], bool] | None = None,
+    analysis_backend: AnalysisBackend | None = None,
+) -> UIFacade:
     """Construct a real local command host; caller controls all filesystem locations."""
     from platformdirs import user_data_dir
 
     destination = Path(root) if root is not None else Path(user_data_dir(
         "ResearchWeave", "ResearchWeave")) / "ui-v2"
-    return UIFacade(destination, export_authorizer=export_authorizer,
-                    backup_authorizer=backup_authorizer)
+    return UIFacade(
+        destination,
+        export_authorizer=export_authorizer,
+        backup_authorizer=backup_authorizer,
+        analysis_backend=analysis_backend,
+    )
