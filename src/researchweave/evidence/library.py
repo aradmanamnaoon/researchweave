@@ -249,6 +249,11 @@ class LibraryService:
                     "Note source is unknown", "NOT_FOUND")
             conn.execute("INSERT INTO notes VALUES (?,?,?,?,?)",
                          (note_id, source_id, title, body, now_utc()))
+            self._ensure_note_history(conn)
+            conn.execute(
+                "INSERT INTO note_revisions VALUES (?,?,?,?,?,?,?)",
+                (note_id, 1, title, body, "Initial note", "unknown", now_utc()),
+            )
 
         _, revision = self.store.mutate("evidence.note",
                                         {"note_id": note_id, "source_id": source_id,
@@ -257,13 +262,216 @@ class LibraryService:
         return {"note_id": note_id, "source_id": source_id, "revision": revision,
                 "evidence_class": "human_note_unverified"}
 
+    @staticmethod
+    def _ensure_note_history(conn: Any) -> None:
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS note_revisions ("
+            "note_id TEXT NOT NULL REFERENCES notes(id), "
+            "revision INTEGER NOT NULL CHECK(revision>0), "
+            "title TEXT NOT NULL, body TEXT NOT NULL, rationale TEXT NOT NULL, "
+            "actor TEXT NOT NULL, recorded_at TEXT NOT NULL, "
+            "PRIMARY KEY(note_id,revision))"
+        )
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS note_tombstones ("
+            "note_id TEXT PRIMARY KEY REFERENCES notes(id), reason TEXT NOT NULL, "
+            "actor TEXT NOT NULL, deleted_at TEXT NOT NULL)"
+        )
+
+    def _adopt_note_history(self, conn: Any, note_id: str) -> Any:
+        self._ensure_note_history(conn)
+        note = conn.execute("SELECT * FROM notes WHERE id=?", (note_id,)).fetchone()
+        require(note is not None, "Evidence note not found", "NOT_FOUND")
+        existing = conn.execute(
+            "SELECT COUNT(*) FROM note_revisions WHERE note_id=?", (note_id,)
+        ).fetchone()[0]
+        if existing == 0:
+            conn.execute(
+                "INSERT INTO note_revisions VALUES (?,?,?,?,?,?,?)",
+                (
+                    note_id,
+                    1,
+                    note["title"],
+                    note["body"],
+                    "Legacy note adopted into revision history",
+                    "migration",
+                    note["created_at"],
+                ),
+            )
+        return note
+
+    def revise_note(
+        self,
+        note_id: str,
+        title: str,
+        body: str,
+        actor: str,
+        rationale: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        require(bool(title.strip()) and len(title) <= 300, "Note title required")
+        require(bool(body.strip()) and len(body) <= 250_000, "Invalid note text")
+        require(bool(actor.strip()) and len(actor) <= 255, "Note editor is required")
+        require(bool(rationale.strip()) and len(rationale) <= 5000,
+                "Note revision rationale is required")
+
+        def persist(conn: Any) -> int:
+            note = self._adopt_note_history(conn, note_id)
+            require(
+                conn.execute(
+                    "SELECT 1 FROM note_tombstones WHERE note_id=?", (note_id,)
+                ).fetchone() is None,
+                "Deleted note cannot be revised",
+                "CONFLICT",
+            )
+            latest = int(conn.execute(
+                "SELECT MAX(revision) FROM note_revisions WHERE note_id=?", (note_id,)
+            ).fetchone()[0])
+            require(
+                note["title"] != title or note["body"] != body,
+                "Note revision does not change content",
+                "CONFLICT",
+            )
+            revision = latest + 1
+            conn.execute(
+                "INSERT INTO note_revisions VALUES (?,?,?,?,?,?,?)",
+                (
+                    note_id,
+                    revision,
+                    title,
+                    body,
+                    rationale.strip(),
+                    actor.strip(),
+                    now_utc(),
+                ),
+            )
+            conn.execute(
+                "UPDATE notes SET title=?,body=? WHERE id=?", (title, body, note_id)
+            )
+            return revision
+
+        note_revision, project_revision = self.store.mutate(
+            "evidence.note_revise",
+            {
+                "note_id": note_id,
+                "body_sha256": sha256(body.encode()),
+                "actor": actor.strip(),
+                "rationale": rationale.strip(),
+            },
+            persist,
+            expected_revision=expected_revision,
+        )
+        return {
+            "note_id": note_id,
+            "note_revision": note_revision,
+            "project_revision": project_revision,
+            "history_preserved": True,
+        }
+
+    def delete_note(
+        self,
+        note_id: str,
+        actor: str,
+        reason: str,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
+        require(bool(actor.strip()) and len(actor) <= 255, "Deleting actor is required")
+        require(bool(reason.strip()) and len(reason) <= 5000, "Deletion reason is required")
+
+        def persist(conn: Any) -> None:
+            self._adopt_note_history(conn, note_id)
+            require(
+                conn.execute(
+                    "SELECT 1 FROM note_tombstones WHERE note_id=?", (note_id,)
+                ).fetchone() is None,
+                "Note is already deleted",
+                "CONFLICT",
+            )
+            conn.execute(
+                "INSERT INTO note_tombstones VALUES (?,?,?,?)",
+                (note_id, reason.strip(), actor.strip(), now_utc()),
+            )
+
+        _, project_revision = self.store.mutate(
+            "evidence.note_delete",
+            {"note_id": note_id, "actor": actor.strip(), "reason": reason.strip()},
+            persist,
+            expected_revision=expected_revision,
+        )
+        return {
+            "note_id": note_id,
+            "deleted": True,
+            "physical_row_preserved": True,
+            "project_revision": project_revision,
+        }
+
+    def note_history(self, note_id: str) -> dict[str, Any]:
+        note = self.store.conn.execute(
+            "SELECT * FROM notes WHERE id=?", (note_id,)
+        ).fetchone()
+        require(note is not None, "Evidence note not found", "NOT_FOUND")
+        exists = self.store.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='note_revisions'"
+        ).fetchone()
+        if exists is None:
+            revisions = [{
+                "note_id": note_id,
+                "revision": 1,
+                "title": note["title"],
+                "body": note["body"],
+                "rationale": "Legacy note without explicit revision metadata",
+                "actor": "unknown",
+                "recorded_at": note["created_at"],
+            }]
+            tombstone = None
+        else:
+            revisions = [
+                dict(row)
+                for row in self.store.conn.execute(
+                    "SELECT * FROM note_revisions WHERE note_id=? ORDER BY revision",
+                    (note_id,),
+                )
+            ]
+            tombstone_table = self.store.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='note_tombstones'"
+            ).fetchone()
+            tombstone = (
+                self.store.conn.execute(
+                    "SELECT * FROM note_tombstones WHERE note_id=?", (note_id,)
+                ).fetchone()
+                if tombstone_table is not None
+                else None
+            )
+        return {
+            "note_id": note_id,
+            "source_id": note["source_id"],
+            "revisions": revisions,
+            "deleted": tombstone is not None,
+            "tombstone": dict(tombstone) if tombstone is not None else None,
+        }
+
     def export_notebook(self) -> str:
         lines = ["# Evidence notebook", "",
                  "*Human notes are interpretations; source quotations must be independently "
                  "verified.*", ""]
-        for row in self.store.conn.execute(
-            "SELECT n.title,n.body,s.title AS source,n.source_id FROM notes n "
-            "JOIN sources s ON s.id=n.source_id ORDER BY n.created_at,n.id"):
+        tombstones = self.store.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='note_tombstones'"
+        ).fetchone()
+        if tombstones is None:
+            rows = self.store.conn.execute(
+                "SELECT n.title,n.body,s.title AS source,n.source_id FROM notes n "
+                "JOIN sources s ON s.id=n.source_id ORDER BY n.created_at,n.id"
+            )
+        else:
+            rows = self.store.conn.execute(
+                "SELECT n.title,n.body,s.title AS source,n.source_id FROM notes n "
+                "JOIN sources s ON s.id=n.source_id "
+                "LEFT JOIN note_tombstones t ON t.note_id=n.id "
+                "WHERE t.note_id IS NULL ORDER BY n.created_at,n.id"
+            )
+        for row in rows:
             title = str(row["title"]).replace("\n", " ").replace("#", "")
             lines.extend([f"## {title}", f"Source: {row['source']} ({row['source_id']})",
                           "", row["body"], ""])
