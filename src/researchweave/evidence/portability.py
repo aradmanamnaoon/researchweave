@@ -345,6 +345,26 @@ def selective_clone(
 
     review_record_ids: set[str] = set()
     if review_ids:
+        known_reviews = {
+            str(row["review_id"])
+            for row in store.conn.execute("SELECT DISTINCT review_id FROM review_records")
+        }
+        if table_exists("review_search_runs"):
+            known_reviews.update(
+                str(row["review_id"])
+                for row in store.conn.execute("SELECT DISTINCT review_id FROM review_search_runs")
+            )
+        if table_exists("review_studies"):
+            known_reviews.update(
+                str(row["review_id"])
+                for row in store.conn.execute("SELECT DISTINCT review_id FROM review_studies")
+            )
+        missing_reviews = sorted(set(review_ids) - known_reviews)
+        require(
+            not missing_reviews,
+            f"Review selection not found: {', '.join(missing_reviews)}",
+            "NOT_FOUND",
+        )
         rows = [
             row
             for row in store.conn.execute("SELECT id,review_id,reference_id FROM review_records")
@@ -395,6 +415,46 @@ def selective_clone(
                 reference_set.add(str(alias["canonical_id"]))
                 changed = True
 
+    # Preserve the source side of selected, fully-contained citation relations and
+    # highlight relocation history. These are dependencies, not an instruction to
+    # pull unrelated citation-neighborhood records into a selective clone.
+    citation_edges: list[dict[str, Any]] = []
+    if table_exists("reference_citations"):
+        citation_edges = [
+            dict(row)
+            for row in store.conn.execute("SELECT * FROM reference_citations ORDER BY id")
+            if row["citing_id"] in reference_set and row["cited_id"] in reference_set
+        ]
+        for edge in citation_edges:
+            anchor = store.conn.execute(
+                "SELECT source_id FROM anchors WHERE id=?", (edge["anchor_id"],)
+            ).fetchone()
+            require(
+                anchor is not None,
+                "Citation anchor dependency is missing",
+                "INTEGRITY_FAILURE",
+            )
+            source_set.add(str(anchor["source_id"]))
+
+    highlight_rows: list[dict[str, Any]] = []
+    relocation_rows: list[dict[str, Any]] = []
+    if table_exists("evidence_highlights"):
+        highlight_rows = [
+            dict(row)
+            for row in store.conn.execute("SELECT * FROM evidence_highlights ORDER BY id")
+            if row["source_id"] in source_set
+        ]
+        highlight_ids = {row["id"] for row in highlight_rows}
+        if highlight_ids and table_exists("evidence_highlight_relocations"):
+            relocation_rows = [
+                dict(row)
+                for row in store.conn.execute(
+                    "SELECT * FROM evidence_highlight_relocations ORDER BY recorded_at,id"
+                )
+                if row["highlight_id"] in highlight_ids
+            ]
+            source_set.update(str(row["target_source_id"]) for row in relocation_rows)
+
     sources = []
     for source_id in sorted(source_set):
         row = store.conn.execute(
@@ -424,6 +484,65 @@ def selective_clone(
         dict(row)
         for row in store.conn.execute("SELECT * FROM anchors ORDER BY id")
         if row["source_id"] in source_set
+    ]
+    note_ids = {row["id"] for row in notes}
+    note_revisions = (
+        [
+            dict(row)
+            for row in store.conn.execute("SELECT * FROM note_revisions ORDER BY note_id,revision")
+            if row["note_id"] in note_ids
+        ]
+        if note_ids and table_exists("note_revisions")
+        else []
+    )
+    note_tombstones = (
+        [
+            dict(row)
+            for row in store.conn.execute("SELECT * FROM note_tombstones ORDER BY note_id")
+            if row["note_id"] in note_ids
+        ]
+        if note_ids and table_exists("note_tombstones")
+        else []
+    )
+    anchor_ids = {row["id"] for row in anchors}
+    # A relocation can add a target source after the first highlight pass. Include
+    # highlights belonging to those dependency sources too, while keeping the
+    # relationship set bounded to the selected source closure.
+    if table_exists("evidence_highlights"):
+        highlight_rows = [
+            dict(row)
+            for row in store.conn.execute("SELECT * FROM evidence_highlights ORDER BY id")
+            if row["source_id"] in source_set
+        ]
+        highlight_ids = {row["id"] for row in highlight_rows}
+        if table_exists("evidence_highlight_relocations"):
+            relocation_rows = [
+                dict(row)
+                for row in store.conn.execute(
+                    "SELECT * FROM evidence_highlight_relocations ORDER BY recorded_at,id"
+                )
+                if row["highlight_id"] in highlight_ids and row["target_source_id"] in source_set
+            ]
+    citation_assertions = (
+        [
+            dict(row)
+            for row in store.conn.execute("SELECT * FROM citation_assertions ORDER BY id")
+            if row["citing_id"] in reference_set and row["cited_id"] in reference_set
+        ]
+        if table_exists("citation_assertions")
+        else []
+    )
+    claims = [
+        dict(row)
+        for row in store.conn.execute("SELECT * FROM claims ORDER BY id")
+        if (row["note_id"] is not None and row["note_id"] in note_ids)
+        or (row["anchor_id"] is not None and row["anchor_id"] in anchor_ids)
+    ]
+    selected_object_ids = source_set | reference_set | note_ids | anchor_ids | review_record_ids
+    lineage = [
+        dict(row)
+        for row in store.conn.execute("SELECT * FROM lineage ORDER BY child_id,parent_id")
+        if row["child_id"] in selected_object_ids and row["parent_id"] in selected_object_ids
     ]
     text_rows = [
         dict(row)
@@ -664,6 +783,41 @@ def selective_clone(
                             note[key] for key in ("id", "source_id", "title", "body", "created_at")
                         ),
                     )
+                if note_revisions:
+                    conn.execute(
+                        "CREATE TABLE IF NOT EXISTS note_revisions ("
+                        "note_id TEXT NOT NULL REFERENCES notes(id),revision INTEGER NOT NULL "
+                        "CHECK(revision>0),title TEXT NOT NULL,body TEXT NOT NULL,"
+                        "rationale TEXT NOT NULL,actor TEXT NOT NULL,recorded_at TEXT NOT NULL,"
+                        "PRIMARY KEY(note_id,revision))"
+                    )
+                    for row in note_revisions:
+                        conn.execute(
+                            "INSERT INTO note_revisions VALUES (?,?,?,?,?,?,?)",
+                            tuple(
+                                row[key]
+                                for key in (
+                                    "note_id",
+                                    "revision",
+                                    "title",
+                                    "body",
+                                    "rationale",
+                                    "actor",
+                                    "recorded_at",
+                                )
+                            ),
+                        )
+                if note_tombstones:
+                    conn.execute(
+                        "CREATE TABLE IF NOT EXISTS note_tombstones ("
+                        "note_id TEXT PRIMARY KEY REFERENCES notes(id),reason TEXT NOT NULL,"
+                        "actor TEXT NOT NULL,deleted_at TEXT NOT NULL)"
+                    )
+                    for row in note_tombstones:
+                        conn.execute(
+                            "INSERT INTO note_tombstones VALUES (?,?,?,?)",
+                            tuple(row[key] for key in ("note_id", "reason", "actor", "deleted_at")),
+                        )
                 for anchor in anchors:
                     conn.execute(
                         "INSERT INTO anchors VALUES (?,?,?,?,?,?,?,?)",
@@ -680,6 +834,133 @@ def selective_clone(
                                 "verified",
                             )
                         ),
+                    )
+                if highlight_rows:
+                    conn.execute(
+                        "CREATE TABLE IF NOT EXISTS evidence_highlights ("
+                        "id TEXT PRIMARY KEY,source_id TEXT NOT NULL REFERENCES sources(id),"
+                        "page_number INTEGER NOT NULL CHECK(page_number>0),"
+                        "start_offset INTEGER NOT NULL,end_offset INTEGER NOT NULL,"
+                        "quote TEXT NOT NULL,source_sha256 TEXT NOT NULL,page_sha256 TEXT NOT NULL,"
+                        "extraction_version TEXT NOT NULL,created_at TEXT NOT NULL,"
+                        "CHECK(start_offset>=0),CHECK(end_offset>=start_offset))"
+                    )
+                    for row in highlight_rows:
+                        conn.execute(
+                            "INSERT INTO evidence_highlights VALUES (?,?,?,?,?,?,?,?,?,?)",
+                            tuple(
+                                row[key]
+                                for key in (
+                                    "id",
+                                    "source_id",
+                                    "page_number",
+                                    "start_offset",
+                                    "end_offset",
+                                    "quote",
+                                    "source_sha256",
+                                    "page_sha256",
+                                    "extraction_version",
+                                    "created_at",
+                                )
+                            ),
+                        )
+                if relocation_rows:
+                    conn.execute(
+                        "CREATE TABLE IF NOT EXISTS evidence_highlight_relocations ("
+                        "id TEXT PRIMARY KEY,highlight_id TEXT NOT NULL "
+                        "REFERENCES evidence_highlights(id),target_source_id TEXT NOT NULL "
+                        "REFERENCES sources(id),status TEXT NOT NULL CHECK(status IN "
+                        "('unchanged','relocated','ambiguous','missing')),target_page INTEGER,"
+                        "target_start INTEGER,target_end INTEGER,target_page_sha256 TEXT,"
+                        "candidate_count INTEGER NOT NULL CHECK(candidate_count>=0),"
+                        "review_required INTEGER NOT NULL CHECK(review_required IN (0,1)),"
+                        "recorded_at TEXT NOT NULL)"
+                    )
+                    for row in relocation_rows:
+                        conn.execute(
+                            "INSERT INTO evidence_highlight_relocations "
+                            "VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                            tuple(
+                                row[key]
+                                for key in (
+                                    "id",
+                                    "highlight_id",
+                                    "target_source_id",
+                                    "status",
+                                    "target_page",
+                                    "target_start",
+                                    "target_end",
+                                    "target_page_sha256",
+                                    "candidate_count",
+                                    "review_required",
+                                    "recorded_at",
+                                )
+                            ),
+                        )
+                if citation_edges:
+                    conn.execute(
+                        "CREATE TABLE IF NOT EXISTS reference_citations ("
+                        "id TEXT PRIMARY KEY,citing_id TEXT NOT NULL REFERENCES reference(id),"
+                        "cited_id TEXT NOT NULL REFERENCES reference(id),anchor_id TEXT NOT NULL "
+                        "REFERENCES anchors(id),anchor_sha256 TEXT NOT NULL,actor TEXT NOT NULL,"
+                        "rationale TEXT NOT NULL,created_at TEXT NOT NULL,revoked_at TEXT,"
+                        "revocation_reason TEXT,revoked_by TEXT,CHECK(citing_id != cited_id))"
+                    )
+                    for row in citation_edges:
+                        conn.execute(
+                            "INSERT INTO reference_citations VALUES (?,?,?,?,?,?,?,?,?,?,?)",
+                            tuple(
+                                row[key]
+                                for key in (
+                                    "id",
+                                    "citing_id",
+                                    "cited_id",
+                                    "anchor_id",
+                                    "anchor_sha256",
+                                    "actor",
+                                    "rationale",
+                                    "created_at",
+                                    "revoked_at",
+                                    "revocation_reason",
+                                    "revoked_by",
+                                )
+                            ),
+                        )
+                if citation_assertions:
+                    conn.execute(
+                        "CREATE TABLE IF NOT EXISTS citation_assertions ("
+                        "id TEXT PRIMARY KEY,citing_id TEXT NOT NULL REFERENCES reference(id),"
+                        "cited_id TEXT NOT NULL REFERENCES reference(id),provenance TEXT NOT NULL,"
+                        "confirmed_by TEXT NOT NULL,created_at TEXT NOT NULL,"
+                        "UNIQUE(citing_id,cited_id))"
+                    )
+                    for row in citation_assertions:
+                        conn.execute(
+                            "INSERT INTO citation_assertions VALUES (?,?,?,?,?,?)",
+                            tuple(
+                                row[key]
+                                for key in (
+                                    "id",
+                                    "citing_id",
+                                    "cited_id",
+                                    "provenance",
+                                    "confirmed_by",
+                                    "created_at",
+                                )
+                            ),
+                        )
+                for row in claims:
+                    conn.execute(
+                        "INSERT INTO claims VALUES (?,?,?,?,?)",
+                        tuple(
+                            row[key]
+                            for key in ("id", "note_id", "anchor_id", "statement", "interpretation")
+                        ),
+                    )
+                for row in lineage:
+                    conn.execute(
+                        "INSERT INTO lineage VALUES (?,?,?)",
+                        tuple(row[key] for key in ("child_id", "parent_id", "kind")),
                     )
                 for protocol in protocol_rows:
                     conn.execute(
@@ -960,6 +1241,9 @@ def selective_clone(
             "collections": len(collection_rows),
             "review_records": len(review_records),
             "protocol_versions": len(protocol_rows),
+            "note_revisions": len(note_revisions),
+            "highlights": len(highlight_rows),
+            "citation_relations": len(citation_edges) + len(citation_assertions),
             "dependency_closed_source_ids": sorted(source_set),
             "dependency_closed_reference_ids": sorted(reference_set),
             "destination": str(destination),
