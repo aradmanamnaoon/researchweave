@@ -1,0 +1,27 @@
+{
+  "journey": "03_citation_integrity_failure",
+  "steps": [
+    {
+      "operation": "project.create",
+      "status": "ok"
+    },
+    {
+      "operation": "library.bibliography_import",
+      "status": "ok"
+    },
+    {
+      "operation": "reference.validate",
+      "status": "ok"
+    },
+    {
+      "code": "INVALID_INPUT",
+      "operation": "library.bibliography_import",
+      "status": "failed"
+    },
+    {
+      "operation": "reference.raw_preservation",
+      "status": "ok"
+    }
+  ],
+  "verified": true
+}

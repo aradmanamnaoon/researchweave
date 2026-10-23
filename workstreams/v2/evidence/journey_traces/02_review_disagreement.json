@@ -1,0 +1,74 @@
+{
+  "journey": "02_review_disagreement",
+  "steps": [
+    {
+      "operation": "project.create",
+      "status": "ok"
+    },
+    {
+      "operation": "library.bibliography_import",
+      "status": "ok"
+    },
+    {
+      "operation": "review.search_begin",
+      "status": "ok"
+    },
+    {
+      "operation": "review.register",
+      "status": "ok"
+    },
+    {
+      "operation": "review.search_hit",
+      "status": "ok"
+    },
+    {
+      "operation": "review.search_hit",
+      "status": "ok"
+    },
+    {
+      "operation": "review.search_finalize",
+      "status": "ok"
+    },
+    {
+      "operation": "review.screen",
+      "status": "ok"
+    },
+    {
+      "operation": "review.status",
+      "status": "ok"
+    },
+    {
+      "operation": "review.screen",
+      "status": "ok"
+    },
+    {
+      "operation": "review.status",
+      "status": "ok"
+    },
+    {
+      "operation": "review.adjudicate",
+      "status": "ok"
+    },
+    {
+      "operation": "review.retrieval",
+      "status": "ok"
+    },
+    {
+      "operation": "review.advance",
+      "status": "ok"
+    },
+    {
+      "operation": "review.prisma",
+      "status": "ok"
+    },
+    {
+      "operation": "review.prisma_export",
+      "status": "ok"
+    },
+    {
+      "operation": "library.references",
+      "status": "ok"
+    }
+  ],
+  "verified": true
+}
