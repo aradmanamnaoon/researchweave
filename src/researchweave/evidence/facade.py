@@ -36,6 +36,8 @@ from .identity import IdentityService
 from .interoperability import (
     InteroperabilityService,
     VaultRecord,
+    ZoteroLocalBridge,
+    ZoteroLocalTransport,
     preview_obsidian_vault,
     preview_zotero_export,
 )
@@ -399,6 +401,9 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "migration.zotero_export": (
         "read", ("project_id", "batch_id"),
         "Export exact preserved Zotero CSL-JSON with mapping receipt"),
+    "migration.zotero_local_read": (
+        "external-network", ("path",),
+        "Read Zotero's explicitly enabled local API through an injected host transport"),
     "migration.obsidian_preview": (
         "read", ("files",), "Preview sanitized Obsidian vault Markdown mapping"),
     "migration.obsidian_import": (
@@ -600,11 +605,15 @@ def _artifact_wire(receipt: Mapping[str, Any]) -> dict[str, Any]:
 class EvidenceFacade:
     def __init__(self, workspace_root: Path, *, allow_local_writes: bool = False,
                  allow_remote_queries: bool = False,
-                 metadata_transport: HTTPTransport | None = None) -> None:
+                 metadata_transport: HTTPTransport | None = None,
+                 zotero_transport: ZoteroLocalTransport | None = None) -> None:
         self.workspace_root = workspace_root.resolve()
         self.allow_local_writes = allow_local_writes
         self.allow_remote_queries = allow_remote_queries and metadata_transport is not None
         self.catalog = CatalogClient(metadata_transport, offline=not self.allow_remote_queries)
+        self.zotero_bridge = (
+            ZoteroLocalBridge(zotero_transport) if zotero_transport is not None else None
+        )
 
     def capability_manifest(self) -> list[Mapping[str, Any]]:
         return [
@@ -620,8 +629,9 @@ class EvidenceFacade:
              "transmitted_data": (["provider-selected bibliographic query-or-identifier",
                                     "result-limit"]
                                   if effect == "external-network" else []),
-             "network_hosts": (["api.crossref.org", "api.openalex.org",
-                                "eutils.ncbi.nlm.nih.gov", "www.ebi.ac.uk"]
+             "network_hosts": (["127.0.0.1"] if operation == "migration.zotero_local_read"
+                               else ["api.crossref.org", "api.openalex.org",
+                                     "eutils.ncbi.nlm.nih.gov", "www.ebi.ac.uk"]
                                if effect == "external-network" else []),
              "required_arguments": list(required),
              "arguments_schema": arguments_schema(operation, required),
@@ -700,7 +710,14 @@ class EvidenceFacade:
             if effect == "local-write" and not self.allow_local_writes:
                 raise EvidenceError("NEEDS_APPROVAL", "Local writes need trusted host access",
                                     "Approve through the host, then retry.")
-            if effect == "external-network" and not self.allow_remote_queries:
+            if operation == "migration.zotero_local_read" and self.zotero_bridge is None:
+                raise EvidenceError(
+                    "OFFLINE_DENIED",
+                    "Zotero local API access is disabled",
+                    "Inject a user-authorized Zotero local transport through the trusted host.",
+                )
+            if (effect == "external-network" and operation != "migration.zotero_local_read"
+                    and not self.allow_remote_queries):
                 raise EvidenceError("OFFLINE_DENIED", "Network lookups are disabled",
                                     "Enable access with an injected trusted HTTPS transport.")
             data = self._dispatch(operation, arguments, expected)
@@ -769,6 +786,15 @@ class EvidenceFacade:
             return preview_markdown(_markdown_records(args))
         if operation == "migration.zotero_preview":
             return preview_zotero_export(_bytes(args))
+        if operation == "migration.zotero_local_read":
+            bridge = self.zotero_bridge
+            if bridge is None:
+                raise EvidenceError(
+                    "OFFLINE_DENIED",
+                    "Zotero local transport unavailable",
+                    "Inject a user-authorized Zotero local transport through the trusted host.",
+                )
+            return bridge.request("GET", _value(args, "path", str))
         if operation == "migration.obsidian_preview":
             return preview_obsidian_vault(_vault_records(args))
         if operation == "project.archive_verify":

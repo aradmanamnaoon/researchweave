@@ -3,6 +3,7 @@ from __future__ import annotations
 import csv
 import io
 import json
+import zipfile
 from pathlib import Path
 
 import pytest
@@ -67,11 +68,19 @@ def test_manuscript_markdown_html_and_manifest_checksums(tmp_path: Path) -> None
         service = ArtifactFormatService(store)
         markdown = service.export_manuscript("paper", "markdown")
         html_export = service.export_manuscript("paper", "html")
+        docx_export = service.export_manuscript("paper", "docx")
         assert b"# Abstract" in markdown["bytes"]
         assert b"&lt;unsafe&gt; &amp; literal." in html_export["bytes"]
-        manifest = service.manifest([markdown, html_export])
+        assert zipfile.is_zipfile(io.BytesIO(docx_export["bytes"]))
+        try:
+            pdf_export = service.export_manuscript("paper", "pdf")
+        except EvidenceError as exc:
+            assert exc.code == "DEPENDENCY_MISSING"
+        else:
+            assert pdf_export["bytes"].startswith(b"%PDF")
+        manifest = service.manifest([markdown, html_export, docx_export])
         assert manifest["deterministic"] is True
-        assert len(manifest["artifacts"]) == 2
+        assert len(manifest["artifacts"]) == 3
         assert manifest["manifest_sha256"]
 
 

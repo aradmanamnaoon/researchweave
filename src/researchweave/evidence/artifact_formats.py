@@ -9,7 +9,7 @@ import json
 import re
 from typing import Any
 
-from .errors import require
+from .errors import EvidenceError, require
 from .library import LibraryService
 from .models import canonical_json, sha256
 from .storage import ProjectStore
@@ -166,7 +166,7 @@ class ArtifactFormatService:
 
     def export_manuscript(self, manuscript_id: str, format_name: str) -> dict[str, Any]:
         require(
-            format_name in {"markdown", "html"},
+            format_name in {"markdown", "html", "docx", "pdf"},
             "Unsupported manuscript export format",
             "UNSUPPORTED_FORMAT",
         )
@@ -176,7 +176,7 @@ class ArtifactFormatService:
         if format_name == "markdown":
             data = markdown.encode()
             fidelity = "native_markdown"
-        else:
+        elif format_name == "html":
             rendered: list[str] = ["<!doctype html>", '<html lang="en">', "<body>"]
             for section in sections:
                 rendered.append(f"<h1>{html.escape(str(section['section']))}</h1>")
@@ -186,6 +186,51 @@ class ArtifactFormatService:
             rendered.extend(["</body>", "</html>", ""])
             data = "\n".join(rendered).encode()
             fidelity = "plain_text_structure_preserved_markup_not_interpreted"
+        elif format_name == "docx":
+            try:
+                from docx import Document
+            except ImportError as exc:
+                raise EvidenceError(
+                    "DEPENDENCY_MISSING",
+                    "DOCX export requires python-docx",
+                    "Install the optional document-export dependency and retry.",
+                ) from exc
+            document = Document()
+            for section in sections:
+                document.add_heading(str(section["section"]), level=1)
+                for paragraph in str(section["body"]).split("\n\n"):
+                    if paragraph.strip():
+                        document.add_paragraph(paragraph)
+            output = io.BytesIO()
+            document.save(output)
+            data = output.getvalue()
+            fidelity = "section_and_paragraph_structure_preserved_citation_tokens_literal"
+        else:
+            try:
+                from reportlab.lib.styles import getSampleStyleSheet  # type: ignore[import-untyped]
+                from reportlab.platypus import (  # type: ignore[import-untyped]
+                    Paragraph,
+                    SimpleDocTemplate,
+                    Spacer,
+                )
+            except ImportError as exc:
+                raise EvidenceError(
+                    "DEPENDENCY_MISSING",
+                    "PDF export requires reportlab",
+                    "Install the optional PDF-export dependency and retry.",
+                ) from exc
+            output = io.BytesIO()
+            styles = getSampleStyleSheet()
+            story: list[Any] = []
+            for section in sections:
+                story.append(Paragraph(html.escape(str(section["section"])), styles["Heading1"]))
+                for paragraph in str(section["body"]).split("\n\n"):
+                    if paragraph.strip():
+                        story.append(Paragraph(html.escape(paragraph), styles["BodyText"]))
+                        story.append(Spacer(1, 8))
+            SimpleDocTemplate(output).build(story)
+            data = output.getvalue()
+            fidelity = "section_and_paragraph_structure_preserved_citation_tokens_literal"
         return {
             "format": format_name,
             "bytes": data,
