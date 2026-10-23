@@ -58,7 +58,10 @@ def preview_project(
         2 <= len(locale) <= 20 and all(char.isalnum() or char in "-_" for char in locale),
         "Invalid project locale",
     )
-    require(privacy in {"private", "public"}, "Project privacy must be private or public")
+    require(
+        privacy in {"private", "restricted", "public"},
+        "Project privacy must be private, restricted, or public",
+    )
     require(stage in ALLOWED_STAGES, "Unknown project lifecycle stage")
     require(len(description) <= 10_000, "Project description is too long", "RESOURCE_LIMIT")
     normalized_tags = sorted({tag.strip().casefold() for tag in (tags or []) if tag.strip()})
@@ -156,6 +159,7 @@ def create_project(
     description: str = "",
     tags: list[str] | None = None,
     advanced: dict[str, Any] | None = None,
+    project_id: str | None = None,
 ) -> dict[str, Any]:
     """Create a project atomically after validating the complete wizard payload."""
     preview = preview_project(
@@ -185,6 +189,7 @@ def create_project(
             preview["metadata"]["design"],
             preview["metadata"]["locale"],
             preview["metadata"]["privacy"],
+            project_id=project_id,
         ) as store:
             metadata = preview["metadata"]
 

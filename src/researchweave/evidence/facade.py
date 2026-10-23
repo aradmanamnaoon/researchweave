@@ -11,11 +11,13 @@ import binascii
 from collections.abc import Mapping
 from dataclasses import asdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal, cast
 from uuid import UUID
 
+from .artifact_formats import ArtifactFormatService
 from .bibliography import parse_bibliography
 from .citation_graph import CitationGraphService
+from .claim_support import ClaimSupportService
 from .collections import CollectionService
 from .contracts import arguments_schema, response_schema, risk_metadata, validate_arguments
 from .data_management import DataManagementPlanService
@@ -28,6 +30,7 @@ from .encrypted_archive import (
 )
 from .errors import EvidenceError, require
 from .extraction import ExtractedValue, ExtractionService, FieldDefinition
+from .extraction_forms import ExtractionFormService
 from .identity import IdentityService
 from .interoperability import (
     InteroperabilityService,
@@ -41,6 +44,7 @@ from .models import new_id
 from .portability import export_research_artifacts, export_review_packet, selective_clone
 from .prisma_export import prisma_export
 from .project_format import archive_project, restore_archive, verify_archive
+from .project_wizard import create_project, preview_project, project_profile
 from .protocols import ProtocolService, question_feedback
 from .provenance import export_provenance
 from .publishing import PublishingService
@@ -51,10 +55,12 @@ from .recovery import (
 )
 from .reference_identity import compare_reference, reconcile_catalog_candidates
 from .reference_monitor import ReferenceUpdateMonitor
+from .research_design import ResearchQuestionService
 from .reviews import ReviewService
 from .schema_migrations import inspect_schema, migrate_project
 from .search_index import LocalIndex
 from .storage import ProjectStore
+from .study_registry import StudyRegistryService
 from .synthesis import Finding, SynthesisService
 from .timeline import research_timeline, timeline_json
 from .writing import WritingService
@@ -62,7 +68,14 @@ from .writing import WritingService
 # effect, required arguments, description
 OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "project.create": ("local-write", ("title", "question", "design"), "Create a local project"),
+    "project.wizard_preview": (
+        "read", ("title", "question", "design"),
+        "Validate beginner or advanced project setup without writing"),
+    "project.wizard_create": (
+        "local-write", ("title", "question", "design"),
+        "Create an atomic guided beginner or advanced project"),
     "project.open": ("read", ("project_id",), "Read local project identity"),
+    "project.profile": ("read", ("project_id",), "Read guided project lifecycle profile"),
     "project.migration_preview": (
         "read", ("project_id",), "Inspect legacy SQLite migration compatibility"),
     "project.migrate": (
@@ -127,6 +140,8 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
         "read", ("project_id",), "Filter references by collection tags year and text"),
     "library.collection_export": (
         "read", ("project_id", "collection_id"), "Export collection CSV"),
+    "library.reference_export": (
+        "read", ("project_id", "format"), "Render references in a portable standard format"),
     "reference.validate": ("read", ("project_id", "reference_id"), "Inspect DOI syntax"),
     "reference.compare_metadata": (
         "read", ("project_id", "reference_id", "candidate"),
@@ -171,15 +186,50 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
                         "Record exact quote anchor"),
     "evidence.note": ("local-write", ("project_id", "source_id", "title", "body"),
                       "Record attributed evidence note"),
+    "evidence.note_revise": (
+        "local-write", ("project_id", "note_id", "title", "body", "actor", "rationale"),
+        "Append an evidence-note revision"),
+    "evidence.note_delete": (
+        "local-write", ("project_id", "note_id", "actor", "reason"),
+        "Tombstone an evidence note while preserving history"),
+    "evidence.note_history": (
+        "read", ("project_id", "note_id"), "Read evidence-note revisions and tombstone"),
     "evidence.notebook_export": ("read", ("project_id",), "Render notebook Markdown"),
     "question.feedback": ("read", ("question", "framework", "fields"), "Question checklist"),
+    "question.create": (
+        "local-write", ("project_id", "question", "framework", "fields", "author"),
+        "Persist a structured research question without generating hypotheses"),
+    "question.amend": (
+        "local-write",
+        ("project_id", "question_id", "question", "framework", "fields", "author", "rationale"),
+        "Append a structured research-question version"),
+    "question.history": (
+        "read", ("project_id", "question_id"), "Read structured research-question history"),
     "protocol.create": ("local-write", ("project_id", "title", "author", "body"),
                         "Register protocol"),
     "protocol.amend": ("local-write", ("project_id", "protocol_id", "author", "rationale", "body"),
                        "Append protocol version"),
     "protocol.history": ("read", ("project_id", "protocol_id"), "View protocol history"),
+    "protocol.diff": (
+        "read", ("project_id", "protocol_id", "from_version", "to_version"),
+        "Compare immutable protocol versions"),
+    "protocol.export": (
+        "read", ("project_id", "protocol_id"), "Export protocol version history as Markdown"),
     "review.register": ("local-write", ("project_id", "review_id", "reference_id"),
                         "Register review record"),
+    "review.study_create": (
+        "local-write", ("project_id", "review_id", "label"),
+        "Create an explicit stable study identity"),
+    "review.study_attach": (
+        "local-write", ("project_id", "study_id", "record_id", "relationship", "rationale"),
+        "Attach one imported report to an explicit study identity"),
+    "review.study_detach": (
+        "local-write", ("project_id", "study_id", "record_id", "rationale"),
+        "Detach a report from a study identity with audit rationale"),
+    "review.studies": (
+        "read", ("project_id", "review_id"), "List studies and their explicitly linked reports"),
+    "review.study_unassigned": (
+        "read", ("project_id", "review_id"), "List reports without inferred study identity"),
     "review.search_begin": ("local-write", ("project_id", "review_id", "provider",
                                            "query", "expected_records"), "Save exact search"),
     "review.search_hit": ("local-write", ("project_id", "run_id", "reference_id",
@@ -203,8 +253,23 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
                              "Export conservative persisted PRISMA counts"),
     "review.extract": ("local-write", ("project_id", "record_id", "schema",
                                        "extracted", "reviewer"), "Create validated extraction"),
+    "review.form_create": (
+        "local-write", ("project_id", "name", "fields", "author"),
+        "Create a versioned extraction form"),
+    "review.form_revise": (
+        "local-write", ("project_id", "form_id", "fields", "author", "rationale", "migration"),
+        "Revise an extraction form with explicit prior-value migration"),
+    "review.form_history": (
+        "read", ("project_id", "form_id"), "Read extraction-form schema history"),
+    "review.form_record": (
+        "local-write", ("project_id", "form_id", "record_id", "values", "reviewer"),
+        "Record values against the latest extraction-form schema"),
+    "review.form_values": (
+        "read", ("project_id", "form_id"), "Read versioned extraction-form values"),
     "review.evidence_matrix": ("read", ("project_id", "review_id"),
                                "Read attributed study outcome fields"),
+    "review.evidence_matrix_export": (
+        "read", ("project_id", "review_id"), "Export attributed evidence matrix as CSV"),
     "review.bias_assess": ("local-write", ("project_id", "record_id", "template",
                                           "assessor", "responses"),
                            "Record evidence-backed manual bias appraisal"),
@@ -216,14 +281,34 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "review.gap_add": ("local-write", ("project_id", "question", "searches", "limitations"),
                        "Record reproducible evidence gap"),
     "review.gaps": ("read", ("project_id",), "Read evidence gap registry"),
+    "review.gap_update": (
+        "local-write", ("project_id", "gap_id", "status", "priority", "rationale", "actor"),
+        "Update evidence-gap priority and lifecycle with rationale"),
     "review.synthesis_compose": ("local-write", ("project_id", "title", "sections"),
                                  "Save attributed narrative synthesis"),
     "review.synthesis_outline": ("read", ("project_id", "outline_id"), "Read saved synthesis"),
+    "review.synthesis_export": (
+        "read", ("project_id", "outline_id"), "Export attributed narrative synthesis Markdown"),
     "review.packet_export": (
         "local-write", ("project_id", "review_id", "filename"),
         "Export privacy-reviewed systematic-review packet"),
     "writing.section_save": ("local-write", ("project_id", "manuscript_id", "section",
                                            "body", "citations"), "Save manuscript section"),
+    "writing.section_history": (
+        "read", ("project_id", "manuscript_id", "section"),
+        "Read manuscript section revision history"),
+    "writing.section_diff": (
+        "read",
+        ("project_id", "manuscript_id", "section", "from_revision", "to_revision"),
+        "Compare manuscript section revisions"),
+    "writing.claim_add": (
+        "local-write",
+        ("project_id", "manuscript_id", "section", "statement", "statement_start",
+         "statement_end", "actor", "rationale"),
+        "Register an exact manuscript claim span with explicit support classification"),
+    "writing.claim_check": (
+        "read", ("project_id", "manuscript_id"),
+        "Recheck registered manuscript claims against current sections and anchors"),
     "writing.inspect": ("read", ("project_id", "manuscript_id"), "Inspect citations"),
     "writing.render": ("read", ("project_id", "manuscript_id"), "Export manuscript Markdown"),
     "writing.bibliography": ("read", ("project_id", "manuscript_id"),
@@ -232,6 +317,12 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
                       "Inspect manuscript submission issues"),
     "writing.submission_packet": ("read", ("project_id", "manuscript_id", "journal"),
                                   "Prepare unsubmitted publication packet"),
+    "writing.submission_export": (
+        "local-write", ("project_id", "manuscript_id", "journal", "filename"),
+        "Atomically export an integrity-checked draft submission ZIP"),
+    "writing.manuscript_export": (
+        "read", ("project_id", "manuscript_id", "format"),
+        "Render manuscript in a deterministic portable format"),
     "provenance.graph": ("read", ("project_id",), "Export provenance graph"),
     "data_management.create": (
         "local-write", ("project_id", "title", "inventory", "policies", "rationale",
@@ -358,6 +449,99 @@ def _vault_records(arguments: Mapping[str, Any]) -> list[VaultRecord]:
     return records
 
 
+def _string_mapping(arguments: Mapping[str, Any], key: str) -> dict[str, str]:
+    value = _value(arguments, key, dict)
+    require(
+        all(isinstance(name, str) and isinstance(item, str) for name, item in value.items()),
+        f"Argument {key} must map strings to strings",
+    )
+    return dict(value)
+
+
+def _field_definitions(arguments: Mapping[str, Any]) -> list[FieldDefinition]:
+    values = _value(arguments, "fields", list)
+    require(0 < len(values) <= 200, "Extraction form needs 1 to 200 fields")
+    output: list[FieldDefinition] = []
+    allowed = {"name", "datatype", "required", "permitted_values", "unit", "minimum", "maximum"}
+    for item in values:
+        require(isinstance(item, dict), "Extraction form fields must be objects")
+        require(set(item).issubset(allowed), "Extraction form field has unsupported properties")
+        name = item.get("name")
+        datatype = item.get("datatype")
+        require(isinstance(name, str), "Extraction form field name is required")
+        require(
+            isinstance(datatype, str)
+            and datatype in {"number", "integer", "string", "boolean", "category"},
+            "Unsupported extraction field datatype",
+        )
+        permitted = item.get("permitted_values", [])
+        require(
+            isinstance(permitted, list) and all(isinstance(value, str) for value in permitted),
+            "Extraction field permitted_values must be strings",
+        )
+        unit = item.get("unit")
+        require(unit is None or isinstance(unit, str), "Extraction field unit must be text")
+        minimum = item.get("minimum")
+        maximum = item.get("maximum")
+        require(
+            minimum is None or type(minimum) in {int, float},
+            "Extraction field minimum must be numeric",
+        )
+        require(
+            maximum is None or type(maximum) in {int, float},
+            "Extraction field maximum must be numeric",
+        )
+        typed_datatype = cast(
+            Literal["number", "integer", "string", "boolean", "category"], datatype
+        )
+        output.append(
+            FieldDefinition(
+                name=name,
+                datatype=typed_datatype,
+                required=item.get("required") is True,
+                permitted_values=tuple(permitted),
+                unit=unit,
+                minimum=float(minimum) if minimum is not None else None,
+                maximum=float(maximum) if maximum is not None else None,
+            )
+        )
+    return output
+
+
+def _wizard_options(arguments: Mapping[str, Any]) -> dict[str, Any]:
+    tags = arguments.get("tags")
+    advanced = arguments.get("advanced")
+    require(tags is None or isinstance(tags, list), "Project tags must be an array")
+    require(
+        tags is None or all(isinstance(tag, str) for tag in tags),
+        "Project tags must contain strings",
+    )
+    require(advanced is None or isinstance(advanced, dict), "Advanced metadata must be an object")
+    return {
+        "mode": str(arguments.get("mode", "beginner")),
+        "locale": str(arguments.get("locale", "en")),
+        "privacy": str(arguments.get("privacy", "private")),
+        "stage": str(arguments.get("stage", "planning")),
+        "description": str(arguments.get("description", "")),
+        "tags": tags,
+        "advanced": advanced,
+    }
+
+
+def _artifact_wire(receipt: Mapping[str, Any]) -> dict[str, Any]:
+    payload = receipt.get("bytes")
+    require(
+        isinstance(payload, bytes),
+        "Artifact renderer did not return bytes",
+        "INTEGRITY_FAILURE",
+    )
+    payload_bytes = cast(bytes, payload)
+    return {
+        **{key: value for key, value in receipt.items() if key != "bytes"},
+        "data_base64": base64.b64encode(payload_bytes).decode("ascii"),
+    }
+
+
 class EvidenceFacade:
     def __init__(self, workspace_root: Path, *, allow_local_writes: bool = False,
                  allow_remote_queries: bool = False,
@@ -482,6 +666,24 @@ class EvidenceFacade:
             return question_feedback(_value(args, "question", str),
                                      _value(args, "framework", str),
                                      _value(args, "fields", dict))
+        if operation == "project.wizard_preview":
+            return preview_project(
+                title=_value(args, "title", str),
+                question=_value(args, "question", str),
+                design=_value(args, "design", str),
+                **_wizard_options(args),
+            )
+        if operation == "project.wizard_create":
+            project_id = new_id()
+            self.workspace_root.mkdir(parents=True, exist_ok=True)
+            return create_project(
+                self.workspace_root / project_id,
+                title=_value(args, "title", str),
+                question=_value(args, "question", str),
+                design=_value(args, "design", str),
+                project_id=project_id,
+                **_wizard_options(args),
+            )
         if operation == "project.create":
             project_id = new_id()
             self.workspace_root.mkdir(parents=True, exist_ok=True)
@@ -538,6 +740,8 @@ class EvidenceFacade:
         with self._project(_value(args, "project_id", str)) as store:
             if operation == "project.open":
                 return asdict(store.info())
+            if operation == "project.profile":
+                return project_profile(store)
             if operation == "project.integrity":
                 return store.audit()
             if operation in {"project.timeline", "project.timeline_export"}:
@@ -673,6 +877,18 @@ class EvidenceFacade:
                     "format": "csv",
                     "text": collections.export_csv(_value(args, "collection_id", str)),
                 }
+            if operation == "library.reference_export":
+                reference_ids = args.get("reference_ids")
+                require(
+                    reference_ids is None or isinstance(reference_ids, list),
+                    "reference_ids must be an array",
+                )
+                return _artifact_wire(
+                    ArtifactFormatService(store).export_references(
+                        _value(args, "format", str),
+                        reference_ids=reference_ids,
+                    )
+                )
             if operation == "reference.validate":
                 return library.validate_reference(_value(args, "reference_id", str))
             if operation == "reference.compare_metadata":
@@ -763,8 +979,48 @@ class EvidenceFacade:
                 return library.add_note(_value(args, "source_id", str),
                     _value(args, "title", str), _value(args, "body", str),
                     expected_revision=expected)
+            if operation == "evidence.note_revise":
+                return library.revise_note(
+                    _value(args, "note_id", str),
+                    _value(args, "title", str),
+                    _value(args, "body", str),
+                    _value(args, "actor", str),
+                    _value(args, "rationale", str),
+                    expected_revision=expected,
+                )
+            if operation == "evidence.note_delete":
+                return library.delete_note(
+                    _value(args, "note_id", str),
+                    _value(args, "actor", str),
+                    _value(args, "reason", str),
+                    expected_revision=expected,
+                )
+            if operation == "evidence.note_history":
+                return library.note_history(_value(args, "note_id", str))
             if operation == "evidence.notebook_export":
                 return {"format": "markdown", "text": library.export_notebook()}
+            questions = ResearchQuestionService(store)
+            if operation == "question.create":
+                return questions.create(
+                    _value(args, "question", str),
+                    _value(args, "framework", str),
+                    _string_mapping(args, "fields"),
+                    _value(args, "author", str),
+                    rationale=str(args.get("rationale", "Initial structured question")),
+                    expected_revision=expected,
+                )
+            if operation == "question.amend":
+                return questions.amend(
+                    _value(args, "question_id", str),
+                    _value(args, "question", str),
+                    _value(args, "framework", str),
+                    _string_mapping(args, "fields"),
+                    _value(args, "author", str),
+                    _value(args, "rationale", str),
+                    expected_revision=expected,
+                )
+            if operation == "question.history":
+                return {"history": questions.history(_value(args, "question_id", str))}
             protocol = ProtocolService(store)
             if operation == "protocol.create":
                 return protocol.create(_value(args, "title", str), _value(args, "author", str),
@@ -775,11 +1031,51 @@ class EvidenceFacade:
                     _value(args, "body", dict), expected_revision=expected)
             if operation == "protocol.history":
                 return {"history": protocol.history(_value(args, "protocol_id", str))}
+            if operation == "protocol.diff":
+                return protocol.diff(
+                    _value(args, "protocol_id", str),
+                    _value(args, "from_version", int),
+                    _value(args, "to_version", int),
+                )
+            if operation == "protocol.export":
+                return {
+                    "format": "markdown",
+                    "text": protocol.export_markdown(_value(args, "protocol_id", str)),
+                }
             review = ReviewService(store)
             if operation == "review.register":
                 return review.register(_value(args, "review_id", str),
                     _value(args, "reference_id", str), args.get("study_id"),
                     expected_revision=expected)
+            studies = StudyRegistryService(store)
+            if operation == "review.study_create":
+                metadata = args.get("metadata")
+                require(metadata is None or isinstance(metadata, Mapping), "Invalid study metadata")
+                return studies.create(
+                    _value(args, "review_id", str),
+                    _value(args, "label", str),
+                    metadata,
+                    expected_revision=expected,
+                )
+            if operation == "review.study_attach":
+                return studies.attach_report(
+                    _value(args, "study_id", str),
+                    _value(args, "record_id", str),
+                    _value(args, "relationship", str),
+                    _value(args, "rationale", str),
+                    expected_revision=expected,
+                )
+            if operation == "review.study_detach":
+                return studies.detach_report(
+                    _value(args, "study_id", str),
+                    _value(args, "record_id", str),
+                    _value(args, "rationale", str),
+                    expected_revision=expected,
+                )
+            if operation == "review.studies":
+                return {"studies": studies.studies(_value(args, "review_id", str))}
+            if operation == "review.study_unassigned":
+                return studies.reconcile_unassigned(_value(args, "review_id", str))
             if operation == "review.search_begin":
                 return review.begin_search(_value(args, "review_id", str),
                     _value(args, "provider", str), _value(args, "query", str),
@@ -826,9 +1122,56 @@ class EvidenceFacade:
                     ExtractedValue(**_value(args, "extracted", dict)),
                     _value(args, "reviewer", str), args.get("anchor_id"),
                     expected_revision=expected)
+            forms = ExtractionFormService(store)
+            if operation == "review.form_create":
+                return forms.create(
+                    _value(args, "name", str),
+                    _field_definitions(args),
+                    _value(args, "author", str),
+                    rationale=str(args.get("rationale", "Initial extraction schema")),
+                    expected_revision=expected,
+                )
+            if operation == "review.form_revise":
+                migration = _value(args, "migration", dict)
+                require(
+                    all(
+                        isinstance(key, str) and (value is None or isinstance(value, str))
+                        for key, value in migration.items()
+                    ),
+                    "Form migration must map field names to field names or null",
+                )
+                return forms.revise(
+                    _value(args, "form_id", str),
+                    _field_definitions(args),
+                    _value(args, "author", str),
+                    _value(args, "rationale", str),
+                    migration,
+                    expected_revision=expected,
+                )
+            if operation == "review.form_history":
+                return {"history": forms.history(_value(args, "form_id", str))}
+            if operation == "review.form_record":
+                return forms.record(
+                    _value(args, "form_id", str),
+                    _value(args, "record_id", str),
+                    _value(args, "values", dict),
+                    _value(args, "reviewer", str),
+                    expected_revision=expected,
+                )
+            if operation == "review.form_values":
+                version = args.get("version")
+                require(version is None or type(version) is int, "Invalid extraction-form version")
+                return {
+                    "values": forms.values(_value(args, "form_id", str), version=version)
+                }
             if operation == "review.evidence_matrix":
                 return {"records": ExtractionService(store).matrix(
                     _value(args, "review_id", str))}
+            if operation == "review.evidence_matrix_export":
+                return {
+                    "format": "csv",
+                    "text": ExtractionService(store).matrix_csv(_value(args, "review_id", str)),
+                }
             synthesis = SynthesisService(store)
             if operation == "review.bias_assess":
                 return synthesis.assess_bias(_value(args, "record_id", str),
@@ -847,11 +1190,25 @@ class EvidenceFacade:
                     expected_revision=expected)
             if operation == "review.gaps":
                 return {"records": synthesis.gaps()}
+            if operation == "review.gap_update":
+                return synthesis.update_gap(
+                    _value(args, "gap_id", str),
+                    _value(args, "status", str),
+                    _value(args, "priority", str),
+                    _value(args, "rationale", str),
+                    _value(args, "actor", str),
+                    expected_revision=expected,
+                )
             if operation == "review.synthesis_compose":
                 return synthesis.compose(_value(args, "title", str),
                     _value(args, "sections", list), expected_revision=expected)
             if operation == "review.synthesis_outline":
                 return synthesis.outline(_value(args, "outline_id", str))
+            if operation == "review.synthesis_export":
+                return {
+                    "format": "markdown",
+                    "text": synthesis.export_outline_markdown(_value(args, "outline_id", str)),
+                }
             if operation == "review.packet_export":
                 exports = self.workspace_root / "exports"
                 exports.mkdir(exist_ok=True)
@@ -868,6 +1225,37 @@ class EvidenceFacade:
                 return writing.save_section(_value(args, "manuscript_id", str),
                     _value(args, "section", str), _value(args, "body", str),
                     _value(args, "citations", dict), expected_revision=expected)
+            if operation == "writing.section_history":
+                return {
+                    "history": writing.section_history(
+                        _value(args, "manuscript_id", str), _value(args, "section", str)
+                    )
+                }
+            if operation == "writing.section_diff":
+                return writing.section_diff(
+                    _value(args, "manuscript_id", str),
+                    _value(args, "section", str),
+                    _value(args, "from_revision", int),
+                    _value(args, "to_revision", int),
+                )
+            claims = ClaimSupportService(store)
+            if operation == "writing.claim_add":
+                anchor_id = args.get("anchor_id")
+                require(anchor_id is None or isinstance(anchor_id, str), "Invalid anchor_id")
+                return claims.add(
+                    _value(args, "manuscript_id", str),
+                    _value(args, "section", str),
+                    _value(args, "statement", str),
+                    _value(args, "statement_start", int),
+                    _value(args, "statement_end", int),
+                    _value(args, "actor", str),
+                    _value(args, "rationale", str),
+                    anchor_id=anchor_id,
+                    interpretation=args.get("interpretation") is True,
+                    expected_revision=expected,
+                )
+            if operation == "writing.claim_check":
+                return claims.check(_value(args, "manuscript_id", str))
             if operation == "writing.inspect":
                 return writing.inspect(_value(args, "manuscript_id", str))
             if operation == "writing.render":
@@ -883,6 +1271,32 @@ class EvidenceFacade:
                 return publishing.submission_packet(_value(args, "manuscript_id", str),
                     _value(args, "journal", str),
                     allow_incomplete=args.get("allow_incomplete") is True)
+            if operation == "writing.submission_export":
+                exports = self.workspace_root / "exports"
+                exports.mkdir(exist_ok=True)
+                requirements = args.get("requirements")
+                metadata = args.get("supplied_metadata")
+                require(requirements is None or isinstance(requirements, dict),
+                        "Invalid venue requirements")
+                require(metadata is None or isinstance(metadata, dict),
+                        "Invalid supplied submission metadata")
+                return publishing.export_submission_packet(
+                    _value(args, "manuscript_id", str),
+                    _value(args, "journal", str),
+                    exports / _simple_filename(
+                        _value(args, "filename", str), ".rw-submission.zip"
+                    ),
+                    allow_incomplete=args.get("allow_incomplete") is True,
+                    requirements=requirements,
+                    supplied_metadata=metadata,
+                )
+            if operation == "writing.manuscript_export":
+                return _artifact_wire(
+                    ArtifactFormatService(store).export_manuscript(
+                        _value(args, "manuscript_id", str),
+                        _value(args, "format", str),
+                    )
+                )
             if operation == "provenance.graph":
                 return export_provenance(store)
             dmp = DataManagementPlanService(store)

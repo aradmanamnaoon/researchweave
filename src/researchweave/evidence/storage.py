@@ -207,8 +207,9 @@ class ProjectStore:
         require(bool(question.strip()) and len(question) <= 4000,
                 "A research question is required")
         require(design in {"exploratory", "observational", "experimental", "qualitative",
-                           "mixed", "computational", "systematic_review", "replication",
-                           "nonacademic"}, "Unsupported research design")
+                           "mixed", "mixed_methods", "secondary_analysis", "computational",
+                           "systematic_review", "replication", "nonacademic"},
+                "Unsupported research design")
         require(privacy in {"private", "restricted", "public"}, "Unknown privacy setting")
         require(2 <= len(locale) <= 16 and locale.replace("-", "").isalpha(),
                 "Locale must be a language code")
@@ -287,7 +288,7 @@ class ProjectStore:
         with self.transaction() as conn:
             conn.execute("INSERT OR IGNORE INTO objects(digest,size) VALUES (?,?)",
                          (digest, len(data)))
-        return digest
+        return str(digest)
 
     def get_object(self, digest: str) -> bytes:
         path = self.object_path(digest)

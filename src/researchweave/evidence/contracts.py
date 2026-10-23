@@ -18,10 +18,25 @@ _ARRAYS = {
     "sections", "unresolved",
 }
 _OBJECTS = {
-    "candidate", "citations", "extracted", "finding", "observed", "policies",
-    "responses", "schema",
+    "advanced", "candidate", "citations", "extracted", "finding", "metadata",
+    "migration", "observed", "policies", "requirements", "responses", "schema",
+    "supplied_metadata", "values",
 }
-_INTEGERS = {"start", "end", "expected_records", "page", "offset", "limit"}
+_INTEGERS = {
+    "end",
+    "expected_records",
+    "from_revision",
+    "from_version",
+    "limit",
+    "offset",
+    "page",
+    "start",
+    "statement_end",
+    "statement_start",
+    "to_revision",
+    "to_version",
+    "version",
+}
 _OPTIONAL: dict[str, str] = {
     "privacy": "string", "locale": "string", "filename": "string",
     "format": "string", "author": "string", "include_revoked": "boolean",
@@ -34,9 +49,28 @@ _OPTIONAL: dict[str, str] = {
     "rationale": "string", "actor": "string", "review_id": "string",
     "checked_at": "string", "start": "integer", "end": "integer",
     "expected_records": "integer", "allow_network": "boolean",
+    "mode": "string", "stage": "string", "description": "string",
+    "tags": "array", "advanced": "object", "metadata": "object",
+    "anchor_id": "string", "interpretation": "boolean", "relationship": "string",
+    "status": "string", "priority": "string", "style": "string",
+    "version": "integer", "requirements": "object", "supplied_metadata": "object",
+    "reference_ids": "array",
 }
-_NUMERIC_MIN = {"start": 0, "end": 0, "limit": 1,
-                "offset": 0, "expected_records": 0, "page": 1}
+_NUMERIC_MIN = {
+    "start": 0,
+    "end": 0,
+    "limit": 1,
+    "offset": 0,
+    "expected_records": 0,
+    "page": 1,
+    "from_revision": 1,
+    "from_version": 1,
+    "statement_start": 0,
+    "statement_end": 1,
+    "to_revision": 1,
+    "to_version": 1,
+    "version": 1,
+}
 _ENUMS = {
     "privacy": ["private", "restricted", "public"],
     "stage": ["title_abstract", "full_text"],
@@ -55,14 +89,35 @@ def _schema_for(name: str, operation: str) -> dict[str, Any]:
     if name == "password":
         return {"type": "string", "minLength": 1, "maxLength": 1024,
                 "writeOnly": True}
+    if name == "mode" and operation.startswith("project.wizard_"):
+        return {"type": "string", "enum": ["beginner", "advanced"]}
+    if name == "stage" and operation.startswith("project.wizard_"):
+        return {
+            "type": "string",
+            "enum": [
+                "planning", "protocol", "discovery", "screening", "extraction",
+                "synthesis", "writing",
+            ],
+        }
+    if name == "status" and operation == "review.gap_update":
+        return {"type": "string", "enum": ["open", "addressed"]}
+    if name == "priority" and operation == "review.gap_update":
+        return {"type": "string", "enum": ["low", "medium", "high", "critical"]}
+    if name == "relationship" and operation == "review.study_attach":
+        return {
+            "type": "string",
+            "enum": ["primary", "secondary", "protocol", "correction", "other"],
+        }
     if name == "body":
         if operation.startswith("protocol."):
             return {"type": "object", "maxProperties": 500}
         return {"type": "string", "maxLength": 1000000}
     if name == "fields":
-        return ({"type": "object", "maxProperties": 500}
-                if operation == "question.feedback" else
-                {"type": "array", "maxItems": 200, "items": {"type": "object"}})
+        return (
+            {"type": "object", "maxProperties": 500}
+            if operation.startswith("question.")
+            else {"type": "array", "maxItems": 200, "items": {"type": "object"}}
+        )
     if name in _OBJECTS:
         return {"type": "object", "maxProperties": 500}
     if name in _ARRAYS:
@@ -88,7 +143,8 @@ def _schema_for(name: str, operation: str) -> dict[str, Any]:
     } else 5000}
     if name in {"project_id", "source_id", "reference_id", "record_id", "anchor_id",
                 "review_id", "run_id", "collection_id", "plan_id", "form_id",
-                "outline_id", "protocol_id", "batch_id", "edge_id", "snapshot"}:
+                "outline_id", "protocol_id", "batch_id", "edge_id", "snapshot",
+                "note_id", "question_id", "study_id", "gap_id", "manuscript_id"}:
         result["minLength"] = 1
         result["maxLength"] = 255
     if name in _ENUMS:
