@@ -36,11 +36,17 @@ from .design import apply_theme, named
 from .facade import UIFacade
 from .jobs import JobManager
 from .models import ResearchTableModel
+from .pdf_reader import PDFReader
+from .visualization import Bin, ChartSpec, HistogramWidget
 
 SCREENS = (
-    "Dashboard", "Search", "Protocol", "Library", "Reader", "Review", "Data View", "Variable View",
-    "Statistics", "Qualitative", "Manuscript", "Notebook", "Agent", "Privacy",
-    "Exports", "Backups", "Jobs", "Guidance", "Preferences", "Activity", "About",
+    "Dashboard", "Search", "Protocol", "Library", "Reader", "PDF Reader", "Evidence",
+    "Review",
+    "Data View", "Variable View",
+    "Statistics", "Qualitative", "Manuscript", "Notebook", "Publishing",
+    "Agent", "Privacy",
+    "Exports", "Backups", "Diagnostics", "Jobs", "Guidance",
+    "Preferences", "Activity", "About",
 )
 
 
@@ -282,6 +288,46 @@ class ResearchWindow(QMainWindow):
         named(self.reader_text, "Read-only source content")
         layout.addWidget(self.reader_text)
         layout.addWidget(button("Code selected text", self.annotate_selection))
+        layout.addWidget(button("Capture selected text as evidence",
+                                self.capture_evidence, primary=True))
+
+        layout = self._page(
+            "PDF Reader",
+            "Read an explicitly selected local PDF in QtPdf. Verify quoted text "
+            "and page references against the source before citing.",
+        )
+        self.pdf_reader = PDFReader(self)
+        layout.addWidget(self.pdf_reader)
+
+        layout = self._page(
+            "Evidence",
+            "Source-linked quotations remain inspectable. A matching quotation "
+            "does not by itself establish scientific truth.",
+        )
+        layout.addWidget(button("Capture selection from Reader", self.capture_evidence))
+        self.evidence_list = QListWidget()
+        named(self.evidence_list, "Anchored excerpts with integrity status")
+        self.evidence_list.currentItemChanged.connect(self.inspect_selected_evidence)
+        layout.addWidget(self.evidence_list)
+        self.evidence_detail = QPlainTextEdit()
+        self.evidence_detail.setReadOnly(True)
+        named(self.evidence_detail, "Selected evidence passage and source checks")
+        layout.addWidget(self.evidence_detail)
+        self.claim_entry = QPlainTextEdit()
+        self.claim_entry.setPlaceholderText("Write a draft claim to link to the passage")
+        self.claim_entry.setMaximumHeight(90)
+        named(self.claim_entry, "New source-linked claim draft")
+        layout.addWidget(self.claim_entry)
+        layout.addWidget(button("Create claim from selected evidence",
+                                self.create_evidence_claim, primary=True))
+        self.claim_list = QListWidget()
+        named(self.claim_list, "Draft claims and evidence linkage")
+        self.claim_list.currentItemChanged.connect(self.inspect_selected_claim)
+        layout.addWidget(self.claim_list)
+        self.claim_details = QPlainTextEdit()
+        self.claim_details.setReadOnly(True)
+        named(self.claim_details, "Claim support limitations and verification warnings")
+        layout.addWidget(self.claim_details)
 
         layout = self._page("Review", "Screen included and excluded sources with a reason.")
         self.review_summary = QLabel("No screening decisions.")
@@ -335,6 +381,9 @@ class ResearchWindow(QMainWindow):
         named(self.variable_picker, "Numeric column for descriptive summary")
         layout.addWidget(self.variable_picker)
         layout.addWidget(button("Compute descriptive summary", self.run_summary, primary=True))
+        self.histogram_chart = HistogramWidget()
+        named(self.histogram_chart, "Observed value histogram")
+        layout.addWidget(self.histogram_chart)
         self.stats_result = QPlainTextEdit()
         self.stats_result.setReadOnly(True)
         named(self.stats_result, "Text alternative for numeric summary")
@@ -357,6 +406,29 @@ class ResearchWindow(QMainWindow):
         named(self.notebook_editor, "Editable research notes")
         layout.addWidget(self.notebook_editor)
         layout.addWidget(button("Save notes · Ctrl+S", lambda: self.save_text("notebook")))
+
+        layout = self._page(
+            "Publishing",
+            "Review manuscript readiness and unresolved requirements. "
+            "No approval or journal compliance can be inferred automatically.",
+        )
+        layout.addWidget(button("Inspect submission draft gates",
+                                self.preview_publishing, primary=True))
+        layout.addWidget(button("Generate review packet preview",
+                                self.preview_submission_markdown))
+        self.publication_summary = QLabel(
+            "Write a draft and link original evidence before checking submission readiness."
+        )
+        self.publication_summary.setWordWrap(True)
+        layout.addWidget(self.publication_summary)
+        self.release_gates = QListWidget()
+        named(self.release_gates, "Manuscript publication checklist and human review gates")
+        self.release_gates.currentItemChanged.connect(self.inspect_release_gate)
+        layout.addWidget(self.release_gates)
+        self.release_detail = QPlainTextEdit()
+        self.release_detail.setReadOnly(True)
+        named(self.release_detail, "Detailed release checklist and Markdown preview")
+        layout.addWidget(self.release_detail)
 
         layout = self._page("Agent", "Model plans are suggestions; no unapproved changes can run.")
         self.agent_proposal = QPlainTextEdit()
@@ -406,6 +478,25 @@ class ResearchWindow(QMainWindow):
         self.backup_receipt = QLabel("Backups are local, immutable ZIP data archives.")
         self.backup_receipt.setWordWrap(True)
         layout.addWidget(self.backup_receipt)
+
+        layout = self._page(
+            "Diagnostics",
+            "Audit local source hashes, research links, screening decisions and "
+            "table structure. Passing this audit does not certify research validity.",
+        )
+        layout.addWidget(button("Run project integrity audit",
+                                self.run_diagnostics, primary=True))
+        self.audit_summary = QLabel("No integrity audit has been run.")
+        self.audit_summary.setWordWrap(True)
+        layout.addWidget(self.audit_summary)
+        self.audit_findings = QListWidget()
+        named(self.audit_findings, "Project integrity findings")
+        self.audit_findings.currentItemChanged.connect(self.inspect_finding)
+        layout.addWidget(self.audit_findings)
+        self.audit_detail = QPlainTextEdit()
+        self.audit_detail.setReadOnly(True)
+        named(self.audit_detail, "Selected finding and corrective action")
+        layout.addWidget(self.audit_detail)
 
         layout = self._page("Jobs", "Long operations use cancellable supervised Qt tasks.")
         self.job_list = QListWidget()
@@ -482,6 +573,7 @@ class ResearchWindow(QMainWindow):
             "ui.project.update", "ui.source.add", "ui.review.vote", "ui.qual.annotate",
             "ui.dataset.import", "ui.manuscript.save", "ui.notebook.save", "ui.tutorial.step",
             "ui.protocol.start", "ui.protocol.update",
+            "ui.evidence.capture", "ui.claim.create",
         }:
             values.setdefault("expected_revision", self.revision)
         result = self.facade.execute(operation, values)
@@ -508,6 +600,8 @@ class ResearchWindow(QMainWindow):
             self.refresh_review()
         elif name == "Qualitative":
             self.refresh_annotations()
+        elif name == "Evidence":
+            self.refresh_evidence()
         elif name == "Activity":
             self.refresh_activity()
         elif name == "Protocol":
@@ -516,6 +610,10 @@ class ResearchWindow(QMainWindow):
             self.refresh_guidance()
         elif name == "Backups":
             self.refresh_backups()
+        elif name == "Diagnostics":
+            self.run_diagnostics()
+        elif name == "Publishing":
+            self.preview_publishing()
         elif name in ("Data View", "Variable View", "Statistics"):
             self.refresh_datasets()
         self.prefs.selected_screen = name
@@ -946,6 +1044,31 @@ class ResearchWindow(QMainWindow):
             self.stats_result.setPlainText("\n".join(
                 f"{key}: {value}" for key, value in result.items()
             ))
+            chart_response = self._call(
+                "ui.chart.histogram", dataset_id=self.current_dataset_id,
+                column=self.variable_picker.currentText(),
+                bins=10,
+            )
+            if chart_response is not None:
+                data = chart_response["chart"]
+                spec = ChartSpec(
+                    title=data["title"], column=data["column"],
+                    kind=data["kind"],
+                    x_label=data["x_label"], y_label=data["y_label"],
+                    bins=tuple(Bin(**item) for item in data["bins"]),
+                    n=data["n"], missing_n=data["missing_n"],
+                    min_value=data["min_value"], max_value=data["max_value"],
+                    mean=data["mean"], source_label=data["source_label"],
+                    description=data["description"],
+                )
+                self.histogram_chart.set_chart(spec)
+                self.stats_result.appendPlainText(
+                    "\nHistogram table (accessible alternative):\n" +
+                    "\n".join(
+                        f"{item['interval']}: {item['count']} observations"
+                        for item in data["accessibility_data"]
+                    )
+                )
 
     def save_text(self, which: str) -> None:
         if not self.project_id:
@@ -1124,6 +1247,85 @@ class ResearchWindow(QMainWindow):
             self.navigate("Dashboard")
             self._set_status("Verified snapshot restored to a separate local project.")
 
+    def run_diagnostics(self) -> None:
+        self.audit_findings.clear()
+        if not self.project_id:
+            self.audit_summary.setText("Select a project before running an audit.")
+            return
+        report = self._call("ui.project.audit")
+        if report is None:
+            return
+        totals = report["summary"]
+        self.audit_summary.setText(
+            f"{report['status']} · project revision {report['project_revision']}\n"
+            f"Errors: {totals['errors']} · warnings: {totals['warnings']} · "
+            f"information: {totals['information']}\n"
+            "The audit detects structural integrity issues only."
+        )
+        for finding in report["findings"]:
+            item = QListWidgetItem(
+                f"{finding['severity'].upper()} · {finding['title']} · "
+                f"{finding['location']}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, finding)
+            self.audit_findings.addItem(item)
+
+    def inspect_finding(self, current: QListWidgetItem | None,
+                        previous: QListWidgetItem | None) -> None:
+        if current is None:
+            return
+        finding = current.data(Qt.ItemDataRole.UserRole)
+        self.audit_detail.setPlainText(
+            f"{finding['severity'].upper()} · {finding['code']}\n"
+            f"Location: {finding['location']}\n\n"
+            f"Finding: {finding['message']}\n\n"
+            f"Next action: {finding['recovery']}"
+        )
+
+    def preview_publishing(self) -> None:
+        self.release_gates.clear()
+        if not self.project_id:
+            self.publication_summary.setText("Select a project before reviewing a manuscript.")
+            return
+        result = self._call("ui.release.preview")
+        if result is None:
+            return
+        self.publication_summary.setText(
+            f"Status: {result['structural_status']}\n"
+            f"Saved manuscript: {result['manuscript_characters']} characters\n"
+            f"Blocked checks: {len(result['blocking_gates'])}; "
+            f"manual review: {len(result['manual_gates'])}\n"
+            "Publication approval: No · Ethics approval: Not verified"
+        )
+        for gate in result["gates"]:
+            item = QListWidgetItem(
+                f"{gate['state'].upper()} · {gate['heading']}"
+            )
+            item.setData(Qt.ItemDataRole.UserRole, gate)
+            self.release_gates.addItem(item)
+
+    def inspect_release_gate(self, current: QListWidgetItem | None,
+                             previous: QListWidgetItem | None) -> None:
+        if current is None:
+            return
+        item = current.data(Qt.ItemDataRole.UserRole)
+        self.release_detail.setPlainText(
+            f"{item['heading']}\nState: {item['state']}\n\n"
+            f"{item['rationale']}\n\nAction: {item['next_action']}\n"
+            "Only a human can verify scientific methods, data permissions and ethics."
+        )
+
+    def preview_submission_markdown(self) -> None:
+        response = self._call("ui.release.markdown")
+        if response is not None:
+            self.release_detail.setPlainText(
+                f"Preview only · {response['filename_suggestion']}\n"
+                f"SHA-256: {response['sha256']}\n\n{response['content']}"
+            )
+            self._set_status(
+                "Review packet preview generated locally. No publication was submitted."
+            )
+
     def cancel_job(self) -> None:
         selected = self.job_list.currentItem()
         if selected:
@@ -1293,6 +1495,111 @@ class ResearchWindow(QMainWindow):
             f"Limitations: {item['caveat']}\n\n"
             f"Next action: {item['next_action']}"
         )
+
+    def capture_evidence(self) -> None:
+        if not self.current_source_id:
+            self._set_status("Choose a local source in Library before capturing evidence.")
+            return
+        cursor = self.reader_text.textCursor()
+        start, end = cursor.selectionStart(), cursor.selectionEnd()
+        if start >= end:
+            self._set_status("Highlight an exact passage in Reader first.")
+            return
+        note, accepted = QInputDialog.getText(
+            self, "Evidence interpretation", "Optional context note (not a verified claim)"
+        )
+        if not accepted:
+            return
+        result = self._call(
+            "ui.evidence.capture", source_id=self.current_source_id,
+            start=start, end=end, note=note,
+        )
+        if result is not None:
+            self.navigate("Evidence")
+            self._set_status(
+                f"Evidence anchor saved; integrity: {result['integrity']['integrity']}"
+            )
+
+    def refresh_evidence(self) -> None:
+        if not self.project_id:
+            return
+        saved = self._call("ui.evidence.list", limit=500)
+        if saved is not None:
+            self.evidence_list.clear()
+            for record in saved["records"]:
+                item = QListWidgetItem(
+                    f"{record['integrity'].upper()} · {record['quote'][:100]}"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, record["id"])
+                self.evidence_list.addItem(item)
+        claims = self._call("ui.claim.list")
+        if claims is not None:
+            self.claim_list.clear()
+            for claim in claims["claims"]:
+                item = QListWidgetItem(
+                    f"{claim['status']} · {claim['text'][:90]} · "
+                    f"{claim['supporting_count']} source links"
+                )
+                item.setData(Qt.ItemDataRole.UserRole, claim["id"])
+                self.claim_list.addItem(item)
+
+    def inspect_selected_evidence(self, current: QListWidgetItem | None,
+                                  previous: QListWidgetItem | None) -> None:
+        if current is None:
+            return
+        response = self._call(
+            "ui.evidence.inspect", evidence_id=current.data(Qt.ItemDataRole.UserRole)
+        )
+        if response is not None:
+            self.evidence_detail.setPlainText(
+                f"Source: {response['source_title']}\n"
+                f"Label: {response['source_label']}\n"
+                f"Text: {response['quote']}\n"
+                f"Span: {response['span_start']}–{response['span_end']}\n"
+                f"Source SHA-256: {response['source_sha256']}\n"
+                f"Integrity: {response['integrity']}\n"
+                f"Checks: {response['checks']}\n\n{response['note']}"
+            )
+
+    def create_evidence_claim(self) -> None:
+        item = self.evidence_list.currentItem()
+        if item is None:
+            self._set_status("Select the evidence passage that supports the draft.")
+            return
+        created = self._call(
+            "ui.claim.create", text=self.claim_entry.toPlainText(),
+            supporting_evidence=[item.data(Qt.ItemDataRole.UserRole)],
+            challenging_evidence=[],
+        )
+        if created is not None:
+            self.claim_entry.clear()
+            self.refresh_evidence()
+            self._set_status("Claim draft saved; independent scientific review is required.")
+
+    def inspect_selected_claim(self, current: QListWidgetItem | None,
+                               previous: QListWidgetItem | None) -> None:
+        if current is None:
+            return
+        claim_id = current.data(Qt.ItemDataRole.UserRole)
+        assessment = self._call("ui.claim.inspect", claim_id=claim_id)
+        reference = self._call("ui.claim.reference", claim_id=claim_id)
+        if assessment is None:
+            return
+        text = (
+            f"Draft: {assessment['claim']['text']}\n"
+            f"Evidence integrity: {assessment['integrity']}\n"
+            f"Supporting excerpts: {len(assessment['supporting'])}\n"
+            f"Challenging excerpts: {len(assessment['challenging'])}\n"
+            f"Scientific review required: {assessment['human_assessment_required']}\n"
+            f"Warnings: {assessment['warnings']}\n"
+        )
+        if reference is not None:
+            text += (
+                f"\n{reference['citation_placeholder']}\n"
+                f"Source IDs: {reference['source_ids']}\n"
+                f"{reference['note']}"
+            )
+        self.claim_details.setPlainText(text)
 
     def closeEvent(self, event: QCloseEvent | None) -> None:
         if event is None:

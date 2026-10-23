@@ -5,7 +5,10 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
-from typing import Any, Literal
+from typing import TYPE_CHECKING, Any, Literal
+
+if TYPE_CHECKING:
+    from .evidence import ClaimRecord, EvidenceAnchor
 from uuid import uuid4
 
 
@@ -134,6 +137,8 @@ class Project:
     manuscript: str = ""
     notebook: str = ""
     protocol: dict[str, Any] = field(default_factory=dict)
+    evidence: list[EvidenceAnchor] = field(default_factory=list)
+    claims: list[ClaimRecord] = field(default_factory=list)
     activity: list[Activity] = field(default_factory=list)
     tutorial_steps: list[str] = field(default_factory=list)
 

@@ -26,6 +26,15 @@ from .contracts import (
     new_id,
     utc_now,
 )
+from .diagnostics import audit_project
+from .evidence import (
+    add_anchor,
+    create_claim,
+    draft_manuscript_reference,
+    inspect_anchor,
+    inspect_claim,
+)
+from .release import inspect_submission, submission_markdown
 from .research_guides import (
     blank_protocol,
     get_template,
@@ -37,6 +46,7 @@ from .research_guides import (
 from .search import search_project
 from .snapshots import SnapshotManager
 from .store import MAX_ROWS, MAX_SOURCE_CHARS, PreferenceStore, ProjectStore
+from .visualization import ChartSpec, chart_svg, histogram
 
 MAX_TITLE = 180
 MAX_NOTE = 250_000
@@ -140,6 +150,16 @@ class UIFacade:
             "ui.source.search": ("Search project library", Effect.READ),
             "ui.source.get": ("Read a local source", Effect.READ),
             "ui.search.global": ("Search all local research objects", Effect.READ),
+            "ui.evidence.capture": ("Save source-anchored passage", Effect.WRITE),
+            "ui.evidence.list": ("List project source excerpts", Effect.READ),
+            "ui.evidence.inspect": ("Check anchored quotation integrity", Effect.READ),
+            "ui.claim.create": ("Create draft with evidence references", Effect.WRITE),
+            "ui.claim.list": ("List claims with provenance warnings", Effect.READ),
+            "ui.claim.inspect": ("Check supporting and conflicting evidence", Effect.READ),
+            "ui.claim.reference": ("Generate unverified citation placeholder", Effect.READ),
+            "ui.project.audit": ("Audit local project structural integrity", Effect.READ),
+            "ui.release.preview": ("Inspect human review gates for a manuscript", Effect.READ),
+            "ui.release.markdown": ("Generate local submission review Markdown", Effect.READ),
             "ui.review.vote": ("Save screening decision", Effect.WRITE),
             "ui.review.counts": ("Compute screening counts", Effect.READ),
             "ui.review.queue": ("List source screening decisions and reasons", Effect.READ),
@@ -150,6 +170,8 @@ class UIFacade:
             "ui.dataset.list": ("Show project data tables", Effect.READ),
             "ui.dataset.page": ("Read bounded dataset page", Effect.READ),
             "ui.dataset.variables": ("Inspect column types and missingness", Effect.READ),
+            "ui.chart.histogram": ("Compute descriptive histogram counts", Effect.READ),
+            "ui.chart.svg": ("Produce local accessible chart SVG", Effect.READ),
             "ui.manuscript.save": ("Save a manuscript draft", Effect.WRITE),
             "ui.notebook.save": ("Save local research notes", Effect.WRITE),
             "ui.tutorial.step": ("Mark local tutorial step", Effect.WRITE),
@@ -430,6 +452,92 @@ class UIFacade:
         return search_project(project, query, limit=limit, offset=offset,
                               categories=kinds)
 
+    def _do_ui_evidence_capture(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        source_id = _string(args, "source_id", 36)
+        start = _integer(args, "start", maximum=250_000)
+        end = _integer(args, "end", maximum=250_000)
+        note = _string(args, "note", 4_000, required=False)
+
+        def update(project: Project) -> dict[str, Any]:
+            anchor = add_anchor(
+                project, source_id=source_id, start=start, end=end, note=note
+            )
+            return {"evidence": asdict(anchor),
+                    "integrity": inspect_anchor(project, anchor)}
+
+        return self._mutate(args, "ui.evidence.capture", update)
+
+    def _do_ui_evidence_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        source_id = _string(args, "source_id", 36, required=False)
+        limit = _integer(args, "limit", minimum=1, maximum=500, default=100)
+        offset = _integer(args, "offset", maximum=5000)
+        anchors = [
+            item for item in project.evidence
+            if not source_id or item.source_id == source_id
+        ]
+        return {"total": len(anchors), "records": [
+            {**asdict(item), "integrity": inspect_anchor(project, item)["integrity"]}
+            for item in anchors[offset:offset + limit]
+        ]}
+
+    def _do_ui_evidence_inspect(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        anchor_id = _string(args, "evidence_id", 36)
+        from .evidence import get_anchor
+
+        return inspect_anchor(project, get_anchor(project, anchor_id))
+
+    def _do_ui_claim_create(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        text = _string(args, "text", 4_000)
+        supporting = args.get("supporting_evidence", [])
+        challenging = args.get("challenging_evidence", [])
+
+        def update(project: Project) -> dict[str, Any]:
+            claim = create_claim(
+                project, text,
+                supporting_evidence=supporting,
+                challenging_evidence=challenging,
+            )
+            return {"claim": asdict(claim), "review": inspect_claim(project, claim)}
+
+        return self._mutate(args, "ui.claim.create", update)
+
+    def _do_ui_claim_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return {"claims": [
+            {"id": item.id, "text": item.text,
+             "supporting_count": len(item.supporting_evidence),
+             "challenging_count": len(item.challenging_evidence),
+             "status": item.status}
+            for item in project.claims
+        ]}
+
+    def _do_ui_claim_inspect(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        claim_id = _string(args, "claim_id", 36)
+        match = next((item for item in project.claims if item.id == claim_id), None)
+        if match is None:
+            raise UIError("NOT_FOUND", "Claim was not found.",
+                          "Choose a draft claim from the evidence panel.")
+        return inspect_claim(project, match)
+
+    def _do_ui_claim_reference(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return draft_manuscript_reference(project, _string(args, "claim_id", 36))
+
+    def _do_ui_project_audit(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return audit_project(project)
+
+    def _do_ui_release_preview(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return inspect_submission(project)
+
+    def _do_ui_release_markdown(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        project = _required_project(args, self.store)
+        return submission_markdown(project)
+
     def _do_ui_review_vote(self, args: Mapping[str, Any]) -> dict[str, Any]:
         source_id = _string(args, "source_id", 36)
         decision = _string(args, "decision", 10)
@@ -609,6 +717,35 @@ class UIFacade:
             "sample_sd": statistics.stdev(numbers) if len(numbers) >= 2 else None,
             "method": "descriptive statistics only",
             "warning": "Non-numeric and non-finite cells were excluded; inspect missingness.",
+        }
+
+    def _chart(self, args: Mapping[str, Any]) -> ChartSpec:
+        project = _required_project(args, self.store)
+        dataset = _dataset(project, _string(args, "dataset_id", 36))
+        column = _string(args, "column", 100)
+        if column not in dataset.columns:
+            raise UIError("NOT_FOUND", "Unknown variable for chart.",
+                          "Select a column in Variable View.")
+        bin_count = _integer(args, "bins", minimum=1, maximum=60, default=10)
+        unit = _string(args, "unit", 60, required=False)
+        index = dataset.columns.index(column)
+        values = [_safe_number(row[index]) for row in dataset.rows]
+        return histogram(values, column=column, bins=bin_count, unit=unit,
+                         source_label=dataset.origin)
+
+    def _do_ui_chart_histogram(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        return {"chart": self._chart(args).as_dict()}
+
+    def _do_ui_chart_svg(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        spec = self._chart(args)
+        width = _integer(args, "width", minimum=400, maximum=4096, default=900)
+        height = _integer(args, "height", minimum=240, maximum=2160, default=500)
+        content = chart_svg(spec, width=width, height=height)
+        return {
+            "format": "image/svg+xml", "svg": content,
+            "sha256": hashlib.sha256(content.encode("utf-8")).hexdigest(),
+            "source_label": spec.source_label, "accessibility_data": spec.accessible_table(),
+            "warnings": ["Descriptive display only; no statistical inference."],
         }
 
     def _do_ui_manuscript_save(self, args: Mapping[str, Any]) -> dict[str, Any]:

@@ -21,6 +21,7 @@ from .contracts import (
     Source,
     UIError,
 )
+from .evidence import ClaimRecord, EvidenceAnchor
 
 SCHEMA_VERSION = 1
 MAX_PROJECT_BYTES = 8 * 1024 * 1024
@@ -52,6 +53,10 @@ def decode_project(raw: dict[str, Any]) -> Project:
         project.annotations = [_record(item, Annotation) for item in data.get("annotations", [])]
         project.datasets = [_record(item, Dataset) for item in data.get("datasets", [])]
         project.activity = [_record(item, Activity) for item in data.get("activity", [])]
+        project.evidence = [_record(item, EvidenceAnchor)
+                            for item in data.get("evidence", [])]
+        project.claims = [_record(item, ClaimRecord)
+                          for item in data.get("claims", [])]
     except (ValueError, TypeError, KeyError) as exc:
         raise UIError("INTEGRITY_FAILURE", "Project contains invalid records.",
                       "Inspect the original project or restore a backup.") from exc
@@ -65,6 +70,9 @@ def decode_project(raw: dict[str, Any]) -> Project:
         if len(source.text) > MAX_SOURCE_CHARS:
             raise UIError("RESOURCE_LIMIT", "A source exceeds the text preview limit.",
                           "Split the document into smaller sections.")
+    if len(project.evidence) > 5000 or len(project.claims) > 5000:
+        raise UIError("RESOURCE_LIMIT", "Project has too many evidence records.",
+                      "Split the project into smaller research workspaces.")
     return cast(Project, project)
 
 
