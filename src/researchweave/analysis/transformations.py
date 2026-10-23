@@ -4,17 +4,45 @@ from __future__ import annotations
 
 from typing import Any
 
-from .datasets import revise
+from .datasets import revise, revise_schema
 from .errors import AnalysisError, require
-from .models import Dataset, finite_number
+from .models import Dataset, Variable, finite_number
 
 
-def predicate(row: dict[str, Any], expression: dict[str, Any]) -> bool:
+def predicate(row: dict[str, Any], expression: dict[str, Any], *, depth: int = 0) -> bool:
+    require(depth <= 12, "Filter expression nesting exceeds budget", "RESOURCE_LIMIT")
+    require(isinstance(expression, dict) and len(expression) <= 6, "Invalid filter expression")
+    connective = expression.get("logic")
+    if connective is not None:
+        require(connective in {"and", "or", "not"}, "Unsupported logical operator")
+        children = expression.get("expressions")
+        require(isinstance(children, list), "Logical expression requires child list")
+        require(1 <= len(children) <= 50, "Logical expression child budget exceeded")
+        require(
+            all(isinstance(child, dict) for child in children), "Filter children must be objects"
+        )
+        if connective == "not":
+            require(len(children) == 1, "NOT requires exactly one child")
+            return not predicate(row, children[0], depth=depth + 1)
+        evaluated = [predicate(row, child, depth=depth + 1) for child in children]
+        return all(evaluated) if connective == "and" else any(evaluated)
     column = expression.get("column")
     operator = expression.get("op")
     require(column in row, "Filter references unknown column")
     require(
-        operator in {"eq", "ne", "gt", "ge", "lt", "le", "is_null", "not_null", "in"},
+        operator
+        in {
+            "eq",
+            "ne",
+            "gt",
+            "ge",
+            "lt",
+            "le",
+            "is_null",
+            "not_null",
+            "in",
+            "not_in",
+        },
         "Unsupported filter operator",
     )
     left = row[column]
@@ -29,9 +57,10 @@ def predicate(row: dict[str, Any], expression: dict[str, Any]) -> bool:
         return left == right
     if operator == "ne":
         return left != right
-    if operator == "in":
+    if operator in {"in", "not_in"}:
         require(isinstance(right, list) and len(right) <= 1000, "Invalid filter members")
-        return left in right
+        included = left in right
+        return included if operator == "in" else not included
     lhs = finite_number(left, name=column)
     rhs = finite_number(right, name="comparison")
     return {
@@ -58,23 +87,43 @@ def transform(dataset: Dataset, spec: dict[str, Any]) -> Dataset:
                 row[column] = mapping.get(str(row[column]), row[column])
     else:
         column, source = spec.get("column"), spec.get("source")
-        require(column in dataset.columns and source in dataset.columns, "Invalid derivation")
+        require(isinstance(column, str) and column.isidentifier(), "Invalid derived column name")
+        require(column not in dataset.columns, "Derived column must be new", "CONFLICT")
+        require(source in dataset.columns, "Invalid derivation source")
         operation = spec.get("operation")
         require(operation in ("add", "subtract", "multiply", "divide"), "Invalid arithmetic")
-        operand = finite_number(spec.get("operand"), name="operand")
-        require(operation != "divide" or operand != 0, "Division by zero")
+        operand_column = spec.get("operand_column")
+        has_constant = "operand" in spec
+        require(bool(operand_column) ^ has_constant, "Choose one operand source")
+        if operand_column is not None:
+            require(operand_column in dataset.columns, "Unknown operand column")
+            operand = None
+        else:
+            operand = finite_number(spec.get("operand"), name="operand")
+            require(operation != "divide" or operand != 0, "Division by zero")
         for row in rows:
-            if row[source] is None:
+            if row[source] is None or (operand_column is not None and row[operand_column] is None):
                 row[column] = None
                 continue
             original = finite_number(row[source], name=source)
+            right = (
+                finite_number(row[operand_column], name=str(operand_column))
+                if operand_column is not None
+                else operand
+            )
+            require(right is not None, "Missing derivation operand")
             if operation == "add":
-                outcome = original + operand
+                outcome = original + right
             elif operation == "subtract":
-                outcome = original - operand
+                outcome = original - right
             elif operation == "multiply":
-                outcome = original * operand
+                outcome = original * right
             else:
-                outcome = original / operand
+                require(right != 0, "Division by zero")
+                outcome = original / right
             row[column] = finite_number(outcome, name=column)
+        variables = tuple([*dataset.variables, Variable(column, dtype="number", scale="unknown")])
+        return revise_schema(
+            dataset, rows, tuple([*dataset.columns, column]), variables, dict(spec)
+        )
     return revise(dataset, rows, dict(spec))

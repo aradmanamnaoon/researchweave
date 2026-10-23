@@ -248,6 +248,45 @@ def revise(
     )
 
 
+def revise_schema(
+    dataset: Dataset,
+    records: list[dict[str, Any]],
+    columns: tuple[str, ...],
+    variables: tuple[Variable, ...],
+    operation: dict[str, Any],
+) -> Dataset:
+    """Create an immutable revision whose schema intentionally changes."""
+
+    require(len(records) <= MAX_ROWS, "Too many transformed rows", "RESOURCE_LIMIT")
+    require(bool(columns) and len(set(columns)) == len(columns), "Invalid transformed columns")
+    require(tuple(variable.name for variable in variables) == columns, "Variable schema mismatch")
+    require(
+        all(set(row) == set(columns) for row in records),
+        "Transformed schema mismatch",
+        "SCHEMA_MISMATCH",
+    )
+    identity = digest(
+        {
+            "parent": dataset.revision,
+            "columns": columns,
+            "records": records,
+            "variables": [v.__dict__ for v in variables],
+            "operation": operation,
+        }
+    )
+    return Dataset(
+        dataset.dataset_id,
+        identity,
+        dataset.revision,
+        dataset.source_hash,
+        utc_now(),
+        columns,
+        variables,
+        tuple(records),
+        operation,
+    )
+
+
 def set_variable(dataset: Dataset, name: str, **updates: Any) -> Dataset:
     require(name in dataset.columns, "Unknown variable", "NOT_FOUND")
     allowed = {"label", "units", "scale", "value_labels", "missing_values", "private", "dtype"}

@@ -60,6 +60,39 @@ def test_transform_immutable_replay_and_null_policy(sample):
         )
 
 
+def test_compound_filter_and_new_column_derivation(sample):
+    compound = {
+        "type": "filter",
+        "expression": {
+            "logic": "and",
+            "expressions": [
+                {"column": "group", "op": "in", "value": ["A", "B"]},
+                {"column": "score", "op": "gt", "value": 3},
+                {
+                    "logic": "not",
+                    "expressions": [{"column": "pre", "op": "eq", "value": "2"}],
+                },
+            ],
+        },
+    }
+    filtered = transform(sample, compound)
+    assert [row["score"] for row in filtered.records] == ["4", "6", "5"]
+    derived = transform(
+        sample,
+        {
+            "type": "derive",
+            "column": "change",
+            "source": "score",
+            "operand_column": "pre",
+            "operation": "subtract",
+        },
+    )
+    assert derived.columns[-1] == "change"
+    assert [row["change"] for row in derived.records] == [1.0, 1.0, 1.0, -1.0, 1.0, 1.0]
+    assert "change" not in sample.columns
+    assert derived.parent_revision == sample.revision
+
+
 def test_descriptive_and_welch_oracle(sample):
     summary = describe(sample, "score")
     assert summary["mean"] == pytest.approx(3.5)
@@ -103,9 +136,7 @@ def test_facade_authorization_and_restart(sample, tmp_path):
     denied = facade.execute("dataset.import", req, {})
     assert denied["error"]["code"] == "PERMISSION_DENIED"
     capability = facade.issue_authorization("dataset.import", req)
-    allowed = facade.execute(
-        "dataset.import", req, {"host_capability": capability}
-    )
+    allowed = facade.execute("dataset.import", req, {"host_capability": capability})
     assert allowed["status"] == "ok"
     data = allowed["data"]
     reopened = build_analysis_facade(tmp_path / "database")

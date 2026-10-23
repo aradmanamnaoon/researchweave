@@ -3,10 +3,13 @@ from pathlib import Path
 import pytest
 
 from researchweave.analysis.data_ops import (
+    aggregate_groups,
     case_selection,
     frequency_weighted_mean,
     join_tables,
     missingness,
+    pivot_longer,
+    pivot_wider,
     recode_missing,
 )
 from researchweave.analysis.datasets import import_csv
@@ -67,3 +70,41 @@ def test_frequency_weights_are_integer_and_reconcile(tmp_path):
     fractional = _table(tmp_path, "fractional.csv", "x,w\n2,1.2\n4,1\n")
     with pytest.raises(AnalysisError, match="integers"):
         frequency_weighted_mean(fractional, "x", "w")
+
+
+def test_group_aggregation_and_long_wide_roundtrip(tmp_path):
+    dataset = _table(
+        tmp_path,
+        "wide.csv",
+        "id,group,t1,t2\na,A,1,2\nb,A,3,4\nc,B,10,20\n",
+    )
+    aggregated = aggregate_groups(
+        dataset,
+        by=["group"],
+        values=["t1"],
+        functions=["count", "mean", "sum"],
+    )
+    assert aggregated.columns == ("group", "t1_count", "t1_mean", "t1_sum")
+    assert aggregated.records[0]["t1_count"] == 2
+    assert aggregated.records[0]["t1_mean"] == pytest.approx(2)
+    long = pivot_longer(dataset, id_columns=["id", "group"], value_columns=["t1", "t2"])
+    assert len(long.records) == 6
+    assert long.records[0] == {"id": "a", "group": "A", "variable": "t1", "value": "1"}
+    wide = pivot_wider(
+        long,
+        id_columns=["id", "group"],
+        names_from="variable",
+        values_from="value",
+    )
+    assert wide.columns == dataset.columns
+    assert wide.records == dataset.records
+
+
+def test_wide_reshape_rejects_duplicate_cells(tmp_path):
+    dataset = _table(
+        tmp_path,
+        "long.csv",
+        "id,variable,value\na,t1,1\na,t1,2\n",
+    )
+    with pytest.raises(AnalysisError, match="Duplicate ID/name cell"):
+        pivot_wider(dataset, id_columns=["id"], names_from="variable", values_from="value")

@@ -230,3 +230,230 @@ def frequency_weighted_mean(dataset: Dataset, column: str, weight: str) -> dict[
         "n_excluded": len(dataset.records) - used,
         "revision": dataset.revision,
     }
+
+
+def aggregate_groups(
+    dataset: Dataset,
+    *,
+    by: list[str],
+    values: list[str],
+    functions: list[Literal["count", "sum", "mean", "min", "max"]],
+) -> Dataset:
+    """Deterministic grouped aggregation with explicit output naming."""
+
+    require(bool(by) and len(set(by)) == len(by), "Distinct grouping columns required")
+    require(bool(values) and len(set(values)) == len(values), "Distinct value columns required")
+    require(set(by).isdisjoint(values), "Grouping and value columns must differ")
+    require(
+        all(column in dataset.columns for column in [*by, *values]), "Unknown aggregation column"
+    )
+    require(
+        bool(functions) and len(set(functions)) == len(functions), "Distinct aggregations required"
+    )
+    require(
+        all(function in {"count", "sum", "mean", "min", "max"} for function in functions),
+        "Unsupported aggregation",
+    )
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = {}
+    for row in dataset.records:
+        key = tuple(row[column] for column in by)
+        groups.setdefault(key, []).append(row)
+    require(len(groups) <= MAX_ROWS, "Too many aggregation groups", "RESOURCE_LIMIT")
+    output_columns = tuple(
+        [*by, *[f"{value}_{function}" for value in values for function in functions]]
+    )
+    rows: list[dict[str, Any]] = []
+    for key in sorted(groups, key=lambda item: tuple("" if v is None else str(v) for v in item)):
+        members = groups[key]
+        result = dict(zip(by, key, strict=True))
+        for value in values:
+            observed = [
+                finite_number(row[value], name=value) for row in members if row[value] is not None
+            ]
+            for function in functions:
+                name = f"{value}_{function}"
+                if function == "count":
+                    result[name] = len(observed)
+                elif not observed:
+                    result[name] = None
+                elif function == "sum":
+                    result[name] = float(sum(observed))
+                elif function == "mean":
+                    result[name] = float(sum(observed) / len(observed))
+                elif function == "min":
+                    result[name] = float(min(observed))
+                else:
+                    result[name] = float(max(observed))
+        rows.append(result)
+    group_variables = [
+        next(variable for variable in dataset.variables if variable.name == name) for name in by
+    ]
+    aggregate_variables = [
+        Variable(name, dtype="number", scale="ratio" if name.endswith("_count") else "unknown")
+        for name in output_columns
+        if name not in by
+    ]
+    operation = {
+        "type": "aggregate",
+        "by": by,
+        "values": values,
+        "functions": functions,
+        "source_revision": dataset.revision,
+    }
+    revision = digest(
+        {
+            "parent": dataset.revision,
+            "columns": output_columns,
+            "rows": rows,
+            "operation": operation,
+        }
+    )
+    return Dataset(
+        dataset.dataset_id,
+        revision,
+        dataset.revision,
+        dataset.source_hash,
+        utc_now(),
+        output_columns,
+        tuple([*group_variables, *aggregate_variables]),
+        tuple(rows),
+        operation,
+    )
+
+
+def pivot_longer(
+    dataset: Dataset,
+    *,
+    id_columns: list[str],
+    value_columns: list[str],
+    names_to: str = "variable",
+    values_to: str = "value",
+) -> Dataset:
+    """Reshape selected wide columns into explicit name/value rows."""
+
+    require(
+        bool(id_columns) and len(set(id_columns)) == len(id_columns), "Distinct ID columns required"
+    )
+    require(
+        bool(value_columns) and len(set(value_columns)) == len(value_columns),
+        "Distinct value columns required",
+    )
+    require(set(id_columns).isdisjoint(value_columns), "ID and value columns must differ")
+    require(
+        all(column in dataset.columns for column in [*id_columns, *value_columns]),
+        "Unknown reshape column",
+    )
+    require(
+        names_to not in dataset.columns and values_to not in dataset.columns,
+        "Reshape target conflicts with existing column",
+    )
+    require(names_to != values_to, "Reshape output names must differ")
+    require(
+        len(dataset.records) * len(value_columns) <= MAX_ROWS,
+        "Long reshape exceeds row budget",
+        "RESOURCE_LIMIT",
+    )
+    rows: list[dict[str, Any]] = []
+    for row in dataset.records:
+        identity = {column: row[column] for column in id_columns}
+        for column in value_columns:
+            rows.append({**identity, names_to: column, values_to: row[column]})
+    columns = tuple([*id_columns, names_to, values_to])
+    id_variables = [
+        next(variable for variable in dataset.variables if variable.name == name)
+        for name in id_columns
+    ]
+    variables = tuple(
+        [
+            *id_variables,
+            Variable(names_to, dtype="text", scale="nominal"),
+            Variable(values_to, dtype="text", scale="unknown"),
+        ]
+    )
+    operation = {
+        "type": "pivot_longer",
+        "id_columns": id_columns,
+        "value_columns": value_columns,
+        "names_to": names_to,
+        "values_to": values_to,
+    }
+    revision = digest({"parent": dataset.revision, "rows": rows, "operation": operation})
+    return Dataset(
+        dataset.dataset_id,
+        revision,
+        dataset.revision,
+        dataset.source_hash,
+        utc_now(),
+        columns,
+        variables,
+        tuple(rows),
+        operation,
+    )
+
+
+def pivot_wider(
+    dataset: Dataset,
+    *,
+    id_columns: list[str],
+    names_from: str,
+    values_from: str,
+) -> Dataset:
+    """Reshape long rows into one row per ID, rejecting duplicate cells."""
+
+    require(
+        bool(id_columns) and len(set(id_columns)) == len(id_columns), "Distinct ID columns required"
+    )
+    require(
+        all(column in dataset.columns for column in [*id_columns, names_from, values_from]),
+        "Unknown reshape column",
+    )
+    require(
+        names_from not in id_columns and values_from not in id_columns,
+        "ID columns conflict with value mapping",
+    )
+    levels = sorted(
+        {str(row[names_from]) for row in dataset.records if row[names_from] is not None}
+    )
+    require(bool(levels) and len(levels) <= 1000, "Invalid pivot level count", "RESOURCE_LIMIT")
+    require(all(level.isidentifier() for level in levels), "Pivot names must be safe identifiers")
+    require(set(levels).isdisjoint(id_columns), "Pivot level conflicts with ID column")
+    grouped: dict[tuple[Any, ...], dict[str, Any]] = {}
+    seen: set[tuple[tuple[Any, ...], str]] = set()
+    for row in dataset.records:
+        if row[names_from] is None:
+            continue
+        key = tuple(row[column] for column in id_columns)
+        level = str(row[names_from])
+        cell = (key, level)
+        require(cell not in seen, "Duplicate ID/name cell in wide reshape", "CONFLICT")
+        seen.add(cell)
+        grouped.setdefault(key, dict(zip(id_columns, key, strict=True)))[level] = row[values_from]
+    rows = []
+    for key in sorted(grouped, key=lambda item: tuple("" if v is None else str(v) for v in item)):
+        base = grouped[key]
+        rows.append({**base, **{level: base.get(level) for level in levels}})
+    columns = tuple([*id_columns, *levels])
+    id_variables = [
+        next(variable for variable in dataset.variables if variable.name == name)
+        for name in id_columns
+    ]
+    variables = tuple([*id_variables, *[Variable(level) for level in levels]])
+    operation = {
+        "type": "pivot_wider",
+        "id_columns": id_columns,
+        "names_from": names_from,
+        "values_from": values_from,
+        "levels": levels,
+    }
+    revision = digest({"parent": dataset.revision, "rows": rows, "operation": operation})
+    return Dataset(
+        dataset.dataset_id,
+        revision,
+        dataset.revision,
+        dataset.source_hash,
+        utc_now(),
+        columns,
+        variables,
+        tuple(rows),
+        operation,
+    )
