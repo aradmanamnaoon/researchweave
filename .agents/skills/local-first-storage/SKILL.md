@@ -28,4 +28,3 @@ Operate only on authorized project files. Do not send research data to external 
 ## Authoritative reference
 
 - [Primary reference](https://www.sqlite.org/atomiccommit.html)
-

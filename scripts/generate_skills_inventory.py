@@ -104,7 +104,9 @@ def discover() -> list[Skill]:
 
 def md_cell(value: str) -> str:
     """Escape Markdown table delimiters and inline HTML that could disrupt rendering."""
-    return value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("|", "&#124;")
+    return (
+        value.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("|", "&#124;")
+    )
 
 
 def render(skills: list[Skill]) -> str:
@@ -122,10 +124,10 @@ def render(skills: list[Skill]) -> str:
         "The source of truth for vendored skill attribution and bundled license "
         "notices is [EXTERNAL_SKILLS_PROVENANCE.md](EXTERNAL_SKILLS_PROVENANCE.md).",
         "",
-        f"**Total skills:** {total}  ",
-        f"**Repository-authored skills:** {total - external}  ",
-        f"**Vendored external skills:** {external}  ",
-        f"**Additional files inside skill folders:** {support_files}  ",
+        f"**Total skills:** {total}",
+        f"**Repository-authored skills:** {total - external}",
+        f"**Vendored external skills:** {external}",
+        f"**Additional files inside skill folders:** {support_files}",
         f"**Guidance words in SKILL.md bodies:** {words:,}",
         "",
         "| Skill | Activation / purpose | Origin | Guidance words | Supporting files |",
@@ -179,8 +181,13 @@ def write_if_changed(content: str) -> bool:
     temp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(
-            mode="w", encoding="utf-8", newline="\n", dir=OUTPUT.parent,
-            prefix=".skills-inventory-", suffix=".tmp", delete=False
+            mode="w",
+            encoding="utf-8",
+            newline="\n",
+            dir=OUTPUT.parent,
+            prefix=".skills-inventory-",
+            suffix=".tmp",
+            delete=False,
         ) as handle:
             temp_path = Path(handle.name)
             handle.write(content)
@@ -201,7 +208,8 @@ def update(check: bool) -> int:
         print(f"OK: inventory up to date for {len(skills)} skills")
         return 0
     changed = write_if_changed(content)
-    print(f"{'Updated' if changed else 'Unchanged'}: {OUTPUT.relative_to(ROOT)} ({len(skills)} skills)")
+    action = "Updated" if changed else "Unchanged"
+    print(f"{action}: {OUTPUT.relative_to(ROOT)} ({len(skills)} skills)")
     return 0
 
 

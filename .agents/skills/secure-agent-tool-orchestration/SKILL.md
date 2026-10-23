@@ -28,4 +28,3 @@ Operate only on authorized project files. Do not send research data to external 
 ## Authoritative reference
 
 - [Primary reference](https://owasp.org/www-project-top-10-for-large-language-model-applications/)
-

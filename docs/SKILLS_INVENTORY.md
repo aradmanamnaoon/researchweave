@@ -4,10 +4,10 @@
 
 This index lists every `.agents/skills/*/SKILL.md` currently present in the repository. Skill metadata is taken from its YAML frontmatter. The source of truth for vendored skill attribution and bundled license notices is [EXTERNAL_SKILLS_PROVENANCE.md](EXTERNAL_SKILLS_PROVENANCE.md).
 
-**Total skills:** 27  
-**Repository-authored skills:** 24  
-**Vendored external skills:** 3  
-**Additional files inside skill folders:** 27  
+**Total skills:** 27
+**Repository-authored skills:** 24
+**Vendored external skills:** 3
+**Additional files inside skill folders:** 27
 **Guidance words in SKILL.md bodies:** 18,393
 
 | Skill | Activation / purpose | Origin | Guidance words | Supporting files |
