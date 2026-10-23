@@ -55,10 +55,48 @@ def test_manuscript_section_history_diff_and_stale_claim_detection(tmp_path: Pat
         checked = ClaimSupportService(store).check("paper")
         assert checked["issues"][0]["code"] == "CLAIM_STALE_AFTER_EDIT"
         assert checked["claim_coverage_complete"] is False
+        restored = writing.restore_section(
+            "paper", "Results", 1, "Researcher", "Return to the evidence-backed wording"
+        )
+        assert restored["section_revision"] == 3
+        assert writing.sections("paper")[0]["body"] == body1
+        assert [row["revision"] for row in writing.section_history("paper", "Results")] == [1, 2, 3]
     with ProjectStore(root) as reopened:
         history = WritingService(reopened).section_history("paper", "Results")
-        assert [row["revision"] for row in history] == [1, 2]
+        assert [row["revision"] for row in history] == [1, 2, 3]
+        assert history[-1]["body"] == body1
         assert reopened.audit()["ok"]
+
+
+def test_manuscript_figures_are_versioned_cas_objects_and_reopen(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    with ProjectStore.create(root, "Writing", "Question", "observational") as store:
+        writing = WritingService(store)
+        first = writing.save_figure(
+            "paper",
+            "Figure 1",
+            "Synthetic flow diagram",
+            b"<svg xmlns='http://www.w3.org/2000/svg'></svg>",
+            "image/svg+xml",
+            "Researcher",
+            "Initial figure",
+        )
+        revised = writing.save_figure(
+            "paper",
+            "Figure 1",
+            "Revised synthetic flow diagram",
+            b"<svg xmlns='http://www.w3.org/2000/svg'><title>Revised</title></svg>",
+            "image/svg+xml",
+            "Researcher",
+            "Caption and source revised",
+            figure_id=first["figure_id"],
+        )
+        assert revised["figure_revision"] == 2
+        current = writing.figures("paper")
+        assert current[0]["caption"] == "Revised synthetic flow diagram"
+        assert store.get_object(current[0]["digest"]).startswith(b"<svg")
+    with ProjectStore(root) as reopened:
+        assert WritingService(reopened).figures("paper")[0]["revision"] == 2
 
 
 def test_evidence_matrix_csv_preserves_missingness_units_and_anchor(tmp_path: Path) -> None:

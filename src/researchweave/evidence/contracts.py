@@ -146,7 +146,7 @@ def _schema_for(name: str, operation: str) -> dict[str, Any]:
     if name in {"project_id", "source_id", "reference_id", "record_id", "anchor_id",
                 "review_id", "run_id", "collection_id", "plan_id", "form_id",
                 "outline_id", "protocol_id", "batch_id", "edge_id", "snapshot",
-                "note_id", "question_id", "study_id", "gap_id", "manuscript_id"}:
+                "note_id", "question_id", "study_id", "gap_id", "manuscript_id", "figure_id"}:
         result["minLength"] = 1
         result["maxLength"] = 255
     if name in _ENUMS:

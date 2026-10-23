@@ -339,6 +339,20 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
         "read",
         ("project_id", "manuscript_id", "section", "from_revision", "to_revision"),
         "Compare manuscript section revisions"),
+    "writing.section_restore": (
+        "local-write",
+        ("project_id", "manuscript_id", "section", "version", "actor", "rationale"),
+        "Restore an earlier manuscript section as a new immutable revision"),
+    "writing.figure_save": (
+        "local-write",
+        ("project_id", "manuscript_id", "label", "caption", "media_type", "data_base64",
+         "actor", "rationale"),
+        "Save or revise a CAS-backed manuscript figure"),
+    "writing.figure_remove": (
+        "local-write", ("project_id", "manuscript_id", "figure_id", "actor", "rationale"),
+        "Remove a figure by appending a figure revision"),
+    "writing.figures": (
+        "read", ("project_id", "manuscript_id"), "List current manuscript figures"),
     "writing.claim_add": (
         "local-write",
         ("project_id", "manuscript_id", "section", "statement", "statement_start",
@@ -1373,6 +1387,39 @@ class EvidenceFacade:
                     _value(args, "from_revision", int),
                     _value(args, "to_revision", int),
                 )
+            if operation == "writing.section_restore":
+                return writing.restore_section(
+                    _value(args, "manuscript_id", str),
+                    _value(args, "section", str),
+                    _value(args, "version", int),
+                    _value(args, "actor", str),
+                    _value(args, "rationale", str),
+                    expected_revision=expected,
+                )
+            if operation == "writing.figure_save":
+                figure_id = args.get("figure_id")
+                require(figure_id is None or isinstance(figure_id, str), "Invalid figure ID")
+                return writing.save_figure(
+                    _value(args, "manuscript_id", str),
+                    _value(args, "label", str),
+                    _value(args, "caption", str),
+                    _bytes(args),
+                    _value(args, "media_type", str),
+                    _value(args, "actor", str),
+                    _value(args, "rationale", str),
+                    figure_id=figure_id,
+                    expected_revision=expected,
+                )
+            if operation == "writing.figure_remove":
+                return writing.remove_figure(
+                    _value(args, "manuscript_id", str),
+                    _value(args, "figure_id", str),
+                    _value(args, "actor", str),
+                    _value(args, "rationale", str),
+                    expected_revision=expected,
+                )
+            if operation == "writing.figures":
+                return {"figures": writing.figures(_value(args, "manuscript_id", str))}
             claims = ClaimSupportService(store)
             if operation == "writing.claim_add":
                 anchor_id = args.get("anchor_id")
