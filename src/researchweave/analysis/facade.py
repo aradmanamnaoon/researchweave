@@ -54,7 +54,7 @@ from .multivariate import hierarchical_clusters, kmeans_clusters, principal_comp
 from .plots import render_plot
 from .power import two_sample_t_power, two_sample_t_required
 from .recommendations import recommend_from_mapping
-from .runtime import run_script
+from .runtime import RuntimeAuthorizer, run_script
 from .scale_scoring import ScaleDefinition, item_total_diagnostics, score_scale
 from .schemas import RESULT_SCHEMA, schema_for, validate_arguments
 from .statistics import correlation, describe, reliability, t_test
@@ -69,6 +69,7 @@ class AnalysisFacade:
         self.store = DatasetStore(directory)
         self.host_paths = host_paths or HostPaths()
         self.authorizations = CapabilityIssuer(directory)
+        self.runtime_authorizations = RuntimeAuthorizer()
 
     def issue_authorization(
         self,
@@ -322,11 +323,19 @@ class AnalysisFacade:
         elif operation == "statistics.recommend":
             data = recommend_from_mapping(dict(arguments))
         elif operation in ("runtime.python", "runtime.r"):
+            language = "python" if operation.endswith("python") else "r"
+            timeout_seconds = int(arguments.get("timeout_seconds", 10))
+            runtime_approval = self.runtime_authorizations.issue(
+                str(arguments["source"]),
+                language=language,
+                timeout_seconds=timeout_seconds,
+            )
             data = run_script(
                 str(arguments["source"]),
-                language="python" if operation.endswith("python") else "r",
-                approved=True,
-                timeout_seconds=int(arguments.get("timeout_seconds", 10)),
+                authorizer=self.runtime_authorizations,
+                approval=runtime_approval,
+                language=language,
+                timeout_seconds=timeout_seconds,
                 directory=self.host_paths.execution_directory(),
             )
         elif operation == "dataset.import":
