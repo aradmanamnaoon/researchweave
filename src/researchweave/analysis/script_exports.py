@@ -10,42 +10,38 @@ from typing import Any
 
 from .errors import require
 from .models import Dataset, canonical_json, digest, finite_number, runtime_versions
+from .schemas import OPERATION_SCHEMAS
 
-READ_OPERATIONS = frozenset(
+NON_REPLAYABLE_OPERATIONS = frozenset(
     {
-        "dataset.inspect",
-        "dataset.page",
-        "dataset.missingness",
-        "statistics.describe",
-        "statistics.test",
-        "statistics.correlate",
-        "statistics.psychometric",
-        "statistics.model",
-        "statistics.logistic",
-        "statistics.poisson",
-        "statistics.contingency",
-        "statistics.rank",
-        "statistics.anova",
-        "statistics.pca",
-        "statistics.kmeans",
-        "statistics.hierarchical",
-        "statistics.diagnostics",
-        "statistics.vif",
-        "statistics.score_scale",
-        "statistics.item_total",
-        "statistics.time_features",
-        "statistics.adf",
-        "statistics.weighted_mean",
+        "dataset.import",
+        "dataset.scan_parquet",
+        "dataset.export_csv",
+        "dataset.transform",
+        "dataset.variable",
+        "dataset.select",
+        "dataset.user_missing",
+        "dataset.complete_case",
+        "dataset.simple_impute",
+        "dataset.multiple_impute",
+        "plot.render",
+        "runtime.python",
+        "runtime.r",
     }
 )
+
+# Every other registered facade operation is a deterministic read. Keeping this
+# definition tied to the schema registry prevents syntax support from silently
+# falling behind as scientific methods are added.
+READ_OPERATIONS = frozenset(OPERATION_SCHEMAS) - NON_REPLAYABLE_OPERATIONS
 
 
 @dataclass(frozen=True)
 class SyntaxExport:
     language: str
     operation: str
-    dataset_revision: str
-    dataset_id: str
+    dataset_revision: str | None
+    dataset_id: str | None
     arguments_sha256: str
     dependencies: dict[str, str]
     source: str
@@ -58,16 +54,27 @@ class SyntaxExport:
 
 
 def export_python_script(
-    operation: str, arguments: dict[str, Any], dataset: Dataset
+    operation: str, arguments: dict[str, Any], dataset: Dataset | None = None
 ) -> SyntaxExport:
     """Generate deterministic script using installed ResearchWeave kernels."""
     require(operation in READ_OPERATIONS, "Syntax replay unsupported", "UNSUPPORTED")
-    require(
-        arguments.get("dataset_id") == dataset.dataset_id
-        and arguments.get("revision") == dataset.revision,
-        "Export parameters do not identify exact source revision",
-        "INTEGRITY_FAILURE",
-    )
+    schema = OPERATION_SCHEMAS[operation]
+    requires_dataset = {"dataset_id", "revision"} <= set(schema.required)
+    if requires_dataset:
+        require(dataset is not None, "Dataset revision required for syntax replay")
+        require(
+            arguments.get("dataset_id") == dataset.dataset_id
+            and arguments.get("revision") == dataset.revision,
+            "Export parameters do not identify exact source revision",
+            "INTEGRITY_FAILURE",
+        )
+    else:
+        require(
+            dataset is None,
+            "Dataset must be omitted for an operation without dataset identity",
+            "SCHEMA_MISMATCH",
+        )
+    schema.validate(arguments)
     require(len(canonical_json(arguments)) <= 100_000, "Arguments exceed source budget")
     versions = runtime_versions()
     dependencies = {
@@ -113,8 +120,8 @@ if __name__ == "__main__":
     return SyntaxExport(
         "python",
         operation,
-        dataset.revision,
-        dataset.dataset_id,
+        dataset.revision if dataset is not None else None,
+        dataset.dataset_id if dataset is not None else None,
         digest(arguments),
         dependencies,
         source,
@@ -122,7 +129,11 @@ if __name__ == "__main__":
         "python replay.py STORE_ROOT",
         (
             "Requires compatible local ResearchWeave version and exact dependencies",
-            "Requires original immutable dataset revision in local store",
+            *(
+                ("Requires original immutable dataset revision in local store",)
+                if dataset is not None
+                else ()
+            ),
         ),
     )
 

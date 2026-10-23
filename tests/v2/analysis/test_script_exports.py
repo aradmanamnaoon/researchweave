@@ -9,6 +9,7 @@ from researchweave.analysis import build_analysis_facade
 from researchweave.analysis.datasets import import_csv
 from researchweave.analysis.errors import AnalysisError
 from researchweave.analysis.script_exports import (
+    READ_OPERATIONS,
     export_python_script,
     export_r_script,
     save_syntax,
@@ -51,3 +52,35 @@ def test_scripts_guard_revision_and_unsupported_r(tmp_path: Path):
     assert "mean(v)" in r.source and "sd(v)" in r.source
     with pytest.raises(AnalysisError, match="UNSUPPORTED"):
         export_r_script("statistics.model", args, data)
+
+
+def test_python_replay_allowlist_matches_read_only_manifest(tmp_path: Path):
+    facade = build_analysis_facade(tmp_path / "store")
+    expected = {
+        item["operation"]
+        for item in facade.capability_manifest()
+        if item["effect"] == "read" and item["operation"] != "dataset.scan_parquet"
+    }
+    assert READ_OPERATIONS == expected
+
+
+def test_non_dataset_operation_replays_in_fresh_interpreter(tmp_path: Path):
+    arguments = {"r": 0.5, "n": 20}
+    exported = export_python_script("statistics.effect_correlation", arguments)
+    assert exported.dataset_id is None
+    assert exported.dataset_revision is None
+    target = tmp_path / "effect_replay.py"
+    save_syntax(exported, target)
+    store = tmp_path / "empty_store"
+    store.mkdir()
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, str(target), str(store)],
+        capture_output=True,
+        text=True,
+        timeout=15,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    payload = json.loads(result.stdout)
+    assert payload["r"] == pytest.approx(0.5)
+    assert payload["n"] == 20
