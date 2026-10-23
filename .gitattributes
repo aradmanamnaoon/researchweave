@@ -3,5 +3,6 @@
 *.jpg binary
 *.ico binary
 *.pdf binary
+*.svg text eol=lf
 .agents/skills/security-best-practices/references/** whitespace=-blank-at-eol
 .agents/skills/security-threat-model/references/** whitespace=-blank-at-eol

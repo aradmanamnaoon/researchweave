@@ -5,7 +5,7 @@
   "assets": [
     {
       "path": "researchweave-mark.svg",
-      "sha256": "70afab3597c8092f1b63af2be9a0b1376c707de179552626194043437a038cf2",
+      "sha256": "e12dbc631903f9a17117a0c2421fe31eee316942551c6fa7d1b40885daedb227",
       "title": "ResearchWeave mark",
       "description": "Three curved paths connect like strands around a research evidence dot",
       "license": "GPL-3.0-only",
@@ -13,7 +13,7 @@
     },
     {
       "path": "workflow.svg",
-      "sha256": "d37587ee6e8e13a0ca65cdb7c324f6f81ec7ad4927508e813dc11f0215beca90",
+      "sha256": "3193418e714fa211aec19a5a0fddb2be9dafa60213bb71bd5b8353757f9a4225",
       "title": "ResearchWeave workflow",
       "description": "A local project flows from research question to source, annotated evidence, research note and user-authorized export",
       "license": "GPL-3.0-only",

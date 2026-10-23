@@ -50,6 +50,38 @@ files or private working-tree data.
 
 ## Current next phase
 
-Phase 01: merge the four committed V2 worker branches in evidence, analysis, AI, UI order; inspect
-conflicts explicitly; run each domain's focused validation after its merge; then inventory legacy
-application paths and integration gaps.
+## Phase 01 — worker merge and conflict reconciliation
+
+- Status: complete locally.
+- Merge commits, in required order:
+  - evidence: `2f2acde` from `bfa5f96678630403e8933b7aca063a43e39aab11`
+  - analysis: `7c2aed0` from `b878adde6037ecbcd9146700bb767dcb96bfdd01`
+  - AI: `c4239ec` from `c1ac49e003ac6cf84781cfcfc01f8c059cd652f4`
+  - UI: `fb6ab24` from `e00be109f8de4e2a892c5f42496a840b3f164dbb`
+- No merge conflicts occurred and no worker worktree was modified.
+- The first integrated test attempt exposed missing worker-declared dependencies and a text-line-ending
+  dependent UI SVG checksum. Shared dependency metadata and SVG normalization were corrected in the
+  integration branch.
+- Observed after dependency normalization on Windows CPython 3.12.9:
+  - evidence: **176 passed**, one expected duplicate-ZIP warning.
+  - analysis: **177 passed**, two statsmodels seasonal-start warnings.
+  - AI: **138 passed, 2 skipped**.
+  - UI: **141 passed**.
+- Ruff and first-party mypy/compile checks run during merge inspection were clean for all four domain
+  source trees. Scientific third-party packages remain typed according to their upstream metadata;
+  analysis validation uses `--ignore-missing-imports` as documented by that worker.
+
+## Phase 03 — dependency normalization (started early to unblock merge verification)
+
+- Added the runtime scientific stack required by the merged analysis package and the audited
+  encryption/PDF/credential dependencies used by evidence and AI.
+- Added optional `formats` dependencies for XLSX/ODS/Parquet/SAV import support.
+- Regenerated `uv.lock` and successfully ran `uv sync --extra dev --extra formats`.
+- Declared SVG files as LF-normalized text and refreshed the two UI asset SHA-256 values against the
+  checked-out bytes so hashes are stable across Windows checkout behavior.
+
+## Current next phase
+
+Phase 04/06: implement the shared `core` command bus, host approval authority, audit store and real
+application composition root; inject the production analysis facade into the desktop UI; replace the
+placeholder app entry point; then add integration tests before retiring any legacy placeholders.
