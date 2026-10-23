@@ -64,6 +64,15 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "protocol.history": ("read", ("project_id", "protocol_id"), "View protocol history"),
     "review.register": ("local-write", ("project_id", "review_id", "reference_id"),
                         "Register review record"),
+    "review.search_begin": ("local-write", ("project_id", "review_id", "provider",
+                                           "query", "expected_records"), "Save exact search"),
+    "review.search_hit": ("local-write", ("project_id", "run_id", "reference_id",
+                                         "disposition", "actor"), "Account for source hit"),
+    "review.search_finalize": ("local-write", ("project_id", "run_id"),
+                              "Reconcile imported source results"),
+    "review.retrieval": ("local-write", ("project_id", "review_id", "record_id",
+                                        "outcome", "reason", "actor"),
+                         "Track report retrieval separately from eligibility"),
     "review.screen": ("local-write", ("project_id", "review_id", "record_id", "reviewer",
                                     "stage", "decision"), "Record blinded vote"),
     "review.status": ("read", ("project_id", "review_id", "record_id", "stage"),
@@ -351,6 +360,24 @@ class EvidenceFacade:
             if operation == "review.register":
                 return review.register(_value(args, "review_id", str),
                     _value(args, "reference_id", str), args.get("study_id"),
+                    expected_revision=expected)
+            if operation == "review.search_begin":
+                return review.begin_search(_value(args, "review_id", str),
+                    _value(args, "provider", str), _value(args, "query", str),
+                    _value(args, "expected_records", int),
+                    expected_revision=expected)
+            if operation == "review.search_hit":
+                return review.record_hit(_value(args, "run_id", str),
+                    _value(args, "reference_id", str), _value(args, "disposition", str),
+                    _value(args, "actor", str), str(args.get("rationale", "")),
+                    expected_revision=expected)
+            if operation == "review.search_finalize":
+                return review.finalize_search(_value(args, "run_id", str),
+                                              expected_revision=expected)
+            if operation == "review.retrieval":
+                return review.retrieval(_value(args, "review_id", str),
+                    _value(args, "record_id", str), _value(args, "outcome", str),
+                    _value(args, "reason", str), _value(args, "actor", str),
                     expected_revision=expected)
             if operation == "review.screen":
                 return review.vote(_value(args, "review_id", str),

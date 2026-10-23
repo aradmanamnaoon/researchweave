@@ -117,6 +117,39 @@ CREATE TABLE migrations (version INTEGER PRIMARY KEY, installed_at TEXT NOT NULL
 """
 
 
+REVIEW_SCHEMA_V2 = """
+CREATE TABLE review_search_runs (
+    id TEXT PRIMARY KEY, review_id TEXT NOT NULL, provider TEXT NOT NULL,
+    original_query TEXT NOT NULL, filters_json TEXT NOT NULL,
+    searched_at TEXT NOT NULL, response_sha256 TEXT,
+    expected_records INTEGER NOT NULL CHECK(expected_records >= 0),
+    finalized INTEGER NOT NULL DEFAULT 0 CHECK(finalized IN (0,1))
+);
+CREATE TABLE review_search_hits (
+    id TEXT PRIMARY KEY,
+    run_id TEXT NOT NULL REFERENCES review_search_runs(id),
+    reference_id TEXT NOT NULL REFERENCES reference(id),
+    record_id TEXT REFERENCES review_records(id),
+    disposition TEXT NOT NULL CHECK(disposition IN
+        ('retained','duplicate','removed_automation','removed_other')),
+    rationale TEXT NOT NULL, actor TEXT NOT NULL, recorded_at TEXT NOT NULL,
+    UNIQUE(run_id,reference_id)
+);
+CREATE INDEX review_hits_disposition ON review_search_hits(run_id,disposition);
+CREATE TABLE review_retrieval (
+    record_id TEXT PRIMARY KEY REFERENCES review_records(id),
+    review_id TEXT NOT NULL, outcome TEXT NOT NULL CHECK(outcome IN
+        ('retrieved','not_retrieved')), reason TEXT NOT NULL,
+    actor TEXT NOT NULL, recorded_at TEXT NOT NULL
+);
+"""
+
+
+def _schema_statements(script: str) -> list[str]:
+    """Statements in our static migration SQL; no input SQL is accepted."""
+    return [statement.strip() for statement in script.split(";") if statement.strip()]
+
+
 class ProjectStore:
     """Single-local-project service; no cross-process writer lock guarantee."""
 
@@ -138,7 +171,7 @@ class ProjectStore:
         self.conn.execute("PRAGMA synchronous=FULL")
         version = int(self.conn.execute("PRAGMA user_version").fetchone()[0])
         if create:
-            self.conn.executescript(SCHEMA_SQL)
+            self.conn.executescript(SCHEMA_SQL + REVIEW_SCHEMA_V2)
             self.conn.execute(f"PRAGMA user_version={SCHEMA_VERSION}")
             self.conn.execute("INSERT INTO migrations VALUES (?, ?)", (SCHEMA_VERSION, now_utc()))
         elif version != SCHEMA_VERSION:
@@ -304,3 +337,47 @@ class ProjectStore:
             self.conn.backup(target)
         finally:
             target.close()
+
+    @classmethod
+    def migrate_v1(cls, root: Path) -> dict[str, str | int]:
+        """Explicit durable migration with verified backup and atomic SQLite DDL.
+
+        The caller must authorize local writes. A failed step rolls back the
+        schema and preserves the database and pre-migration copy.
+        """
+        root = root.resolve()
+        db = root / "data" / "project.sqlite"
+        require(db.is_file() and not db.is_symlink(), "Project database is missing or unsafe",
+                "NOT_FOUND")
+        connection = sqlite3.connect(db, isolation_level=None, timeout=10)
+        snapshot: Path | None = None
+        try:
+            current = int(connection.execute("PRAGMA user_version").fetchone()[0])
+            require(current == 1, "Only explicit schema 1 to 2 migration is supported",
+                    "SCHEMA_MISMATCH")
+            backup_dir = db.parent / "migration_backups"
+            backup_dir.mkdir(exist_ok=True)
+            snapshot = backup_dir / f"pre-v2-{new_id()}.sqlite"
+            target = sqlite3.connect(snapshot)
+            try:
+                connection.backup(target)
+            finally:
+                target.close()
+            require(snapshot.stat().st_size > 0, "Migration backup was empty",
+                    "INTEGRITY_FAILURE")
+            connection.execute("PRAGMA foreign_keys=ON")
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                for statement in _schema_statements(REVIEW_SCHEMA_V2):
+                    connection.execute(statement)
+                connection.execute("INSERT INTO migrations VALUES (?,?)", (2, now_utc()))
+                connection.execute("PRAGMA user_version=2")
+                require(connection.execute("PRAGMA foreign_key_check").fetchone() is None,
+                        "Migration introduced foreign-key violations", "INTEGRITY_FAILURE")
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+            return {"from_version": 1, "to_version": 2, "backup": str(snapshot)}
+        finally:
+            connection.close()

@@ -19,6 +19,8 @@
 | RE-023, RE-024, RE-025 | UTF-8 text extraction, exact/unverifiable quote anchoring, source-backed notebook | Partial; PDF and highlights UI absent |
 | RE-027, RE-028, RE-029 | Review report registration, blinded votes, conflict and adjudication | Implemented basic round |
 | RE-032 | Conservative persisted screening arithmetic | Partial; intentionally incomplete PRISMA flow |
+| RE-027..032-V2 | Search provenance, per-hit dispositions, duplicate accounting, full-text retrieval, explicit finalized search runs, reconciled PRISMA report/study counts; reviews.py, storage.py, test_review_accounting.py | 3 V2 regression tests pass; external PRISMA report rendering pending |
+| RE-005-V2 | Explicit schema 1→2 migration with SQLite backup, transaction and preserved project metadata; storage.py, test_explicit_v1_migration_preserves_data_and_backup | Tested; schema 0 migration not supported |
 | RE-037, RE-039 | Manuscript section revisions and unverified citation lint | Partial |
 | RE-050 | Provenance graph with orphan/cycle checks | Implemented service; further adversarial tests pending |
 | RE-050-VERIFY | Reopen graph equivalence, persisted source/note/anchor causal links, orphan and cycle detection; test_provenance.py | 2 local tests passed |

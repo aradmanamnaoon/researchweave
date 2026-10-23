@@ -2,7 +2,7 @@
   "definition": "Token-based nonblank noncomment Python code lines minus AST docstring lines",
   "scope": "src/researchweave/evidence/**/*.py",
   "files": 17,
-  "meaningful_source_lines": 2432,
+  "meaningful_source_lines": 2650,
   "file_lines": {
     "__init__.py": 12,
     "bibliography.py": 242,
@@ -10,16 +10,16 @@
     "documents.py": 65,
     "errors.py": 11,
     "extraction.py": 108,
-    "facade.py": 372,
+    "facade.py": 399,
     "library.py": 147,
     "migration.py": 145,
     "models.py": 63,
     "project_format.py": 218,
     "protocols.py": 81,
     "provenance.py": 49,
-    "reviews.py": 149,
+    "reviews.py": 274,
     "search_index.py": 103,
-    "storage.py": 278,
+    "storage.py": 344,
     "writing.py": 90
   },
   "exclusions": "tests, workstreams, Markdown, fixtures, docstrings, comments, blanks"

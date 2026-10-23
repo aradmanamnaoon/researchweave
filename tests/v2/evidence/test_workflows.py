@@ -128,6 +128,9 @@ def test_bibliography_and_review_disagreement(tmp_path: Path) -> None:
     run(facade, "review.adjudicate", project_id=project_id, review_id="review-1",
         record_id=record_id, stage="title_abstract", decision="include",
         adjudicator="lead", reason="Protocol eligibility fulfilled")
+    run(facade, "review.retrieval", project_id=project_id, review_id="review-1",
+        record_id=record_id, outcome="retrieved", reason="Available in local library",
+        actor="lead")
     run(facade, "review.advance", project_id=project_id, review_id="review-1",
         record_id=record_id)
     prisma = run(facade, "review.prisma", project_id=project_id, review_id="review-1")

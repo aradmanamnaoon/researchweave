@@ -8,4 +8,6 @@
 
 `LibraryService` normalizes offline references and preserves raw inputs. `ProtocolService` appends history without overwriting registration. `ReviewService` maintains blinded independent votes and adjudication, exposing incomplete PRISMA measurements as incomplete. `WritingService` flags unverified citation identities and preserves section revisions. `export_provenance` diagnoses graph cycles and missing parents.
 
+SQLite schema 2 adds `review_search_runs`, `review_search_hits` and `review_retrieval`. Only finalized search runs with count-consistent hits, double-screening and retrieval events can produce a complete PRISMA accounting flag. Use `ProjectStore.migrate_v1(root)` for an explicitly authorized v1 project upgrade; the operation preserves a SQLite backup and fails if the version is unsupported.
+
 No invented citation metadata, network fallback, telemetered state, or model-provided filesystem authority is permitted.

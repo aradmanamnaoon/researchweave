@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 from uuid import uuid4
 
-SCHEMA_VERSION = 1
+SCHEMA_VERSION = 2
 ARCHIVE_VERSION = "1.0.0"
 
 

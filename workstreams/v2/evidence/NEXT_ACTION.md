@@ -1,6 +1,6 @@
 # Next work, in priority order
 
-1. Add review identification/search-run provenance, duplicate subtraction and full-text retrieval tracking, then compute complete PRISMA 2020 figures from immutable events.
+1. Extend review protocol registry with multi-source search capture, study/report linkage and versioned standardized full-text exclusion reasons; generate independently checked PRISMA 2020 diagrams and exports. Existing search/retrieval ledger and reconciled counts are implemented.
 2. Extend FTS5 with incremental indexing and persist provider lookup evidence for reference identity checks. Live provider checks remain opt-in.
 3. Implement reversible logical dedup merge and undo, versioned source extraction, and PDF/DOCX/EPUB parsing with safe optional dependencies.
 4. Add migrations from two earlier schema fixtures, authenticated encrypted .rwproj and crash/fuzz archive tests.

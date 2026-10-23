@@ -698,6 +698,134 @@
     "ui_binding": "pending"
   },
   {
+    "operation": "review.search_begin",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "review_id",
+      "provider",
+      "query",
+      "expected_records"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "review_id",
+        "provider",
+        "query",
+        "expected_records"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Save exact search",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.search_hit",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "run_id",
+      "reference_id",
+      "disposition",
+      "actor"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "run_id",
+        "reference_id",
+        "disposition",
+        "actor"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Account for source hit",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.search_finalize",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "run_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "run_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Reconcile imported source results",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.retrieval",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "review_id",
+      "record_id",
+      "outcome",
+      "reason",
+      "actor"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "review_id",
+        "record_id",
+        "outcome",
+        "reason",
+        "actor"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Track report retrieval separately from eligibility",
+    "ui_binding": "pending"
+  },
+  {
     "operation": "review.screen",
     "protocol_version": 1,
     "version": "1.0.0",

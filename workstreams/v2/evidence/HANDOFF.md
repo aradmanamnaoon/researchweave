@@ -19,3 +19,5 @@ SOURCE_LAYOUT_VERIFIED must include tracked index paths, source SLOC, import/com
 Verified 16 Python files and 2,106 meaningful source lines using `count_sloc.py`; compiler, Ruff, strict mypy and 10 observed behavior tests pass. Target remains 6,000 purposeful source lines; unresolved features are recorded in NEXT_ACTION.md.
 
 Discovery increment: 17 modules, 2,432 meaningful SLOC, 19 tests passed, Ruff/mypy/compile passed. Public metadata requests require an explicitly injected transport and authorization; all provider contract tests used mock responses.
+
+Review accounting increment: SQLite schema 2, explicit backup-preserving v1 migration, four new review facade commands, 43 capabilities total and 2,650 meaningful source lines. Observed 24 passing focused tests with 84% combined coverage. Persisted source hits, duplicate dispositions, retrieval outcomes and reconciled PRISMA counts are available; complex reviews and chart/report rendering require further validation.

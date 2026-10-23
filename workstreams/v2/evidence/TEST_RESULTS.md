@@ -24,3 +24,11 @@
 
 - `pytest -q tests/v2/evidence -o pythonpath=src`: 21 tests passed, including provenance graph preservation across reopen and adversarial cycle/orphan fixtures.
 - `ruff check src/researchweave/evidence tests/v2/evidence`: passed.
+
+## Review provenance and migration follow-up
+
+- `pytest -q tests/v2/evidence -o pythonpath=src`: 24 passed, including reconciled 4-hit/1-duplicate/1-unretrieved/2-included report flow, unfinalized-run rejection, v1→v2 data-preserving migration and backup verification.
+- `ruff check src/researchweave/evidence tests/v2/evidence`: passed.
+- `mypy src/researchweave/evidence --strict --follow-imports=skip`: passed.
+
+Latest coverage measurement: 24 tests passed; 84% combined line/branch coverage, 1,756 statements and 460 branches. Measured 17 production modules with 2,650 meaningful SLOC.
