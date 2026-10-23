@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
+from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from .errors import EvidenceError, require
@@ -114,6 +115,47 @@ class ReferenceUpdateMonitor:
                 "SELECT * FROM reference_watch ORDER BY created_at,reference_id"
             )
         ]
+
+    def due_watches(self, *, now: str | None = None,
+                    interval_hours: int = 168, limit: int = 100) -> dict[str, Any]:
+        """Return opt-in watches due for a host-scheduled or manual metadata check.
+
+        This method is deliberately read-only and performs no provider access.
+        The trusted host decides whether and when to execute a network lookup.
+        """
+        require(type(interval_hours) is int and 1 <= interval_hours <= 24 * 365,
+                "Reference watch interval must be between 1 hour and 1 year")
+        require(type(limit) is int and 1 <= limit <= 1000,
+                "Reference watch result limit must be 1..1000")
+        instant_text = now or now_utc()
+        try:
+            instant = datetime.fromisoformat(instant_text)
+        except ValueError as exc:
+            raise EvidenceError("INVALID_INPUT", "Invalid watch clock timestamp",
+                                "Use an ISO-8601 UTC timestamp.") from exc
+        require(instant.tzinfo is not None, "Reference watch clock must include timezone")
+        instant = instant.astimezone(UTC)
+        if not _tables_exist(self.store):
+            return {"checked_at": instant.isoformat(), "interval_hours": interval_hours,
+                    "records": [], "count": 0, "network_queries": 0}
+        due: list[dict[str, Any]] = []
+        for row in self.store.conn.execute(
+                "SELECT * FROM reference_watch WHERE enabled=1 ORDER BY updated_at,reference_id"):
+            updated = datetime.fromisoformat(str(row["updated_at"]))
+            require(updated.tzinfo is not None, "Stored reference watch timestamp is invalid",
+                    "INTEGRITY_FAILURE")
+            next_due = updated.astimezone(UTC) + timedelta(hours=interval_hours)
+            if next_due <= instant:
+                due.append({"reference_id": row["reference_id"],
+                            "provider": row["provider"],
+                            "last_checked_or_updated_at": row["updated_at"],
+                            "next_due_at": next_due.isoformat(),
+                            "enabled": True})
+            if len(due) >= limit:
+                break
+        return {"checked_at": instant.isoformat(), "interval_hours": interval_hours,
+                "records": due, "count": len(due), "network_queries": 0,
+                "requires_explicit_network_execution": True}
 
     def record_observation(
         self,

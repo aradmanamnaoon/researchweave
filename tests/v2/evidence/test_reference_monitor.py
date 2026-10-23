@@ -79,3 +79,29 @@ def test_reference_monitor_flags_identifier_conflict_and_unsubscribe(tmp_path: P
         assert disabled["enabled"] is False
         with pytest.raises(EvidenceError):
             monitor.record_observation(reference_id, "manual", {"title": "Record"})
+
+
+def test_due_watches_are_read_only_and_require_host_network_execution(tmp_path: Path) -> None:
+    root = tmp_path / "project"
+    with ProjectStore.create(root, "Monitor", "Updates?", "exploratory") as store:
+        imported = LibraryService(store).import_bibliography(
+            b"@article{x,title={Record},author={Doe, Ada},year={2024},doi={10.1000/watch}}",
+            "bibtex",
+        )
+        reference_id = imported["references"][0]["id"]
+        monitor = ReferenceUpdateMonitor(store)
+        subscribed = monitor.subscribe(reference_id, "crossref")
+        before = store.info().revision
+        watch = store.conn.execute(
+            "SELECT updated_at FROM reference_watch WHERE reference_id=?", (reference_id,)
+        ).fetchone()
+        assert watch is not None
+        from datetime import datetime, timedelta
+
+        due_at = (datetime.fromisoformat(watch["updated_at"]) + timedelta(hours=169)).isoformat()
+        due = monitor.due_watches(now=due_at, interval_hours=168)
+        assert due["count"] == 1
+        assert due["records"][0]["reference_id"] == reference_id
+        assert due["requires_explicit_network_execution"] is True
+        assert due["network_queries"] == 0
+        assert store.info().revision == before == subscribed["revision"]

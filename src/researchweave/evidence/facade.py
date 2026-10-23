@@ -179,6 +179,8 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
         "Record provider observation without silently changing metadata"),
     "reference.update_history": (
         "read", ("project_id", "reference_id"), "Read reference update observations"),
+    "reference.watch_due": (
+        "read", ("project_id",), "List opted-in reference watches due for host execution"),
     "reference.identity_record": (
         "local-write", ("project_id", "reference_id", "provider", "observed"),
         "Persist explicit provider metadata identity comparison"),
@@ -979,6 +981,12 @@ class EvidenceFacade:
                 return {
                     "records": monitor.history(_value(args, "reference_id", str))
                 }
+            if operation == "reference.watch_due":
+                return monitor.due_watches(
+                    now=args.get("now") if isinstance(args.get("now"), str) else None,
+                    interval_hours=int(args.get("interval_hours", 168)),
+                    limit=int(args.get("limit", 100)),
+                )
             if operation == "evidence.anchor":
                 return library.add_anchor(_value(args, "source_id", str),
                     _value(args, "quote", str), _value(args, "start", int),
