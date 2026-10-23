@@ -42,6 +42,7 @@ from .library import LibraryService
 from .migration import MarkdownMigration, MarkdownRecord, preview_markdown
 from .models import new_id
 from .portability import export_research_artifacts, export_review_packet, selective_clone
+from .prisma2020 import Prisma2020Service
 from .prisma_export import prisma_export
 from .project_format import archive_project, restore_archive, verify_archive
 from .project_wizard import create_project, preview_project, project_profile
@@ -261,6 +262,10 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "review.prisma": ("read", ("project_id", "review_id"), "Screening reconciliation"),
     "review.prisma_export": ("read", ("project_id", "review_id"),
                              "Export conservative persisted PRISMA counts"),
+    "review.prisma2020_report": ("read", ("project_id", "review_id"),
+                                "Audit recorded review flow against PRISMA 2020 accounting"),
+    "review.prisma2020_svg": ("read", ("project_id", "review_id"),
+                             "Render safe diagnostic PRISMA 2020 flow SVG"),
     "review.extract": ("local-write", ("project_id", "record_id", "schema",
                                        "extracted", "reviewer"), "Create validated extraction"),
     "review.form_create": (
@@ -1135,6 +1140,10 @@ class EvidenceFacade:
             if operation == "review.prisma_export":
                 return prisma_export(review.prisma(_value(args, "review_id", str)),
                                      format_name=str(args.get("format", "markdown")))
+            if operation == "review.prisma2020_report":
+                return Prisma2020Service(store).report(_value(args, "review_id", str))
+            if operation == "review.prisma2020_svg":
+                return Prisma2020Service(store).svg(_value(args, "review_id", str))
             if operation == "review.extract":
                 return ExtractionService(store).create_entry(
                     _value(args, "record_id", str),
