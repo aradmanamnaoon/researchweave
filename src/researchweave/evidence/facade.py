@@ -27,6 +27,7 @@ from .provenance import export_provenance
 from .reviews import ReviewService
 from .search_index import LocalIndex
 from .storage import ProjectStore
+from .timeline import research_timeline, timeline_json
 from .writing import WritingService
 
 # effect, required arguments, description
@@ -34,6 +35,8 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "project.create": ("local-write", ("title", "question", "design"), "Create a local project"),
     "project.open": ("read", ("project_id",), "Read local project identity"),
     "project.integrity": ("read", ("project_id",), "Audit project hashes"),
+    "project.timeline": ("read", ("project_id",), "Read verified chronological project events"),
+    "project.timeline_export": ("read", ("project_id",), "Export verified timeline JSON"),
     "project.archive": ("local-write", ("project_id", "filename"), "Create .rwproj snapshot"),
     "project.archive_verify": ("read", ("filename",), "Verify .rwproj without writing"),
     "project.restore": ("local-write", ("filename",), "Restore .rwproj"),
@@ -301,6 +304,15 @@ class EvidenceFacade:
                 return asdict(store.info())
             if operation == "project.integrity":
                 return store.audit()
+            if operation in {"project.timeline", "project.timeline_export"}:
+                report = research_timeline(
+                    store, limit=int(args.get("limit", 100)),
+                    offset=int(args.get("offset", 0)),
+                    operation_prefix=args.get("operation_prefix"))
+                if operation == "project.timeline_export":
+                    return {"format": "json", "text": timeline_json(report),
+                            "total": report["total"], "verified": True}
+                return report
             if operation == "project.archive":
                 exports = self.workspace_root / "exports"
                 exports.mkdir(exist_ok=True)

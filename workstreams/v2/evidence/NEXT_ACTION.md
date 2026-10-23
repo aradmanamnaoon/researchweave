@@ -1,5 +1,7 @@
 # Next work, in priority order
 
+Verified timeline increment: `project.timeline` and `project.timeline_export` now provide paginated redacted persisted event chronology and reject damaged hash chains. 26 focused tests, Ruff, strict mypy and compile passed after this change. Timestamp re-normalization of legacy events and full UI chronology remain outstanding.
+
 1. Extend review protocol registry with multi-source search capture, study/report linkage and versioned standardized full-text exclusion reasons; generate independently checked PRISMA 2020 diagrams and exports. Existing search/retrieval ledger and reconciled counts are implemented.
 2. Extend FTS5 with incremental indexing and persist provider lookup evidence for reference identity checks. Live provider checks remain opt-in.
 3. Implement reversible logical dedup merge and undo, versioned source extraction, and PDF/DOCX/EPUB parsing with safe optional dependencies.
