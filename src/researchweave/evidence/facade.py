@@ -38,6 +38,7 @@ from .library import LibraryService
 from .migration import MarkdownMigration, MarkdownRecord, preview_markdown
 from .models import new_id
 from .portability import export_research_artifacts, export_review_packet, selective_clone
+from .prisma_export import prisma_export
 from .project_format import archive_project, restore_archive, verify_archive
 from .protocols import ProtocolService, question_feedback
 from .provenance import export_provenance
@@ -47,6 +48,7 @@ from .recovery import (
     list_recovery_snapshots,
     restore_recovery_snapshot,
 )
+from .reference_identity import compare_reference, reconcile_catalog_candidates
 from .reference_monitor import ReferenceUpdateMonitor
 from .reviews import ReviewService
 from .schema_migrations import inspect_schema, migrate_project
@@ -125,6 +127,22 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "library.collection_export": (
         "read", ("project_id", "collection_id"), "Export collection CSV"),
     "reference.validate": ("read", ("project_id", "reference_id"), "Inspect DOI syntax"),
+    "reference.compare_metadata": (
+        "read", ("project_id", "reference_id", "candidate"),
+        "Compare metadata without asserting an external source was verified"),
+    "reference.provider_identity": (
+        "external-network", ("project_id", "reference_id", "provider"),
+        "Explicit opt-in catalog identity comparison with provider provenance"),
+    "reference.citation_link": (
+        "local-write", ("project_id", "citing_id", "cited_id", "anchor_id",
+                        "actor", "rationale"), "Attest a source-anchored citation relation"),
+    "reference.citation_revoke": (
+        "local-write", ("project_id", "edge_id", "actor", "rationale"),
+        "Revoke an incorrect citation relation while keeping audit history"),
+    "reference.citation_graph": (
+        "read", ("project_id",), "Read audited inter-reference citation links"),
+    "reference.citation_graphml": (
+        "read", ("project_id",), "Export source-attested citation graph as GraphML"),
     "reference.merge": ("local-write", ("project_id", "canonical_id", "duplicate_id", "rationale"),
                         "Record reversible user-reviewed reference identity merge"),
     "reference.unmerge": ("local-write", ("project_id", "duplicate_id", "rationale"),
@@ -148,8 +166,6 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
         "local-write", ("project_id", "citing_reference_id", "cited_reference_id",
                          "provenance", "confirmed_by"),
         "Add an explicitly confirmed citation relationship"),
-    "reference.citation_graph": (
-        "read", ("project_id",), "Export confirmed citation relationships"),
     "evidence.anchor": ("local-write", ("project_id", "source_id", "quote", "start", "end"),
                         "Record exact quote anchor"),
     "evidence.note": ("local-write", ("project_id", "source_id", "title", "body"),
@@ -182,6 +198,8 @@ OPERATIONS: dict[str, tuple[str, tuple[str, ...], str]] = {
     "review.advance": ("local-write", ("project_id", "review_id", "record_id"),
                        "Advance included review record"),
     "review.prisma": ("read", ("project_id", "review_id"), "Screening reconciliation"),
+    "review.prisma_export": ("read", ("project_id", "review_id"),
+                             "Export conservative persisted PRISMA counts"),
     "review.extract": ("local-write", ("project_id", "record_id", "schema",
                                        "extracted", "reviewer"), "Create validated extraction"),
     "review.evidence_matrix": ("read", ("project_id", "review_id"),
@@ -648,6 +666,32 @@ class EvidenceFacade:
                 }
             if operation == "reference.validate":
                 return library.validate_reference(_value(args, "reference_id", str))
+            if operation == "reference.compare_metadata":
+                return compare_reference(library.get_reference(
+                    _value(args, "reference_id", str)), _value(args, "candidate", dict))
+            if operation == "reference.provider_identity":
+                reference = library.get_reference(_value(args, "reference_id", str))
+                require(bool(reference.doi), "Reference has no valid DOI", "INVALID_INPUT")
+                catalog_result = self.catalog.search(_value(args, "provider", str),
+                                                     str(reference.doi), limit=10)
+                return reconcile_catalog_candidates(
+                    reference, catalog_result["records"],
+                    provider=str(catalog_result["provider"]),
+                    response_sha256=catalog_result["raw_response_sha256"])
+            citations = CitationGraphService(store)
+            if operation == "reference.citation_link":
+                return citations.link(
+                    _value(args, "citing_id", str), _value(args, "cited_id", str),
+                    _value(args, "anchor_id", str), _value(args, "actor", str),
+                    _value(args, "rationale", str), expected_revision=expected)
+            if operation == "reference.citation_revoke":
+                return citations.revoke(
+                    _value(args, "edge_id", str), _value(args, "actor", str),
+                    _value(args, "rationale", str), expected_revision=expected)
+            if operation == "reference.citation_graph":
+                return citations.graph(include_revoked=args.get("include_revoked") is True)
+            if operation == "reference.citation_graphml":
+                return citations.graphml()
             if operation == "reference.merge":
                 return library.merge_references(_value(args, "canonical_id", str),
                     _value(args, "duplicate_id", str), _value(args, "rationale", str),
@@ -677,8 +721,6 @@ class EvidenceFacade:
                     relationship=str(args.get("relationship", "cites")),
                     expected_revision=expected,
                 )
-            if operation == "reference.citation_graph":
-                return citations.graph()
             monitor = ReferenceUpdateMonitor(store)
             if operation == "reference.watch":
                 return monitor.subscribe(
@@ -765,6 +807,9 @@ class EvidenceFacade:
                     _value(args, "record_id", str), expected_revision=expected)
             if operation == "review.prisma":
                 return review.prisma(_value(args, "review_id", str))
+            if operation == "review.prisma_export":
+                return prisma_export(review.prisma(_value(args, "review_id", str)),
+                                     format_name=str(args.get("format", "markdown")))
             if operation == "review.extract":
                 return ExtractionService(store).create_entry(
                     _value(args, "record_id", str),

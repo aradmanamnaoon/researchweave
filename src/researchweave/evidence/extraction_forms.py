@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import json
 from collections.abc import Mapping
-from typing import Any
+from typing import Any, Literal, cast
 
 from .errors import EvidenceError, require
 from .extraction import ExtractedValue, FieldDefinition, validate_field
@@ -19,9 +19,15 @@ def _field_from_wire(data: Mapping[str, Any]) -> FieldDefinition:
         and all(isinstance(value, str) for value in permitted),
         "permitted_values must contain strings",
     )
+    dtype = data.get("datatype")
+    require(isinstance(dtype, str) and dtype in
+            {"number", "integer", "string", "boolean", "category"},
+            "Unsupported extraction field datatype")
+    typed_dtype = cast(Literal["number", "integer", "string", "boolean", "category"],
+                       dtype)
     return FieldDefinition(
         name=str(data.get("name", "")),
-        datatype=str(data.get("datatype", "")),
+        datatype=typed_dtype,
         required=bool(data.get("required", False)),
         permitted_values=tuple(permitted),
         unit=data.get("unit") if isinstance(data.get("unit"), str) else None,
@@ -160,10 +166,16 @@ class ExtractionFormService:
         for field in fields:
             raw = values[field.name]
             require(isinstance(raw, Mapping), f"Extraction value {field.name} must be an object")
+            missingness = raw.get("missingness", "present")
+            require(isinstance(missingness, str) and missingness in
+                    {"present", "not_reported", "not_applicable", "not_extracted"},
+                    "Invalid extraction missingness")
+            typed_missingness = cast(Literal["present", "not_reported", "not_applicable",
+                                             "not_extracted"], missingness)
             extracted = ExtractedValue(
                 field=field.name,
                 value=raw.get("value"),
-                missingness=str(raw.get("missingness", "present")),
+                missingness=typed_missingness,
                 unit=raw.get("unit") if isinstance(raw.get("unit"), str) else None,
                 original_text=str(raw.get("original_text", "")),
             )

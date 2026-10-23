@@ -1,14 +1,57 @@
-# Next work, in priority order
+# ResearchWeave V2 evidence — next executable engineering actions
 
-Verified timeline increment: `project.timeline` and `project.timeline_export` now provide paginated redacted persisted event chronology and reject damaged hash chains. 26 focused tests, Ruff, strict mypy and compile passed after this change. Timestamp re-normalization of legacy events and full UI chronology remain outstanding.
+Branch: `rebuild/v2-evidence` at `D:\coding\codex\researchweave-v2-evidence`.
+Read `ACCEPTANCE_MATRIX.md` for all 52 statuses. Do not restart or overwrite
+existing work. Do not push or merge this branch without the integrator.
 
-Further branch milestone (before final suite): `reference.merge`/`reference.unmerge` now work with a reviewer rationale and reversible aliases. Fulltext DOCX/EPUB and optional PDF parsing are integrated with project persistence and page checksums; synthesis, risk appraisal, bibliography, manuscript checks and submission packet operations are exposed through the facade. 59 focused tests passed; initial full-tree Ruff/mypy issues remain in concurrently developing `collections.py`, `diagnostics.py`, `recovery.py`, `encrypted_archive.py` and `portability.py`. Re-run quality gates after those changes settle. Full supported PDF parser cannot be exercised in current dependency-free runtime.
+1. **Finish provenance and citation support (RE-012, RE-026).** Add a trusted,
+   explicit provider DOI detail lookup with correction/retraction fields, verify
+   exact DOI, title, year and authors across independent providers, preserve raw
+   response digests, and keep paper-read/claim-support status unverified until
+   independently evidenced. Continue hardening `reference_identity.py`,
+   `identity.py`, `citation_graph.py` and facade commands with synthetic tests.
+2. **Complete review methodology (RE-027..036).** Expand study/report
+   equivalence links, versioned exclusion taxonomy, full PRISMA 2020 checklist
+   and checked diagram exports, source-anchored extraction matrix exports and
+   official bias-template versioning. Never impute missing research outcomes.
+3. **Complete manuscript and interoperability (RE-037..045).** Use a real
+   maintained CSL renderer for styles in optional dependency mode; implement
+   deterministic journal packet file manifests, metadata requirements and
+   location-aware citation checks. Extend Zotero/Obsidian export fidelity for
+   collections, rich notes, embedded assets and safe undo with actual fixtures.
+4. **Finish native recovery and compatibility (RE-002..008, RE-046..052).**
+   Add N-2 documented migrations and failure-injection fixtures; verify
+   SQLite object/event equivalence through selective cloning and encrypted
+   recovery. Support opt-in host autosave scheduling and reference monitoring
+   via the final agent, never hidden network activity.
+5. **Expand real input and provider acceptance.** With a trusted host-approved
+   transport, test provider pagination/credentials/rate restrictions, DOI
+   nonexistence/mismatches and retraction notices. With optional `pypdf`, test
+   actual open/public-domain text PDFs, encrypted scans and malformed corpora.
+   Record exact tests and environment. Do not claim success from mocks.
+6. **Finalize typed facade contracts.** Add truthful per-field JSON schemas,
+   range/enum/size checks, typed result schemas, feature readiness flags,
+   and no-automatic-privacy-export gates. See `API_CATALOG.md`.
+7. **Run cross-platform gates.** Windows passed baseline automated checks;
+   Linux/macOS and large-scale benchmarks are unverified. Test in isolated
+   runners if available, produce artifact hashes, exact versions and regression
+   traces. Keep all five executable journeys green.
 
-1. Extend review protocol registry with multi-source search capture, study/report linkage and versioned standardized full-text exclusion reasons; generate independently checked PRISMA 2020 diagrams and exports. Existing search/retrieval ledger and reconciled counts are implemented.
-2. Extend FTS5 with incremental indexing and persist provider lookup evidence for reference identity checks. Live provider checks remain opt-in.
-3. Implement reversible logical dedup merge and undo, versioned source extraction, and PDF/DOCX/EPUB parsing with safe optional dependencies.
-4. Add migrations from two earlier schema fixtures, authenticated encrypted .rwproj and crash/fuzz archive tests.
-5. Add extraction forms, evidence matrix, evidence support classification and complete manuscript citation formatter.
-6. Implement export/migration receipts for Zotero/Obsidian/Notion standard user-owned formats.
-7. Expand end-to-end demonstrations and tests to support all features, increase branch coverage, run strict mypy and benchmark realistic large inputs.
-8. Once operations are independently verified, ask integrator to wire UI and trusted host command bus. The integrator merges the isolated branch and verifies its canonical source path.
+At the end of each small validated change, run relevant focused tests,
+`ruff`, strict `mypy`, and compile checks. Stage **only the changed evidence
+domain production/tests/workstream files**, commit locally, and update
+`TEST_RESULTS.md` plus the 52-row acceptance matrix. For complete regression:
+
+```powershell
+D:\coding\codex\researchweave\.venv\Scripts\python.exe -m compileall -q src/researchweave/evidence
+D:\coding\codex\researchweave\.venv\Scripts\ruff.exe check src/researchweave/evidence tests/v2/evidence
+D:\coding\codex\researchweave\.venv\Scripts\mypy.exe src/researchweave/evidence --strict --follow-imports=skip
+D:\coding\codex\researchweave\.venv\Scripts\python.exe -m pytest -q tests/v2/evidence --cov=researchweave.evidence --cov-report=term -o pythonpath=src
+D:\coding\codex\researchweave\.venv\Scripts\python.exe workstreams/v2/evidence/count_sloc.py
+git status --short --branch
+git ls-files -- src/researchweave/evidence
+```
+
+When continuing an interrupted session, inspect current git state and
+already committed work before applying patches. Other coding sessions
+have advanced this same branch in parallel. Do not discard their changes.

@@ -1,12 +1,52 @@
-# Limitations and risk register
+# ResearchWeave V2 evidence — current limitations and risk register
 
-1. Schema 2 adds persisted review search provenance and retrieval events. Explicit v1→v2 migration exists with backups and transaction rollback; prior schema 0 and more general migration history remain unsupported. Opening schema 1 does not auto-migrate.
-2. Plaintext .rwproj export is not suitable for public sharing of private studies unless data is separately vetted. Encryption is not implemented.
-3. The current importers cover BibTeX, RIS, CSL JSON, EndNote XML, and UTF-8 plain/Markdown/HTML; advanced BibTeX macros/concatenation are unsupported; malicious nested XML and deeply nested metadata need broader fuzz testing. Scanned PDFs, DOCX and EPUB have no verified extraction adapter yet.
-4. DOI normalization verifies syntax only. Optional metadata discovery adapters were tested with offline fixtures; live provider behavior has not been verified. Identity, retractions, corrections and scientific claim support remain unverified.
-5. Review disagreement, search identification and retrieval are durable. PRISMA accounting now reconciles search runs, removals, screened reports, retrieval and assessment; `complete_prisma_2020` is only true for recorded reconciled flows. Separate non-database sources and manual imports need explicit search-run recording; graphical PRISMA diagram and published checklist export remain pending.
-6. FTS5 supports explicit rebuild and quoted phrase retrieval. No live incremental indexing, embeddings, blind multi-user synchronization, authority service, external integrations, full migration receipts or irreversible purge.
-7. Archive file creation uses safe temporary staging and replacement; simultaneous competing file creation is not protected by a cross-process lock, and existing projects are never overwritten. The object CAS may retain unattached objects after a failed domain mutation. A future orphan repair must be explicit and audited.
-8. `status(reveal_before_complete=...)` ignores the optional flag on purpose; hidden reviewer votes cannot be revealed before the round completes.
-9. The AST source target of 6,000 purposeful Python SLOC is not yet reached. Missing packages must be built as tested domain functionality, not placeholder lines.
-10. Capability manifests currently list required arguments, but full typed JSON-schema property definitions and trusted host authorization scopes need integration.
+The governing requirement audit is `ACCEPTANCE_MATRIX.md`. At the latest audited
+checkpoint **11 requirements were marked complete and 41 partial**; this is not
+a formal scientific certification. Current coverage/test counts are in
+`TEST_RESULTS.md` and must be remeasured after future modifications.
+
+1. Public provider adapters were checked using deterministic, mocked transports;
+   **no live Crossref, OpenAlex, PubMed or Europe PMC response was verified**.
+   The opt-in identity lookup reports catalog-presence claims and discrepancies
+   without treating identifier syntax as DOI existence or article content as read.
+   Retraction/correction signals remain unverified until a trusted source is checked.
+2. Authenticated `.rwproj.enc` export/import uses optional vetted cryptography
+   and rejects wrong passwords, tampering and inconsistent archive identity.
+   Independent crypto review, cancellation tests and cross-platform execution
+   were not performed. Passwords are never stored in project archives.
+3. PDF support requires optional `pypdf` for real-world documents; parser mocks
+   and malicious input handling were verified. Scanned/no-text pages are honestly
+   flagged. OCR is not present and never simulated. DOCX/EPUB parsers support
+   bounded safe subsets; unusual complex package/embedded assets can be rejected.
+4. Zotero bridge consumes user-owned CSL-JSON exports, never an active Zotero
+   SQLite database. Unknown fields and source exports survive in CAS, but
+   external binary attachments and all collections are not fully reconstructed.
+   Obsidian import protects paths/links and retains raw content; embedded asset
+   bytes and full complex vault graph export remain incomplete.
+5. Scientific risk of bias, synthesis, contradiction and evidence-gap services
+   preserve user rationale/uncertainty, but do not implement every official
+   methodology template or independently validate comparative eligibility.
+   The PRISMA Mermaid/Markdown/CSV output is a diagnostic presentation, not a
+   certified publication-ready PRISMA 2020 diagram/checklist.
+6. Bibliographies support deterministic basic styles, not full CSL. Manuscript
+   claims cannot be marked scientifically supported merely because an identifier
+   or quote exists. Submission packets are preview artifacts; no journal submit
+   action exists and missing ethics/affiliation declarations are not fabricated.
+7. SQLite uses durable local transactions with explicit schema compatibility.
+   Schema 1→2 is verified; a general historical migration chain and cross-process
+   write/lock stress testing remain outstanding. CAS objects from a rollback may
+   remain as unreferenced blobs and are never silently deleted.
+8. Snapshots, checksummed portable bundles and selective clones are implemented,
+   but true timed autosave/scheduler wiring belongs to final host integration.
+   The source hash chain and timeline are tested against deliberate tampering.
+9. The capability manifest exposes command effects, required arguments and
+   permissions; full per-field JSON schema validators, compatibility guarantees,
+   and final PyQt6 host integration are incomplete. Live network is opt-in, with
+   no default telemetry or background provider calls.
+10. The recorded tests ran on Windows Python 3.12 with synthetic content.
+    Linux/macOS runners, real PDF corpus acceptance, live providers, large-scale
+    benchmarks and privacy-specific deployment audits are unverified.
+
+Original source data and records are preserved by default. Deleting or repairing
+corrupted scientific data requires explicit authorization; read-only diagnostics
+must remain read-only. See `NEXT_ACTION.md` for exact follow-up gates.

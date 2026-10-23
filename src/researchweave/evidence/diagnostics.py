@@ -20,7 +20,8 @@ def library_diagnostics(store: ProjectStore) -> dict[str, Any]:
     duplicate_pairs: dict[tuple[str, str], dict[str, Any]] = {}
     for reference in references:
         for candidate in duplicate_candidates(reference, references):
-            pair = tuple(sorted((reference.id, str(candidate["id"]))))
+            peer_id = str(candidate["id"])
+            pair = (min(reference.id, peer_id), max(reference.id, peer_id))
             duplicate_pairs[pair] = {
                 "reference_ids": list(pair),
                 "same_doi": candidate["same_doi"],

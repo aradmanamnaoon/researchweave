@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, cast
+from typing import Any
 
 from .errors import EvidenceError, require
 from .project_format import archive_project, restore_archive, verify_archive
@@ -13,7 +13,7 @@ MAX_SNAPSHOTS = 20
 
 
 def _snapshot_dir(store: ProjectStore) -> Path:
-    directory = cast(Path, store.root / ".recovery")
+    directory = store.root / ".recovery"
     directory.mkdir(exist_ok=True)
     require(directory.is_dir() and not directory.is_symlink(),
             "Recovery directory is unsafe", "INTEGRITY_FAILURE")
@@ -79,4 +79,4 @@ def restore_recovery_snapshot(
     verified = verify_archive(path)
     require(verified["project_id"] == store.info().id,
             "Recovery snapshot belongs to another project", "CONFLICT")
-    return cast(dict[str, Any], restore_archive(path, destination))
+    return restore_archive(path, destination)

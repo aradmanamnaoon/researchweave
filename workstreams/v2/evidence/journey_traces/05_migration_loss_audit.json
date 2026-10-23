@@ -1,0 +1,35 @@
+{
+  "journey": "05_migration_loss_audit",
+  "steps": [
+    {
+      "operation": "project.create",
+      "status": "ok"
+    },
+    {
+      "operation": "migration.markdown_preview",
+      "status": "ok"
+    },
+    {
+      "operation": "project.open",
+      "status": "ok"
+    },
+    {
+      "operation": "migration.markdown_import",
+      "status": "ok"
+    },
+    {
+      "operation": "library.source_text",
+      "status": "ok"
+    },
+    {
+      "operation": "migration.markdown_undo",
+      "status": "ok"
+    },
+    {
+      "code": "NOT_FOUND",
+      "operation": "migration.markdown_undo",
+      "status": "failed"
+    }
+  ],
+  "verified": true
+}

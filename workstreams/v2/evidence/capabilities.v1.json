@@ -54,6 +54,56 @@
     "ui_binding": "pending"
   },
   {
+    "operation": "project.migration_preview",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Inspect legacy SQLite migration compatibility",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.migrate",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Upgrade a supported legacy SQLite project",
+    "ui_binding": "pending"
+  },
+  {
     "operation": "project.integrity",
     "protocol_version": 1,
     "version": "1.0.0",
@@ -76,6 +126,56 @@
       "type": "object"
     },
     "summary": "Audit project hashes",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.timeline",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read verified chronological project events",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.timeline_export",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Export verified timeline JSON",
     "ui_binding": "pending"
   },
   {
@@ -153,6 +253,222 @@
       "type": "object"
     },
     "summary": "Restore .rwproj",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.archive_encrypted",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "filename",
+      "password"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "filename",
+        "password"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Create authenticated encrypted .rwproj archive",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.archive_encrypted_verify",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "filename",
+      "password"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "filename",
+        "password"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Authenticate encrypted .rwproj archive",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.restore_encrypted",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "filename",
+      "password"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "filename",
+        "password"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Restore authenticated encrypted archive",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.recovery_snapshot",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Create verified local recovery snapshot",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.recovery_list",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "List and verify local recovery snapshots",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.recovery_restore",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "snapshot"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "snapshot"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Restore recovery snapshot to a fresh project copy",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.selective_clone",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "source_ids",
+      "reference_ids"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "source_ids",
+        "reference_ids"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Clone selected project objects and dependencies",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "project.artifact_export",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "filename"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "filename"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Export portable research artifacts",
     "ui_binding": "pending"
   },
   {
@@ -295,6 +611,33 @@
     "ui_binding": "pending"
   },
   {
+    "operation": "library.source_pages",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "source_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "source_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read and verify page-level document extraction",
+    "ui_binding": "pending"
+  },
+  {
     "operation": "discovery.search",
     "protocol_version": 1,
     "version": "1.0.0",
@@ -408,6 +751,31 @@
     "ui_binding": "pending"
   },
   {
+    "operation": "library.index_sync",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Incrementally synchronize local search cache",
+    "ui_binding": "pending"
+  },
+  {
     "operation": "library.index_health",
     "protocol_version": 1,
     "version": "1.0.0",
@@ -430,6 +798,222 @@
       "type": "object"
     },
     "summary": "Inspect search cache state",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.diagnostics",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Run read-only library diagnostics",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.collection_create",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "name"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "name"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Create structured reference collection",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.collection_tree",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read nested reference collections",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.collection_add",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "collection_id",
+      "reference_ids"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "collection_id",
+        "reference_ids"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Add references to collection",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.collection_remove",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "collection_id",
+      "reference_ids"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "collection_id",
+        "reference_ids"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Remove references from collection",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.reference_tag",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "reference_ids",
+      "tags"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "reference_ids",
+        "tags"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Tag references",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.collection_search",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Filter references by collection tags year and text",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "library.collection_export",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "collection_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "collection_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Export collection CSV",
     "ui_binding": "pending"
   },
   {
@@ -457,6 +1041,450 @@
       "type": "object"
     },
     "summary": "Inspect DOI syntax",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.compare_metadata",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "reference_id",
+      "candidate"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "reference_id",
+        "candidate"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Compare metadata without asserting an external source was verified",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.provider_identity",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "external-network",
+    "required_permission": "external-network",
+    "offline": false,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [
+      "api.crossref.org",
+      "api.openalex.org",
+      "eutils.ncbi.nlm.nih.gov",
+      "www.ebi.ac.uk"
+    ],
+    "required_arguments": [
+      "project_id",
+      "reference_id",
+      "provider"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "reference_id",
+        "provider"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Explicit opt-in catalog identity comparison with provider provenance",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.citation_link",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "citing_id",
+      "cited_id",
+      "anchor_id",
+      "actor",
+      "rationale"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "citing_id",
+        "cited_id",
+        "anchor_id",
+        "actor",
+        "rationale"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Attest a source-anchored citation relation",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.citation_revoke",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "edge_id",
+      "actor",
+      "rationale"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "edge_id",
+        "actor",
+        "rationale"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Revoke an incorrect citation relation while keeping audit history",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.citation_graph",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read audited inter-reference citation links",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.citation_graphml",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Export source-attested citation graph as GraphML",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.merge",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "canonical_id",
+      "duplicate_id",
+      "rationale"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "canonical_id",
+        "duplicate_id",
+        "rationale"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Record reversible user-reviewed reference identity merge",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.unmerge",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "duplicate_id",
+      "rationale"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "duplicate_id",
+        "rationale"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Undo reference alias while retaining original metadata",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.watch",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "reference_id",
+      "provider"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "reference_id",
+        "provider"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Opt reference into metadata update monitoring",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.unwatch",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "reference_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "reference_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Disable reference update monitoring",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.update_observation",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "reference_id",
+      "provider",
+      "observed"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "reference_id",
+        "provider",
+        "observed"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Record provider observation without silently changing metadata",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.update_history",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "reference_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "reference_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read reference update observations",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.identity_record",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "reference_id",
+      "provider",
+      "observed"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "reference_id",
+        "provider",
+        "observed"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Persist explicit provider metadata identity comparison",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.identity_history",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "reference_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "reference_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read persisted reference identity checks",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "reference.citation_add",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "citing_reference_id",
+      "cited_reference_id",
+      "provenance",
+      "confirmed_by"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "citing_reference_id",
+        "cited_reference_id",
+        "provenance",
+        "confirmed_by"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Add an explicitly confirmed citation relationship",
     "ui_binding": "pending"
   },
   {
@@ -985,6 +2013,33 @@
     "ui_binding": "pending"
   },
   {
+    "operation": "review.prisma_export",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "review_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "review_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Export conservative persisted PRISMA counts",
+    "ui_binding": "pending"
+  },
+  {
     "operation": "review.extract",
     "protocol_version": 1,
     "version": "1.0.0",
@@ -1042,6 +2097,261 @@
       "type": "object"
     },
     "summary": "Read attributed study outcome fields",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.bias_assess",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "record_id",
+      "template",
+      "assessor",
+      "responses"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "record_id",
+        "template",
+        "assessor",
+        "responses"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Record evidence-backed manual bias appraisal",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.bias_history",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "record_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "record_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "List human appraisal history",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.finding_add",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "finding"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "finding"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Register anchored study finding",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.contradictions",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "question"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "question"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Group potentially conflicting findings",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.gap_add",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "question",
+      "searches",
+      "limitations"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "question",
+        "searches",
+        "limitations"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Record reproducible evidence gap",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.gaps",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read evidence gap registry",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.synthesis_compose",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "title",
+      "sections"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "title",
+        "sections"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Save attributed narrative synthesis",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.synthesis_outline",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "outline_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "outline_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read saved synthesis",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "review.packet_export",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "review_id",
+      "filename"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "review_id",
+        "filename"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Export privacy-reviewed systematic-review packet",
     "ui_binding": "pending"
   },
   {
@@ -1132,6 +2442,89 @@
     "ui_binding": "pending"
   },
   {
+    "operation": "writing.bibliography",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "manuscript_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "manuscript_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Render basic validated bibliography",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "writing.check",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "manuscript_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "manuscript_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Inspect manuscript submission issues",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "writing.submission_packet",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "manuscript_id",
+      "journal"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "manuscript_id",
+        "journal"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Prepare unsubmitted publication packet",
+    "ui_binding": "pending"
+  },
+  {
     "operation": "provenance.graph",
     "protocol_version": 1,
     "version": "1.0.0",
@@ -1154,6 +2547,134 @@
       "type": "object"
     },
     "summary": "Export provenance graph",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "data_management.create",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "title",
+      "inventory",
+      "policies",
+      "rationale",
+      "unresolved",
+      "author"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "title",
+        "inventory",
+        "policies",
+        "rationale",
+        "unresolved",
+        "author"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Create versioned data-management plan",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "data_management.amend",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "plan_id",
+      "inventory",
+      "policies",
+      "rationale",
+      "unresolved",
+      "author"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "plan_id",
+        "inventory",
+        "policies",
+        "rationale",
+        "unresolved",
+        "author"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Append data-management plan version",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "data_management.history",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "plan_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "plan_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read data-management plan history",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "data_management.export",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "plan_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "plan_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Export data-management plan Markdown",
     "ui_binding": "pending"
   },
   {
@@ -1233,6 +2754,191 @@
       "type": "object"
     },
     "summary": "Soft-delete a complete imported Markdown batch",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "migration.zotero_preview",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "data_base64"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "data_base64"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Preview user-owned Zotero CSL-JSON export mapping",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "migration.zotero_import",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "data_base64"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "data_base64"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Import Zotero CSL-JSON with explicit fidelity receipt",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "migration.obsidian_preview",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "files"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "files"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Preview sanitized Obsidian vault Markdown mapping",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "migration.obsidian_import",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "files"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "files"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Import Obsidian vault notes with backlinks and provenance",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "migration.obsidian_export",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "batch_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "batch_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Export imported Obsidian Markdown losslessly",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "migration.interop_receipt",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "read",
+    "required_permission": "read",
+    "offline": true,
+    "safe_for_batch": true,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "batch_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "batch_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Read interoperability fidelity receipt",
+    "ui_binding": "pending"
+  },
+  {
+    "operation": "migration.interop_undo",
+    "protocol_version": 1,
+    "version": "1.0.0",
+    "effect": "local-write",
+    "required_permission": "local-write",
+    "offline": true,
+    "safe_for_batch": false,
+    "preview_supported": true,
+    "network_hosts": [],
+    "required_arguments": [
+      "project_id",
+      "batch_id"
+    ],
+    "arguments_schema": {
+      "type": "object",
+      "required": [
+        "project_id",
+        "batch_id"
+      ]
+    },
+    "result_schema": {
+      "type": "object"
+    },
+    "summary": "Undo supported interoperability batch while preserving raw input",
     "ui_binding": "pending"
   }
 ]

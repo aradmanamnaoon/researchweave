@@ -32,3 +32,14 @@
 - `mypy src/researchweave/evidence --strict --follow-imports=skip`: passed.
 
 Latest coverage measurement: 24 tests passed; 84% combined line/branch coverage, 1,756 statements and 460 branches. Measured 17 production modules with 2,650 meaningful SLOC.
+
+## Full V2 evidence checkpoint (2026-10-23, Windows)
+
+- `python -m pytest -q tests/v2/evidence --cov=researchweave.evidence --cov-report=term -o pythonpath=src`: **105 passed**, one expected standard-library warning for adversarial duplicate ZIP fixture; 4,372 statements, 1,160 branches, **89% combined coverage**.
+- `ruff check src/researchweave/evidence tests/v2/evidence`: **all checks passed**.
+- `mypy src/researchweave/evidence --strict --follow-imports=skip`: **no issues in 37 source files**.
+- `python -m compileall -q src/researchweave/evidence`: **passed**.
+- `python workstreams/v2/evidence/count_sloc.py`: **37 production Python modules, 8,545 meaningful source lines** (nonblank/noncomment, excluding docstrings; see `CODE_METRICS.json`).
+- `tests/v2/evidence/test_five_journeys.py`: **5/5 passed**, with normalized persisted call traces under `workstreams/v2/evidence/journey_traces/`.
+- Unit tests include fail-closed malicious path inputs, duplicate references, wrong-password encrypted archives, tampering, independent blinded reviewers, migration rollback and network-denial fixtures.
+- Parser testing remains synthetic/injected for PDF, and all remote provider tests are mocked; no live network or Linux/macOS runner was claimed. Re-run all commands after additional source changes because other local workers have committed to this same branch concurrently.

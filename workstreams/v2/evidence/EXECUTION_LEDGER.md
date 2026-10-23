@@ -1,5 +1,11 @@
 # Execution ledger (append-on-milestone)
 
+**Latest 52-row governing acceptance matrix:** `ACCEPTANCE_MATRIX.md`. The
+milestones below are historical snapshots; older pending/absent statements
+are superseded by the matrix. Read its per-requirement implementation,
+facade IDs, tests, persistence checks and remaining scientific/security
+limitations before using this branch for integration.
+
 | IDs | Observed behavior and owned files | Status |
 |---|---|---|
 | AUDIT-001 | Git base audit, initial audit recorded, distinct clean worktree created | Verified |
@@ -30,5 +36,10 @@
 | RE-031, RE-034..036 | Manual appraisals, anchored findings, grouping by matching outcomes, evidence gaps and synthesis via `synthesis.py` facade handlers, `test_synthesis_publishing.py`, `test_facade_extensions.py` | Partial: focused tests passed; full scientific templates and comprehensive provenance audits pending |
 | RE-038..040 | `publishing.py` deterministic plain/numbered bibliography, manuscript warnings, explicit unsubmitted publication packet, facade commands | Partial: focused tests passed; full CSL/DOCX/PDF packet export missing |
 | RE-004, RE-014..017, RE-020..022, RE-026, RE-030..031, RE-033..036, RE-038, RE-040..049, RE-051..052 | Not implemented or incomplete; consult NEXT_ACTION.md | Pending |
+| 2026-10-23 V2 capability expansion | Authenticated encryption; recovery and data-management plans; private export packets; Zotero/Obsidian imports; FTS sync; structured PDF/DOCX/EPUB; bibliographic identity, user-attested citation relationships, anchored research timeline, risk appraisal, evidence gaps, synthesis, publishing; `src/researchweave/evidence/` | See `ACCEPTANCE_MATRIX.md` for 52 distinct statuses; source and facade integration tested, live providers untested |
+| JOURNEYS-001..005 | `test_five_journeys.py` and immutable normalized `journey_traces/*.json` | Five executed and passed on Windows; tested reopen, wrong provenance, disagreement, archive restore, and migration undo |
+| PRISMA-EXPORT | `prisma_export.py`; `review.prisma_export`, `test_prisma_export.py` | Markdown, CSV and diagnostic Mermaid, unreconciled claims marked incomplete |
+| RE-012-IDENTITY | `identity.py`, `reference_identity.py` with `reference.identity_record`, `reference.compare_metadata`, opt-in `reference.provider_identity` | Candidate mismatches and catalog-reported DOI distinguished; no claim support asserted; mocked network only |
+| RE-026-CITATIONS | `citation_graph.py` and `reference.citation_*` command family | Anchored links rechecked against original source hashes; unanchored manual citations clearly labeled, never infer paper read |
 
 The source is tracked at relative `src/researchweave/evidence/` in isolated branch `rebuild/v2-evidence`. Source layout verification, measured meaningful SLOC, test count and commit SHA are recorded in TEST_RESULTS.md and HANDOFF.md after final local checks.

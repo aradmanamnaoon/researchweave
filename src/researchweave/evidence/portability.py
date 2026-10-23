@@ -87,7 +87,7 @@ def _write_bundle(
             archive.writestr(_zipinfo("manifest.json"), manifest_bytes)
             for name, data in sorted(payloads.items()):
                 require(
-                    name and "/" not in name and "\\" not in name and name != "manifest.json",
+                    bool(name) and "/" not in name and "\\" not in name and name != "manifest.json",
                     "Unsafe artifact path",
                 )
                 archive.writestr(_zipinfo(name), data)
