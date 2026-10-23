@@ -257,6 +257,17 @@ def test_visible_acceptance_closure_surfaces(tmp_path: Path) -> None:
         memo="before",
     )
     revision = int(annotation["revision"])
+    evidence = ok(
+        facade,
+        "ui.evidence.capture",
+        project_id=pid,
+        expected_revision=revision,
+        source_id=source["source_id"],
+        start=0,
+        end=7,
+        note="Visible evidence anchor.",
+    )
+    revision = int(evidence["revision"])
     dataset = ok(
         facade,
         "ui.dataset.import",
@@ -284,6 +295,16 @@ def test_visible_acceptance_closure_surfaces(tmp_path: Path) -> None:
     shell.annotation_memo.setText("after")
     shell.update_annotation()
     assert shell.annotation_list.item(0).text().startswith("edited-visible:")
+    shell.open_selected_annotation_source()
+    assert shell.page_heading.text() == "Reader"
+    assert shell.reader_text.textCursor().selectedText() == "visible"
+
+    shell.navigate("Evidence")
+    assert shell.evidence_list.count() == 1
+    shell.evidence_list.setCurrentRow(0)
+    shell.open_selected_evidence_source()
+    assert shell.page_heading.text() == "Reader"
+    assert shell.reader_text.textCursor().selectedText() == "visible"
 
     shell.navigate("Statistics")
     dataset_index = shell.dataset_picker.findData(dataset["dataset_id"])

@@ -9,6 +9,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtTest import QTest
 from PyQt6.QtWidgets import QApplication
 
 from researchweave.ui import build_ui_facade, build_ui_shell
@@ -93,6 +94,27 @@ def test_qtpdf_renders_and_navigation(qt_app, tmp_path: Path) -> None:
     reader.change_zoom("150%")
     assert reader.view.zoomFactor() == pytest.approx(1.5)
     reader.change_zoom("Fit page")
+    reader.search_input.setText("synthetic")
+    reader.search_text()
+    for _ in range(20):
+        qt_app.processEvents()
+        QTest.qWait(10)
+        if reader.search_model.count() > 0:
+            break
+    assert reader.search_model.count() == 1
+    assert "page 1" in reader.status_label.text().lower()
+    reference = reader.current_page_reference()
+    assert reference is not None
+    assert reference["page"] == 1
+    assert reference["sha256"] == receipt["sha256"]
+    assert reference["verified_text_coordinates"] is False
+    reader.search_input.setText("not-in-fixture")
+    reader.search_text()
+    for _ in range(20):
+        qt_app.processEvents()
+        QTest.qWait(10)
+    assert reader.search_model.count() == 0
+    assert "ocr" in reader.status_label.text().lower()
     reader.resize(900, 600)
     reader.show()
     qt_app.processEvents()

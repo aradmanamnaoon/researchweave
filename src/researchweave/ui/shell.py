@@ -6,7 +6,7 @@ from collections.abc import Callable, Mapping
 from typing import Any, cast
 
 from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QAction, QCloseEvent, QKeySequence
+from PyQt6.QtGui import QAction, QCloseEvent, QKeySequence, QTextCursor
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -40,7 +40,7 @@ from .jobs import JobManager
 from .models import ResearchTableModel
 from .pdf_reader import PDFReader
 from .presets import WORKSPACE_SCREENS
-from .text_offsets import qt_range_to_codepoints
+from .text_offsets import codepoint_range_to_qt, qt_range_to_codepoints
 from .visualization import Bin, ChartSpec, HistogramWidget
 
 SCREENS = WORKSPACE_SCREENS
@@ -439,7 +439,11 @@ class ResearchWindow(QMainWindow):
         self.evidence_list = QListWidget()
         named(self.evidence_list, "Anchored excerpts with integrity status")
         self.evidence_list.currentItemChanged.connect(self.inspect_selected_evidence)
+        self.evidence_list.itemActivated.connect(self.open_selected_evidence_source)
         layout.addWidget(self.evidence_list)
+        layout.addWidget(
+            button("Open selected passage in Reader", self.open_selected_evidence_source)
+        )
         self.evidence_detail = QPlainTextEdit()
         self.evidence_detail.setReadOnly(True)
         named(self.evidence_detail, "Selected evidence passage and source checks")
@@ -731,6 +735,7 @@ class ResearchWindow(QMainWindow):
         self.annotation_list = QListWidget()
         named(self.annotation_list, "Saved text annotations")
         self.annotation_list.currentItemChanged.connect(self.load_annotation_for_edit)
+        self.annotation_list.itemActivated.connect(self.open_selected_annotation_source)
         layout.addWidget(self.annotation_list)
         annotation_form = QFormLayout()
         self.annotation_code = QLineEdit()
@@ -2247,6 +2252,46 @@ class ResearchWindow(QMainWindow):
                 row.setData(Qt.ItemDataRole.UserRole, item)
                 self.annotation_list.addItem(row)
 
+    def _open_source_span(self, source_id: str, start: int, end: int, label: str) -> None:
+        response = self._call("ui.source.get", source_id=source_id)
+        if response is None:
+            return
+        source = response["source"]
+        try:
+            qt_start, qt_end = codepoint_range_to_qt(source["text"], start, end)
+        except UIError as exc:
+            self._set_status(f"{exc.message} {exc.recovery}")
+            return
+        self.current_source_id = source_id
+        self.reader_meta.setText(
+            f"{source['title']} · {source['source_label']} · "
+            f"SHA-256 {source['content_hash']}\n{label}"
+        )
+        self.reader_text.setPlainText(source["text"])
+        cursor = self.reader_text.textCursor()
+        cursor.setPosition(qt_start)
+        cursor.setPosition(qt_end, QTextCursor.MoveMode.KeepAnchor)
+        self.reader_text.setTextCursor(cursor)
+        self.reader_text.ensureCursorVisible()
+        self.navigate("Reader")
+
+    def open_selected_annotation_source(
+        self, item: QListWidgetItem | bool | None = None
+    ) -> None:
+        selected = item if isinstance(item, QListWidgetItem) else self.annotation_list.currentItem()
+        if selected is None:
+            self._set_status("Select an annotation first.")
+            return
+        record = selected.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(record, dict):
+            return
+        self._open_source_span(
+            str(record["source_id"]),
+            int(record["start"]),
+            int(record["end"]),
+            f"Annotation {record['id']} · code {record['code']}",
+        )
+
     def load_annotation_for_edit(
         self, current: QListWidgetItem | None, previous: QListWidgetItem | None
     ) -> None:
@@ -2275,7 +2320,16 @@ class ResearchWindow(QMainWindow):
             memo=self.annotation_memo.text(),
         )
         if response is not None:
+            annotation_id = str(response["annotation"]["id"])
             self.refresh_annotations()
+            for row in range(self.annotation_list.count()):
+                item = self.annotation_list.item(row)
+                if item is None:
+                    continue
+                record = item.data(Qt.ItemDataRole.UserRole)
+                if isinstance(record, dict) and str(record.get("id", "")) == annotation_id:
+                    self.annotation_list.setCurrentItem(item)
+                    break
             self._set_status("Updated annotation code and memo without changing its source span.")
 
     def refresh_codebook(self) -> None:
@@ -3950,6 +4004,26 @@ class ResearchWindow(QMainWindow):
                 f"Integrity: {response['integrity']}\n"
                 f"Checks: {response['checks']}\n\n{response['note']}"
             )
+
+    def open_selected_evidence_source(
+        self, item: QListWidgetItem | bool | None = None
+    ) -> None:
+        selected = item if isinstance(item, QListWidgetItem) else self.evidence_list.currentItem()
+        if selected is None:
+            self._set_status("Select an evidence passage first.")
+            return
+        response = self._call(
+            "ui.evidence.inspect",
+            evidence_id=selected.data(Qt.ItemDataRole.UserRole),
+        )
+        if response is None:
+            return
+        self._open_source_span(
+            str(response["source_id"]),
+            int(response["span_start"]),
+            int(response["span_end"]),
+            f"Evidence anchor · integrity {response['integrity']}",
+        )
 
     def create_evidence_claim(self) -> None:
         item = self.evidence_list.currentItem()

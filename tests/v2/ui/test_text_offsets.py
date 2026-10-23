@@ -13,7 +13,7 @@ from PyQt6.QtWidgets import QApplication, QInputDialog
 
 from researchweave.ui import build_ui_facade, build_ui_shell
 from researchweave.ui.contracts import UIError
-from researchweave.ui.text_offsets import qt_range_to_codepoints
+from researchweave.ui.text_offsets import codepoint_range_to_qt, qt_range_to_codepoints
 
 
 @pytest.mark.parametrize(
@@ -28,6 +28,7 @@ from researchweave.ui.text_offsets import qt_range_to_codepoints
 )
 def test_exact_unicode_offsets(text, qt_start, qt_end, expected) -> None:
     assert qt_range_to_codepoints(text, qt_start, qt_end) == expected
+    assert codepoint_range_to_qt(text, *expected) == (qt_start, qt_end)
     assert text[slice(*expected)]
 
 
@@ -35,6 +36,11 @@ def test_exact_unicode_offsets(text, qt_start, qt_end, expected) -> None:
 def test_reject_split_or_invalid_spans(start: int, end: int) -> None:
     with pytest.raises(UIError):
         qt_range_to_codepoints("🧠abc", start, end)
+
+
+def test_reject_invalid_persisted_codepoint_span() -> None:
+    with pytest.raises(UIError):
+        codepoint_range_to_qt("abc", 1, 5)
 
 
 def test_reader_captures_correct_offset_after_emoji(tmp_path: Path, monkeypatch) -> None:

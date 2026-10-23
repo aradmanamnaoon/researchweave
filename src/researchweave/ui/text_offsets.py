@@ -50,3 +50,23 @@ def qt_range_to_codepoints(text: str, start: int, end: int) -> tuple[int, int]:
         raise UIError("INVALID_INPUT", "Selection is outside the source text.",
                       "Highlight existing source text before coding.")
     return first, last
+
+
+def codepoint_range_to_qt(text: str, start: int, end: int) -> tuple[int, int]:
+    """Translate persisted Python codepoint offsets into Qt UTF-16 cursor offsets."""
+    if (
+        not isinstance(text, str)
+        or type(start) is not int
+        or type(end) is not int
+        or start < 0
+        or start >= end
+        or end > len(text)
+    ):
+        raise UIError(
+            "INVALID_INPUT",
+            "Invalid persisted source span.",
+            "Inspect the saved evidence or annotation before navigating to it.",
+        )
+    qt_start = len(text[:start].encode("utf-16-le")) // 2
+    qt_end = len(text[:end].encode("utf-16-le")) // 2
+    return qt_start, qt_end

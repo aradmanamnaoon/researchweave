@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 from PyQt6.QtCore import QPointF, pyqtSignal
-from PyQt6.QtPdf import QPdfDocument
+from PyQt6.QtPdf import QPdfDocument, QPdfSearchModel
 from PyQt6.QtPdfWidgets import QPdfView
 from PyQt6.QtWidgets import (
     QComboBox,
@@ -123,6 +123,9 @@ class PDFReader(QWidget):
         self.view.setDocument(self.document)
         self.view.setPageMode(QPdfView.PageMode.SinglePage)
         self.view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
+        self.search_model = QPdfSearchModel(self)
+        self.search_model.setDocument(self.document)
+        self.view.setSearchModel(self.search_model)
         self.current_path: Path | None = None
         self.metadata: PDFMetadata | None = None
 
@@ -155,6 +158,25 @@ class PDFReader(QWidget):
         self.zoom_picker.currentTextChanged.connect(self.change_zoom)
         tools.addWidget(self.zoom_picker)
         column.addLayout(tools)
+        search_tools = QHBoxLayout()
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Search verified PDF text layer")
+        named(
+            self.search_input,
+            "Search local PDF text",
+            "Search uses QtPdf's local text layer only; scanned image OCR is not inferred.",
+        )
+        self.search_input.returnPressed.connect(self.search_text)
+        search_tools.addWidget(self.search_input)
+        self.search_previous = QPushButton("Previous match")
+        self.search_previous.clicked.connect(lambda: self.navigate_search(-1))
+        named(self.search_previous, "Go to previous PDF text match")
+        search_tools.addWidget(self.search_previous)
+        self.search_next = QPushButton("Next match")
+        self.search_next.clicked.connect(lambda: self.navigate_search(1))
+        named(self.search_next, "Go to next PDF text match")
+        search_tools.addWidget(self.search_next)
+        column.addLayout(search_tools)
         column.addWidget(self.view)
         self.status_label = QLabel(
             "Select a local PDF. No file contents are uploaded or indexed."
@@ -163,6 +185,7 @@ class PDFReader(QWidget):
         named(self.status_label, "PDF document status")
         column.addWidget(self.status_label)
         self.document.pageCountChanged.connect(self._on_pages)
+        self.search_model.countChanged.connect(self._sync_search_status)
         navigator = self.view.pageNavigator()
         if navigator is not None:
             navigator.currentPageChanged.connect(self._on_page_change)
@@ -210,6 +233,8 @@ class PDFReader(QWidget):
             path=str(candidate), title=candidate.name,
             pages=self.document.pageCount(), bytes=size, sha256=digest,
         )
+        self.search_model.setDocument(self.document)
+        self.search_model.setSearchString("")
         self.view.setZoomMode(QPdfView.ZoomMode.FitToWidth)
         self.zoom_picker.setCurrentText("Fit width")
         self.jump(1)
@@ -230,6 +255,9 @@ class PDFReader(QWidget):
         self.next_button.setEnabled(count > 0 and current < count)
         self.page_input.setEnabled(count > 0)
         self.zoom_picker.setEnabled(count > 0)
+        self.search_input.setEnabled(count > 0)
+        self.search_previous.setEnabled(count > 0 and self.search_model.count() > 0)
+        self.search_next.setEnabled(count > 0 and self.search_model.count() > 0)
         self.page_total.setText(f"of {count}")
 
     def current_page(self) -> int:
@@ -289,10 +317,76 @@ class PDFReader(QWidget):
             self.view.setZoomMode(QPdfView.ZoomMode.Custom)
             self.view.setZoomFactor(float(mode[:-1]) / 100.0)
 
+    def search_text(self) -> None:
+        query = self.search_input.text().strip()
+        if not query:
+            self.search_model.setSearchString("")
+            self.status_label.setText(
+                "Enter text to search the PDF's existing local text layer."
+            )
+            self._sync_enabled()
+            return
+        self.search_model.setSearchString(query)
+        self._sync_search_status()
+
+    def _sync_search_status(self) -> None:
+        count = self.search_model.count()
+        self.search_previous.setEnabled(count > 0)
+        self.search_next.setEnabled(count > 0)
+        if not self.search_input.text().strip():
+            return
+        if count == 0:
+            self.status_label.setText(
+                "No local text-layer matches. This does not imply OCR was attempted."
+            )
+            return
+        current = self.view.currentSearchResultIndex()
+        if not 0 <= current < count:
+            current = 0
+            self.view.setCurrentSearchResultIndex(current)
+        result = self.search_model.resultAtIndex(current)
+        if result.isValid():
+            self.jump(result.page() + 1)
+            context = f"{result.contextBefore()}[{self.search_input.text()}]{result.contextAfter()}"
+            self.status_label.setText(
+                f"Text-layer match {current + 1} of {count} · page {result.page() + 1}.\n"
+                f"{context}\nVerify quotation and page reference against the rendered PDF."
+            )
+
+    def navigate_search(self, delta: int) -> None:
+        count = self.search_model.count()
+        if count <= 0:
+            self._sync_search_status()
+            return
+        current = self.view.currentSearchResultIndex()
+        if current < 0:
+            current = 0
+        else:
+            current = (current + delta) % count
+        self.view.setCurrentSearchResultIndex(current)
+        self._sync_search_status()
+
+    def current_page_reference(self) -> dict[str, Any] | None:
+        if self.metadata is None or self.current_page() <= 0:
+            return None
+        return {
+            "path": self.metadata.path,
+            "sha256": self.metadata.sha256,
+            "page": self.current_page(),
+            "label": f"{self.metadata.title}, p. {self.current_page()}",
+            "verified_text_coordinates": False,
+            "note": (
+                "Page reference identifies the rendered local PDF page. "
+                "Verify quotation text manually before citing."
+            ),
+        }
+
     def close_file(self) -> None:
         self.document.close()
         self.current_path = None
         self.metadata = None
+        self.search_model.setSearchString("")
+        self.search_input.clear()
         self.page_input.setText("1")
         self.status_label.setText("No PDF is open.")
         self._sync_enabled()
