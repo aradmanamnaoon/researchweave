@@ -61,3 +61,5 @@ Structured graph planning is available headlessly with `PlanCompiler`, `ToolMani
 
 The read-only Markdown connector is available through `ConnectorRegistry` and `MarkdownVault` in `researchweave.ai.integrations`. It is constructed with a trusted existing vault directory and requires `granted_scopes=frozenset({"notes.read"})` for `registry.invoke("local.markdown", "read", {"path": "paper.md"}, ...)`. It returns raw UTF-8 Markdown, a SHA-256 checksum, and `untrusted=True`. Imported instructions cannot grant tool authority.
 
+The optional `BudgetStore` in `researchweave.ai.budgets` supports `configure(Budget(...))`, `reserve(project_id, token_limit)`, `close_reservation(reservation, actual_tokens=...)`, and `summary(project_id)`. Reservations survive process restarts; they are finalized exactly once, and an interrupted request stays reserved pending explicit reconciliation. Provider integration should reserve before the call and finalize from observed provider usage.
+

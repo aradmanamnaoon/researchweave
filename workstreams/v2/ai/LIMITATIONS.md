@@ -8,5 +8,7 @@ An injectable embedder Protocol, fingerprinted exact-vector SQLite store and hyb
 
 The Markdown connector supports read-only, scope-gated local notes; it does not yet implement notes mutation, Zotero, Crossref/OpenAlex, MCP, WebDAV or S3 APIs. Imported note bodies are correctly tagged as untrusted but require policy enforcement in downstream agents.
 
+Durable project-level token budgets and reservations exist as a separate host service. The current `ProviderRegistry.complete` path has not yet been bound to `BudgetStore` at the application composition root, and its admission token estimate is conservative rather than tokenizer-exact; unknown monetary pricing remains unknown.
+
 No live hosted model, real user files, or external network was used during tests. Do not enable experimental remote transport in a sensitive production installation until DNS rebinding, proxy handling, cancellation, audit and credential storage are completed.
 
