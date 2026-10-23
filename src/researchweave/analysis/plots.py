@@ -288,9 +288,23 @@ def render_plot(
                 options["slope"] = float(fitted.slope)
                 options["r_squared"] = float(fitted.rvalue**2)
             else:
-                ax.scatter(xs, ys, alpha=0.75)
+                require(len(xs) >= 3 and np.ptp(xs) > 0, "Residual plot needs nonconstant x")
+                fitted = stats.linregress(xs, ys)
+                fitted_values = [fitted.intercept + fitted.slope * value for value in xs]
+                residuals = [
+                    observed - predicted
+                    for observed, predicted in zip(ys, fitted_values, strict=True)
+                ]
+                ax.scatter(fitted_values, residuals, alpha=0.75)
                 ax.axhline(0, linestyle="--")
-            plot_data = {"x": xs, "y": ys, "source_indices": indices}
+                plot_data = {
+                    "fitted": list(map(float, fitted_values)),
+                    "residuals": list(map(float, residuals)),
+                    "source_indices": indices,
+                    "model": "simple_ols_with_intercept",
+                }
+            if kind != "residual":
+                plot_data = {"x": xs, "y": ys, "source_indices": indices}
         elif kind in {"histogram", "density", "box", "violin", "qq"}:
             xs, indices = _numeric(dataset, x)
             n_used = len(xs)

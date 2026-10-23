@@ -12,7 +12,12 @@ from typing import Any
 
 import numpy as np
 
-from .coding_review import CodingReviewLedger, disagreements, propose_relocation
+from .coding_review import (
+    CodingReviewLedger,
+    adjudicate_disagreements,
+    disagreements,
+    propose_relocation,
+)
 from .datasets import DatasetStore, import_csv
 from .errors import AnalysisError, require
 from .facade import AnalysisFacade, build_analysis_facade
@@ -213,10 +218,10 @@ def survey_modeling_journey(workspace: Path) -> dict[str, Any]:
     )
     scatter_args = {
         **identity2,
-        "filename": "survey_residual_proxy.svg",
+        "filename": "survey_residuals.svg",
         "x": "x",
         "y": "outcome",
-        "kind": "scatter",
+        "kind": "residual",
     }
     diagnostic_plot = _authorized(facade, "plot.render", scatter_args, request_id="survey-plot")
     restarted = build_analysis_facade(store_root)
@@ -367,6 +372,15 @@ def qualitative_audit_journey(workspace: Path) -> dict[str, Any]:
     conflict_rows = disagreements(
         state.project, coder_a="coder_a", coder_b="coder_b", unit_ids=list(coder_a)
     )
+    adjudication = adjudicate_disagreements(
+        state.project,
+        coder_a="coder_a",
+        coder_b="coder_b",
+        unit_ids=list(coder_a),
+        resolutions={"u2": "strain"},
+        adjudicator="lead",
+        rationales={"u2": "Context emphasizes time pressure, so strain is retained."},
+    )
     ledger = CodingReviewLedger(state.project)
     ledger.decide(2, "accept", reviewer="reviewer_1", rationale="Positive coding fits context")
     ledger.decide(2, "reject", reviewer="reviewer_2", rationale="Strain dominates this unit")
@@ -400,6 +414,7 @@ def qualitative_audit_journey(workspace: Path) -> dict[str, Any]:
         "n_annotations": matrix["n_annotations"],
         "kappa": agreement,
         "disagreements": conflict_rows,
+        "adjudication": adjudication,
         "review_consensus": reopened_ledger.consensus(),
         "memo_hash": digest(asdict(reopened.memos["memo_theme"])),
         "saved_content_hash": saved["content_hash"],

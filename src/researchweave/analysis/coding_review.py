@@ -271,3 +271,66 @@ def disagreements(
         for unit in unit_ids
         if labels[coder_a][unit] != labels[coder_b][unit]
     ]
+
+
+def adjudicate_disagreements(
+    project: CodingProject,
+    *,
+    coder_a: str,
+    coder_b: str,
+    unit_ids: list[str],
+    resolutions: dict[str, str],
+    adjudicator: str,
+    rationales: dict[str, str],
+) -> dict[str, Any]:
+    """Resolve declared fixed-unit coder disagreements with explicit human decisions.
+
+    This operation does not rewrite either coder's annotations. It returns an
+    auditable consensus mapping that can be persisted with the project handoff.
+    Every disagreement requires an explicit label and rationale from a named
+    adjudicator; agreements pass through unchanged.
+    """
+
+    require(bool(adjudicator.strip()), "Named adjudicator required")
+    conflicts = disagreements(project, coder_a=coder_a, coder_b=coder_b, unit_ids=unit_ids)
+    conflict_units = {str(row["unit_id"]) for row in conflicts}
+    require(
+        set(resolutions) == conflict_units and set(rationales) == conflict_units,
+        "Every disagreement requires exactly one resolution and rationale",
+        "SCHEMA_MISMATCH",
+    )
+    require(
+        all(bool(str(rationales[unit]).strip()) for unit in conflict_units),
+        "Adjudication rationale cannot be empty",
+    )
+    labels: dict[str, dict[str, str]] = {coder_a: {}, coder_b: {}}
+    for annotation in project.annotations:
+        if annotation.coder in labels and annotation.unit_id in unit_ids:
+            labels[annotation.coder][annotation.unit_id] = annotation.code_id
+    consensus: dict[str, str] = {}
+    decisions: list[dict[str, str]] = []
+    for unit in unit_ids:
+        first = labels[coder_a][unit]
+        second = labels[coder_b][unit]
+        if first == second:
+            consensus[unit] = first
+            continue
+        selected = str(resolutions[unit])
+        require(selected in project.codes, "Adjudicated label is not in the codebook")
+        consensus[unit] = selected
+        decisions.append(
+            {
+                "unit_id": unit,
+                "coder_a": first,
+                "coder_b": second,
+                "resolved_code": selected,
+                "adjudicator": adjudicator,
+                "rationale": str(rationales[unit]),
+            }
+        )
+    return {
+        "consensus": consensus,
+        "decisions": decisions,
+        "adjudicator": adjudicator,
+        "n_disagreements": len(conflicts),
+    }

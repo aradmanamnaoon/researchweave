@@ -2,6 +2,7 @@ import pytest
 
 from researchweave.analysis.coding_review import (
     CodingReviewLedger,
+    adjudicate_disagreements,
     apply_relocation,
     disagreements,
     propose_relocation,
@@ -80,3 +81,30 @@ def test_agreement_disagreement_unit_rules():
     assert found == [{"unit_id": "segment", "coder_a": "one", "coder_b": "two"}]
     with pytest.raises(AnalysisError, match="SCHEMA_MISMATCH"):
         disagreements(project, coder_a="coder_a", coder_b="coder_b", unit_ids=["segment", "absent"])
+
+
+def test_adjudication_requires_explicit_resolution_and_preserves_coder_labels():
+    project = _project()
+    project.annotate("text", 4, 9, "two", "coder_b", "segment")
+    resolved = adjudicate_disagreements(
+        project,
+        coder_a="coder_a",
+        coder_b="coder_b",
+        unit_ids=["segment"],
+        resolutions={"segment": "two"},
+        adjudicator="lead",
+        rationales={"segment": "Second code matches the declared codebook definition."},
+    )
+    assert resolved["consensus"] == {"segment": "two"}
+    assert resolved["decisions"][0]["coder_a"] == "one"
+    assert resolved["decisions"][0]["coder_b"] == "two"
+    with pytest.raises(AnalysisError, match="SCHEMA_MISMATCH"):
+        adjudicate_disagreements(
+            project,
+            coder_a="coder_a",
+            coder_b="coder_b",
+            unit_ids=["segment"],
+            resolutions={},
+            adjudicator="lead",
+            rationales={},
+        )

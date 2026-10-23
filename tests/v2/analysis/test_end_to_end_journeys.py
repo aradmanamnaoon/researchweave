@@ -28,6 +28,9 @@ def test_survey_modeling_journey_design_restart_and_bad_weight(tmp_path: Path):
     assert trace["survey_mean"]["n_strata"] == 2
     assert trace["survey_mean"]["n_psus"] == 6
     assert trace["model"]["method"] == "ols"
+    assert trace["diagnostic_plot"]["kind"] == "residual"
+    assert trace["diagnostic_plot"]["plot_data"]["model"] == "simple_ols_with_intercept"
+    assert abs(sum(trace["diagnostic_plot"]["plot_data"]["residuals"])) < 1e-10
     assert trace["restart_result_match"] is True
     assert trace["injected_failure"] == "INVALID_INPUT"
 
@@ -47,6 +50,8 @@ def test_qualitative_journey_unicode_agreement_review_restart_and_stale_source(t
     assert trace["n_annotations"] == 8
     assert trace["kappa"]["kappa"] == pytest.approx(0.5)
     assert len(trace["disagreements"]) == 1
+    assert trace["adjudication"]["n_disagreements"] == 1
+    assert trace["adjudication"]["consensus"]["u2"] == "strain"
     assert trace["restart_project_hash_match"] is True
     assert trace["stale_source_relocation"]["status"] == "missing"
     assert trace["review_consensus"][2]["status"] == "conflict"
