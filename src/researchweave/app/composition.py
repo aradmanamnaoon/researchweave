@@ -125,8 +125,11 @@ def build_services(
     )
     ai_issuer = ApprovalIssuer(secrets.token_bytes(32))
     ai = build_ai_facade(
-        paths.ai, policy=EgressPolicy(offline=True), issuer=ai_issuer,
-        remote_sync=remote_sync, mcp_bridge=mcp_bridge,
+        paths.ai,
+        policy=EgressPolicy(offline=True),
+        issuer=ai_issuer,
+        remote_sync=remote_sync,
+        mcp_bridge=mcp_bridge,
     )
     ui = build_ui_facade(paths.ui)
 

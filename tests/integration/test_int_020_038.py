@@ -225,9 +225,7 @@ def test_int_025_027_migrations_preserve_source_and_require_approval(tmp_path: P
             connection.close()
         destination = services.paths.evidence / legacy_id
         legacy_root.rename(destination)
-        migration_preview = gateway.execute(
-            "project.migration_preview", {"project_id": legacy_id}
-        )
+        migration_preview = gateway.execute("project.migration_preview", {"project_id": legacy_id})
         assert migration_preview["data"]["compatibility"] == "upgrade_available"
         migrated = gateway.execute("project.migrate", {"project_id": legacy_id})
         assert migrated["status"] == "ok", migrated

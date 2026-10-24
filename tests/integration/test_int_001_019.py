@@ -81,9 +81,7 @@ def test_int_002_learner_persistence_and_invalid_creation(tmp_path: Path) -> Non
         services.close()
     reopened = build_services(tmp_path)
     try:
-        response = reopened.bus.dispatch(
-            _request("ui.project.open", scope, project_id=str(scope))
-        )
+        response = reopened.bus.dispatch(_request("ui.project.open", scope, project_id=str(scope)))
         assert response["status"] == "ok", response
         assert "Deterministic synthetic research" in repr(response["data"])
     finally:
@@ -97,7 +95,8 @@ def test_int_003_protocol_version_and_denied_amendment(tmp_path: Path) -> None:
         created = _approved(
             services,
             _request(
-                "project.create", scope,
+                "project.create",
+                scope,
                 title="Synthetic protocol",
                 question="Does a protocol retain its first version?",
                 design="mixed_methods",
@@ -106,7 +105,8 @@ def test_int_003_protocol_version_and_denied_amendment(tmp_path: Path) -> None:
         assert created["status"] == "ok", created
         project_id = created["data"]["project_id"]
         protocol_request = _request(
-            "protocol.create", scope,
+            "protocol.create",
+            scope,
             project_id=project_id,
             title="Prespecified design",
             author="Synthetic reviewer",
@@ -121,7 +121,8 @@ def test_int_003_protocol_version_and_denied_amendment(tmp_path: Path) -> None:
         protocol_id = original["data"]["protocol_id"]
         unauthorized = services.bus.dispatch(
             _request(
-                "protocol.amend", scope,
+                "protocol.amend",
+                scope,
                 project_id=project_id,
                 protocol_id=protocol_id,
                 author="Synthetic reviewer",
@@ -132,7 +133,8 @@ def test_int_003_protocol_version_and_denied_amendment(tmp_path: Path) -> None:
         assert unauthorized["error"]["code"] == "NEEDS_APPROVAL"
         exported = services.bus.dispatch(
             _request(
-                "protocol.export", scope,
+                "protocol.export",
+                scope,
                 project_id=project_id,
                 protocol_id=protocol_id,
             )
@@ -151,8 +153,11 @@ def test_int_007_offline_bibliography_import_and_invalid_encoding(tmp_path: Path
         created = _approved(
             services,
             _request(
-                "project.create", scope,
-                title="Offline references", question="Can citations persist?", design="exploratory",
+                "project.create",
+                scope,
+                title="Offline references",
+                question="Can citations persist?",
+                design="exploratory",
             ),
         )
         assert created["status"] == "ok", created
@@ -163,8 +168,11 @@ def test_int_007_offline_bibliography_import_and_invalid_encoding(tmp_path: Path
         imported = _approved(
             services,
             _request(
-                "library.bibliography_import", scope,
-                project_id=project_id, format="bibtex", data_base64=payload,
+                "library.bibliography_import",
+                scope,
+                project_id=project_id,
+                format="bibtex",
+                data_base64=payload,
             ),
         )
         assert imported["status"] == "ok", imported
@@ -172,14 +180,15 @@ def test_int_007_offline_bibliography_import_and_invalid_encoding(tmp_path: Path
         bad = _approved(
             services,
             _request(
-                "library.bibliography_import", scope,
-                project_id=project_id, format="bibtex", data_base64="%%%notbase64",
+                "library.bibliography_import",
+                scope,
+                project_id=project_id,
+                format="bibtex",
+                data_base64="%%%notbase64",
             ),
         )
         assert bad["status"] != "ok", bad
-        listed = services.bus.dispatch(
-            _request("library.references", scope, project_id=project_id)
-        )
+        listed = services.bus.dispatch(_request("library.references", scope, project_id=project_id))
         assert listed["status"] == "ok", listed
         assert "Synthetic Reference" in repr(listed["data"])
         assert services.evidence.allow_remote_queries is False
@@ -227,8 +236,11 @@ def _evidence_project(services: object, scope: UUID, design: str = "exploratory"
     response = _approved(
         services,
         _request(
-            "project.create", scope, title="Synthetic acceptance",
-            question="Can the evidence survive an integrated command?", design=design,
+            "project.create",
+            scope,
+            title="Synthetic acceptance",
+            question="Can the evidence survive an integrated command?",
+            design=design,
         ),
     )
     assert response["status"] == "ok", response
@@ -253,8 +265,12 @@ def test_int_004_archive_roundtrip_and_conflict(tmp_path: Path) -> None:
         scope = uuid4()
         project_id = _evidence_project(services, scope)
         imported = _call(
-            services, scope, "library.import", project_id=project_id,
-            title="Portable source", media_type="text/plain",
+            services,
+            scope,
+            "library.import",
+            project_id=project_id,
+            title="Portable source",
+            media_type="text/plain",
             data_base64=base64.b64encode(b"Portable synthetic evidence").decode(),
         )
         _call(services, scope, "project.archive", project_id=project_id, filename="safe.rwproj")
@@ -273,8 +289,11 @@ def test_int_004_archive_roundtrip_and_conflict(tmp_path: Path) -> None:
         restored = _call(reopened, scope, "project.restore", filename="safe.rwproj")
         assert restored["project_id"] == project_id
         text = _call(
-            reopened, scope, "library.source_text",
-            project_id=project_id, source_id=imported["source_id"],
+            reopened,
+            scope,
+            "library.source_text",
+            project_id=project_id,
+            source_id=imported["source_id"],
         )
         assert text["text"] == "Portable synthetic evidence"
         repeat = _approved(reopened, _request("project.restore", scope, filename="safe.rwproj"))
@@ -307,14 +326,22 @@ def test_int_006_revision_stale_write_does_not_mutate(tmp_path: Path) -> None:
         scope = uuid4()
         project_id = _evidence_project(services, scope)
         source = _call(
-            services, scope, "library.import", project_id=project_id,
-            title="Revisions", media_type="text/plain",
+            services,
+            scope,
+            "library.import",
+            project_id=project_id,
+            title="Revisions",
+            media_type="text/plain",
             data_base64=base64.b64encode(b"Synthetic revision source").decode(),
         )
         before = _call(services, scope, "project.open", project_id=project_id)
         stale = _request(
-            "evidence.note", scope, project_id=project_id, source_id=source["source_id"],
-            title="Stale edit", body="Should never be stored",
+            "evidence.note",
+            scope,
+            project_id=project_id,
+            source_id=source["source_id"],
+            title="Stale edit",
+            body="Should never be stored",
         ).model_copy(update={"expected_revision": 0})
         denied = _approved(services, stale)
         assert denied["status"] == "failed", denied
@@ -330,29 +357,49 @@ def test_int_012_014_source_anchor_and_unverified_quote(tmp_path: Path) -> None:
         scope = uuid4()
         project_id = _evidence_project(services, scope)
         source = _call(
-            services, scope, "library.import", project_id=project_id,
-            title="Synthetic PDF text fixture", media_type="text/plain",
+            services,
+            scope,
+            "library.import",
+            project_id=project_id,
+            title="Synthetic PDF text fixture",
+            media_type="text/plain",
             data_base64=base64.b64encode(b"The reproducible evidence is local.").decode(),
         )
         anchor = _call(
-            services, scope, "evidence.anchor", project_id=project_id,
-            source_id=source["source_id"], quote="reproducible evidence",
-            start=4, end=25,
+            services,
+            scope,
+            "evidence.anchor",
+            project_id=project_id,
+            source_id=source["source_id"],
+            quote="reproducible evidence",
+            start=4,
+            end=25,
         )
         assert anchor["quote_verified"] is True
         invalid = _approved(
-            services, _request(
-                "evidence.anchor", scope, project_id=project_id,
-                source_id=source["source_id"], quote="fabricated quote",
-                start=4, end=20,
+            services,
+            _request(
+                "evidence.anchor",
+                scope,
+                project_id=project_id,
+                source_id=source["source_id"],
+                quote="fabricated quote",
+                start=4,
+                end=20,
             ),
         )
         assert invalid["status"] == "ok", invalid
         assert invalid["data"]["quote_verified"] is False
-        assert _call(
-            services, scope, "library.source_text",
-            project_id=project_id, source_id=source["source_id"],
-        )["text"] == "The reproducible evidence is local."
+        assert (
+            _call(
+                services,
+                scope,
+                "library.source_text",
+                project_id=project_id,
+                source_id=source["source_id"],
+            )["text"]
+            == "The reproducible evidence is local."
+        )
     finally:
         services.close()
 
@@ -363,32 +410,52 @@ def test_int_016_protocol_amendment_retains_original(tmp_path: Path) -> None:
         scope = uuid4()
         project_id = _evidence_project(services, scope)
         original = _call(
-            services, scope, "protocol.create", project_id=project_id,
-            title="Preregistered", author="Researcher",
+            services,
+            scope,
+            "protocol.create",
+            project_id=project_id,
+            title="Preregistered",
+            author="Researcher",
             body={"objective": "Original prespecified outcome", "design": "mixed"},
         )
         _call(
-            services, scope, "protocol.amend", project_id=project_id,
-            protocol_id=original["protocol_id"], author="Researcher",
+            services,
+            scope,
+            "protocol.amend",
+            project_id=project_id,
+            protocol_id=original["protocol_id"],
+            author="Researcher",
             rationale="Document explicit protocol change",
             body={"objective": "Revised exploratory outcome", "design": "mixed"},
         )
         diff = _call(
-            services, scope, "protocol.diff", project_id=project_id,
-            protocol_id=original["protocol_id"], from_version=1, to_version=2,
+            services,
+            scope,
+            "protocol.diff",
+            project_id=project_id,
+            protocol_id=original["protocol_id"],
+            from_version=1,
+            to_version=2,
         )
         assert "objective" in diff["changed_fields"]
         export = _call(
-            services, scope, "protocol.export",
-            project_id=project_id, protocol_id=original["protocol_id"],
+            services,
+            scope,
+            "protocol.export",
+            project_id=project_id,
+            protocol_id=original["protocol_id"],
         )
         assert "Original prespecified outcome" in export["text"]
         assert "Revised exploratory outcome" in export["text"]
         unauth = services.bus.dispatch(
             _request(
-                "protocol.amend", scope, project_id=project_id,
-                protocol_id=original["protocol_id"], author="Researcher",
-                rationale="Unauthorized change", body={"objective": "Hidden change"},
+                "protocol.amend",
+                scope,
+                project_id=project_id,
+                protocol_id=original["protocol_id"],
+                author="Researcher",
+                rationale="Unauthorized change",
+                body={"objective": "Hidden change"},
             )
         )
         assert unauth["error"]["code"] == "NEEDS_APPROVAL"
@@ -406,32 +473,57 @@ def test_int_008_reference_merge_is_reversible(tmp_path: Path) -> None:
             "@article{b,title={Same Label},author={Roe, John},year={2022},doi={10.1234/b}}"
         )
         records = _call(
-            services, scope, "library.bibliography_import", project_id=project_id,
-            format="bibtex", data_base64=base64.b64encode(bib.encode()).decode(),
+            services,
+            scope,
+            "library.bibliography_import",
+            project_id=project_id,
+            format="bibtex",
+            data_base64=base64.b64encode(bib.encode()).decode(),
         )["references"]
         left, right = (item["id"] for item in records)
         unapproved = services.bus.dispatch(
             _request(
-                "reference.merge", scope, project_id=project_id,
-                canonical_id=left, duplicate_id=right, rationale="Human-reviewed duplicate",
+                "reference.merge",
+                scope,
+                project_id=project_id,
+                canonical_id=left,
+                duplicate_id=right,
+                rationale="Human-reviewed duplicate",
             )
         )
         assert unapproved["error"]["code"] == "NEEDS_APPROVAL"
         _call(
-            services, scope, "reference.merge", project_id=project_id,
-            canonical_id=left, duplicate_id=right, rationale="Human-reviewed duplicate",
+            services,
+            scope,
+            "reference.merge",
+            project_id=project_id,
+            canonical_id=left,
+            duplicate_id=right,
+            rationale="Human-reviewed duplicate",
         )
         resolution = _call(
-            services, scope, "reference.resolve", project_id=project_id, reference_id=right,
+            services,
+            scope,
+            "reference.resolve",
+            project_id=project_id,
+            reference_id=right,
         )
         assert resolution["is_alias"] and resolution["canonical_id"] == left
         assert resolution["original"]["id"] == right
         _call(
-            services, scope, "reference.unmerge", project_id=project_id,
-            duplicate_id=right, rationale="Review corrected identity",
+            services,
+            scope,
+            "reference.unmerge",
+            project_id=project_id,
+            duplicate_id=right,
+            rationale="Review corrected identity",
         )
         assert not _call(
-            services, scope, "reference.resolve", project_id=project_id, reference_id=right,
+            services,
+            scope,
+            "reference.resolve",
+            project_id=project_id,
+            reference_id=right,
         )["is_alias"]
         references = _call(services, scope, "library.references", project_id=project_id)
         assert len(references["records"]) == 2
@@ -445,32 +537,66 @@ def test_int_017_screening_blinding_and_disagreement(tmp_path: Path) -> None:
         scope = uuid4()
         project_id = _evidence_project(services, scope, "systematic_review")
         ref = _call(
-            services, scope, "library.bibliography_import", project_id=project_id,
+            services,
+            scope,
+            "library.bibliography_import",
+            project_id=project_id,
             format="bibtex",
             data_base64=base64.b64encode(b"@article{a,title={Synthetic},year={2025}}").decode(),
         )["references"][0]["id"]
         record = _call(
-            services, scope, "review.register",
-            project_id=project_id, review_id="r", reference_id=ref,
+            services,
+            scope,
+            "review.register",
+            project_id=project_id,
+            review_id="r",
+            reference_id=ref,
         )["record_id"]
         _call(
-            services, scope, "review.screen", project_id=project_id, review_id="r",
-            record_id=record, reviewer="r1", stage="title_abstract", decision="include",
+            services,
+            scope,
+            "review.screen",
+            project_id=project_id,
+            review_id="r",
+            record_id=record,
+            reviewer="r1",
+            stage="title_abstract",
+            decision="include",
         )
         blinded = _call(
-            services, scope, "review.status", project_id=project_id, review_id="r",
-            record_id=record, stage="title_abstract",
+            services,
+            scope,
+            "review.status",
+            project_id=project_id,
+            review_id="r",
+            record_id=record,
+            stage="title_abstract",
         )
         assert blinded["votes"] == [] and blinded["status"] == "pending_second_vote"
         _call(
-            services, scope, "review.screen", project_id=project_id, review_id="r",
-            record_id=record, reviewer="r2", stage="title_abstract",
-            decision="exclude", reason="Wrong population",
+            services,
+            scope,
+            "review.screen",
+            project_id=project_id,
+            review_id="r",
+            record_id=record,
+            reviewer="r2",
+            stage="title_abstract",
+            decision="exclude",
+            reason="Wrong population",
         )
-        assert _call(
-            services, scope, "review.status", project_id=project_id, review_id="r",
-            record_id=record, stage="title_abstract",
-        )["status"] == "conflict"
+        assert (
+            _call(
+                services,
+                scope,
+                "review.status",
+                project_id=project_id,
+                review_id="r",
+                record_id=record,
+                stage="title_abstract",
+            )["status"]
+            == "conflict"
+        )
     finally:
         services.close()
 
@@ -481,12 +607,21 @@ def test_int_018_prisma_counts_and_incomplete_gate(tmp_path: Path) -> None:
         scope = uuid4()
         project_id = _evidence_project(services, scope, "systematic_review")
         run = _call(
-            services, scope, "review.search_begin", project_id=project_id,
-            review_id="r", provider="synthetic", query="local fixture",
+            services,
+            scope,
+            "review.search_begin",
+            project_id=project_id,
+            review_id="r",
+            provider="synthetic",
+            query="local fixture",
             expected_records=2,
         )
         incomplete = _call(
-            services, scope, "review.prisma2020_report", project_id=project_id, review_id="r",
+            services,
+            scope,
+            "review.prisma2020_report",
+            project_id=project_id,
+            review_id="r",
         )
         assert incomplete["publication_ready"] is False
         assert incomplete["prisma_2020_compliance_certified"] is False
@@ -501,49 +636,79 @@ def test_int_019_typed_extraction_and_missingness(tmp_path: Path) -> None:
         scope = uuid4()
         project_id = _evidence_project(services, scope, "systematic_review")
         reference = _call(
-            services, scope, "library.bibliography_import", project_id=project_id,
+            services,
+            scope,
+            "library.bibliography_import",
+            project_id=project_id,
             format="bibtex",
             data_base64=base64.b64encode(b"@article{a,title={Outcome},year={2025}}").decode(),
         )["references"][0]["id"]
         record = _call(
-            services, scope, "review.register",
-            project_id=project_id, review_id="r", reference_id=reference,
+            services,
+            scope,
+            "review.register",
+            project_id=project_id,
+            review_id="r",
+            reference_id=reference,
         )["record_id"]
         form = _call(
-            services, scope, "review.form_create", project_id=project_id,
-            name="Typed outcomes", author="Researcher",
+            services,
+            scope,
+            "review.form_create",
+            project_id=project_id,
+            name="Typed outcomes",
+            author="Researcher",
             fields=[
                 {"name": "n", "datatype": "integer", "required": True, "minimum": 1},
                 {"name": "effect", "datatype": "number", "unit": "points"},
             ],
         )
         _call(
-            services, scope, "review.form_record", project_id=project_id,
-            form_id=form["form_id"], record_id=record, reviewer="Researcher",
+            services,
+            scope,
+            "review.form_record",
+            project_id=project_id,
+            form_id=form["form_id"],
+            record_id=record,
+            reviewer="Researcher",
             values={
                 "n": {"value": 20, "missingness": "present"},
                 "effect": {"value": None, "missingness": "not_reported", "unit": "points"},
             },
         )
         values = _call(
-            services, scope, "review.form_values",
-            project_id=project_id, form_id=form["form_id"],
+            services,
+            scope,
+            "review.form_values",
+            project_id=project_id,
+            form_id=form["form_id"],
         )["values"]
         assert values[0]["values"]["n"]["value"] == 20
         assert values[0]["values"]["effect"]["missingness"] == "not_reported"
         assert values[0]["values"]["effect"]["unit"] == "points"
         rejected = _approved(
-            services, _request(
-                "review.form_record", scope, project_id=project_id,
-                form_id=form["form_id"], record_id=record, reviewer="Researcher",
+            services,
+            _request(
+                "review.form_record",
+                scope,
+                project_id=project_id,
+                form_id=form["form_id"],
+                record_id=record,
+                reviewer="Researcher",
                 values={"n": {"value": -1, "missingness": "present"}},
             ),
         )
         assert rejected["status"] == "failed"
-        assert _call(
-            services, scope, "review.form_values",
-            project_id=project_id, form_id=form["form_id"],
-        )["values"] == values
+        assert (
+            _call(
+                services,
+                scope,
+                "review.form_values",
+                project_id=project_id,
+                form_id=form["form_id"],
+            )["values"]
+            == values
+        )
     finally:
         services.close()
 
@@ -582,9 +747,7 @@ def test_int_005_future_schema_rejected_without_migration(tmp_path: Path) -> Non
         )
         assert inspected["status"] == "ok", inspected
         assert inspected["data"]["compatibility"] == "future_unsupported"
-        result = _approved(
-            services, _request("project.migrate", scope, project_id=project_id)
-        )
+        result = _approved(services, _request("project.migrate", scope, project_id=project_id))
         assert result["status"] == "failed", result
         assert database.read_bytes() == before
         with sqlite3.connect(database) as connection:

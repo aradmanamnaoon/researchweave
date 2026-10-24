@@ -20,9 +20,7 @@ def _call(services, operation: str, project_id, **arguments: object) -> dict:
     assert services.bus.dispatch(request)["error"]["code"] == "NEEDS_APPROVAL"
     approval = services.bus.issue_approval(request)
     result = services.bus.dispatch(request, approval=approval)
-    assert services.bus.dispatch(request, approval=approval)["error"]["code"] == (
-        "NEEDS_APPROVAL"
-    )
+    assert services.bus.dispatch(request, approval=approval)["error"]["code"] == ("NEEDS_APPROVAL")
     return result
 
 

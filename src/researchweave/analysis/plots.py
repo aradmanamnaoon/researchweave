@@ -285,11 +285,7 @@ def render_plot(
     require(x_scale in {"linear", "log"}, "Unsupported x axis scale")
     require(y_scale in {"linear", "log"}, "Unsupported y axis scale")
     if x_scale == "log":
-        x_values = [
-            finite_number(row[x], name=x)
-            for row in dataset.records
-            if row[x] is not None
-        ]
+        x_values = [finite_number(row[x], name=x) for row in dataset.records if row[x] is not None]
         require(
             bool(x_values) and all(value > 0 for value in x_values),
             "Log x axis requires positive values",

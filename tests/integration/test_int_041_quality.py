@@ -33,11 +33,7 @@ def test_int_041_row_links_lineage_and_test_leakage_fail_visible(tmp_path: Path)
                 "expected_revision": project["revision"],
                 "name": "Synthetic split quality",
                 "csv_text": (
-                    "subject,split,x,y\n"
-                    "s1,train,1,2\n"
-                    "s1,test,2,4\n"
-                    "s2,train,,6\n"
-                    "s3,test,4,8\n"
+                    "subject,split,x,y\ns1,train,1,2\ns1,test,2,4\ns2,train,,6\ns3,test,4,8\n"
                 ),
             },
         )

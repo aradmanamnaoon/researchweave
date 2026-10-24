@@ -164,7 +164,9 @@ class AIFacade:
             entry("connector.list", "read", True),
             entry("mcp.inspect", "read", True, configured=self.mcp_bridge is not None),
             entry(
-                "mcp.invoke", "local-write", True,
+                "mcp.invoke",
+                "local-write",
+                True,
                 arguments=("tool", "arguments", "granted_scopes"),
                 configured=self.mcp_bridge is not None,
             ),
@@ -423,7 +425,8 @@ class AIFacade:
                 if self.mcp_bridge is None:
                     raise AIError("NOT_FOUND", "MCP bridge is not configured")
                 result = self.mcp_bridge.invoke(
-                    args["tool"], args["arguments"],
+                    args["tool"],
+                    args["arguments"],
                     granted_scopes=args["granted_scopes"],
                 )
             elif operation == "sync.push":

@@ -20,8 +20,11 @@ from researchweave.core import OperationRequest
 def _project(gateway: DesktopCommandGateway) -> dict:
     response = gateway.execute(
         "ui.project.create",
-        {"title": "Synthetic acceptance", "question": "What does the fixture show?",
-         "study_type": "quantitative"},
+        {
+            "title": "Synthetic acceptance",
+            "question": "What does the fixture show?",
+            "study_type": "quantitative",
+        },
     )
     assert response["status"] == "ok", response
     return dict(response["data"])
@@ -37,12 +40,19 @@ def test_int_039_meta_analysis_persisted_and_invalid_scale(tmp_path: Path) -> No
             {"id": "one", "estimate": 2.0, "se": 1.0, "scale": "mean_difference"},
             {"id": "two", "estimate": 4.0, "se": 1.0, "scale": "mean_difference"},
         ]
+
         def run(study_rows: list[dict], revision: int) -> dict:
-            return dict(gateway.execute(
-                "ui.analysis.run",
-                {"project_id": project["project_id"], "expected_revision": revision,
-                 "method": "analysis.statistics.meta", "inputs": {"studies": study_rows}},
-            ))
+            return dict(
+                gateway.execute(
+                    "ui.analysis.run",
+                    {
+                        "project_id": project["project_id"],
+                        "expected_revision": revision,
+                        "method": "analysis.statistics.meta",
+                        "inputs": {"studies": study_rows},
+                    },
+                )
+            )
 
         result = run(studies, project["revision"])
         assert result["status"] == "ok", result
@@ -50,8 +60,7 @@ def test_int_039_meta_analysis_persisted_and_invalid_scale(tmp_path: Path) -> No
         assert estimates["estimate"] == pytest.approx(3.0)
         assert estimates["standard_error"] == pytest.approx(2**-0.5)
         assert result["data"]["result"]["provenance"]["request_id"]
-        invalid = run([studies[0], {**studies[1], "scale": "log_or"}],
-                      result["data"]["revision"])
+        invalid = run([studies[0], {**studies[1], "scale": "log_or"}], result["data"]["revision"])
         assert invalid["status"] == "failed"
         assert invalid["error"]["code"] == "INVALID_INPUT"
         assert len(services.ui.store.open(project["project_id"]).analysis_results) == 1
@@ -68,9 +77,10 @@ def test_int_049_055_056_057_host_policy_and_offline_default(tmp_path: Path) -> 
         project = _project(gateway)
         assert services.health()["offline"] is True
         assert services.ai.policy.offline is True
-        assert gateway.execute("ui.project.open", {"project_id": project["project_id"]})[
-            "status"
-        ] == "ok"
+        assert (
+            gateway.execute("ui.project.open", {"project_id": project["project_id"]})["status"]
+            == "ok"
+        )
         unsafe = OperationRequest(
             operation="retrieval.ingest",
             project_id=uuid4(),
@@ -97,10 +107,8 @@ def test_int_054_059_agent_capabilities_and_durable_local_operation(tmp_path: Pa
         result = gateway.execute("ui.ai.capabilities", {"project_id": project["project_id"]})
         assert result["status"] == "ok", result
         assert result["data"]["available"] is True
-        assert any(item["operation"] == "agent.v2.plan" for item in
-                   result["data"]["capabilities"])
-        assert any(event["operation"] == "ui.ai.capabilities"
-                   for event in services.audit.events())
+        assert any(item["operation"] == "agent.v2.plan" for item in result["data"]["capabilities"])
+        assert any(event["operation"] == "ui.ai.capabilities" for event in services.audit.events())
     finally:
         services.close()
 
@@ -118,8 +126,10 @@ def test_int_066_071_desktop_preferences_and_audited_history(tmp_path: Path) -> 
         activity = gateway.execute("ui.activity.list", {"project_id": project["project_id"]})
         assert activity["status"] == "ok", activity
         events = services.audit.events()
-        assert any(event["operation"] == "ui.project.create" and
-                   len(event["output_sha256"]) == 64 for event in events)
+        assert any(
+            event["operation"] == "ui.project.create" and len(event["output_sha256"]) == 64
+            for event in events
+        )
         assert services.ui.store.open(project["project_id"]).id == project["project_id"]
     finally:
         services.close()
@@ -135,17 +145,28 @@ def test_int_042_072_analysis_syntax_export_is_versioned_and_rejects_unsupported
         project = _project(gateway)
         dataset = gateway.execute(
             "ui.dataset.import",
-            {"project_id": project["project_id"], "expected_revision": project["revision"],
-             "name": "Synthetic scores", "csv_text": "score\n1\n3\n5\n"},
+            {
+                "project_id": project["project_id"],
+                "expected_revision": project["revision"],
+                "name": "Synthetic scores",
+                "csv_text": "score\n1\n3\n5\n",
+            },
         )
         assert dataset["status"] == "ok", dataset
         imported = dataset["data"]
-        common = {"dataset_id": imported["dataset_id"], "operation": "statistics.describe",
-                  "arguments": {"column": "score"}}
+        common = {
+            "dataset_id": imported["dataset_id"],
+            "operation": "statistics.describe",
+            "arguments": {"column": "score"},
+        }
         generated = gateway.execute(
             "ui.analysis.run",
-            {"project_id": project["project_id"], "expected_revision": imported["revision"],
-             "method": "analysis.syntax.python", "inputs": common},
+            {
+                "project_id": project["project_id"],
+                "expected_revision": imported["revision"],
+                "method": "analysis.syntax.python",
+                "inputs": common,
+            },
         )
         assert generated["status"] == "ok", generated
         record = generated["data"]["result"]
@@ -155,10 +176,12 @@ def test_int_042_072_analysis_syntax_export_is_versioned_and_rejects_unsupported
         assert services.ui.store.open(project["project_id"]).analysis_results
         failed = gateway.execute(
             "ui.analysis.run",
-            {"project_id": project["project_id"],
-             "expected_revision": generated["data"]["revision"],
-             "method": "analysis.syntax.r",
-             "inputs": {**common, "operation": "statistics.model"}},
+            {
+                "project_id": project["project_id"],
+                "expected_revision": generated["data"]["revision"],
+                "method": "analysis.syntax.r",
+                "inputs": {**common, "operation": "statistics.model"},
+            },
         )
         assert failed["status"] == "failed"
         assert failed["error"]["code"] == "INVALID_INPUT"
@@ -174,24 +197,18 @@ def test_int_055_host_approval_replay_and_argument_substitution(tmp_path: Path) 
     try:
         project = uuid4()
         req = OperationRequest(
-            operation="ui.project.create", project_id=project,
-            arguments={"title": "Approved", "question": "Synthetic?",
-                       "study_type": "quantitative"},
+            operation="ui.project.create",
+            project_id=project,
+            arguments={"title": "Approved", "question": "Synthetic?", "study_type": "quantitative"},
         )
         approval = services.bus.issue_approval(req)
-        swapped = req.model_copy(update={
-            "arguments": {**req.arguments, "title": "Unapproved"}
-        })
+        swapped = req.model_copy(update={"arguments": {**req.arguments, "title": "Unapproved"}})
         assert services.bus.dispatch(swapped, approval=approval)["error"]["code"] == (
             "NEEDS_APPROVAL"
         )
         assert services.bus.dispatch(req, approval=approval)["status"] == "ok"
-        assert services.bus.dispatch(req, approval=approval)["error"]["code"] == (
-            "NEEDS_APPROVAL"
-        )
-        assert [e["status"] for e in services.audit.events()] == [
-            "failed", "ok", "failed"
-        ]
+        assert services.bus.dispatch(req, approval=approval)["error"]["code"] == ("NEEDS_APPROVAL")
+        assert [e["status"] for e in services.audit.events()] == ["failed", "ok", "failed"]
     finally:
         services.close()
 
@@ -269,15 +286,11 @@ def test_int_043_python_runtime_host_approval_and_receipt(tmp_path: Path) -> Non
         denied = services.bus.dispatch(request)
         assert denied["status"] == "failed"
         assert denied["error"]["code"] == "NEEDS_APPROVAL"
-        executed = services.bus.dispatch(
-            request, approval=services.bus.issue_approval(request)
-        )
+        executed = services.bus.dispatch(request, approval=services.bus.issue_approval(request))
         assert executed["status"] == "ok", executed
         assert "5" in str(executed["data"])
         assert len(services.audit.events()) == 2
-        assert all(
-            len(event["input_sha256"]) == 64 for event in services.audit.events()
-        )
+        assert all(len(event["input_sha256"]) == 64 for event in services.audit.events())
     finally:
         services.close()
 
@@ -288,9 +301,7 @@ def test_int_065_backup_denied_without_host_confirmation(tmp_path: Path) -> None
     try:
         gateway = DesktopCommandGateway(services.ui, services.bus)
         project = _project(gateway)
-        plan = gateway.execute(
-            "ui.backup.plan", {"project_id": project["project_id"]}
-        )
+        plan = gateway.execute("ui.backup.plan", {"project_id": project["project_id"]})
         assert plan["status"] == "ok", plan
         denied = gateway.execute(
             "ui.backup.create",
@@ -301,12 +312,9 @@ def test_int_065_backup_denied_without_host_confirmation(tmp_path: Path) -> None
         )
         assert denied["status"] == "failed", denied
         assert denied["error"]["code"] == "NEEDS_APPROVAL"
-        assert services.ui.store.open(project["project_id"]).revision == (
-            project["revision"]
-        )
+        assert services.ui.store.open(project["project_id"]).revision == (project["revision"])
         assert any(
-            entry["operation"] == "ui.backup.create"
-            and entry["status"] == "failed"
+            entry["operation"] == "ui.backup.create" and entry["status"] == "failed"
             for entry in services.audit.events()
         )
     finally:
@@ -321,13 +329,9 @@ def test_int_046_047_qualitative_unicode_code_and_conflict(tmp_path: Path) -> No
         project_id = "synthetic_qualitative_study"
 
         def dispatch(operation: str, arguments: dict) -> dict:
-            request = OperationRequest(
-                operation=operation, project_id=scope, arguments=arguments
-            )
+            request = OperationRequest(operation=operation, project_id=scope, arguments=arguments)
             effect = services.bus.effect_for(operation)
-            approval = (
-                services.bus.issue_approval(request) if effect != "read" else None
-            )
+            approval = services.bus.issue_approval(request) if effect != "read" else None
             return dict(services.bus.dispatch(request, approval=approval))
 
         created = dispatch("qualitative.create", {"project_id": project_id})
@@ -379,8 +383,8 @@ def test_int_065_local_snapshot_restore_checksum_and_preservation(
         project_id = project["project_id"]
         plan = gateway.execute("ui.backup.plan", {"project_id": project_id})
         assert plan["status"] == "ok", plan
-        gateway.backup_authorizer = (
-            lambda action, target: action == "create" and target == project_id
+        gateway.backup_authorizer = lambda action, target: (
+            action == "create" and target == project_id
         )
         created = gateway.execute(
             "ui.backup.create",
@@ -390,8 +394,8 @@ def test_int_065_local_snapshot_restore_checksum_and_preservation(
         backup_id = plan["data"]["backup_id"]
         inspected = gateway.execute("ui.backup.inspect", {"backup_id": backup_id})
         assert inspected["status"] == "ok", inspected
-        gateway.backup_authorizer = (
-            lambda action, target: action == "restore" and target == backup_id
+        gateway.backup_authorizer = lambda action, target: (
+            action == "restore" and target == backup_id
         )
         wrong = gateway.execute(
             "ui.backup.restore",
@@ -408,8 +412,7 @@ def test_int_065_local_snapshot_restore_checksum_and_preservation(
         assert restored["status"] == "ok", restored
         assert services.ui.store.open(project_id).title == "Synthetic acceptance"
         assert any(
-            event["operation"] == "ui.backup.restore"
-            and event["status"] == "failed"
+            event["operation"] == "ui.backup.restore" and event["status"] == "failed"
             for event in services.audit.events()
         )
     finally:
@@ -421,11 +424,17 @@ def test_int_047_agreement_metric_and_undefined_case_via_bus(tmp_path: Path) -> 
     services = build_services(tmp_path)
     try:
         scope = uuid4()
+
         def score(first: dict[str, str], second: dict[str, str]) -> dict:
-            return dict(services.bus.dispatch(OperationRequest(
-                operation="qualitative.kappa", project_id=scope,
-                arguments={"first": first, "second": second},
-            )))
+            return dict(
+                services.bus.dispatch(
+                    OperationRequest(
+                        operation="qualitative.kappa",
+                        project_id=scope,
+                        arguments={"first": first, "second": second},
+                    )
+                )
+            )
 
         result = score(
             {"a": "yes", "b": "no", "c": "yes", "d": "no"},
@@ -438,7 +447,8 @@ def test_int_047_agreement_metric_and_undefined_case_via_bus(tmp_path: Path) -> 
         if undefined["status"] == "ok":
             assert "1.0" not in str(undefined["data"])
         assert [event["operation"] for event in services.audit.events()] == [
-            "qualitative.kappa", "qualitative.kappa",
+            "qualitative.kappa",
+            "qualitative.kappa",
         ]
     finally:
         services.close()
@@ -454,7 +464,8 @@ def test_int_054_059_agent_durable_plan_checkpoint_and_recovery(tmp_path: Path) 
             req = OperationRequest(operation=operation, project_id=scope, arguments=args)
             approval = (
                 services.bus.issue_approval(req)
-                if services.bus.effect_for(operation) != "read" else None
+                if services.bus.effect_for(operation) != "read"
+                else None
             )
             return dict(services.bus.dispatch(req, approval=approval))
 
@@ -465,10 +476,16 @@ def test_int_054_059_agent_durable_plan_checkpoint_and_recovery(tmp_path: Path) 
         assert ingested["status"] == "ok", ingested
         planned = invoke(
             "agent.v2.plan",
-            {"project_id": str(scope), "steps": [
-                {"step_id": "search", "operation": "retrieval.query",
-                 "arguments": {"query": "memory", "limit": 3}},
-            ]},
+            {
+                "project_id": str(scope),
+                "steps": [
+                    {
+                        "step_id": "search",
+                        "operation": "retrieval.query",
+                        "arguments": {"query": "memory", "limit": 3},
+                    },
+                ],
+            },
         )
         assert planned["status"] == "ok", planned
         plan_id = planned["data"]["plan_id"]
@@ -479,9 +496,7 @@ def test_int_054_059_agent_durable_plan_checkpoint_and_recovery(tmp_path: Path) 
         assert executed["data"]["hits"][0]["source_id"] == "grounded-fixture"
         recovery = invoke("agent.v2.recover", {"plan_id": plan_id})
         assert recovery["status"] == "ok", recovery
-        assert "agent.v2.recover" in [
-            event["operation"] for event in services.audit.events()
-        ]
+        assert "agent.v2.recover" in [event["operation"] for event in services.audit.events()]
     finally:
         services.close()
 
@@ -492,17 +507,24 @@ def test_int_053_evidence_only_citations_and_unsupported_abstention(tmp_path: Pa
     try:
         scope = uuid4()
         req = OperationRequest(
-            operation="retrieval.ingest", project_id=scope,
+            operation="retrieval.ingest",
+            project_id=scope,
             arguments={"source_id": "source-53", "content": "Neurons transmit signals."},
         )
-        assert services.bus.dispatch(
-            req, approval=services.bus.issue_approval(req)
-        )["status"] == "ok"
+        assert (
+            services.bus.dispatch(req, approval=services.bus.issue_approval(req))["status"] == "ok"
+        )
+
         def answer(question: str) -> dict:
-            return dict(services.bus.dispatch(OperationRequest(
-                operation="retrieval.answer", project_id=scope,
-                arguments={"question": question, "limit": 3},
-            )))
+            return dict(
+                services.bus.dispatch(
+                    OperationRequest(
+                        operation="retrieval.answer",
+                        project_id=scope,
+                        arguments={"question": question, "limit": 3},
+                    )
+                )
+            )
 
         supported = answer("Neurons")
         assert supported["status"] == "ok", supported
@@ -526,15 +548,14 @@ def test_int_058_offline_provider_denial_has_no_fallback(tmp_path: Path) -> None
     try:
         scope = uuid4()
         request = OperationRequest(
-            operation="provider.complete", project_id=scope,
+            operation="provider.complete",
+            project_id=scope,
             arguments={"provider": "unconfigured", "prompt": "SYNTHETIC PRIVATE"},
         )
         denied = services.bus.dispatch(request)
         assert denied["status"] == "failed"
         assert denied["error"]["code"] == "NEEDS_APPROVAL"
-        attempted = services.bus.dispatch(
-            request, approval=services.bus.issue_approval(request)
-        )
+        attempted = services.bus.dispatch(request, approval=services.bus.issue_approval(request))
         assert attempted["status"] == "failed", attempted
         assert not any(
             e["operation"] == "provider.complete" and e["status"] == "ok"
@@ -551,30 +572,41 @@ def test_int_054_059_recovery_after_service_reopen(tmp_path: Path) -> None:
     services = build_services(tmp_path)
     try:
         req = OperationRequest(
-            operation="agent.v2.plan", project_id=scope,
-            arguments={"project_id": str(scope), "steps": [
-                {"step_id": "lookup", "operation": "retrieval.query",
-                 "arguments": {"query": "fixture", "limit": 2}},
-            ]},
+            operation="agent.v2.plan",
+            project_id=scope,
+            arguments={
+                "project_id": str(scope),
+                "steps": [
+                    {
+                        "step_id": "lookup",
+                        "operation": "retrieval.query",
+                        "arguments": {"query": "fixture", "limit": 2},
+                    },
+                ],
+            },
         )
-        planned = services.bus.dispatch(
-            req, approval=services.bus.issue_approval(req)
-        )
+        planned = services.bus.dispatch(req, approval=services.bus.issue_approval(req))
         assert planned["status"] == "ok", planned
         plan_id = planned["data"]["plan_id"]
     finally:
         services.close()
     reopened = build_services(tmp_path)
     try:
-        recover = reopened.bus.dispatch(OperationRequest(
-            operation="agent.v2.recover", project_id=scope,
-            arguments={"plan_id": plan_id},
-        ))
+        recover = reopened.bus.dispatch(
+            OperationRequest(
+                operation="agent.v2.recover",
+                project_id=scope,
+                arguments={"plan_id": plan_id},
+            )
+        )
         assert recover["status"] == "ok", recover
-        preview = reopened.bus.dispatch(OperationRequest(
-            operation="agent.v2.preview", project_id=scope,
-            arguments={"plan_id": plan_id},
-        ))
+        preview = reopened.bus.dispatch(
+            OperationRequest(
+                operation="agent.v2.preview",
+                project_id=scope,
+                arguments={"plan_id": plan_id},
+            )
+        )
         assert preview["status"] == "ok", preview
     finally:
         reopened.close()
@@ -590,15 +622,17 @@ def test_int_066_preset_save_restore_delete_through_desktop_gateway(
         project = _project(gateway)
         saved = gateway.execute(
             "ui.workspace.preset.save",
-            {"preset": {
-                "name": "Synthetic compact",
-                "project_id": project["project_id"],
-                "active_screen": "Statistics",
-                "theme": "dark",
-                "density": "compact",
-                "window_width": 100,
-                "window_height": 50,
-            }},
+            {
+                "preset": {
+                    "name": "Synthetic compact",
+                    "project_id": project["project_id"],
+                    "active_screen": "Statistics",
+                    "theme": "dark",
+                    "density": "compact",
+                    "window_width": 100,
+                    "window_height": 50,
+                }
+            },
         )
         assert saved["status"] == "ok", saved
         preset = saved["data"]["preset"]
@@ -613,9 +647,7 @@ def test_int_066_preset_save_restore_delete_through_desktop_gateway(
         listed = gateway.execute("ui.workspace.preset.list", {})
         assert listed["status"] == "ok", listed
         assert any(p["id"] == preset_id for p in listed["data"]["presets"])
-        removed = gateway.execute(
-            "ui.workspace.preset.delete", {"preset_id": preset_id}
-        )
+        removed = gateway.execute("ui.workspace.preset.delete", {"preset_id": preset_id})
         assert removed["status"] == "ok", removed
         after = gateway.execute("ui.workspace.preset.list", {})
         assert all(p["id"] != preset_id for p in after["data"]["presets"])
@@ -655,17 +687,14 @@ def test_int_045_integrated_plot_artifact_and_invalid_log_data(
         assert success["status"] == "ok", success
         artifact = services.paths.exports / args["filename"]
         assert artifact.read_bytes().startswith(signature)
-        assert success["data"]["sha256"] == hashlib.sha256(
-            artifact.read_bytes()
-        ).hexdigest()
+        assert success["data"]["sha256"] == hashlib.sha256(artifact.read_bytes()).hexdigest()
         assert success["data"]["plot_data"]
         assert success["data"]["data_table"] == success["data"]["plot_data"]
         assert success["data"]["caption"] == "Synthetic plot"
         assert success["data"]["alt_text"]
         invalid = gateway.execute(
             "plot.render",
-            {**args, "filename": f"invalid.{extension}",
-             "options": {"x_scale": "log"}},
+            {**args, "filename": f"invalid.{extension}", "options": {"x_scale": "log"}},
         )
         assert invalid["status"] == "failed", invalid
         assert invalid["error"]["code"] == "INVALID_INPUT"
@@ -681,11 +710,13 @@ def test_int_047_adjudication_receipt_requires_reason(tmp_path: Path) -> None:
     scope = uuid4()
     project_id = "coding_receipt"
     try:
+
         def call(operation: str, arguments: dict) -> dict:
             req = OperationRequest(operation=operation, project_id=scope, arguments=arguments)
             approval = (
                 services.bus.issue_approval(req)
-                if services.bus.effect_for(operation) != "read" else None
+                if services.bus.effect_for(operation) != "read"
+                else None
             )
             return dict(services.bus.dispatch(req, approval=approval))
 
@@ -693,46 +724,65 @@ def test_int_047_adjudication_receipt_requires_reason(tmp_path: Path) -> None:
         assert created["status"] == "ok", created
         revision = created["data"]["content_hash"]
         for code in ("support", "opposition"):
-            response = call("qualitative.add_code", {
-                "project_id": project_id, "expected_content_hash": revision,
-                "code_id": code, "name": code, "actor": "lead",
-            })
+            response = call(
+                "qualitative.add_code",
+                {
+                    "project_id": project_id,
+                    "expected_content_hash": revision,
+                    "code_id": code,
+                    "name": code,
+                    "actor": "lead",
+                },
+            )
             assert response["status"] == "ok", response
             revision = response["data"]["content_hash"]
-        added = call("qualitative.add_transcript", {
-            "project_id": project_id, "expected_content_hash": revision,
-            "source_id": "interview", "text": "first second", "case_id": "case-one",
-        })
+        added = call(
+            "qualitative.add_transcript",
+            {
+                "project_id": project_id,
+                "expected_content_hash": revision,
+                "source_id": "interview",
+                "text": "first second",
+                "case_id": "case-one",
+            },
+        )
         assert added["status"] == "ok", added
         revision = added["data"]["content_hash"]
         for coder, code, start, end in (
             ("coder_a", "support", 0, 5),
             ("coder_b", "opposition", 6, 12),
         ):
-            annotation = call("qualitative.annotate", {
-                "project_id": project_id, "expected_content_hash": revision,
-                "source_id": "interview", "start": start, "end": end,
-                "code_id": code, "coder": coder, "unit_id": "u1",
-            })
+            annotation = call(
+                "qualitative.annotate",
+                {
+                    "project_id": project_id,
+                    "expected_content_hash": revision,
+                    "source_id": "interview",
+                    "start": start,
+                    "end": end,
+                    "code_id": code,
+                    "coder": coder,
+                    "unit_id": "u1",
+                },
+            )
             assert annotation["status"] == "ok", annotation
             revision = annotation["data"]["content_hash"]
         base = {
-            "project_id": project_id, "coder_a": "coder_a",
-            "coder_b": "coder_b", "unit_ids": ["u1"],
+            "project_id": project_id,
+            "coder_a": "coder_a",
+            "coder_b": "coder_b",
+            "unit_ids": ["u1"],
             "resolutions": {"u1": "support"},
-            "adjudicator": "reviewer", "rationales": {"u1": "Reviewed the passage."},
+            "adjudicator": "reviewer",
+            "rationales": {"u1": "Reviewed the passage."},
         }
         resolved = call("qualitative.adjudicate", base)
         assert resolved["status"] == "ok", resolved
         assert resolved["data"]["n_disagreements"] == 1
         assert resolved["data"]["decisions"][0]["resolved_code"] == "support"
-        rejected = call(
-            "qualitative.adjudicate", {**base, "rationales": {}}
-        )
+        rejected = call("qualitative.adjudicate", {**base, "rationales": {}})
         assert rejected["status"] == "failed"
-        assert "qualitative.adjudicate" in [
-            event["operation"] for event in services.audit.events()
-        ]
+        assert "qualitative.adjudicate" in [event["operation"] for event in services.audit.events()]
     finally:
         services.close()
 
@@ -744,10 +794,9 @@ def test_int_048_sensitive_mixed_display_denied_and_project_isolated(
     services = build_services(tmp_path)
     scope = uuid4()
     try:
+
         def call(operation: str, args: dict, approve: bool = True) -> dict:
-            request = OperationRequest(
-                operation=operation, project_id=scope, arguments=args
-            )
+            request = OperationRequest(operation=operation, project_id=scope, arguments=args)
             approval = (
                 services.bus.issue_approval(request)
                 if approve and services.bus.effect_for(operation) != "read"
@@ -809,8 +858,11 @@ def test_int_048_sensitive_mixed_display_denied_and_project_isolated(
             "dataset_id": imported["data"]["dataset_id"],
             "revision": imported["data"]["revision"],
             "project_id": "mixed_study",
-            "case_column": "case", "measure_column": "score",
-            "code_id": "theme", "allow_quotes": True, "include_private": True,
+            "case_column": "case",
+            "measure_column": "score",
+            "code_id": "theme",
+            "allow_quotes": True,
+            "include_private": True,
         }
         linked = call(
             "mixed.joint_display",
@@ -831,14 +883,13 @@ def test_int_048_sensitive_mixed_display_denied_and_project_isolated(
         assert denied["error"]["code"] == "NEEDS_APPROVAL"
         unrelated = call(
             "mixed.joint_display",
-            {k: v for k, v in arguments.items()
-             if k not in {"allow_quotes", "include_private"}}
+            {k: v for k, v in arguments.items() if k not in {"allow_quotes", "include_private"}}
             | {"project_id": "other_study"},
         )
         assert unrelated["status"] == "failed"
         assert not any(
-            event["operation"] == "mixed.joint_display_sensitive"
-            and event["status"] == "ok" for event in services.audit.events()
+            event["operation"] == "mixed.joint_display_sensitive" and event["status"] == "ok"
+            for event in services.audit.events()
         )
     finally:
         services.close()
@@ -859,8 +910,6 @@ def test_int_048_sensitive_mixed_display_denied_and_project_isolated(
         ("INT-070", "No native visual regression reference or screenshot oracle exists."),
     ],
 )
-def test_int_external_or_native_acceptance_unobserved(
-    contract: str, blocker: str
-) -> None:
+def test_int_external_or_native_acceptance_unobserved(contract: str, blocker: str) -> None:
     """Pending verification never substitutes mock evidence for native success."""
     pytest.skip(f"{contract}: {blocker}")
