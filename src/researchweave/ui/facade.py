@@ -54,6 +54,7 @@ from .snapshots import SnapshotManager
 from .store import MAX_ROWS, MAX_SOURCE_CHARS, PreferenceStore, ProjectStore
 from .visualization import ChartSpec, categorical_bar, chart_png, chart_svg, histogram
 from .workflows import (
+    AIBackend,
     AnalysisBackend,
     add_mixed_method_link,
     add_notification,
@@ -206,6 +207,7 @@ class UIFacade:
         export_authorizer: Callable[[str], bool] | None = None,
         backup_authorizer: Callable[[str, str], bool] | None = None,
         analysis_backend: AnalysisBackend | None = None,
+        ai_backend: AIBackend | None = None,
     ) -> None:
         self.store = ProjectStore(root)
         self.settings = PreferenceStore(root)
@@ -213,6 +215,7 @@ class UIFacade:
         self.export_authorizer = export_authorizer
         self.backup_authorizer = backup_authorizer
         self.analysis_backend = analysis_backend
+        self.ai_backend = ai_backend
         self.snapshots = SnapshotManager(self.store)
         self.recovery = RecoveryJournal(self.store)
         self._recent: dict[str, dict[str, Any]] = {}
@@ -325,7 +328,12 @@ class UIFacade:
             "ui.agent.action.approve": ("Approve exact agent action fingerprint", Effect.WRITE),
             "ui.agent.action.deny": ("Deny exact agent action proposal", Effect.WRITE),
             "ui.agent.action.record": ("Record approved agent execution state", Effect.WRITE),
+            "ui.agent.action.execute": (
+                "Execute an exact approved action through the trusted AI host",
+                Effect.EXECUTION,
+            ),
             "ui.agent.timeline": ("Read persistent agent action timeline", Effect.READ),
+            "ui.ai.capabilities": ("Inspect host-routable AI operations", Effect.READ),
             "ui.provider.read": ("Read provider mode and availability state", Effect.READ),
             "ui.provider.update": ("Configure provider metadata without secrets", Effect.WRITE),
             "ui.privacy.read": ("Inspect local privacy and egress state", Effect.READ),
@@ -479,6 +487,7 @@ class UIFacade:
             "output_refs": {"type": "array", "items": string},
             "message": string,
         }
+        schemas["ui.agent.action.execute"] |= {"action_id": string}
         schemas["ui.provider.update"] |= {"provider": {"type": "object"}}
         schemas["ui.integration.disconnect"] |= {
             "integration_id": string,
@@ -569,7 +578,12 @@ class UIFacade:
                 "arguments": self._redacted(arguments),
                 "preview_only": True,
                 "human_confirmation": operation
-                in ("ui.export.write", "ui.backup.create", "ui.backup.restore"),
+                in (
+                    "ui.export.write",
+                    "ui.backup.create",
+                    "ui.backup.restore",
+                    "ui.agent.action.execute",
+                ),
             },
             "artifacts": [],
             "warnings": [],
@@ -2606,6 +2620,80 @@ class UIFacade:
             }
 
         return self._mutate(args, "ui.agent.action.record", update)
+
+    def _do_ui_ai_capabilities(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        if self.ai_backend is None:
+            return {
+                "available": False,
+                "capabilities": [],
+                "blocker": "The integrated AI host is not connected.",
+            }
+        return {
+            "available": True,
+            "capabilities": [dict(item) for item in self.ai_backend.capabilities()],
+        }
+
+    def _do_ui_agent_action_execute(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        action_id = _string(args, "action_id", 60)
+        backend = self.ai_backend
+        if backend is None:
+            raise UIError(
+                "DEPENDENCY_MISSING",
+                "The integrated AI host is unavailable.",
+                "Use manual work or start the fully integrated desktop application.",
+            )
+
+        def update(project: Project) -> dict[str, Any]:
+            action = next(
+                (item for item in project.agent_actions if item.get("id") == action_id),
+                None,
+            )
+            if action is None:
+                raise UIError(
+                    "NOT_FOUND",
+                    "Agent proposal was not found.",
+                    "Refresh the timeline and choose an existing proposal.",
+                )
+            if action.get("event") != "approved":
+                raise UIError(
+                    "NEEDS_APPROVAL",
+                    "This action has not been approved for execution.",
+                    "Approve the exact proposal fingerprint before executing it.",
+                )
+            result = dict(backend.execute_approved(project.id, action))
+            error = result.get("error")
+            if result.get("status") == "ok":
+                refs = [str(result.get("request_id", ""))] if result.get("request_id") else []
+                recorded = record_action_execution(
+                    project,
+                    action_id=action_id,
+                    approval_id=str(action["approval_id"]),
+                    event="completed",
+                    output_refs=refs,
+                    message="Approved AI operation completed through the integration host.",
+                )
+            else:
+                code = (
+                    str(error.get("code", "INTERNAL_ERROR"))
+                    if isinstance(error, Mapping)
+                    else "INTERNAL_ERROR"
+                )
+                message = (
+                    str(error.get("message", "AI operation failed"))
+                    if isinstance(error, Mapping)
+                    else "AI operation failed"
+                )
+                recorded = record_action_execution(
+                    project,
+                    action_id=action_id,
+                    approval_id=str(action["approval_id"]),
+                    event="failed",
+                    output_refs=[],
+                    message=f"{code}: {message}"[:1_000],
+                )
+            return {"action": recorded, "execution": result}
+
+        return self._mutate(args, "ui.agent.action.execute", update)
 
     def _do_ui_agent_timeline(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)

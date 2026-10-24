@@ -25,6 +25,7 @@ from researchweave.evidence.facade import EvidenceFacade
 from researchweave.ui import build_ui_facade
 from researchweave.ui.facade import UIFacade
 
+from .ai_bridge import ProductionAIBackend
 from .analysis_bridge import ProductionAnalysisBackend
 
 
@@ -152,4 +153,5 @@ def build_services(data_root: Path) -> AppServices:
 
     bus.register(DomainBinding("ai", ai, executor=ai_execute))
     bus.register(DomainBinding("ui", ui))
+    ui.ai_backend = ProductionAIBackend(bus)
     return AppServices(paths, evidence, analysis, ai, ui, bus, audit, authority, ai_issuer)

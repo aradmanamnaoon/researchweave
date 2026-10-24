@@ -449,6 +449,20 @@ class AnalysisBackend(Protocol):
         """Run one scientific method and return a provenance-complete result."""
 
 
+class AIBackend(Protocol):
+    """Host-injected adapter for approved AI operations owned outside the Qt layer."""
+
+    def capabilities(self) -> list[Mapping[str, Any]]:
+        """Return AI operations that the trusted application host can route."""
+
+    def execute_approved(
+        self,
+        project_id: str,
+        action: Mapping[str, Any],
+    ) -> Mapping[str, Any]:
+        """Execute one previously approved, fingerprint-bound desktop action."""
+
+
 def validate_analysis_result(raw: Mapping[str, Any]) -> dict[str, Any]:
     required = (
         "method",
@@ -728,6 +742,7 @@ def _action_fingerprint(record: Mapping[str, Any]) -> str:
     keys = (
         "operation",
         "target",
+        "arguments",
         "changed_fields",
         "files",
         "network_destination",
@@ -746,6 +761,7 @@ def propose_action(project: Project, payload: Mapping[str, Any]) -> dict[str, An
         )
     operation = _clean_text(payload.get("operation"), "Operation", 200)
     target = _clean_text(payload.get("target"), "Action target", 1_000)
+    arguments = dict(_mapping(payload.get("arguments", {}), "Operation arguments"))
     changed = dict(_mapping(payload.get("changed_fields", {}), "Changed fields"))
     files = _string_list(payload.get("files", []), "Action files", limit=200, item_limit=1_000)
     destination = _clean_text(
@@ -764,6 +780,7 @@ def propose_action(project: Project, payload: Mapping[str, Any]) -> dict[str, An
         "event": "proposed",
         "operation": operation,
         "target": target,
+        "arguments": arguments,
         "changed_fields": changed,
         "files": files,
         "network_destination": destination,

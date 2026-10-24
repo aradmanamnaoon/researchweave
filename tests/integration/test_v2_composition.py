@@ -256,3 +256,72 @@ def test_ai_retrieval_and_durable_agent_run_through_shared_bus(tmp_path: Path) -
         ]
     finally:
         services.close()
+
+
+def test_desktop_agent_approval_executes_exact_ai_operation(tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    try:
+        gateway = DesktopCommandGateway(services.ui, services.bus)
+        created = gateway.execute(
+            "ui.project.create",
+            {
+                "title": "Desktop AI integration",
+                "question": "Can an approved local AI operation execute?",
+                "study_type": "qualitative",
+            },
+        )["data"]
+        project_id = str(created["project_id"])
+        proposed = gateway.execute(
+            "ui.agent.action.propose",
+            {
+                "project_id": project_id,
+                "expected_revision": created["revision"],
+                "proposal": {
+                    "operation": "retrieval.ingest",
+                    "target": "synthetic-source",
+                    "arguments": {
+                        "source_id": "desktop-source",
+                        "content": "Synthetic desktop evidence about memory.",
+                    },
+                    "changed_fields": {"purpose": "integration test"},
+                    "files": [],
+                    "network_destination": "",
+                    "data_egress": False,
+                    "destructive_effect": False,
+                    "provider": "manual",
+                    "model": "",
+                    "input_refs": [],
+                },
+            },
+        )["data"]
+        action = proposed["action"]
+        approved_action = gateway.execute(
+            "ui.agent.action.approve",
+            {
+                "project_id": project_id,
+                "expected_revision": proposed["revision"],
+                "action_id": action["id"],
+                "expected_fingerprint": action["fingerprint"],
+            },
+        )["data"]
+        executed = gateway.execute(
+            "ui.agent.action.execute",
+            {
+                "project_id": project_id,
+                "expected_revision": approved_action["revision"],
+                "action_id": action["id"],
+            },
+        )
+        assert executed["status"] == "ok", executed
+        assert executed["data"]["action"]["event"] == "completed"
+        assert executed["data"]["execution"]["status"] == "ok"
+
+        query = services.bus.dispatch(
+            request("retrieval.query", UUID(project_id), {"query": "memory", "limit": 3})
+        )
+        assert query["data"]["hits"][0]["source_id"] == "desktop-source"
+        audit_operations = [event["operation"] for event in services.audit.events()]
+        assert "ui.agent.action.execute" in audit_operations
+        assert "retrieval.ingest" in audit_operations
+    finally:
+        services.close()

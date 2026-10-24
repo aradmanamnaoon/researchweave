@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any, cast
@@ -991,6 +992,9 @@ class ResearchWindow(QMainWindow):
         agent_form = QFormLayout()
         self.agent_operation = QLineEdit()
         self.agent_target = QLineEdit()
+        self.agent_arguments = QPlainTextEdit()
+        self.agent_arguments.setPlaceholderText('{"query": "memory", "limit": 5}')
+        self.agent_arguments.setMaximumHeight(90)
         self.agent_files = QLineEdit()
         self.agent_network = QLineEdit()
         self.agent_egress = QCheckBox("Proposal sends selected data to this destination")
@@ -1003,6 +1007,8 @@ class ResearchWindow(QMainWindow):
         ):
             named(widget, f"Agent action {label.lower()}")
             agent_form.addRow(label, widget)
+        named(self.agent_arguments, "Agent action JSON arguments")
+        agent_form.addRow("Operation arguments (JSON)", self.agent_arguments)
         agent_form.addRow("", self.agent_egress)
         agent_form.addRow("", self.agent_destructive)
         layout.addLayout(agent_form)
@@ -1015,6 +1021,7 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.agent_timeline)
         action_row = QHBoxLayout()
         action_row.addWidget(button("Approve exact selected proposal", self.approve_agent_action))
+        action_row.addWidget(button("Execute approved action", self.execute_agent_action))
         action_row.addWidget(button("Deny selected proposal", self.deny_agent_action))
         layout.addLayout(action_row)
         self.agent_status = QLabel("No provider configured; manual work remains available.")
@@ -3194,9 +3201,19 @@ class ResearchWindow(QMainWindow):
             self.agent_status.setText(result["message"])
 
     def create_agent_action(self) -> None:
+        raw_arguments = self.agent_arguments.toPlainText().strip() or "{}"
+        try:
+            parsed_arguments = json.loads(raw_arguments)
+        except json.JSONDecodeError:
+            self._set_status("Operation arguments must be valid JSON.")
+            return
+        if not isinstance(parsed_arguments, dict):
+            self._set_status("Operation arguments must be a JSON object.")
+            return
         proposal = {
             "operation": self.agent_operation.text(),
             "target": self.agent_target.text(),
+            "arguments": parsed_arguments,
             "changed_fields": {"proposal_text": self.agent_proposal.toPlainText()},
             "files": self._comma_values(self.agent_files.text()),
             "network_destination": self.agent_network.text(),
@@ -3236,7 +3253,8 @@ class ResearchWindow(QMainWindow):
         record = current.data(Qt.ItemDataRole.UserRole)
         self.agent_status.setText(
             f"Event: {record['event']}\nOperation: {record['operation']}\n"
-            f"Target: {record['target']}\nChanged fields: {record['changed_fields']}\n"
+            f"Target: {record['target']}\nArguments: {record.get('arguments', {})}\n"
+            f"Changed fields: {record['changed_fields']}\n"
             f"Files: {record['files']}\nNetwork: {record['network_destination'] or 'none'}\n"
             f"Data egress: {record['data_egress']} · destructive: "
             f"{record['destructive_effect']}\nFingerprint: {record['fingerprint']}\n"
@@ -3254,6 +3272,7 @@ class ResearchWindow(QMainWindow):
             return
         preview = (
             f"Operation: {record['operation']}\nTarget: {record['target']}\n"
+            f"Arguments: {record.get('arguments', {})}\n"
             f"Changed fields: {record['changed_fields']}\nFiles: {record['files']}\n"
             f"Network destination: {record['network_destination'] or 'none'}\n"
             f"Data egress: {record['data_egress']}\n"
@@ -3278,9 +3297,48 @@ class ResearchWindow(QMainWindow):
         if response is not None:
             self.refresh_agent_timeline()
             self.agent_status.setText(
-                "Exact scope approved. Execution is still separate and requires the "
-                "integration host."
+                "Exact scope approved. Use Execute approved action for a separate host-routed step."
             )
+
+    def execute_agent_action(self) -> None:
+        current = self.agent_timeline.currentItem()
+        if current is None:
+            self._set_status("Select an approved action to execute.")
+            return
+        record = current.data(Qt.ItemDataRole.UserRole)
+        if record["event"] != "approved":
+            self._set_status("Only an approved action can be executed.")
+            return
+        summary = (
+            f"Operation: {record['operation']}\nArguments: {record.get('arguments', {})}\n"
+            f"Network destination: {record['network_destination'] or 'none'}\n"
+            f"Data egress: {record['data_egress']}\n\nExecute this exact approved action now?"
+        )
+        answer = QMessageBox.question(
+            self,
+            "Execute approved action",
+            summary,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        response = self._call("ui.agent.action.execute", action_id=record["id"])
+        if response is None:
+            return
+        execution = response["execution"]
+        if execution.get("status") == "ok":
+            self.agent_status.setText(
+                "Approved AI action completed through the shared command bus.\n"
+                + json.dumps(execution.get("data", {}), ensure_ascii=False, indent=2)[:4_000]
+            )
+        else:
+            error = execution.get("error") or {}
+            self.agent_status.setText(
+                f"AI action failed: {error.get('code', 'INTERNAL_ERROR')} · "
+                f"{error.get('message', 'Unknown error')}"
+            )
+        self.refresh_agent_timeline()
 
     def deny_agent_action(self) -> None:
         current = self.agent_timeline.currentItem()
