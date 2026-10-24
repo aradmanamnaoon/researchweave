@@ -238,7 +238,7 @@ class ResearchWindow(QMainWindow):
         self.nav.setObjectName("workspaceNav")
         self.nav.setHeaderHidden(True)
         self.nav.setIndentation(14)
-        self.nav.setRootIsDecorated(False)
+        self.nav.setRootIsDecorated(True)
         named(
             self.nav,
             "Workspace navigation",
@@ -261,7 +261,6 @@ class ResearchWindow(QMainWindow):
                 else None
             )
         )
-        self.nav.itemClicked.connect(self._toggle_navigation_group)
         side.addWidget(self.nav)
         palette_button = button("Commands  ·  Ctrl+K", self.show_palette)
         palette_button.setObjectName("quiet")
@@ -1515,13 +1514,6 @@ class ResearchWindow(QMainWindow):
         if "revision" in payload:
             self.revision = payload["revision"]
         return cast(dict[str, Any], payload)
-
-    def _toggle_navigation_group(self, item: QTreeWidgetItem, _column: int) -> None:
-        """Make category headings themselves usable expansion targets."""
-        if item.data(0, Qt.ItemDataRole.UserRole):
-            return
-        if item.childCount():
-            item.setExpanded(not item.isExpanded())
 
     def navigate(self, name: str) -> None:
         if name not in SCREENS:
