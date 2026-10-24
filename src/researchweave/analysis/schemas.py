@@ -766,6 +766,13 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
         {**IDENTITY, "project_id": S, "case_column": S, "measure_column": S, "code_id": S},
         {"min_reporting_cases": INT, "allow_quotes": B, "include_private": B},
     ),
+    "syntax.python": _schema(
+        {"operation": S, "arguments": OBJ},
+        {"dataset_id": S, "revision": S},
+    ),
+    "syntax.r": _schema(
+        {"operation": S, "arguments": OBJ, "dataset_id": S, "revision": S},
+    ),
     "plot.render": _schema(
         {**IDENTITY, "filename": S, "x": S},
         {

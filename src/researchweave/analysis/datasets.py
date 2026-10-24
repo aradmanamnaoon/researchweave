@@ -866,8 +866,11 @@ class DatasetStore:
             {"schema_version": 2, "dataset": record, "content_sha256": digest(record)}
         )
         if target.exists():
+            existing = self.load(dataset.dataset_id, dataset.revision)
             require(
-                target.read_bytes() == content, "Existing revision differs", "INTEGRITY_FAILURE"
+                expected_revision(existing) == dataset.revision,
+                "Existing revision differs",
+                "INTEGRITY_FAILURE",
             )
             return target
         temporary = directory / f".{dataset.revision}.{os.getpid()}.tmp"

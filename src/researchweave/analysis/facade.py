@@ -111,6 +111,7 @@ from .reproducibility import AnalysisPlan, receipt_from_json, verify_replay
 from .runtime import RuntimeAuthorizer, run_script
 from .scale_scoring import ScaleDefinition, item_total_diagnostics, score_scale
 from .schemas import RESULT_SCHEMA, schema_for, validate_arguments
+from .script_exports import export_python_script, export_r_script
 from .statistics import (
     correlation,
     correlation_matrix,
@@ -276,6 +277,8 @@ class AnalysisFacade:
             "mixed.joint_display_sensitive": "sensitive-export",
             "audit.plan": "read",
             "audit.verify_replay": "read",
+            "syntax.python": "read",
+            "syntax.r": "read",
             "plot.render": "local-write",
             "runtime.python": "code-execution",
             "runtime.r": "code-execution",
@@ -408,6 +411,32 @@ class AnalysisFacade:
             expected = receipt_from_json(dict(arguments["expected"]))
             actual = receipt_from_json(dict(arguments["actual"]))
             data = verify_replay(expected, actual)
+        elif operation in {"syntax.python", "syntax.r"}:
+            target_operation = str(arguments["operation"])
+            target_arguments = dict(arguments["arguments"])
+            dataset = None
+            if arguments.get("dataset_id") is not None or arguments.get("revision") is not None:
+                require(
+                    isinstance(arguments.get("dataset_id"), str)
+                    and isinstance(arguments.get("revision"), str),
+                    "Syntax export dataset identity requires dataset_id and revision together",
+                )
+                dataset = self.store.load(
+                    str(arguments["dataset_id"]),
+                    str(arguments["revision"]),
+                )
+            if operation == "syntax.python":
+                data = export_python_script(target_operation, target_arguments, dataset).as_json()
+            else:
+                require(
+                    dataset is not None,
+                    "R syntax export requires an immutable dataset revision",
+                )
+                data = export_r_script(
+                    target_operation,
+                    target_arguments,
+                    cast(Dataset, dataset),
+                ).as_json()
         elif operation == "statistics.bootstrap":
             from dataclasses import asdict
 

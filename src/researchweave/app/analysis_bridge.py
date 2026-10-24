@@ -145,6 +145,12 @@ class ProductionAnalysisBackend:
                 imported_data, staged_hash = imported
                 prepared["dataset_id"] = imported_data["dataset_id"]
                 prepared["revision"] = imported_data["revision"]
+                nested = prepared.get("arguments")
+                if operation in {"syntax.python", "syntax.r"} and isinstance(nested, Mapping):
+                    target_arguments = dict(nested)
+                    target_arguments["dataset_id"] = imported_data["dataset_id"]
+                    target_arguments["revision"] = imported_data["revision"]
+                    prepared["arguments"] = target_arguments
         operation_request = OperationRequest(
             operation=operation,
             project_id=scope,
