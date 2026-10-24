@@ -204,7 +204,85 @@ class ProductionAnalysisBackend:
     ) -> Mapping[str, Any]:
         if method != self.METHOD:
             return self._run_advanced(method, inputs, project_id)
-        return self.run(method, inputs)
+        dataset_id = str(inputs.get("dataset_id", ""))
+        column = str(inputs.get("column", ""))
+        ui_project_id, _columns, _rows, origin = self._dataset(dataset_id)
+        try:
+            scope = UUID(project_id)
+        except ValueError as exc:
+            raise ValueError("Desktop project identifier is not a UUID") from exc
+        imported = self._import_ui_dataset(dataset_id, scope)
+        if imported is None:
+            raise ValueError("UI dataset was not found")
+        imported_data, staged_hash = imported
+        response = self._bus.dispatch(
+            OperationRequest(
+                operation="statistics.describe",
+                project_id=scope,
+                arguments={
+                    "dataset_id": imported_data["dataset_id"],
+                    "revision": imported_data["revision"],
+                    "column": column,
+                },
+                actor="desktop-user",
+            )
+        )
+        if response.get("status") != "ok":
+            error = response.get("error")
+            if isinstance(error, Mapping):
+                raise ValueError(
+                    str(error.get("message", "Scientific descriptive analysis failed"))
+                )
+            raise ValueError("Scientific descriptive analysis failed")
+        data = dict(response["data"])
+        return {
+            "method": "descriptive statistics",
+            "method_version": "researchweave-analysis-v2",
+            "inputs": {
+                "ui_project_id": ui_project_id,
+                "ui_dataset_id": dataset_id,
+                "column": column,
+                "analysis_dataset_id": imported_data["dataset_id"],
+                "analysis_revision": imported_data["revision"],
+            },
+            "assumptions": [
+                "Finite numeric values are summarized; missing/non-numeric values are excluded."
+            ],
+            "warnings": [str(item) for item in response.get("warnings", [])],
+            "estimates": {
+                key: data.get(key)
+                for key in (
+                    "n_total",
+                    "n_valid",
+                    "n_missing",
+                    "mean",
+                    "median",
+                    "sd_sample",
+                    "min",
+                    "max",
+                )
+            },
+            "uncertainty": {
+                "standard_error_mean": data.get("standard_error_mean"),
+                "mean_confidence_interval_95": data.get("mean_confidence_interval_95"),
+            },
+            "diagnostics": {
+                "q1": data.get("q1"),
+                "q3": data.get("q3"),
+                "iqr": data.get("iqr"),
+                "median_absolute_deviation": data.get("median_absolute_deviation"),
+                "skewness_bias_corrected": data.get("skewness_bias_corrected"),
+                "excess_kurtosis_bias_corrected": data.get("excess_kurtosis_bias_corrected"),
+                "ddof": data.get("ddof"),
+            },
+            "provenance": {
+                "ui_dataset_origin": origin,
+                "staged_csv_sha256": staged_hash,
+                "analysis_source_sha256": imported_data["source_hash"],
+                "analysis_response_provenance": response.get("provenance", []),
+                "request_id": response.get("request_id"),
+            },
+        }
 
     def run(self, method: str, inputs: Mapping[str, Any]) -> Mapping[str, Any]:
         if method != self.METHOD:
