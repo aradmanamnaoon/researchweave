@@ -17,7 +17,8 @@ def test_asset_manifest_hashes_and_accessible_svg_metadata() -> None:
     for record in manifest["assets"]:
         path = ASSET_ROOT / record["path"]
         content = path.read_bytes()
-        assert hashlib.sha256(content).hexdigest() == record["sha256"]
+        canonical_content = content.replace(b"\r\n", b"\n")
+        assert hashlib.sha256(canonical_content).hexdigest() == record["sha256"]
         root = ET.fromstring(content)
         namespace = "{http://www.w3.org/2000/svg}"
         title = root.find(f"{namespace}title")
