@@ -15,17 +15,33 @@
     "portable_startup": "pass",
     "portable_user_data_retention": "pass"
   },
-  "promotion_precheck": {
-    "main_is_ancestor": true,
+  "promotion_result": {
+    "fast_forward": true,
+    "promoted_main_sha_at_audit": "d5b78a5643252bdbc98764d239b7521979621e9f",
+    "source_root": "D:\\coding\\codex\\researchweave\\src\\researchweave",
     "original_tracked_changes": false,
     "untracked_direct_or_prefix_collisions": 0,
     "preserve": [
       "prompts/",
       "researchweave-pre-v2.bundle",
       "legacy-tracked-files.pre-v2.txt"
-    ]
+    ],
+    "preserved_after_promotion": true
   },
-  "status": "integration branch verified locally; original-root promotion/post-promotion audit pending",
+  "observed_original_root": {
+    "locked_environment_sync": "pass after stale pre-existing .venv initially lacked numpy/pandas",
+    "runtime_imports": "pass",
+    "integration_pytest": "60 passed, 10 skipped",
+    "full_pytest": "701 passed, 10 skipped, 3 warnings",
+    "ruff_check": "pass",
+    "ruff_format_configured_scope": "358 files formatted",
+    "mypy": "152 source files clean",
+    "compileall": "pass",
+    "skills": "27 skills validated",
+    "readme_local_links": "pass; 6 image references",
+    "pip_audit": "no known vulnerabilities found; local researchweave package not on PyPI"
+  },
+  "status": "verified locally on Windows and promoted to the requested original source root; external/native limitations remain",
   "external_limitations": [
     "Linux/macOS native release builds are not observed on native runners.",
     "Native installer uninstall/reinstall is not observed.",

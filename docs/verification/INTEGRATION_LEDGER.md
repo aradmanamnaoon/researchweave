@@ -57,7 +57,8 @@ No push was performed.
 - `pip-audit --local`: **no known vulnerabilities found**; the local ResearchWeave package itself is not a
   PyPI dependency and is therefore reported as skipped by pip-audit.
 - Source metric: **48,439 substantive first-party Python SLOC across 152 files**. Exact per-file/package
-  output is in `CODE_METRICS.json`.
+  output is in `CODE_METRICS.json`, now measured from the requested final source root
+  `D:\coding\codex\researchweave\src\researchweave`.
 - A fresh focused `detect-secrets` scan over `src` + `tests` reports **10 findings in 8 files**. The only new
   integration finding is the explicitly synthetic password/wrong-password fixture in `test_int_064_sync.py`.
   The full tracked scan reports **119 findings in 26 files**, dominated by deterministic hashes/manifests and
@@ -145,7 +146,7 @@ success.
 | 074 | partial | Portable deletion preserves separate user-profile sentinel; native installer uninstall/reinstall retention is not observed. |
 | 075 | verified-local (Windows) | Six native Windows screenshots and manifest hashes/metadata exist and README links are validated; no cross-platform screenshot claim. |
 | 076 | verified-local | README first-run command plus deterministic create/reopen persistence/invalid-input acceptance; manual outsider usability session not claimed. |
-| 077 | pending-promotion | Integration branch gates pass locally; original-root promotion and post-promotion audit must complete before this becomes verified-local. |
+| 077 | verified-local | Original `main` was fast-forwarded data-safely to the validated V2 tip; `src/researchweave` is populated at the requested path, recovery artifacts remain present, locked dependencies were synchronized, runtime imports pass, integration suite is 60 passed/10 skipped, full suite is 701 passed/10 skipped/3 warnings, Ruff/mypy/compileall/skills/README/pip-audit gates pass from the original root. |
 
 ## Release blockers that are genuinely external or still partial
 
@@ -155,15 +156,27 @@ live Zotero/WebDAV/S3 services, native keyboard/screen-reader/performance/visual
 Linux/macOS release runners, and native installer uninstall/reinstall behavior. Partial local contracts are
 listed individually above rather than hidden behind a blanket Gate B pass.
 
-## Gates before original-root promotion
+## Final Gate A/B/C status
 
 - Gate A / recovery: **PASS** — pre-V2 ref/bundle/manifest and untracked prompt files preserved.
 - Gate B / integrated Windows branch: **PASS for locally feasible checks**, with per-INT external/partial
   limitations above. Current package and validation evidence are recorded above.
-- Gate C / original-root promotion: **READY, not yet executed in this ledger snapshot**. `main` is an ancestor
-  of the integration branch, the original root has no tracked modifications, and a direct/path-prefix collision
-  audit found no conflicts between original untracked recovery data and integration tracked paths. Promotion must
-  use normal fast-forward semantics only; no clean/reset/stash/delete is authorized.
+- Gate C / original-root promotion: **PASS locally**. `main` was fast-forwarded from `7d8e647` to the validated
+  integration tip without stash, clean, reset, deletion, or overwrite. The requested final source now exists at
+  `D:\coding\codex\researchweave\src\researchweave`. The untracked `prompts/`,
+  `researchweave-pre-v2.bundle`, and `legacy-tracked-files.pre-v2.txt` all remain present.
+- The original checkout's pre-existing `.venv` was stale and initially lacked NumPy/Pandas; this was an
+  environment-only collection failure. `uv sync --frozen --extra dev --extra formats --extra release` repaired
+  the local environment from the repository lock without tracked-file changes. After synchronization, original-root
+  runtime imports passed, integration acceptance passed **60/10**, full pytest passed **701/10** with the same
+  three known warnings, Ruff check passed, the configured format scope (`src tests scripts packaging workstreams`)
+  reported **358 files formatted**, mypy passed **152 source files**, `compileall` passed, **27 skills** validated,
+  README links passed with **6 images**, and `pip-audit --local` reported no known vulnerabilities.
+- A raw `ruff format --check .` from the original root is intentionally not the release oracle because it also
+  inspects preserved untracked prompt Markdown; an explicit tracked-file probe likewise reaches vendored
+  `.agents` skill code that the repository's normal Ruff discovery excludes. Neither user-owned prompts nor
+  vendored skill internals were modified to manufacture a clean result.
 
-After promotion, rerun import/smoke/selected/full validation from the original root, verify the preserved
-recovery files are still present, then update INT-077 and this Gate C section. No push is authorized.
+No push was performed. The repository is locally integrated and promoted, but the external/native limitations
+listed above remain unverified and therefore prevent a claim of universal cross-platform/live-service release
+readiness.
