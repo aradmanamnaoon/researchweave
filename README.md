@@ -117,7 +117,7 @@ uv run --extra dev --extra formats python scripts/tasks.py metrics
 uv run --extra dev --extra formats python scripts/tasks.py readme
 ```
 
-The latest observed integrated run completed **703 tests passed, 10 explicitly skipped, with 3 warnings**. The source metric report currently measures **48,439 substantive first-party Python SLOC across 152 source files** using AST/tokenize rules documented in [`docs/verification/CODE_METRICS.json`](docs/verification/CODE_METRICS.json). `cloc`/`tokei` were not installed in the observed environment, so no second counter is claimed.
+The latest observed integrated run completed **703 tests passed, 10 explicitly skipped, with 3 warnings**. The source metric report currently measures **48,643 substantive first-party Python SLOC across 152 source files** using AST/tokenize rules documented in [`docs/verification/CODE_METRICS.json`](docs/verification/CODE_METRICS.json). `cloc`/`tokei` were not installed in the observed environment, so no second counter is claimed.
 
 ## Security, dependencies and reproducibility
 

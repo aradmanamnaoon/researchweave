@@ -76,10 +76,10 @@
     "src/researchweave/app/analysis_bridge.py": 350,
     "src/researchweave/app/cli.py": 25,
     "src/researchweave/app/composition.py": 149,
-    "src/researchweave/app/config.py": 10,
+    "src/researchweave/app/config.py": 14,
     "src/researchweave/app/desktop_gateway.py": 72,
     "src/researchweave/app/logging.py": 12,
-    "src/researchweave/app/main.py": 28,
+    "src/researchweave/app/main.py": 33,
     "src/researchweave/core/__init__.py": 13,
     "src/researchweave/core/audit.py": 90,
     "src/researchweave/core/authorization.py": 70,
@@ -130,10 +130,10 @@
     "src/researchweave/evidence/workspace_integrity.py": 247,
     "src/researchweave/evidence/writing.py": 433,
     "src/researchweave/ui/__init__.py": 8,
-    "src/researchweave/ui/accessibility.py": 104,
+    "src/researchweave/ui/accessibility.py": 106,
     "src/researchweave/ui/contracts.py": 164,
     "src/researchweave/ui/demo.py": 232,
-    "src/researchweave/ui/design.py": 77,
+    "src/researchweave/ui/design.py": 142,
     "src/researchweave/ui/diagnostics.py": 379,
     "src/researchweave/ui/evidence.py": 241,
     "src/researchweave/ui/facade.py": 2659,
@@ -147,7 +147,7 @@
     "src/researchweave/ui/research_guides.py": 498,
     "src/researchweave/ui/screening.py": 253,
     "src/researchweave/ui/search.py": 207,
-    "src/researchweave/ui/shell.py": 4212,
+    "src/researchweave/ui/shell.py": 4340,
     "src/researchweave/ui/snapshots.py": 353,
     "src/researchweave/ui/store.py": 297,
     "src/researchweave/ui/text_offsets.py": 64,
@@ -157,13 +157,13 @@
   "per_package": {
     "ai": 6195,
     "analysis": 11811,
-    "app": 709,
+    "app": 718,
     "core": 366,
     "evidence": 16536,
     "package-root": 3,
-    "ui": 12819
+    "ui": 13014
   },
   "python_files": 152,
   "source_root": "D:\\coding\\codex\\researchweave\\src\\researchweave",
-  "total_substantive_sloc": 48439
+  "total_substantive_sloc": 48643
 }
