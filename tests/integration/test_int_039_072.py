@@ -6,6 +6,7 @@ Domain mathematical kernels have separate dedicated oracle suites.
 
 from __future__ import annotations
 
+import hashlib
 from pathlib import Path
 from uuid import uuid4
 
@@ -481,6 +482,308 @@ def test_int_054_059_agent_durable_plan_checkpoint_and_recovery(tmp_path: Path) 
         assert "agent.v2.recover" in [
             event["operation"] for event in services.audit.events()
         ]
+    finally:
+        services.close()
+
+
+def test_int_053_evidence_only_citations_and_unsupported_abstention(tmp_path: Path) -> None:
+    """INT-053: verify lexical citations; no synthetic generated model answer."""
+    services = build_services(tmp_path)
+    try:
+        scope = uuid4()
+        req = OperationRequest(
+            operation="retrieval.ingest", project_id=scope,
+            arguments={"source_id": "source-53", "content": "Neurons transmit signals."},
+        )
+        assert services.bus.dispatch(
+            req, approval=services.bus.issue_approval(req)
+        )["status"] == "ok"
+        def answer(question: str) -> dict:
+            return dict(services.bus.dispatch(OperationRequest(
+                operation="retrieval.answer", project_id=scope,
+                arguments={"question": question, "limit": 3},
+            )))
+
+        supported = answer("Neurons")
+        assert supported["status"] == "ok", supported
+        data = supported["data"]
+        assert data["answer_mode"] == "evidence-only"
+        assert data["model_generated"] is False
+        assert data["citations"][0]["source_id"] == "source-53"
+        assert len(data["citations"][0]["sha256"]) == 64
+        unsupported = answer("irrelevantword98765")
+        assert unsupported["status"] == "ok", unsupported
+        assert unsupported["data"]["citations"] == []
+        assert unsupported["data"]["model_generated"] is False
+        assert "No source matches" in unsupported["data"]["answer"]
+    finally:
+        services.close()
+
+
+def test_int_058_offline_provider_denial_has_no_fallback(tmp_path: Path) -> None:
+    """INT-058: denied remote model call causes no authorized provider fallback."""
+    services = build_services(tmp_path)
+    try:
+        scope = uuid4()
+        request = OperationRequest(
+            operation="provider.complete", project_id=scope,
+            arguments={"provider": "unconfigured", "prompt": "SYNTHETIC PRIVATE"},
+        )
+        denied = services.bus.dispatch(request)
+        assert denied["status"] == "failed"
+        assert denied["error"]["code"] == "NEEDS_APPROVAL"
+        attempted = services.bus.dispatch(
+            request, approval=services.bus.issue_approval(request)
+        )
+        assert attempted["status"] == "failed", attempted
+        assert not any(
+            e["operation"] == "provider.complete" and e["status"] == "ok"
+            for e in services.audit.events()
+        )
+        assert "SYNTHETIC PRIVATE" not in repr(services.audit.events())
+    finally:
+        services.close()
+
+
+def test_int_054_059_recovery_after_service_reopen(tmp_path: Path) -> None:
+    """INT-054/059: durable agent plan remains recoverable after host restart."""
+    scope = uuid4()
+    services = build_services(tmp_path)
+    try:
+        req = OperationRequest(
+            operation="agent.v2.plan", project_id=scope,
+            arguments={"project_id": str(scope), "steps": [
+                {"step_id": "lookup", "operation": "retrieval.query",
+                 "arguments": {"query": "fixture", "limit": 2}},
+            ]},
+        )
+        planned = services.bus.dispatch(
+            req, approval=services.bus.issue_approval(req)
+        )
+        assert planned["status"] == "ok", planned
+        plan_id = planned["data"]["plan_id"]
+    finally:
+        services.close()
+    reopened = build_services(tmp_path)
+    try:
+        recover = reopened.bus.dispatch(OperationRequest(
+            operation="agent.v2.recover", project_id=scope,
+            arguments={"plan_id": plan_id},
+        ))
+        assert recover["status"] == "ok", recover
+        preview = reopened.bus.dispatch(OperationRequest(
+            operation="agent.v2.preview", project_id=scope,
+            arguments={"plan_id": plan_id},
+        ))
+        assert preview["status"] == "ok", preview
+    finally:
+        reopened.close()
+
+
+def test_int_066_preset_save_restore_delete_through_desktop_gateway(
+    tmp_path: Path,
+) -> None:
+    """INT-066: persisted layout preset roundtrip, safe clamping, and reset."""
+    services = build_services(tmp_path)
+    try:
+        gateway = DesktopCommandGateway(services.ui, services.bus)
+        project = _project(gateway)
+        saved = gateway.execute(
+            "ui.workspace.preset.save",
+            {"preset": {
+                "name": "Synthetic compact",
+                "project_id": project["project_id"],
+                "active_screen": "Statistics",
+                "theme": "dark",
+                "density": "compact",
+                "window_width": 100,
+                "window_height": 50,
+            }},
+        )
+        assert saved["status"] == "ok", saved
+        preset = saved["data"]["preset"]
+        assert preset["window_width"] >= 760
+        assert preset["window_height"] >= 490
+        preset_id = preset["id"]
+    finally:
+        services.close()
+    reopened = build_services(tmp_path)
+    try:
+        gateway = DesktopCommandGateway(reopened.ui, reopened.bus)
+        listed = gateway.execute("ui.workspace.preset.list", {})
+        assert listed["status"] == "ok", listed
+        assert any(p["id"] == preset_id for p in listed["data"]["presets"])
+        removed = gateway.execute(
+            "ui.workspace.preset.delete", {"preset_id": preset_id}
+        )
+        assert removed["status"] == "ok", removed
+        after = gateway.execute("ui.workspace.preset.list", {})
+        assert all(p["id"] != preset_id for p in after["data"]["presets"])
+        assert "ui.workspace.preset.delete" in [
+            event["operation"] for event in reopened.audit.events()
+        ]
+    finally:
+        reopened.close()
+
+
+@pytest.mark.parametrize(
+    ("extension", "signature"),
+    [("svg", b"<?xml"), ("png", b"\x89PNG\r\n\x1a\n")],
+)
+def test_int_045_integrated_plot_artifact_and_invalid_log_data(
+    tmp_path: Path, extension: str, signature: bytes
+) -> None:
+    """INT-045: real scientific plot, binary signature, digest and failed log input."""
+    services = build_services(tmp_path)
+    try:
+        csv = services.paths.imports / "plot_fixture.csv"
+        csv.write_text("x,y\n-1,2\n2,3\n3,4\n4,5\n", encoding="utf-8")
+        gateway = DesktopCommandGateway(services.ui, services.bus)
+        imported = gateway.execute("dataset.import", {"filename": csv.name})
+        assert imported["status"] == "ok", imported
+        dataset = imported["data"]
+        args = {
+            "dataset_id": dataset["dataset_id"],
+            "revision": dataset["revision"],
+            "filename": f"figure.{extension}",
+            "x": "x",
+            "y": "y",
+            "kind": "scatter",
+            "title": "Synthetic plot",
+        }
+        success = gateway.execute("plot.render", args)
+        assert success["status"] == "ok", success
+        artifact = services.paths.exports / args["filename"]
+        assert artifact.read_bytes().startswith(signature)
+        assert success["data"]["sha256"] == hashlib.sha256(
+            artifact.read_bytes()
+        ).hexdigest()
+        assert success["data"]["plot_data"]
+        assert success["data"]["data_table"] == success["data"]["plot_data"]
+        assert success["data"]["caption"] == "Synthetic plot"
+        assert success["data"]["alt_text"]
+        invalid = gateway.execute(
+            "plot.render",
+            {**args, "filename": f"invalid.{extension}",
+             "options": {"x_scale": "log"}},
+        )
+        assert invalid["status"] == "failed", invalid
+        assert invalid["error"]["code"] == "INVALID_INPUT"
+        assert not (services.paths.exports / f"invalid.{extension}").exists()
+        assert any(e["operation"] == "plot.render" for e in services.audit.events())
+    finally:
+        services.close()
+
+
+def test_int_047_adjudication_receipt_requires_reason(tmp_path: Path) -> None:
+    """INT-047: conflicting coder labels yield an auditable reconciliation receipt."""
+    services = build_services(tmp_path)
+    scope = uuid4()
+    project_id = "coding_receipt"
+    try:
+        def call(operation: str, arguments: dict) -> dict:
+            req = OperationRequest(operation=operation, project_id=scope, arguments=arguments)
+            approval = (
+                services.bus.issue_approval(req)
+                if services.bus.effect_for(operation) != "read" else None
+            )
+            return dict(services.bus.dispatch(req, approval=approval))
+
+        created = call("qualitative.create", {"project_id": project_id})
+        assert created["status"] == "ok", created
+        revision = created["data"]["content_hash"]
+        for code in ("support", "opposition"):
+            response = call("qualitative.add_code", {
+                "project_id": project_id, "expected_content_hash": revision,
+                "code_id": code, "name": code, "actor": "lead",
+            })
+            assert response["status"] == "ok", response
+            revision = response["data"]["content_hash"]
+        added = call("qualitative.add_transcript", {
+            "project_id": project_id, "expected_content_hash": revision,
+            "source_id": "interview", "text": "first second", "case_id": "case-one",
+        })
+        assert added["status"] == "ok", added
+        revision = added["data"]["content_hash"]
+        for coder, code, start, end in (
+            ("coder_a", "support", 0, 5),
+            ("coder_b", "opposition", 6, 12),
+        ):
+            annotation = call("qualitative.annotate", {
+                "project_id": project_id, "expected_content_hash": revision,
+                "source_id": "interview", "start": start, "end": end,
+                "code_id": code, "coder": coder, "unit_id": "u1",
+            })
+            assert annotation["status"] == "ok", annotation
+            revision = annotation["data"]["content_hash"]
+        base = {
+            "project_id": project_id, "coder_a": "coder_a",
+            "coder_b": "coder_b", "unit_ids": ["u1"],
+            "resolutions": {"u1": "support"},
+            "adjudicator": "reviewer", "rationales": {"u1": "Reviewed the passage."},
+        }
+        resolved = call("qualitative.adjudicate", base)
+        assert resolved["status"] == "ok", resolved
+        assert resolved["data"]["n_disagreements"] == 1
+        assert resolved["data"]["decisions"][0]["resolved_code"] == "support"
+        rejected = call(
+            "qualitative.adjudicate", {**base, "rationales": {}}
+        )
+        assert rejected["status"] == "failed"
+        assert "qualitative.adjudicate" in [
+            event["operation"] for event in services.audit.events()
+        ]
+    finally:
+        services.close()
+
+
+def test_int_048_sensitive_mixed_display_denied_and_project_isolated(
+    tmp_path: Path,
+) -> None:
+    """INT-048: sensitive mixed export needs separate host authority."""
+    services = build_services(tmp_path)
+    scope = uuid4()
+    try:
+        def call(operation: str, args: dict, approve: bool = True) -> dict:
+            request = OperationRequest(
+                operation=operation, project_id=scope, arguments=args
+            )
+            approval = (
+                services.bus.issue_approval(request)
+                if approve and services.bus.effect_for(operation) != "read"
+                else None
+            )
+            return dict(services.bus.dispatch(request, approval=approval))
+
+        filename = "mixed_fixture.csv"
+        (services.paths.imports / filename).write_text(
+            "case,score\n1,1\n2,2\n3,3\n4,4\n5,5\n6,6\n", encoding="utf-8"
+        )
+        imported = call("dataset.import", {"filename": filename})
+        assert imported["status"] == "ok", imported
+        created = call("qualitative.create", {"project_id": "mixed_study"})
+        assert created["status"] == "ok", created
+        arguments = {
+            "dataset_id": imported["data"]["dataset_id"],
+            "revision": imported["data"]["revision"],
+            "project_id": "mixed_study",
+            "case_column": "case", "measure_column": "score",
+            "code_id": "theme", "allow_quotes": True, "include_private": True,
+        }
+        denied = call("mixed.joint_display_sensitive", arguments, approve=False)
+        assert denied["status"] == "failed", denied
+        assert denied["error"]["code"] == "NEEDS_APPROVAL"
+        unrelated = call(
+            "mixed.joint_display",
+            {k: v for k, v in arguments.items()
+             if k not in {"allow_quotes", "include_private"}}
+            | {"project_id": "other_study"},
+        )
+        assert unrelated["status"] == "failed"
+        assert not any(
+            event["operation"] == "mixed.joint_display_sensitive"
+            and event["status"] == "ok" for event in services.audit.events()
+        )
     finally:
         services.close()
 

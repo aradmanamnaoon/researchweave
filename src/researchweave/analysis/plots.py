@@ -280,6 +280,32 @@ def render_plot(
     require(not output.exists(), "Destination already exists", "CONFLICT")
     options = dict(options or {})
     require(len(options) <= 20, "Plot option budget exceeded", "RESOURCE_LIMIT")
+    x_scale = str(options.get("x_scale", "linear"))
+    y_scale = str(options.get("y_scale", "linear"))
+    require(x_scale in {"linear", "log"}, "Unsupported x axis scale")
+    require(y_scale in {"linear", "log"}, "Unsupported y axis scale")
+    if x_scale == "log":
+        x_values = [
+            finite_number(row[x], name=x)
+            for row in dataset.records
+            if row[x] is not None
+        ]
+        require(
+            bool(x_values) and all(value > 0 for value in x_values),
+            "Log x axis requires positive values",
+        )
+    if y_scale == "log":
+        require(y is not None, "Log y axis requires a numeric y column")
+        y_name = str(y)
+        y_values = [
+            finite_number(row[y_name], name=y_name)
+            for row in dataset.records
+            if row[y_name] is not None
+        ]
+        require(
+            bool(y_values) and all(value > 0 for value in y_values),
+            "Log y axis requires positive values",
+        )
     fig, ax = plt.subplots(figsize=(7, 4.5), layout="constrained")
     plot_data: dict[str, Any]
     n_used = 0
@@ -403,10 +429,17 @@ def render_plot(
             )
         )
         ax.set_title(title)
+        ax.set_xscale(x_scale)
+        ax.set_yscale(y_scale)
         ax.grid(alpha=0.2)
         fig.savefig(output, metadata={"Creator": "ResearchWeave Scientific Analysis"})
     finally:
         plt.close(fig)
+    alt_text = (
+        f"{kind.replace('_', ' ')} chart using {x}"
+        + (f" and {y}" if y else "")
+        + f" with {n_used} plotted observations"
+    )
     return {
         "kind": kind,
         "spec": {
@@ -423,9 +456,9 @@ def render_plot(
         "dataset_revision": dataset.revision,
         "path": str(output),
         "sha256": hashlib.sha256(output.read_bytes()).hexdigest(),
-        "alt_text": f"{kind.replace('_', ' ')} chart using {x}"
-        + (f" and {y}" if y else "")
-        + f" with {n_used} plotted observations",
+        "caption": title.strip() or alt_text,
+        "alt_text": alt_text,
         "plot_data": plot_data,
+        "data_table": plot_data,
         "data_hash": digest(plot_data),
     }
