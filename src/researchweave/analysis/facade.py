@@ -37,6 +37,7 @@ from .data_ops import (
     missingness,
     pivot_longer,
     pivot_wider,
+    quality_screen,
     recode_missing,
 )
 from .datasets import (
@@ -173,6 +174,7 @@ class AnalysisFacade:
             "dataset.transform": "local-write",
             "dataset.variable": "local-write",
             "dataset.missingness": "read",
+            "dataset.quality": "read",
             "dataset.select": "local-write",
             "dataset.user_missing": "local-write",
             "dataset.complete_case": "local-write",
@@ -925,6 +927,17 @@ class AnalysisFacade:
                 data = distribution_diagnostics(obj, str(arguments["column"]))
             elif operation == "dataset.missingness":
                 data = missingness(obj, by=arguments.get("by"))
+            elif operation == "dataset.quality":
+                data = quality_screen(
+                    obj,
+                    subject_column=arguments.get("subject_column"),
+                    outcome=arguments.get("outcome"),
+                    predictors=list(arguments.get("predictors", [])),
+                    split_column=arguments.get("split_column"),
+                    train_values=list(arguments.get("train_values", [])) or None,
+                    test_values=list(arguments.get("test_values", [])) or None,
+                    outlier_threshold=float(arguments.get("outlier_threshold", 3.0)),
+                )
             elif operation == "statistics.weighted_mean":
                 data = frequency_weighted_mean(
                     obj, str(arguments["column"]), str(arguments["weight"])

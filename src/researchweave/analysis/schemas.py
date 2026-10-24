@@ -466,6 +466,18 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "dataset.transform": _schema({**IDENTITY, "spec": TRANSFORM_SPEC}),
     "dataset.variable": _schema({**IDENTITY, "column": S, "updates": VARIABLE_UPDATES}),
     "dataset.missingness": _schema(IDENTITY, {"by": SN}),
+    "dataset.quality": _schema(
+        IDENTITY,
+        {
+            "subject_column": SN,
+            "outcome": SN,
+            "predictors": AS,
+            "split_column": SN,
+            "train_values": AS,
+            "test_values": AS,
+            "outlier_threshold": N,
+        },
+    ),
     "dataset.select": _schema({**IDENTITY, "column": S, "allowed": A}, {"include_null": B}),
     "dataset.user_missing": _schema({**IDENTITY, "column": S, "missing_values": AS}),
     "dataset.complete_case": _schema({**IDENTITY, "columns": AS}),

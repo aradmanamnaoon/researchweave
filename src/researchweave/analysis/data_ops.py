@@ -85,6 +85,162 @@ def missingness(dataset: Dataset, *, by: str | None = None) -> dict[str, Any]:
     }
 
 
+def quality_screen(
+    dataset: Dataset,
+    *,
+    subject_column: str | None = None,
+    outcome: str | None = None,
+    predictors: list[str] | None = None,
+    split_column: str | None = None,
+    train_values: list[str] | None = None,
+    test_values: list[str] | None = None,
+    outlier_threshold: float = 3.0,
+) -> dict[str, Any]:
+    """Return row-linked quality warnings without mutating or excluding observations.
+
+    The screen is intentionally diagnostic: it reports missing cells, duplicate subject IDs,
+    optional model-residual outliers and subject overlap across a configured train/test split.
+    Each warning carries the immutable dataset revision and transformation operation that produced
+    the inspected rows so the desktop can navigate from a warning back to source state.
+    """
+
+    columns = set(dataset.columns)
+    for name, column in (
+        ("subject_column", subject_column),
+        ("outcome", outcome),
+        ("split_column", split_column),
+    ):
+        require(column is None or column in columns, f"Unknown {name}")
+    predictor_names = list(predictors or [])
+    require(all(column in columns for column in predictor_names), "Unknown predictor")
+    require(
+        (outcome is None) == (not predictor_names),
+        "Outcome and predictors must be configured together",
+    )
+    require(
+        split_column is None or subject_column is not None,
+        "Split leakage check requires subject_column",
+    )
+    require(1 <= outlier_threshold <= 8, "Studentized residual threshold outside range")
+
+    variable_index = {item.name: item for item in dataset.variables}
+    lineage = {
+        "dataset_revision": dataset.revision,
+        "parent_revision": dataset.parent_revision,
+        "transformation": dict(dataset.operation),
+    }
+    warnings: list[dict[str, Any]] = []
+
+    for row_index, row in enumerate(dataset.records):
+        missing_columns = [
+            column
+            for column in dataset.columns
+            if row[column] is None
+            or (
+                row[column] is not None
+                and str(row[column]) in set(variable_index[column].missing_values)
+            )
+        ]
+        if missing_columns:
+            warnings.append(
+                {
+                    "kind": "missingness",
+                    "row_indices": [row_index],
+                    "columns": missing_columns,
+                    "message": "Row contains missing values; no observation was removed.",
+                    **lineage,
+                }
+            )
+
+    if subject_column is not None:
+        subject_rows: dict[str, list[int]] = {}
+        for row_index, row in enumerate(dataset.records):
+            raw = row[subject_column]
+            if raw is None:
+                continue
+            subject_rows.setdefault(str(raw), []).append(row_index)
+        for subject, row_indices in sorted(subject_rows.items()):
+            if len(row_indices) > 1:
+                warnings.append(
+                    {
+                        "kind": "duplicate_subject",
+                        "row_indices": row_indices,
+                        "columns": [subject_column],
+                        "subject": subject,
+                        "message": (
+                            "Subject identifier occurs on multiple rows; review study structure "
+                            "before deduplicating."
+                        ),
+                        **lineage,
+                    }
+                )
+
+        if split_column is not None:
+            train = set(train_values or ["train"])
+            test = set(test_values or ["test"])
+            require(
+                bool(train) and bool(test) and train.isdisjoint(test),
+                "Train/test labels must be non-empty and disjoint",
+            )
+            for subject, row_indices in sorted(subject_rows.items()):
+                labels = {str(dataset.records[index][split_column]) for index in row_indices}
+                if labels & train and labels & test:
+                    warnings.append(
+                        {
+                            "kind": "test_set_leakage",
+                            "row_indices": row_indices,
+                            "columns": [subject_column, split_column],
+                            "subject": subject,
+                            "message": (
+                                "Subject appears in both configured training and test partitions."
+                            ),
+                            **lineage,
+                        }
+                    )
+
+    if outcome is not None:
+        from .diagnostics import residual_outlier_flags
+
+        outliers = residual_outlier_flags(
+            dataset,
+            outcome,
+            predictor_names,
+            threshold=outlier_threshold,
+        )
+        for flagged in outliers["flagged"]:
+            warnings.append(
+                {
+                    "kind": "residual_outlier",
+                    "row_indices": [flagged["row_index"]],
+                    "columns": [outcome, *predictor_names],
+                    "studentized_residual": flagged["studentized_residual"],
+                    "message": (
+                        "Large studentized residual requires researcher review; no observation "
+                        "was removed."
+                    ),
+                    **lineage,
+                }
+            )
+
+    counts = Counter(str(item["kind"]) for item in warnings)
+    return {
+        "dataset_revision": dataset.revision,
+        "n_total": len(dataset.records),
+        "warnings": warnings,
+        "counts": dict(sorted(counts.items())),
+        "configured": {
+            "subject_column": subject_column,
+            "outcome": outcome,
+            "predictors": predictor_names,
+            "split_column": split_column,
+            "train_values": sorted(train_values or ["train"]) if split_column else [],
+            "test_values": sorted(test_values or ["test"]) if split_column else [],
+            "outlier_threshold": outlier_threshold,
+        },
+        "mutated": False,
+    }
+
+
 def case_selection(
     dataset: Dataset, column: str, allowed: list[Any], *, include_null: bool = False
 ) -> Dataset:
