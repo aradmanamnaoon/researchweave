@@ -166,5 +166,5 @@ def build_services(
     bus.register(DomainBinding("ai", ai, executor=ai_execute))
     bus.register(DomainBinding("ui", ui))
     ui.analysis_backend = ProductionAnalysisBackend(ui, analysis, paths.imports, bus)
-    ui.ai_backend = ProductionAIBackend(bus)
+    ui.ai_backend = ProductionAIBackend(bus, paths.ai, ai_issuer)
     return AppServices(paths, evidence, analysis, ai, ui, bus, audit, authority, ai_issuer)

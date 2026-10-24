@@ -10,7 +10,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication
+from PyQt6.QtWidgets import QApplication, QScrollArea
 
 from researchweave.ui import build_ui_facade, build_ui_shell
 from researchweave.ui.models import ResearchTableModel
@@ -50,6 +50,45 @@ def test_palette_filters_and_keyboard_activation(qt_app: QApplication, tmp_path:
     assert palette.results.count() == 1
     palette.activate()
     assert window.pages.currentIndex() == SCREENS.index("Privacy")
+    window.close()
+
+
+def test_navigation_keeps_only_active_phase_expanded(qt_app: QApplication, tmp_path: Path) -> None:
+    window = build_ui_shell(fake_services=build_ui_facade(tmp_path))
+    assert window._nav_groups["Start"].isExpanded()
+    assert all(
+        not item.isExpanded() for name, item in window._nav_groups.items() if name != "Start"
+    )
+
+    window.navigate("Library")
+    assert window._nav_groups["Evidence"].isExpanded()
+    assert all(
+        not item.isExpanded() for name, item in window._nav_groups.items() if name != "Evidence"
+    )
+
+    window._nav_groups["Analyze"].setExpanded(True)
+    window.navigate("Exports")
+    assert window._nav_groups["Project"].isExpanded()
+    assert all(
+        not item.isExpanded() for name, item in window._nav_groups.items() if name != "Project"
+    )
+    window.close()
+
+
+def test_dense_workspace_remains_reachable_in_scroll_canvas(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    window = build_ui_shell(fake_services=build_ui_facade(tmp_path))
+    window.resize(900, 620)
+    window.navigate("Statistics")
+    window.show()
+    qt_app.processEvents()
+
+    current = window.pages.currentWidget()
+    assert isinstance(current, QScrollArea)
+    assert current.widgetResizable() is True
+    assert current.horizontalScrollBarPolicy() == Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+    assert current.verticalScrollBar().maximum() > 0
     window.close()
 
 

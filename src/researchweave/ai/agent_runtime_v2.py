@@ -5,13 +5,14 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
 from .errors import AIError
 from .policy import Approval, ApprovalIssuer, canonical_digest
+from .structured_output import validate_schema
 
 JsonDict = dict[str, Any]
 StepHandler = Callable[[Mapping[str, Any]], Mapping[str, Any]]
@@ -25,6 +26,8 @@ class ToolContract:
     reversible: bool
     idempotent: bool
     allowed_arguments: frozenset[str]
+    description: str = ""
+    argument_schema: Mapping[str, Any] = field(default_factory=dict)
 
     def validate_arguments(self, arguments: Mapping[str, Any]) -> JsonDict:
         if not isinstance(arguments, Mapping):
@@ -35,7 +38,37 @@ class ToolContract:
                 "INVALID_INPUT",
                 f"Tool {self.operation} received unknown arguments: {sorted(unknown)}",
             )
-        return dict(arguments)
+        validated = dict(arguments)
+        if self.argument_schema:
+            validate_schema(validated, self.argument_schema)
+        return validated
+
+    @property
+    def risk(self) -> str:
+        if self.effect == "read":
+            return "read"
+        if self.effect == "irreversible":
+            return "destructive"
+        return "write"
+
+    def model_definition(self) -> JsonDict:
+        parameters: Mapping[str, Any]
+        if self.argument_schema:
+            parameters = self.argument_schema
+        else:
+            parameters = {
+                "type": "object",
+                "properties": {name: {} for name in sorted(self.allowed_arguments)},
+                "additionalProperties": False,
+            }
+        return {
+            "type": "function",
+            "function": {
+                "name": self.operation,
+                "description": self.description or self.operation,
+                "parameters": dict(parameters),
+            },
+        }
 
 
 @dataclass(frozen=True)
@@ -118,6 +151,49 @@ class DurableAgentRuntime:
         if not contract.operation or contract.operation in self.tools:
             raise AIError("CONFLICT", "Tool operation is empty or already registered")
         self.tools[contract.operation] = contract
+
+    def tool_definitions(self) -> list[JsonDict]:
+        return [self.tools[name].model_definition() for name in sorted(self.tools)]
+
+    def tool_catalog(self) -> list[JsonDict]:
+        return [
+            {
+                "name": contract.operation,
+                "description": contract.description or contract.operation,
+                "schema": dict(contract.model_definition()["function"]["parameters"]),
+                "risk": contract.risk,
+                "effect": contract.effect,
+            }
+            for contract in (self.tools[name] for name in sorted(self.tools))
+        ]
+
+    def invoke_tool(
+        self,
+        project_id: str,
+        operation: str,
+        arguments: Mapping[str, Any],
+        *,
+        approval: Approval | None = None,
+    ) -> Mapping[str, Any]:
+        contract = self.tools.get(operation)
+        if contract is None:
+            raise AIError("NOT_FOUND", f"Unknown tool: {operation}")
+        validated = contract.validate_arguments(arguments)
+        if contract.effect != "read":
+            if self.issuer is None:
+                raise AIError("NEEDS_APPROVAL", "Trusted host approval issuer is required")
+            self.issuer.verify(
+                approval,
+                project_id,
+                "agent.tool",
+                {"operation": operation, "arguments": validated},
+            )
+        try:
+            return dict(contract.handler(validated))
+        except AIError:
+            raise
+        except Exception as exc:
+            raise AIError("TOOL_FAILURE", "Tool execution failed") from exc
 
     @staticmethod
     def _serialize_steps(steps: Sequence[AgentStep]) -> str:

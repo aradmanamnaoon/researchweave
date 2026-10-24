@@ -7,6 +7,7 @@ from pathlib import Path
 from defusedxml import ElementTree as ET
 
 ASSET_ROOT = Path("workstreams/v2/ui/assets")
+PACKAGED_ASSET_ROOT = Path("src/researchweave/assets")
 
 
 def test_asset_manifest_hashes_and_accessible_svg_metadata() -> None:
@@ -36,3 +37,12 @@ def test_asset_manifest_hashes_and_accessible_svg_metadata() -> None:
         assert b"href=" not in lowered
         assert record["license"] == "GPL-3.0-only"
         assert "Original" in record["provenance"]
+
+
+def test_runtime_brand_assets_match_reviewed_originals() -> None:
+    for name in ("researchweave-mark.svg", "workflow.svg"):
+        reviewed = Path("assets/branding") / name
+        packaged = PACKAGED_ASSET_ROOT / name
+        assert packaged.read_bytes().replace(b"\r\n", b"\n") == reviewed.read_bytes().replace(
+            b"\r\n", b"\n"
+        )

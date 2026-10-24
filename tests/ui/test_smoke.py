@@ -15,6 +15,7 @@ def test_window_starts_offscreen(tmp_path: Path) -> None:
     window.show()
     app.processEvents()
     assert window.windowTitle() == "ResearchWeave"
+    assert not window.windowIcon().isNull()
     assert window.isVisible()
     window.close()
 

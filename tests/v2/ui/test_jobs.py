@@ -97,6 +97,22 @@ def test_progress_is_bounded_and_terminal_completion_is_100(qt_app) -> None:
     assert manager.set_progress("missing", 10) is False
 
 
+def test_streaming_worker_delivers_chunks_on_current_generation(qt_app) -> None:
+    manager = JobManager(max_workers=1)
+    chunks = []
+    manager.chunk.connect(lambda key, value: chunks.append((key, value)))
+
+    def work(stop, emit):
+        emit("alpha")
+        emit(" beta")
+        return "alpha beta"
+
+    assert manager.submit_stream("assistant", work)
+    events = wait_for(manager.result)
+    assert events == [("assistant", "alpha beta")]
+    assert chunks == [("assistant", "alpha"), ("assistant", " beta")]
+
+
 def test_old_generation_result_does_not_overwrite(qt_app) -> None:
     manager = JobManager(max_workers=1)
     was_started = Event()

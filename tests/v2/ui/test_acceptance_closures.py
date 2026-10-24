@@ -14,6 +14,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtWidgets import QApplication, QFileDialog
 
 from researchweave.ui import build_ui_facade, build_ui_shell
+from researchweave.ui.shell import display_local_path
 
 
 def ok(facade, operation: str, **args):
@@ -568,7 +569,8 @@ def test_visible_deviation_retry_overlap_and_export_folder(
     shell.navigate("Exports")
     shell.choose_export_folder()
     assert facade.export_root == destination.resolve()
-    assert shell.export_directory.text() == str(destination.resolve())
+    assert shell.export_directory.text() == display_local_path(destination.resolve())
+    assert shell.export_directory.toolTip() == str(destination.resolve())
     assert notification["notification"]["id"]
     shell.close()
 

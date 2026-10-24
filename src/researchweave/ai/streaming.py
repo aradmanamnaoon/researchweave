@@ -60,6 +60,8 @@ class StreamAssembler:
     usage: dict[str, Any] = field(default_factory=dict)
     finish_reason: str | None = None
     _count: int = 0
+    _tool_argument_count: int = 0
+    _tool_calls: dict[int, dict[str, Any]] = field(default_factory=dict)
     max_characters: int = 1_000_000
 
     def feed(self, event: dict[str, Any]) -> str:
@@ -77,6 +79,43 @@ class StreamAssembler:
             if not isinstance(content, str):
                 raise AIError("SCHEMA_MISMATCH", "Invalid streaming text")
             delta_text += content
+            raw_tool_calls = delta.get("tool_calls", [])
+            if not isinstance(raw_tool_calls, list) or len(raw_tool_calls) > 8:
+                raise AIError("SCHEMA_MISMATCH", "Invalid streaming tool calls")
+            for raw_call in raw_tool_calls:
+                if not isinstance(raw_call, dict):
+                    raise AIError("SCHEMA_MISMATCH", "Invalid streaming tool call")
+                index = raw_call.get("index")
+                if type(index) is not int or not 0 <= index < 8:
+                    raise AIError("SCHEMA_MISMATCH", "Invalid streaming tool-call index")
+                state = self._tool_calls.setdefault(
+                    index,
+                    {"id": "", "type": "function", "function": {"name": "", "arguments": ""}},
+                )
+                call_id = raw_call.get("id")
+                if call_id is not None:
+                    if not isinstance(call_id, str) or len(call_id) > 200:
+                        raise AIError("SCHEMA_MISMATCH", "Invalid streaming tool-call ID")
+                    if state["id"] and state["id"] != call_id:
+                        raise AIError("SCHEMA_MISMATCH", "Streaming tool-call ID changed")
+                    state["id"] = call_id
+                call_type = raw_call.get("type")
+                if call_type is not None and call_type != "function":
+                    raise AIError("SCHEMA_MISMATCH", "Unsupported streaming tool-call type")
+                function = raw_call.get("function")
+                if function is None:
+                    continue
+                if not isinstance(function, dict):
+                    raise AIError("SCHEMA_MISMATCH", "Invalid streaming tool function")
+                name = function.get("name", "")
+                arguments = function.get("arguments", "")
+                if not isinstance(name, str) or not isinstance(arguments, str):
+                    raise AIError("SCHEMA_MISMATCH", "Invalid streaming tool function fields")
+                state["function"]["name"] += name
+                state["function"]["arguments"] += arguments
+                self._tool_argument_count += len(arguments)
+                if len(state["function"]["name"]) > 200 or self._tool_argument_count > 200_000:
+                    raise AIError("RESOURCE_LIMIT", "Streaming tool call exceeds budget")
             if choice.get("finish_reason") is not None:
                 self.finish_reason = str(choice["finish_reason"])
         self._count += len(delta_text)
@@ -93,3 +132,7 @@ class StreamAssembler:
     @property
     def text(self) -> str:
         return "".join(self.text_parts)
+
+    @property
+    def tool_calls(self) -> list[dict[str, Any]]:
+        return [self._tool_calls[index] for index in sorted(self._tool_calls)]

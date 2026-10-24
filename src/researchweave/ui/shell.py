@@ -3,12 +3,14 @@
 from __future__ import annotations
 
 import json
+import tempfile
 from collections.abc import Callable, Mapping
 from pathlib import Path
+from threading import Event
 from typing import Any, cast
 
-from PyQt6.QtCore import Qt, QTimer
-from PyQt6.QtGui import QAction, QCloseEvent, QKeySequence, QTextCursor
+from PyQt6.QtCore import QSize, Qt, QTimer
+from PyQt6.QtGui import QAction, QCloseEvent, QFont, QIcon, QKeySequence, QTextCursor
 from PyQt6.QtWidgets import (
     QApplication,
     QCheckBox,
@@ -38,6 +40,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .assets import asset_path
 from .contracts import Preferences, UIError
 from .design import apply_theme, named
 from .facade import UIFacade
@@ -90,6 +93,79 @@ def heading(text: str) -> QLabel:
     widget = QLabel(text)
     widget.setObjectName("sectionTitle")
     return widget
+
+
+def surface(
+    title: str = "",
+    description: str = "",
+    *,
+    kind: str = "surface",
+) -> tuple[QFrame, QVBoxLayout]:
+    """Create a consistent content surface with optional heading and helper copy."""
+
+    frame = QFrame()
+    frame.setObjectName(kind)
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(16, 14, 16, 14)
+    layout.setSpacing(10)
+    if title:
+        label = QLabel(title)
+        label.setObjectName("surfaceTitle")
+        layout.addWidget(label)
+    if description:
+        helper = QLabel(description)
+        helper.setWordWrap(True)
+        helper.setObjectName("pageLead")
+        layout.addWidget(helper)
+    return frame, layout
+
+
+def metric_card(label: str, value: str = "—", detail: str = "") -> tuple[QFrame, QLabel, QLabel]:
+    """Create a compact dashboard metric card with accessible text labels."""
+
+    frame = QFrame()
+    frame.setObjectName("metricCard")
+    layout = QVBoxLayout(frame)
+    layout.setContentsMargins(14, 12, 14, 12)
+    layout.setSpacing(3)
+    label_widget = QLabel(label.upper())
+    label_widget.setObjectName("metricLabel")
+    value_widget = QLabel(value)
+    value_widget.setObjectName("metricValue")
+    detail_widget = QLabel(detail)
+    detail_widget.setObjectName("metricDetail")
+    detail_widget.setWordWrap(True)
+    layout.addWidget(label_widget)
+    layout.addWidget(value_widget)
+    layout.addWidget(detail_widget)
+    return frame, value_widget, detail_widget
+
+
+def empty_list_item(text: str) -> QListWidgetItem:
+    """Return explanatory list content that cannot be mistaken for project data."""
+
+    item = QListWidgetItem(text)
+    item.setFlags(Qt.ItemFlag.ItemIsEnabled)
+    item.setData(Qt.ItemDataRole.UserRole, None)
+    return item
+
+
+def display_local_path(path: Path) -> str:
+    """Render common private path prefixes without exposing the local account name."""
+
+    resolved = path.resolve()
+    anchors = (
+        (Path(tempfile.gettempdir()).resolve(), "%TEMP%"),
+        (Path.home().resolve(), "~"),
+    )
+    for anchor, label in anchors:
+        try:
+            relative = resolved.relative_to(anchor)
+        except ValueError:
+            continue
+        suffix = str(relative)
+        return label if not suffix else f"{label}\\{suffix}"
+    return str(resolved)
 
 
 class CommandPalette(QDialog):
@@ -165,6 +241,9 @@ class ResearchWindow(QMainWindow):
         self.current_source_id = ""
         self.current_dataset_id = ""
         self.project_title = ""
+        self.assistant_conversation_id: str | None = None
+        self.assistant_pending_tool: dict[str, Any] | None = None
+        self.assistant_model_available = False
         self._editor_loading = False
         self._screen_focus: dict[str, QWidget] = {}
         self.protocol_fields: dict[str, QPlainTextEdit] = {}
@@ -175,6 +254,10 @@ class ResearchWindow(QMainWindow):
         self.jobs.changed.connect(lambda key, state: self._set_status(f"{key}: {state}"))
         self.jobs.changed.connect(lambda _key, _state: self._refresh_dashboard_if_visible())
         self.jobs.progress.connect(lambda _key, _value: self._refresh_dashboard_if_visible())
+        self.jobs.chunk.connect(self._assistant_chunk)
+        self.jobs.result.connect(self._assistant_job_result)
+        self.jobs.error.connect(self._assistant_job_error)
+        self.jobs.changed.connect(self._assistant_job_changed)
         self.setWindowTitle("ResearchWeave · Local research desktop")
         self.base_window_title = "ResearchWeave"
         self.setMinimumSize(760, 490)
@@ -218,12 +301,28 @@ class ResearchWindow(QMainWindow):
         side = QVBoxLayout(sidebar)
         side.setContentsMargins(14, 16, 14, 14)
         side.setSpacing(8)
+        brand_row = QHBoxLayout()
+        brand_row.setSpacing(10)
+        mark = QLabel()
+        mark.setFixedSize(36, 36)
+        mark_icon = QIcon(str(asset_path("researchweave-mark.svg")))
+        if not mark_icon.isNull():
+            mark.setPixmap(mark_icon.pixmap(QSize(34, 34)))
+        mark.setAccessibleName("ResearchWeave mark")
+        brand_row.addWidget(mark, 0, Qt.AlignmentFlag.AlignTop)
+        brand_copy = QVBoxLayout()
+        brand_copy.setSpacing(0)
         brand = QLabel("researchweave")
         brand.setObjectName("brandTitle")
-        side.addWidget(brand)
         brand_context = QLabel("LOCAL RESEARCH WORKSPACE")
         brand_context.setObjectName("eyebrow")
-        side.addWidget(brand_context)
+        brand_copy.addWidget(brand)
+        brand_copy.addWidget(brand_context)
+        brand_row.addLayout(brand_copy, 1)
+        side.addLayout(brand_row)
+        project_label = QLabel("PROJECT")
+        project_label.setObjectName("eyebrow")
+        side.addWidget(project_label)
         self.project_search = QLineEdit()
         self.project_search.setPlaceholderText("Find local projects")
         named(self.project_search, "Search recent local projects")
@@ -234,6 +333,9 @@ class ResearchWindow(QMainWindow):
         self.project_picker.currentIndexChanged.connect(self._selected_project)
         side.addWidget(self.project_picker)
         side.addWidget(button("＋ New project", self.create_project, primary=True))
+        workflow_label = QLabel("WORKFLOW")
+        workflow_label.setObjectName("eyebrow")
+        side.addWidget(workflow_label)
         self.nav = QTreeWidget()
         self.nav.setObjectName("workspaceNav")
         self.nav.setHeaderHidden(True)
@@ -245,10 +347,16 @@ class ResearchWindow(QMainWindow):
             "Use arrow keys to move through grouped research workspaces and Enter to activate.",
         )
         self._nav_items: dict[str, QTreeWidgetItem] = {}
+        self._nav_groups: dict[str, QTreeWidgetItem] = {}
         for group_name, screens in NAVIGATION_GROUPS:
             group_item = QTreeWidgetItem([group_name])
-            group_item.setExpanded(True)
+            group_item.setExpanded(False)
+            group_font = QFont(self.font())
+            group_font.setBold(True)
+            group_font.setPointSizeF(max(8.0, group_font.pointSizeF() * 0.88))
+            group_item.setFont(0, group_font)
             self.nav.addTopLevelItem(group_item)
+            self._nav_groups[group_name] = group_item
             for screen in screens:
                 item = QTreeWidgetItem([screen])
                 item.setData(0, Qt.ItemDataRole.UserRole, screen)
@@ -270,7 +378,11 @@ class ResearchWindow(QMainWindow):
         center_layout = QVBoxLayout(center)
         center_layout.setContentsMargins(0, 2, 0, 0)
         center_layout.setSpacing(10)
-        header = QHBoxLayout()
+        header_surface = QFrame()
+        header_surface.setObjectName("headerSurface")
+        header_surface_layout = QHBoxLayout(header_surface)
+        header_surface_layout.setContentsMargins(16, 10, 12, 10)
+        header = header_surface_layout
         header.setSpacing(16)
         header_titles = QVBoxLayout()
         header_titles.setSpacing(1)
@@ -284,12 +396,15 @@ class ResearchWindow(QMainWindow):
         self.project_context.setObjectName("projectContext")
         self.project_context.setAccessibleName("Current project and privacy status")
         header.addWidget(self.project_context, 0, Qt.AlignmentFlag.AlignVCenter)
-        center_layout.addLayout(header)
+        header_command = button("Commands · Ctrl+K", self.show_palette)
+        header_command.setObjectName("quiet")
+        header.addWidget(header_command, 0, Qt.AlignmentFlag.AlignVCenter)
+        center_layout.addWidget(header_surface)
         self.pages = QStackedWidget()
         self.pages.setAccessibleName("Active research workspace")
         center_layout.addWidget(self.pages)
         self.splitter.addWidget(center)
-        self.splitter.setSizes([max(236, self.prefs.sidebar_width), 930])
+        self.splitter.setSizes([max(248, self.prefs.sidebar_width), 930])
         self._build_pages()
         self._set_status("Ready")
         self._shortcut("Ctrl+K", self.show_palette)
@@ -330,8 +445,15 @@ class ResearchWindow(QMainWindow):
             help_button.setToolTip(f"Open contextual help for {name}")
             intro.addWidget(help_button, 0, Qt.AlignmentFlag.AlignTop)
         layout.addLayout(intro)
-        self.pages.addWidget(page)
-        page.setAccessibleName(f"{name} workspace")
+        scroll = QScrollArea()
+        scroll.setObjectName("pageScroll")
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidgetResizable(True)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll.setWidget(page)
+        named(scroll, f"{name} workspace")
+        page.setAccessibleName(f"{name} workspace content")
+        self.pages.addWidget(scroll)
         return layout
 
     def _build_pages(self) -> None:
@@ -383,25 +505,54 @@ class ResearchWindow(QMainWindow):
         layout.addStretch()
 
         layout = self._page("Dashboard", "Start with a research question. Your work stays local.")
-        dashboard_surface = QFrame()
-        dashboard_surface.setObjectName("surface")
-        dashboard_layout = QVBoxLayout(dashboard_surface)
-        dashboard_layout.setContentsMargins(16, 14, 16, 14)
+        dashboard_surface, dashboard_layout = surface(
+            "Project pulse",
+            "A compact view of the current project, active work and research-state warnings.",
+        )
         self.dashboard = QLabel("Choose a project or create a new one.")
         self.dashboard.setWordWrap(True)
+        self.dashboard.setObjectName("pageLead")
         dashboard_layout.addWidget(self.dashboard)
         refresh_dashboard = button("Refresh", self.refresh_dashboard)
         refresh_dashboard.setObjectName("quiet")
         dashboard_layout.addWidget(refresh_dashboard, 0, Qt.AlignmentFlag.AlignLeft)
         layout.addWidget(dashboard_surface)
-        dashboard_actions = QHBoxLayout()
-        dashboard_actions.addWidget(button("New project", self.create_project, primary=True))
-        dashboard_actions.addWidget(button("Add source", self.import_source))
-        dashboard_actions.addWidget(button("Research protocol", lambda: self.navigate("Protocol")))
-        dashboard_actions.addStretch(1)
-        layout.addLayout(dashboard_actions)
+        metric_row = QHBoxLayout()
+        metric_row.setSpacing(10)
+        source_card, self.dashboard_sources_value, self.dashboard_sources_detail = metric_card(
+            "Sources", "—", "Local evidence inputs"
+        )
+        dataset_card, self.dashboard_datasets_value, self.dashboard_datasets_detail = metric_card(
+            "Datasets", "—", "Structured analysis inputs"
+        )
+        (
+            screening_card,
+            self.dashboard_screening_value,
+            self.dashboard_screening_detail,
+        ) = metric_card("Screening", "—", "Pending / conflict / final")
+        writing_card, self.dashboard_writing_value, self.dashboard_writing_detail = metric_card(
+            "Writing", "—", "Manuscript + notes"
+        )
+        for card in (source_card, dataset_card, screening_card, writing_card):
+            metric_row.addWidget(card, 1)
+        layout.addLayout(metric_row)
+        action_surface, dashboard_actions = surface(
+            "Continue your workflow",
+            "Keep the next common actions close without crowding every research screen.",
+            kind="toolbarSurface",
+        )
+        quick_actions = QHBoxLayout()
+        quick_actions.addWidget(button("New project", self.create_project, primary=True))
+        quick_actions.addWidget(button("Add source", self.import_source))
+        quick_actions.addWidget(button("Research protocol", lambda: self.navigate("Protocol")))
+        quick_actions.addWidget(button("Open notebook", lambda: self.navigate("Notebook")))
+        quick_actions.addWidget(button("Preview export", lambda: self.navigate("Exports")))
+        quick_actions.addStretch(1)
+        dashboard_actions.addLayout(quick_actions)
         self.tutorial = QLabel("First steps: create project → add source → notes → export")
-        layout.addWidget(self.tutorial)
+        self.tutorial.setObjectName("muted")
+        dashboard_actions.addWidget(self.tutorial)
+        layout.addWidget(action_surface)
         layout.addStretch()
 
         layout = self._page(
@@ -427,6 +578,11 @@ class ResearchWindow(QMainWindow):
         )
         self.question_editable = QPlainTextEdit()
         self.question_editable.setMaximumHeight(110)
+        question_surface, question_surface_layout = surface(
+            "Question structure",
+            "Capture the research intent explicitly before choosing methods or analyses.",
+            kind="toolbarSurface",
+        )
         question_form = QFormLayout()
         for label, widget in (
             ("Topic", self.question_topic),
@@ -434,15 +590,24 @@ class ResearchWindow(QMainWindow):
             ("Exposure / intervention / phenomenon", self.question_exposure),
             ("Outcome / target", self.question_outcome),
             ("Question type", self.question_type),
-            ("Editable question", self.question_editable),
         ):
             named(widget, label)
             question_form.addRow(label, widget)
-        layout.addLayout(question_form)
-        layout.addWidget(button("Save structured question", self.save_question, primary=True))
+        question_surface_layout.addLayout(question_form)
+        layout.addWidget(question_surface)
+        draft_surface, draft_layout = surface(
+            "Editable research question",
+            "Write the final wording you want to carry into protocol, evidence and analysis work.",
+        )
+        named(self.question_editable, "Editable question")
+        draft_layout.addWidget(self.question_editable)
+        draft_layout.addWidget(button("Save structured question", self.save_question, primary=True))
         self.question_status = QLabel("Open a project to structure its research question.")
         self.question_status.setWordWrap(True)
-        layout.addWidget(self.question_status)
+        self.question_status.setObjectName("muted")
+        draft_layout.addWidget(self.question_status)
+        layout.addWidget(draft_surface)
+        layout.addStretch()
 
         layout = self._page(
             "Search",
@@ -532,11 +697,16 @@ class ResearchWindow(QMainWindow):
         self._refresh_templates()
 
         layout = self._page("Library", "Search local sources; sample records are always labeled.")
+        library_toolbar, library_toolbar_layout = surface(
+            "Find and organize sources",
+            "Search stays inside this project. Import remains explicit and local.",
+            kind="toolbarSurface",
+        )
         self.search = QLineEdit()
         self.search.setPlaceholderText("Search title, source text or tags")
         named(self.search, "Search this project's sources")
         self.search.textChanged.connect(self.search_sources)
-        layout.addWidget(self.search)
+        library_toolbar_layout.addWidget(self.search)
         library_controls = QHBoxLayout()
         self.library_sort = QComboBox()
         self.library_sort.addItem("Title", "title")
@@ -547,18 +717,24 @@ class ResearchWindow(QMainWindow):
         library_controls.addWidget(self.library_sort)
         library_controls.addWidget(self.library_sort_desc)
         library_controls.addWidget(button("Apply library sort", self.reset_library_page))
-        layout.addLayout(library_controls)
-        layout.addWidget(button("Import source text", self.import_source, primary=True))
+        library_controls.addStretch(1)
+        library_controls.addWidget(button("Import source text", self.import_source, primary=True))
+        library_toolbar_layout.addLayout(library_controls)
+        layout.addWidget(library_toolbar)
+        list_surface, list_surface_layout = surface("Project sources")
         self.library_list = QListWidget()
+        self.library_list.setAlternatingRowColors(True)
         named(self.library_list, "Sources in current project")
         self.library_list.itemSelectionChanged.connect(self.select_source)
-        layout.addWidget(self.library_list)
+        list_surface_layout.addWidget(self.library_list)
         library_pager = QHBoxLayout()
         library_pager.addWidget(button("Previous source page", self.previous_library_page))
         self.library_status = QLabel("No sources loaded")
         library_pager.addWidget(self.library_status)
+        library_pager.addStretch(1)
         library_pager.addWidget(button("Next source page", self.next_library_page))
-        layout.addLayout(library_pager)
+        list_surface_layout.addLayout(library_pager)
+        layout.addWidget(list_surface)
         self.library_offset = 0
         self.library_page_size = 100
         self.library_total = 0
@@ -623,6 +799,11 @@ class ResearchWindow(QMainWindow):
             "Record independent reviewer decisions. Local aliases separate sessions but do not "
             "authenticate reviewer identity.",
         )
+        reviewer_surface, reviewer_layout = surface(
+            "Review session",
+            "Choose the local reviewer label and narrow the queue without exposing peer decisions.",
+            kind="toolbarSurface",
+        )
         reviewer_row = QHBoxLayout()
         self.reviewer_alias = QLineEdit("Reviewer 1")
         named(
@@ -631,11 +812,10 @@ class ResearchWindow(QMainWindow):
             "A local session label only; this is not authenticated identity.",
         )
         reviewer_row.addWidget(QLabel("Reviewer alias"))
-        reviewer_row.addWidget(self.reviewer_alias)
-        layout.addLayout(reviewer_row)
+        reviewer_row.addWidget(self.reviewer_alias, 1)
         self.review_summary = QLabel("No screening decisions.")
         self.review_summary.setWordWrap(True)
-        layout.addWidget(self.review_summary)
+        self.review_summary.setObjectName("pageLead")
         self.review_filter = QComboBox()
         self.review_filter.addItems(
             [
@@ -651,35 +831,57 @@ class ResearchWindow(QMainWindow):
         named(self.review_filter, "Review queue decision filter")
         self.review_filter.currentTextChanged.connect(self.refresh_review)
         self.reviewer_alias.textChanged.connect(self.refresh_review)
-        layout.addWidget(self.review_filter)
+        reviewer_row.addWidget(QLabel("Queue"))
+        reviewer_row.addWidget(self.review_filter)
+        reviewer_layout.addLayout(reviewer_row)
+        reviewer_layout.addWidget(self.review_summary)
+        layout.addWidget(reviewer_surface)
+        queue_surface, queue_layout = surface(
+            "Screen sources",
+            "Select one source, record an exclusion reason when needed, then choose a decision.",
+        )
         self.review_queue = QListWidget()
         named(self.review_queue, "Select a source to review")
         self.review_queue.currentItemChanged.connect(self._select_review_source)
-        layout.addWidget(self.review_queue)
+        queue_layout.addWidget(self.review_queue)
         self.review_reason = QLineEdit()
         self.review_reason.setPlaceholderText("Exclusion reason (required to exclude)")
         named(self.review_reason, "Screening exclusion reason")
-        layout.addWidget(self.review_reason)
+        queue_layout.addWidget(self.review_reason)
+        decision_row = QHBoxLayout()
         for status in ("include", "exclude", "unsure"):
-            layout.addWidget(
-                button(
-                    f"Screen: {status.title()}",
-                    lambda _checked=False, choice=status: self.vote(choice),
-                )
+            decision = button(
+                status.title(),
+                lambda _checked=False, choice=status: self.vote(choice),
+                primary=status == "include",
             )
+            decision.setToolTip(f"Record {status} for the selected source")
+            decision_row.addWidget(decision)
+        decision_row.addStretch(1)
+        queue_layout.addLayout(decision_row)
+        layout.addWidget(queue_surface)
+        adjudication_surface, adjudication_layout = surface(
+            "Resolve conflicts",
+            "Adjudication is a separate local decision and should include an explicit rationale.",
+        )
         self.adjudicator_alias = QLineEdit()
         self.adjudicator_alias.setPlaceholderText("Independent adjudicator alias")
         named(self.adjudicator_alias, "Independent adjudicator alias")
-        layout.addWidget(self.adjudicator_alias)
         self.adjudication_choice = QComboBox()
         self.adjudication_choice.addItems(["include", "exclude", "unsure"])
         named(self.adjudication_choice, "Final adjudication decision")
-        layout.addWidget(self.adjudication_choice)
         self.adjudication_reason = QLineEdit()
         self.adjudication_reason.setPlaceholderText("Adjudication rationale")
         named(self.adjudication_reason, "Adjudication rationale")
-        layout.addWidget(self.adjudication_reason)
-        layout.addWidget(button("Adjudicate selected conflict", self.adjudicate_selected))
+        adjudication_form = QFormLayout()
+        adjudication_form.addRow("Adjudicator", self.adjudicator_alias)
+        adjudication_form.addRow("Decision", self.adjudication_choice)
+        adjudication_form.addRow("Rationale", self.adjudication_reason)
+        adjudication_layout.addLayout(adjudication_form)
+        adjudication_layout.addWidget(
+            button("Adjudicate selected conflict", self.adjudicate_selected, primary=True)
+        )
+        layout.addWidget(adjudication_surface)
         layout.addStretch()
 
         layout = self._page(
@@ -768,17 +970,26 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.extraction_records)
 
         layout = self._page("Data View", "Import a small local CSV; cells stay in a virtual table.")
-        layout.addWidget(button("Import CSV text", self.import_csv, primary=True))
+        data_toolbar, data_toolbar_layout = surface(
+            "Dataset controls",
+            "Choose the active dataset, filter/sort the view, or import CSV text into this "
+            "local project.",
+            kind="toolbarSurface",
+        )
+        data_actions = QHBoxLayout()
+        data_actions.addWidget(button("Import CSV text", self.import_csv, primary=True))
         self.data_mode = QLabel(
             "Read-only preview · edits are disabled until provenance-preserving editing exists."
         )
         self.data_mode.setWordWrap(True)
+        self.data_mode.setObjectName("muted")
         named(self.data_mode, "Dataset editing mode")
-        layout.addWidget(self.data_mode)
+        data_actions.addWidget(self.data_mode, 1)
+        data_toolbar_layout.addLayout(data_actions)
         self.dataset_picker = QComboBox()
         named(self.dataset_picker, "Active dataset")
         self.dataset_picker.currentIndexChanged.connect(self._selected_dataset)
-        layout.addWidget(self.dataset_picker)
+        data_toolbar_layout.addWidget(self.dataset_picker)
         data_controls = QHBoxLayout()
         self.data_filter = QLineEdit()
         self.data_filter.setPlaceholderText("Filter dataset rows")
@@ -791,18 +1002,23 @@ class ResearchWindow(QMainWindow):
         data_controls.addWidget(self.data_sort)
         data_controls.addWidget(self.data_sort_desc)
         data_controls.addWidget(button("Apply data view", self.apply_data_view))
-        layout.addLayout(data_controls)
+        data_toolbar_layout.addLayout(data_controls)
+        layout.addWidget(data_toolbar)
+        data_surface, data_surface_layout = surface("Data preview")
         self.data_table = QTableView()
+        self.data_table.setAlternatingRowColors(True)
         named(self.data_table, "Dataset grid with labeled column and row headers")
         self.data_model = ResearchTableModel()
         self.data_table.setModel(self.data_model)
-        layout.addWidget(self.data_table)
+        data_surface_layout.addWidget(self.data_table)
         pager = QHBoxLayout()
         pager.addWidget(button("Previous data page", self.previous_data_page))
         self.data_page_status = QLabel("No dataset loaded")
         pager.addWidget(self.data_page_status)
+        pager.addStretch(1)
         pager.addWidget(button("Next data page", self.next_data_page))
-        layout.addLayout(pager)
+        data_surface_layout.addLayout(pager)
+        layout.addWidget(data_surface)
         self.data_offset = 0
         self.data_total = 0
         self.data_page_size = 250
@@ -843,10 +1059,23 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(button("Save variable metadata", self.save_variable_metadata))
 
         layout = self._page("Statistics", "Descriptive summaries; missing values are reported.")
+        summary_surface, summary_layout = surface(
+            "Descriptive summary",
+            "Start with a numeric variable; missing values remain explicit in the result.",
+            kind="toolbarSurface",
+        )
         self.variable_picker = QComboBox()
         named(self.variable_picker, "Numeric column for descriptive summary")
-        layout.addWidget(self.variable_picker)
-        layout.addWidget(button("Compute descriptive summary", self.run_summary, primary=True))
+        summary_actions = QHBoxLayout()
+        summary_actions.addWidget(self.variable_picker, 1)
+        summary_actions.addWidget(button("Compute summary", self.run_summary, primary=True))
+        summary_layout.addLayout(summary_actions)
+        layout.addWidget(summary_surface)
+        plot_surface, plot_surface_layout = surface(
+            "Plot builder",
+            "Configure a reproducible plot, preview file receipts, and write only after explicit "
+            "approval.",
+        )
         plot_form = QFormLayout()
         self.plot_type = QComboBox()
         self.plot_type.addItems(["histogram", "bar"])
@@ -868,28 +1097,30 @@ class ResearchWindow(QMainWindow):
         ):
             named(widget, f"Plot {label.lower()}")
             plot_form.addRow(label, widget)
-        layout.addLayout(plot_form)
+        plot_surface_layout.addLayout(plot_form)
         plot_actions = QHBoxLayout()
         plot_actions.addWidget(button("Render configured plot", self.render_configured_plot))
         plot_actions.addWidget(button("Preview SVG + PNG receipts", self.preview_plot_exports))
         plot_actions.addWidget(button("Save plot config", self.save_plot_config))
         plot_actions.addWidget(button("Write approved plot file", self.export_plot_file))
-        layout.addLayout(plot_actions)
+        plot_surface_layout.addLayout(plot_actions)
         self.plot_configs = QListWidget()
         named(self.plot_configs, "Saved descriptive plot configurations")
         self.plot_configs.itemActivated.connect(self.restore_plot_config)
-        layout.addWidget(self.plot_configs)
+        plot_surface_layout.addWidget(self.plot_configs)
         self.histogram_chart = HistogramWidget()
         named(self.histogram_chart, "Observed value histogram")
-        layout.addWidget(self.histogram_chart)
+        plot_surface_layout.addWidget(self.histogram_chart)
+        layout.addWidget(plot_surface)
+        result_surface, result_surface_layout = surface("Result and advanced analysis")
         self.stats_result = QPlainTextEdit()
         self.stats_result.setReadOnly(True)
         named(self.stats_result, "Text alternative for numeric summary")
-        layout.addWidget(self.stats_result)
+        result_surface_layout.addWidget(self.stats_result)
         self.analysis_method = QComboBox()
         named(self.analysis_method, "Scientific analysis method")
         self.analysis_method.currentIndexChanged.connect(self.prepare_analysis_arguments)
-        layout.addWidget(self.analysis_method)
+        result_surface_layout.addWidget(self.analysis_method)
         self.analysis_arguments = QPlainTextEdit()
         self.analysis_arguments.setPlaceholderText(
             "Advanced methods: enter operation arguments as a JSON object. "
@@ -897,8 +1128,9 @@ class ResearchWindow(QMainWindow):
         )
         self.analysis_arguments.setMaximumHeight(120)
         named(self.analysis_arguments, "Advanced scientific analysis JSON arguments")
-        layout.addWidget(self.analysis_arguments)
-        layout.addWidget(button("Run selected analysis", self.run_analysis))
+        result_surface_layout.addWidget(self.analysis_arguments)
+        result_surface_layout.addWidget(button("Run selected analysis", self.run_analysis))
+        layout.addWidget(result_surface)
 
         layout = self._page(
             "Analysis Results",
@@ -1103,6 +1335,57 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.release_detail)
 
         layout = self._page("Agent", "Model plans are suggestions; no unapproved changes can run.")
+        assistant_surface, assistant_layout = surface(
+            "Research assistant",
+            "Uses the model selected in Providers. Read-only research tools may run automatically; "
+            "any future write or destructive tool pauses for exact approval here.",
+        )
+        self.assistant_transcript = QPlainTextEdit()
+        self.assistant_transcript.setReadOnly(True)
+        self.assistant_transcript.setPlaceholderText(
+            "Configure a model in Providers, then ask a project-scoped research question."
+        )
+        self.assistant_transcript.setMinimumHeight(190)
+        named(self.assistant_transcript, "Project research assistant conversation")
+        assistant_layout.addWidget(self.assistant_transcript)
+        self.assistant_prompt = QPlainTextEdit()
+        self.assistant_prompt.setPlaceholderText(
+            "Ask about this project's evidence or research work"
+        )
+        self.assistant_prompt.setMaximumHeight(105)
+        named(self.assistant_prompt, "Research assistant prompt")
+        assistant_layout.addWidget(self.assistant_prompt)
+        assistant_actions = QHBoxLayout()
+        self.assistant_send_button = button(
+            "Send to selected model", self.send_assistant, primary=True
+        )
+        assistant_actions.addWidget(self.assistant_send_button)
+        assistant_actions.addStretch()
+        assistant_layout.addLayout(assistant_actions)
+        self.assistant_tool_status = QLabel(
+            "No model is active. Manual ResearchWeave workflows remain available."
+        )
+        self.assistant_tool_status.setWordWrap(True)
+        named(self.assistant_tool_status, "Assistant model and tool activity status")
+        assistant_layout.addWidget(self.assistant_tool_status)
+        self.assistant_pending = QPlainTextEdit()
+        self.assistant_pending.setReadOnly(True)
+        self.assistant_pending.setMaximumHeight(120)
+        self.assistant_pending.setPlaceholderText("No tool approval is pending.")
+        named(self.assistant_pending, "Pending assistant tool approval")
+        assistant_layout.addWidget(self.assistant_pending)
+        pending_actions = QHBoxLayout()
+        self.assistant_approve_button = button(
+            "Approve exact tool call",
+            self.approve_assistant_tool,
+        )
+        self.assistant_deny_button = button("Deny tool call", self.deny_assistant_tool)
+        pending_actions.addWidget(self.assistant_approve_button)
+        pending_actions.addWidget(self.assistant_deny_button)
+        pending_actions.addStretch()
+        assistant_layout.addLayout(pending_actions)
+        layout.addWidget(assistant_surface)
+        layout.addWidget(heading("Manual proposal review"))
         self.agent_proposal = QPlainTextEdit()
         self.agent_proposal.setPlaceholderText("Paste a proposed action to review locally")
         named(self.agent_proposal, "Untrusted agent proposal")
@@ -1161,6 +1444,17 @@ class ResearchWindow(QMainWindow):
         self.provider_mode = QComboBox()
         self.provider_mode.addItems(["manual", "local", "cloud-api"])
         self.provider_id = QLineEdit("manual")
+        self.provider_protocol = QComboBox()
+        self.provider_protocol.addItems(["openai-compatible", "anthropic", "gemini"])
+        self.provider_endpoint = QLineEdit()
+        self.provider_endpoint.setPlaceholderText("http://127.0.0.1:1234/v1 or https://host/v1")
+        self.provider_model = QLineEdit()
+        self.provider_model.setPlaceholderText("Exact model identifier")
+        self.provider_credential_env = QLineEdit()
+        self.provider_credential_env.setPlaceholderText(
+            "OPENAI_API_KEY (name only, never the secret)"
+        )
+        self.provider_tool_calling = QCheckBox("Model supports native tool calling")
         self.provider_enabled = QCheckBox("Enabled")
         self.provider_credential = QCheckBox("Supported credential configured externally")
         self.provider_egress = QCheckBox("I reviewed and accept the selected data egress")
@@ -1169,11 +1463,16 @@ class ResearchWindow(QMainWindow):
         for label, widget in (
             ("Mode", self.provider_mode),
             ("Provider identifier", self.provider_id),
+            ("Protocol", self.provider_protocol),
+            ("Endpoint", self.provider_endpoint),
+            ("Model", self.provider_model),
+            ("Credential env var", self.provider_credential_env),
             ("Selected data scope", self.provider_scope),
         ):
             named(widget, f"Provider {label.lower()}")
             provider_form.addRow(label, widget)
         provider_form.addRow("", self.provider_enabled)
+        provider_form.addRow("", self.provider_tool_calling)
         provider_form.addRow("", self.provider_credential)
         provider_form.addRow("", self.provider_egress)
         layout.addLayout(provider_form)
@@ -1217,21 +1516,34 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.integration_status)
 
         layout = self._page("Exports", "Preview file hashes before saving a local export.")
+        export_surface, export_surface_layout = surface(
+            "Local export",
+            "Choose a filename, inspect the exact payload/hash first, then explicitly approve the "
+            "write.",
+        )
         export_location = QHBoxLayout()
-        self.export_directory = QLineEdit(str(self.facade.export_root))
+        self.export_directory = QLineEdit(display_local_path(self.facade.export_root))
         self.export_directory.setReadOnly(True)
+        self.export_directory.setToolTip(str(self.facade.export_root.resolve()))
         named(self.export_directory, "Selected local export directory")
         export_location.addWidget(self.export_directory)
         export_location.addWidget(button("Choose export folder", self.choose_export_folder))
-        layout.addLayout(export_location)
+        export_surface_layout.addLayout(export_location)
         self.export_name = QLineEdit("research-notes.md")
         named(self.export_name, "Export filename")
-        layout.addWidget(self.export_name)
-        layout.addWidget(button("Inspect export", self.preview_export))
-        layout.addWidget(button("Save local export", self.export_file, primary=True))
+        export_surface_layout.addWidget(self.export_name)
+        export_actions = QHBoxLayout()
+        export_actions.addWidget(button("Inspect export", self.preview_export))
+        export_actions.addWidget(button("Save local export", self.export_file, primary=True))
+        export_actions.addStretch(1)
+        export_surface_layout.addLayout(export_actions)
+        layout.addWidget(export_surface)
+        receipt_surface, receipt_layout = surface("Export receipt", kind="calloutSurface")
         self.export_receipt = QLabel("No export yet.")
         self.export_receipt.setWordWrap(True)
-        layout.addWidget(self.export_receipt)
+        self.export_receipt.setObjectName("pageLead")
+        receipt_layout.addWidget(self.export_receipt)
+        layout.addWidget(receipt_surface)
         layout.addStretch()
 
         layout = self._page(
@@ -1532,11 +1844,13 @@ class ResearchWindow(QMainWindow):
         self.page_heading.setText(name)
         self.page_context.setText(NAV_GROUP_BY_SCREEN.get(name, "WORKSPACE").upper())
         nav_item = self._nav_items.get(name)
-        if nav_item is not None and self.nav.currentItem() is not nav_item:
+        if nav_item is not None:
             parent = nav_item.parent()
             if parent is not None:
-                parent.setExpanded(True)
-            self.nav.setCurrentItem(nav_item)
+                for group_item in self._nav_groups.values():
+                    group_item.setExpanded(group_item is parent)
+            if self.nav.currentItem() is not nav_item:
+                self.nav.setCurrentItem(nav_item)
         if name == "Library":
             self.search_sources()
         elif name == "Question":
@@ -1735,15 +2049,15 @@ class ResearchWindow(QMainWindow):
 
     def focus_search(self) -> None:
         self.navigate("Search")
-        self.global_query.setFocus()
+        QTimer.singleShot(0, self.global_query.setFocus)
 
     def focus_library_search(self) -> None:
         self.navigate("Library")
-        self.search.setFocus()
+        QTimer.singleShot(0, self.search.setFocus)
 
     def focus_export(self) -> None:
         self.navigate("Exports")
-        self.export_name.setFocus()
+        QTimer.singleShot(0, self.export_name.setFocus)
 
     def search_global(self) -> None:
         self.global_offset = 0
@@ -1835,8 +2149,14 @@ class ResearchWindow(QMainWindow):
                 continue
             updated = str(project["updated_at"])[:10]
             self.project_picker.addItem(
-                f"{project['title']} · {project['id'][:8]} · {updated}",
+                f"{project['title']} · {updated}",
                 project["id"],
+            )
+            index = self.project_picker.count() - 1
+            self.project_picker.setItemData(
+                index,
+                f"Local project ID: {project['id']}",
+                Qt.ItemDataRole.ToolTipRole,
             )
         if self.project_id:
             index = self.project_picker.findData(self.project_id)
@@ -2037,6 +2357,8 @@ class ResearchWindow(QMainWindow):
         self.revision = project["revision"]
         self.current_source_id = ""
         self.current_dataset_id = ""
+        self.assistant_conversation_id = None
+        self.assistant_pending_tool = None
         self._editor_loading = True
         self.manuscript_editor.setPlainText(project["manuscript"])
         self.notebook_editor.setPlainText(project["notebook"])
@@ -2060,6 +2382,7 @@ class ResearchWindow(QMainWindow):
         self.refresh_analysis_results()
         self.refresh_agent_timeline()
         self.refresh_provider()
+        self.refresh_assistant()
         self.refresh_privacy()
         self.refresh_integrations()
         self.refresh_notifications()
@@ -2105,11 +2428,16 @@ class ResearchWindow(QMainWindow):
         self.library_total = value["total"]
         self.library_list.clear()
         for source in value["sources"]:
-            from PyQt6.QtWidgets import QListWidgetItem
-
             item = QListWidgetItem(f"{source['title']} · {source['source_label']}")
             item.setData(Qt.ItemDataRole.UserRole, source["id"])
             self.library_list.addItem(item)
+        if not value["sources"]:
+            message = (
+                "No matching sources. Clear the search or import source text."
+                if self.search.text().strip()
+                else "No sources yet. Import source text to begin building evidence."
+            )
+            self.library_list.addItem(empty_list_item(message))
         start = self.library_offset + 1 if self.library_total else 0
         end = min(self.library_offset + len(value["sources"]), self.library_total)
         self.library_status.setText(
@@ -2136,6 +2464,8 @@ class ResearchWindow(QMainWindow):
         if selected is None:
             return
         source_id = selected.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(source_id, str) or not source_id:
+            return
         value = self._call("ui.source.get", source_id=source_id)
         if value is None:
             return
@@ -2154,6 +2484,9 @@ class ResearchWindow(QMainWindow):
             self._set_status("Select a source in the review queue first.")
             return
         selected_id = selected.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(selected_id, str) or not selected_id:
+            self._set_status("No reviewable source is selected.")
+            return
         reviewer = self.reviewer_alias.text().strip()
         if not reviewer:
             self._set_status("Enter a local reviewer alias before screening.")
@@ -2174,9 +2507,13 @@ class ResearchWindow(QMainWindow):
         if selected is None:
             self._set_status("Select a screening conflict first.")
             return
+        selected_id = selected.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(selected_id, str) or not selected_id:
+            self._set_status("No screening conflict is selected.")
+            return
         response = self._call(
             "ui.screening.adjudicate",
-            source_id=selected.data(Qt.ItemDataRole.UserRole),
+            source_id=selected_id,
             adjudicator=self.adjudicator_alias.text(),
             final_decision=self.adjudication_choice.currentText(),
             rationale=self.adjudication_reason.text(),
@@ -2190,7 +2527,10 @@ class ResearchWindow(QMainWindow):
     ) -> None:
         if current is None:
             return
-        self.current_source_id = current.data(Qt.ItemDataRole.UserRole)
+        source_id = current.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(source_id, str) or not source_id:
+            return
+        self.current_source_id = source_id
         response = self._call("ui.source.get", source_id=self.current_source_id)
         if response:
             source = response["source"]
@@ -2240,6 +2580,10 @@ class ResearchWindow(QMainWindow):
             if source["source_id"] == previous_selection:
                 self.review_queue.setCurrentItem(item)
         self.review_queue.blockSignals(False)
+        if self.review_queue.count() == 0:
+            self.review_queue.addItem(
+                empty_list_item("No sources match this review queue and reviewer context.")
+            )
         self.review_reason.clear()
 
     @staticmethod
@@ -2287,6 +2631,10 @@ class ResearchWindow(QMainWindow):
     def refresh_dashboard(self) -> None:
         if not self.project_id:
             self.dashboard.setText("Choose a project or create a new one.")
+            self.dashboard_sources_value.setText("—")
+            self.dashboard_datasets_value.setText("—")
+            self.dashboard_screening_value.setText("—")
+            self.dashboard_writing_value.setText("—")
             return
         self.dashboard.setText("Loading local project state…")
         response = self._call("ui.project.dashboard")
@@ -2298,13 +2646,27 @@ class ResearchWindow(QMainWindow):
         screening = response["screening"]
         states = screening["status_counts"]
         jobs = [f"{job.task_id}: {job.state} ({job.progress}%)" for job in self.jobs.jobs.values()]
+        manuscript_chars = int(response["draft"]["manuscript_characters"])
+        notebook_chars = int(response["draft"]["notebook_characters"])
+        self.dashboard_sources_value.setText(str(response["source_count"]))
+        self.dashboard_sources_detail.setText("Local source records")
+        self.dashboard_datasets_value.setText(str(response["dataset_count"]))
+        self.dashboard_datasets_detail.setText("Structured datasets")
+        self.dashboard_screening_value.setText(str(screening["screened_with_final_outcome"]))
+        self.dashboard_screening_detail.setText(
+            f"{states['pending']} pending · {states['conflict']} conflicts"
+        )
+        self.dashboard_writing_value.setText(f"{manuscript_chars + notebook_chars:,}")
+        self.dashboard_writing_detail.setText(
+            f"{manuscript_chars:,} manuscript · {notebook_chars:,} notes"
+        )
         self.dashboard.setText(
             f"{response['title']}\n\nResearch question: {response['question']}\n"
             f"Sources: {response['source_count']} · datasets: {response['dataset_count']}\n"
             f"Screening: {states['pending']} pending · {states['conflict']} conflicts · "
             f"{screening['screened_with_final_outcome']} final outcomes\n"
-            f"Writing: {response['draft']['manuscript_characters']} manuscript characters · "
-            f"{response['draft']['notebook_characters']} note characters\n\n"
+            f"Writing: {manuscript_chars} manuscript characters · "
+            f"{notebook_chars} note characters\n\n"
             f"Jobs: {'; '.join(jobs) if jobs else 'none running or retained'}\n"
             f"Next: {'; '.join(response['next_steps'])}\n"
             f"Warnings: {'; '.join(response['warnings']) or 'none'}"
@@ -3316,6 +3678,10 @@ class ResearchWindow(QMainWindow):
             )
             item.setData(Qt.ItemDataRole.UserRole, record)
             self.analysis_results_list.addItem(item)
+        if not response["results"]:
+            self.analysis_results_list.addItem(
+                empty_list_item("No analysis results yet. Run an analysis from Statistics first.")
+            )
 
     def inspect_analysis_result(
         self, current: QListWidgetItem | None, previous: QListWidgetItem | None
@@ -3323,6 +3689,8 @@ class ResearchWindow(QMainWindow):
         if current is None:
             return
         record = current.data(Qt.ItemDataRole.UserRole)
+        if not isinstance(record, dict):
+            return
         self.analysis_result_detail.setPlainText(
             f"Method: {record['method']}\nVersion: {record['method_version']}\n"
             f"Inputs: {record['inputs']}\nAssumptions: {record['assumptions']}\n"
@@ -3350,6 +3718,324 @@ class ResearchWindow(QMainWindow):
             self.save_text(screen.lower())
         else:
             self._set_status("Project records save automatically after each operation.")
+
+    @staticmethod
+    def _assistant_error_payload(exc: Exception) -> dict[str, Any]:
+        code = getattr(exc, "code", None)
+        if isinstance(code, str) and code:
+            message = str(exc).strip() or "Assistant request failed."
+            return {
+                "status": "failed",
+                "error": {"code": code, "message": message[:1_000]},
+            }
+        return {
+            "status": "failed",
+            "error": {
+                "code": "INTERNAL_ERROR",
+                "message": "Assistant request failed without changing approved project data.",
+            },
+        }
+
+    def _assistant_runtime_flags(self) -> tuple[bool, bool]:
+        offline = self.facade.settings.load().offline
+        provider = self._call("ui.provider.read") if self.project_id else None
+        acknowledged = bool(provider and provider.get("egress_acknowledged"))
+        return offline, acknowledged
+
+    def _assistant_running(self) -> bool:
+        job = self.jobs.jobs.get("assistant")
+        return job is not None and job.state in ("queued", "running", "cancelling")
+
+    def _sync_assistant_controls(self) -> None:
+        backend_available = self.facade.ai_backend is not None
+        ready = bool(self.project_id) and backend_available and self.assistant_model_available
+        running = self._assistant_running()
+        pending = self.assistant_pending_tool is not None
+        self.assistant_send_button.setEnabled(ready and not running and not pending)
+        self.assistant_prompt.setEnabled(ready and not running and not pending)
+        self.assistant_approve_button.setEnabled(backend_available and pending and not running)
+        self.assistant_deny_button.setEnabled(backend_available and pending and not running)
+
+    def _set_assistant_pending(self, pending: Mapping[str, Any] | None) -> None:
+        self.assistant_pending_tool = dict(pending) if pending is not None else None
+        if pending is None:
+            self.assistant_pending.clear()
+        else:
+            arguments = pending.get("arguments", {})
+            self.assistant_pending.setPlainText(
+                f"Operation: {pending.get('operation', 'unknown')}\n"
+                f"Risk: {pending.get('risk', 'unknown')}\n"
+                f"Effect: {pending.get('effect', 'unknown')}\n"
+                f"Arguments: {json.dumps(arguments, ensure_ascii=False, sort_keys=True)}\n"
+                f"Model profile: {pending.get('profile_id') or 'active profile'}"
+            )
+        self._sync_assistant_controls()
+
+    def _render_assistant_history(self, payload: Mapping[str, Any]) -> None:
+        raw_messages = payload.get("messages", [])
+        messages = raw_messages if isinstance(raw_messages, list) else []
+        lines: list[str] = []
+        for raw in messages[-100:]:
+            if not isinstance(raw, Mapping):
+                continue
+            role = str(raw.get("role", "message"))
+            content = str(raw.get("content", ""))
+            if len(content) > 4_000:
+                content = content[:4_000] + "…"
+            if role == "tool":
+                metadata = raw.get("metadata", {})
+                operation = (
+                    str(metadata.get("operation", "tool"))
+                    if isinstance(metadata, Mapping)
+                    else "tool"
+                )
+                label = f"Tool · {operation}"
+            else:
+                label = {
+                    "user": "You",
+                    "assistant": "Assistant",
+                    "system": "System",
+                    "evidence": "Evidence",
+                }.get(role, role.title())
+            lines.append(f"{label}\n{content}")
+        self.assistant_transcript.setPlainText("\n\n".join(lines))
+        pending = payload.get("pending_tool")
+        self._set_assistant_pending(pending if isinstance(pending, Mapping) else None)
+
+    def refresh_assistant(self) -> None:
+        self.assistant_model_available = False
+        backend = self.facade.ai_backend
+        if not self.project_id or backend is None:
+            self.assistant_conversation_id = None
+            self.assistant_transcript.setPlainText(
+                "The integrated AI host is unavailable. Manual ResearchWeave workflows "
+                "remain usable."
+            )
+            self.assistant_tool_status.setText("No integrated model runtime is connected.")
+            self._set_assistant_pending(None)
+            return
+        try:
+            model_state = backend.model_config()
+            self.assistant_model_available = bool(model_state.get("active_profile"))
+            conversations = backend.assistant_conversations(self.project_id).get(
+                "conversations", []
+            )
+            if isinstance(conversations, list) and conversations:
+                first = conversations[0]
+                if isinstance(first, Mapping):
+                    self.assistant_conversation_id = str(first.get("conversation_id", "")) or None
+            if self.assistant_conversation_id:
+                history = backend.assistant_history(self.project_id, self.assistant_conversation_id)
+                self._render_assistant_history(history)
+            else:
+                self.assistant_transcript.clear()
+                self._set_assistant_pending(None)
+            if self.assistant_model_available:
+                self.assistant_tool_status.setText(
+                    f"Active model: {model_state.get('active_profile')} · assistant ready."
+                )
+            else:
+                self.assistant_tool_status.setText(
+                    "No model is active. Configure a local or hosted profile in Providers."
+                )
+        except Exception:
+            self.assistant_tool_status.setText(
+                "Assistant history or model configuration could not be loaded."
+            )
+        self._sync_assistant_controls()
+
+    def send_assistant(self) -> None:
+        backend = self.facade.ai_backend
+        if not self.project_id or backend is None:
+            self._set_status(
+                "Open a project with the integrated AI host before using the assistant."
+            )
+            return
+        if not self.assistant_model_available:
+            self._set_status("Configure and enable a model in Providers before sending a message.")
+            return
+        if self.assistant_pending_tool is not None:
+            self._set_status(
+                "Approve or deny the pending tool request before sending another message."
+            )
+            return
+        prompt = self.assistant_prompt.toPlainText().strip()
+        if not prompt:
+            self._set_status("Enter a research question for the assistant.")
+            return
+        project_id = self.project_id
+        conversation_id = self.assistant_conversation_id
+        offline, egress_acknowledged = self._assistant_runtime_flags()
+
+        def work(stop: Event, emit: Callable[[str], None]) -> Mapping[str, Any]:
+            if stop.is_set():
+                return {"status": "cancelled", "data": {}}
+            try:
+                data = backend.assistant_send(
+                    project_id,
+                    prompt,
+                    conversation_id=conversation_id,
+                    offline=offline,
+                    egress_acknowledged=egress_acknowledged,
+                    on_delta=emit,
+                )
+                return {"status": "ok", "data": dict(data)}
+            except Exception as exc:
+                return ResearchWindow._assistant_error_payload(exc)
+
+        if not self.jobs.submit_stream("assistant", work):
+            self._set_status("The assistant is already processing a request.")
+            return
+        if self.assistant_transcript.toPlainText().strip():
+            self.assistant_transcript.appendPlainText("")
+        self.assistant_transcript.appendPlainText(f"You\n{prompt}\n\nAssistant\n")
+        self.assistant_prompt.clear()
+        self.assistant_tool_status.setText("Assistant is generating with the selected model…")
+        self._sync_assistant_controls()
+
+    def _assistant_chunk(self, task_id: str, value: str) -> None:
+        if task_id != "assistant" or not value:
+            return
+        cursor = self.assistant_transcript.textCursor()
+        cursor.movePosition(QTextCursor.MoveOperation.End)
+        cursor.insertText(value)
+        self.assistant_transcript.setTextCursor(cursor)
+
+    def _assistant_job_result(self, task_id: str, value: object) -> None:
+        if task_id != "assistant" or not isinstance(value, Mapping):
+            return
+        status = value.get("status")
+        if status == "cancelled":
+            self.assistant_tool_status.setText("Assistant request was cancelled before it started.")
+            self._sync_assistant_controls()
+            return
+        if status != "ok":
+            error = value.get("error", {})
+            code = (
+                str(error.get("code", "INTERNAL_ERROR"))
+                if isinstance(error, Mapping)
+                else "INTERNAL_ERROR"
+            )
+            message = (
+                str(error.get("message", "Assistant request failed."))
+                if isinstance(error, Mapping)
+                else "Assistant request failed."
+            )
+            self.assistant_tool_status.setText(f"{code}: {message}")
+            self.refresh_assistant()
+            self._set_status(f"Assistant: {message}")
+            return
+        data = value.get("data", {})
+        if not isinstance(data, Mapping):
+            self.assistant_tool_status.setText("Assistant returned an invalid host response.")
+            self._sync_assistant_controls()
+            return
+        conversation_id = data.get("conversation_id")
+        if isinstance(conversation_id, str) and conversation_id:
+            self.assistant_conversation_id = conversation_id
+        events = data.get("tool_events", [])
+        tool_names = (
+            [
+                str(item.get("operation"))
+                for item in events
+                if isinstance(item, Mapping) and item.get("operation")
+            ]
+            if isinstance(events, list)
+            else []
+        )
+        self.refresh_assistant()
+        if self.assistant_pending_tool is not None:
+            self.assistant_tool_status.setText(
+                "Assistant paused before a non-read tool. Review the exact request below."
+            )
+        elif tool_names:
+            self.assistant_tool_status.setText(
+                "Assistant completed · tools used: " + ", ".join(tool_names)
+            )
+        else:
+            self.assistant_tool_status.setText("Assistant completed with the selected model.")
+        self._sync_assistant_controls()
+
+    def _assistant_job_error(self, task_id: str, message: str) -> None:
+        if task_id != "assistant":
+            return
+        self.assistant_tool_status.setText(message)
+        self._sync_assistant_controls()
+
+    def _assistant_job_changed(self, task_id: str, state: str) -> None:
+        if task_id != "assistant":
+            return
+        if state == "running":
+            self.assistant_tool_status.setText("Assistant is running…")
+        self._sync_assistant_controls()
+
+    def approve_assistant_tool(self) -> None:
+        pending = self.assistant_pending_tool
+        backend = self.facade.ai_backend
+        conversation_id = self.assistant_conversation_id
+        if pending is None or backend is None or not self.project_id or not conversation_id:
+            self._set_status("No assistant tool request is waiting for approval.")
+            return
+        summary = (
+            f"Operation: {pending.get('operation', 'unknown')}\n"
+            f"Risk: {pending.get('risk', 'unknown')}\n"
+            f"Effect: {pending.get('effect', 'unknown')}\n"
+            "Arguments: "
+            f"{json.dumps(pending.get('arguments', {}), ensure_ascii=False, sort_keys=True)}\n\n"
+            "Execute exactly this persisted tool call and then let the model continue?"
+        )
+        answer = QMessageBox.question(
+            self,
+            "Approve exact assistant tool call",
+            summary,
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No,
+        )
+        if answer != QMessageBox.StandardButton.Yes:
+            return
+        project_id = self.project_id
+        offline, egress_acknowledged = self._assistant_runtime_flags()
+
+        def work(stop: Event, emit: Callable[[str], None]) -> Mapping[str, Any]:
+            if stop.is_set():
+                return {"status": "cancelled", "data": {}}
+            try:
+                data = backend.assistant_approve(
+                    project_id,
+                    conversation_id,
+                    offline=offline,
+                    egress_acknowledged=egress_acknowledged,
+                    on_delta=emit,
+                )
+                return {"status": "ok", "data": dict(data)}
+            except Exception as exc:
+                return ResearchWindow._assistant_error_payload(exc)
+
+        if not self.jobs.submit_stream("assistant", work):
+            self._set_status("The assistant is already processing a request.")
+            return
+        self.assistant_transcript.appendPlainText(
+            f"\nApproved tool · {pending.get('operation', 'unknown')}\n\nAssistant\n"
+        )
+        self.assistant_tool_status.setText("Executing the exact approved tool call…")
+        self._sync_assistant_controls()
+
+    def deny_assistant_tool(self) -> None:
+        pending = self.assistant_pending_tool
+        backend = self.facade.ai_backend
+        conversation_id = self.assistant_conversation_id
+        if pending is None or backend is None or not self.project_id or not conversation_id:
+            self._set_status("No assistant tool request is waiting for denial.")
+            return
+        try:
+            backend.assistant_deny(self.project_id, conversation_id)
+        except Exception:
+            self._set_status("The pending assistant tool request could not be denied.")
+            return
+        operation = str(pending.get("operation", "tool"))
+        self.refresh_assistant()
+        self.assistant_tool_status.setText(f"Denied {operation}. The tool was not executed.")
+        self._set_status("Assistant tool request denied; no tool side effect was executed.")
 
     def preview_agent(self) -> None:
         result = self._call(
@@ -3533,26 +4219,72 @@ class ResearchWindow(QMainWindow):
             return
         self.provider_mode.setCurrentText(response["mode"])
         self.provider_id.setText(response["provider_id"])
+        self.provider_protocol.setCurrentText(response.get("protocol", "openai-compatible"))
+        self.provider_endpoint.setText(response.get("endpoint", ""))
+        self.provider_model.setText(response.get("model", ""))
+        self.provider_credential_env.setText(response.get("credential_env", ""))
+        self.provider_tool_calling.setChecked(bool(response.get("tool_calling", False)))
         self.provider_enabled.setChecked(bool(response["enabled"]))
         self.provider_credential.setChecked(bool(response["credential_present"]))
         self.provider_egress.setChecked(bool(response["egress_acknowledged"]))
         self.provider_scope.setText(", ".join(response["permission_scope"]))
+        runtime_state = "Integrated AI host is not connected."
+        backend = self.facade.ai_backend
+        if backend is not None:
+            try:
+                model_state = backend.model_config()
+                runtime_state = (
+                    f"Active model profile: {model_state.get('active_profile') or 'none'}"
+                )
+            except Exception:
+                runtime_state = "Model runtime configuration could not be read."
         self.provider_status.setPlainText(
             f"Mode: {response['mode']}\nProvider: {response['provider_id']}\n"
+            f"Protocol: {response.get('protocol', 'openai-compatible')}\n"
+            f"Endpoint: {response.get('endpoint') or 'none'}\n"
+            f"Model: {response.get('model') or 'none'}\n"
+            f"Credential env var: {response.get('credential_env') or 'none'}\n"
+            f"Native tool calling: {response.get('tool_calling', False)}\n"
             f"Availability: {response['effective_availability']}\n"
             f"Credential present: {response['credential_present']}\n"
             f"Permission scope: {response['permission_scope']}\n"
             f"Data-egress acknowledged: {response['egress_acknowledged']}\n"
             f"Observed network calls: {response['network_calls_observed']}\n"
-            f"{response['note']}"
+            f"{runtime_state}\n{response['note']}"
         )
 
     def save_provider(self) -> None:
+        mode = self.provider_mode.currentText()
+        profile = {
+            "identifier": self.provider_id.text().strip(),
+            "kind": self.provider_protocol.currentText(),
+            "endpoint": self.provider_endpoint.text().strip(),
+            "model": self.provider_model.text().strip(),
+            "local": mode == "local",
+            "credential_env": self.provider_credential_env.text().strip() or None,
+            "tool_calling": self.provider_tool_calling.isChecked(),
+            "enabled": self.provider_enabled.isChecked(),
+        }
+        backend = self.facade.ai_backend
+        if mode != "manual" and backend is not None:
+            try:
+                backend.validate_model_profile(profile)
+            except Exception:
+                self._set_status(
+                    "Model configuration is invalid. Check the endpoint, model and credential "
+                    "environment-variable name."
+                )
+                return
         response = self._call(
             "ui.provider.update",
             provider={
-                "mode": self.provider_mode.currentText(),
+                "mode": mode,
                 "provider_id": self.provider_id.text(),
+                "protocol": self.provider_protocol.currentText(),
+                "endpoint": self.provider_endpoint.text(),
+                "model": self.provider_model.text(),
+                "credential_env": self.provider_credential_env.text(),
+                "tool_calling": self.provider_tool_calling.isChecked(),
                 "enabled": self.provider_enabled.isChecked(),
                 "credential_present": self.provider_credential.isChecked(),
                 "availability": "not-checked",
@@ -3561,7 +4293,25 @@ class ResearchWindow(QMainWindow):
             },
         )
         if response is not None:
+            if backend is not None:
+                try:
+                    if mode == "manual":
+                        backend.activate_model(None)
+                    else:
+                        backend.save_model_profile(
+                            profile,
+                            activate=self.provider_enabled.isChecked(),
+                        )
+                        if not self.provider_enabled.isChecked():
+                            backend.activate_model(None)
+                except Exception:
+                    self._set_status(
+                        "Provider metadata was saved, but the model runtime configuration could "
+                        "not be persisted. Review the provider fields and retry."
+                    )
+                    return
             self.refresh_provider()
+            self.refresh_assistant()
 
     def save_offline_mode(self) -> None:
         response = self._call("ui.preferences.update", offline=self.offline_toggle.isChecked())
@@ -3569,6 +4319,7 @@ class ResearchWindow(QMainWindow):
             self.prefs = Preferences(**response["preferences"])
             self.refresh_privacy()
             self.refresh_provider()
+            self.refresh_assistant()
 
     def refresh_privacy(self) -> None:
         if not self.project_id:
@@ -3701,9 +4452,10 @@ class ResearchWindow(QMainWindow):
     def preview_export(self) -> None:
         result = self._call("ui.export.preview", filename=self.export_name.text())
         if result:
+            destination = display_local_path(Path(result["destination"]))
             self.export_receipt.setText(
                 f"{result['filename']} · {result['bytes']} bytes\n"
-                f"SHA-256: {result['sha256']}\nDestination: {result['destination']}"
+                f"SHA-256: {result['sha256']}\nDestination: {destination}"
             )
 
     def choose_export_folder(self) -> None:
@@ -3719,7 +4471,8 @@ class ResearchWindow(QMainWindow):
             self._set_status("Choose an existing ordinary local directory.")
             return
         self.facade.export_root = destination.resolve()
-        self.export_directory.setText(str(self.facade.export_root))
+        self.export_directory.setText(display_local_path(self.facade.export_root))
+        self.export_directory.setToolTip(str(self.facade.export_root))
         self._set_status("Local export folder selected. Each write still requires approval.")
 
     def export_file(self) -> None:

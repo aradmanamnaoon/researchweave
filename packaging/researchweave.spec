@@ -11,7 +11,7 @@ a = Analysis(
     [str(repo / "src" / "researchweave" / "__main__.py")],
     pathex=[str(repo / "src")],
     binaries=[],
-    datas=[],
+    datas=[(str(repo / "src" / "researchweave" / "assets"), "researchweave/assets")],
     hiddenimports=hiddenimports,
     hookspath=[],
     hooksconfig={},
@@ -31,6 +31,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
+    icon=str(repo / "assets" / "branding" / "researchweave.ico"),
 )
 coll = COLLECT(
     exe,

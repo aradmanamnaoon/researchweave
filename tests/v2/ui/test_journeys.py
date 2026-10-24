@@ -447,6 +447,7 @@ def test_journey_3_keyboard_only(
     window.focus_library_search()
     qt_app.processEvents()
     assert window.page_heading.text() == "Library"
+    assert QApplication.focusWidget() is window.search
     assert window.search.accessibleName()
     window.search.setText("café")
     qt_app.processEvents()
@@ -473,6 +474,7 @@ def test_journey_3_keyboard_only(
     window.focus_export()
     qt_app.processEvents()
     assert window.page_heading.text() == "Exports"
+    assert QApplication.focusWidget() is window.export_name
     assert window.export_name.accessibleName()
     window.export_name.setText("keyboard-journey.md")
     monkeypatch.setattr(

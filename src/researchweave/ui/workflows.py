@@ -10,7 +10,7 @@ from __future__ import annotations
 import hashlib
 import json
 import re
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
 from typing import Any, Protocol, cast
@@ -462,6 +462,56 @@ class AIBackend(Protocol):
     ) -> Mapping[str, Any]:
         """Execute one previously approved, fingerprint-bound desktop action."""
 
+    def model_config(self) -> Mapping[str, Any]:
+        """Read secret-free model profiles and the active selection."""
+
+    def validate_model_profile(self, profile: Mapping[str, Any]) -> Mapping[str, Any]:
+        """Validate one model profile without persisting it."""
+
+    def save_model_profile(
+        self,
+        profile: Mapping[str, Any],
+        *,
+        activate: bool = True,
+    ) -> Mapping[str, Any]:
+        """Persist one validated secret-free model profile."""
+
+    def activate_model(self, identifier: str | None) -> Mapping[str, Any]:
+        """Select one saved model profile or disable model use."""
+
+    def assistant_history(self, project_id: str, conversation_id: str) -> Mapping[str, Any]:
+        """Read one durable project assistant conversation."""
+
+    def assistant_conversations(self, project_id: str) -> Mapping[str, Any]:
+        """List durable assistant conversations for one project."""
+
+    def assistant_send(
+        self,
+        project_id: str,
+        prompt: str,
+        *,
+        conversation_id: str | None = None,
+        profile_id: str | None = None,
+        offline: bool,
+        egress_acknowledged: bool,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> Mapping[str, Any]:
+        """Run one assistant turn inside the calling thread and stream real deltas."""
+
+    def assistant_approve(
+        self,
+        project_id: str,
+        conversation_id: str,
+        *,
+        offline: bool,
+        egress_acknowledged: bool,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> Mapping[str, Any]:
+        """Execute exactly one persisted pending tool after trusted user approval."""
+
+    def assistant_deny(self, project_id: str, conversation_id: str) -> Mapping[str, Any]:
+        """Deny and clear exactly one persisted pending assistant tool request."""
+
 
 def validate_analysis_result(raw: Mapping[str, Any]) -> dict[str, Any]:
     required = (
@@ -911,6 +961,26 @@ def configure_provider(project: Project, payload: Mapping[str, Any]) -> dict[str
             "INVALID_INPUT", "Unsupported provider mode.", "Choose manual, local or cloud-api."
         )
     provider_id = _clean_text(payload.get("provider_id", mode), "Provider id", 100)
+    protocol = _clean_text(
+        payload.get("protocol", "openai-compatible"),
+        "Provider protocol",
+        40,
+    )
+    if protocol not in ("openai-compatible", "anthropic", "gemini"):
+        raise UIError(
+            "INVALID_INPUT",
+            "Unsupported provider protocol.",
+            "Choose OpenAI-compatible, Anthropic or Gemini.",
+        )
+    endpoint = _clean_text(payload.get("endpoint", ""), "Provider endpoint", 2_000, required=False)
+    model = _clean_text(payload.get("model", ""), "Model identifier", 256, required=False)
+    credential_env = _clean_text(
+        payload.get("credential_env", ""),
+        "Credential environment variable",
+        128,
+        required=False,
+    )
+    tool_calling = bool(payload.get("tool_calling", False))
     enabled = bool(payload.get("enabled", False))
     credential_present = bool(payload.get("credential_present", False))
     availability = _clean_text(payload.get("availability", "not-checked"), "Availability state", 40)
@@ -936,14 +1006,29 @@ def configure_provider(project: Project, payload: Mapping[str, Any]) -> dict[str
             "Cloud provider data egress has not been acknowledged.",
             "Review the data scope and explicitly acknowledge remote transfer.",
         )
+    if mode != "manual" and enabled and (not endpoint or not model):
+        raise UIError(
+            "INVALID_INPUT",
+            "Enabled model providers require an endpoint and model identifier.",
+            "Enter the local or hosted endpoint and the exact model identifier.",
+        )
     if mode == "manual":
         credential_present = False
         availability = "available"
         permission_scope = []
         egress_ack = False
+        endpoint = ""
+        model = ""
+        credential_env = ""
+        tool_calling = False
     record = {
         "mode": mode,
         "provider_id": provider_id,
+        "protocol": protocol,
+        "endpoint": endpoint,
+        "model": model,
+        "credential_env": credential_env,
+        "tool_calling": tool_calling,
         "enabled": enabled if mode != "manual" else True,
         "credential_present": credential_present,
         "availability": availability,
@@ -963,6 +1048,11 @@ def provider_status(project: Project, *, offline: bool) -> dict[str, Any]:
     configured = project.provider_config or {
         "mode": "manual",
         "provider_id": "manual",
+        "protocol": "openai-compatible",
+        "endpoint": "",
+        "model": "",
+        "credential_env": "",
+        "tool_calling": False,
         "enabled": True,
         "credential_present": False,
         "availability": "available",

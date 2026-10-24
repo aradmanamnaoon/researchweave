@@ -1,14 +1,20 @@
+<p align="center">
+  <img src="assets/branding/researchweave-mark.svg" width="88" alt="ResearchWeave mark" />
+</p>
+
 # ResearchWeave
 
 **A local-first PyQt6 research workspace for evidence, analysis, reproducibility, and controlled AI assistance.**
 
-![Python 3.12](https://img.shields.io/badge/Python-3.12-blue) ![License GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-green)
+![Python 3.12](https://img.shields.io/badge/Python-3.12-blue) ![License GPL-3.0-only](https://img.shields.io/badge/license-GPL--3.0--only-green) ![Offline-first](https://img.shields.io/badge/core-offline--first-315f92)
 
 ResearchWeave runs without an account, API key, model download, or network connection for its core desktop workflow. The integrated V2 application combines research/evidence management, quantitative and qualitative analysis, local provenance, optional AI tooling, and an accessible desktop UI behind a shared typed command bus and host-approval boundary.
 
 ![ResearchWeave dashboard with a deterministic synthetic project](assets/screenshots/researchweave-dashboard-light.png)
 
-The screenshot above is captured from the running integrated application on Windows using `scripts/capture_screenshots.py`. It contains only deterministic synthetic data. Dark-theme and workflow screenshots are stored under [`assets/screenshots`](assets/screenshots/).
+The screenshot above is captured from the running integrated application on Windows using `scripts/capture_screenshots.py`. It contains only deterministic synthetic data. The screenshot manifest records the screen, theme, byte size and SHA-256 for every capture.
+
+![ResearchWeave workflow from question to explicit local export](assets/branding/workflow.svg)
 
 ## What works locally
 
@@ -22,9 +28,11 @@ The current integrated application has locally observed Windows verification for
 - light/dark/contrast themes, keyboard navigation, accessibility metadata, recovery, jobs, notifications and large-table paging;
 - a self-contained Windows PyInstaller bundle that starts without a Python interpreter installed by the user.
 
-The desktop shell groups work by research phase instead of presenting one long flat menu. A persistent page header shows the active workspace and local project context; project search stays in the sidebar; common actions are kept close to the current task; and `Ctrl+K` remains available as a command palette for experienced users. Theme tokens include explicit focus states and measured text contrast, including primary-button and selected-text contrast.
+The desktop shell groups work by research phase instead of presenting one long flat menu. Only the active phase stays expanded, which keeps later workflows reachable on ordinary laptop screens. A persistent page header shows the active workspace and local project/privacy context; project search stays in the sidebar; common actions are kept close to the current task; and `Ctrl+K` remains available as a command palette for experienced users.
 
-Some capabilities remain conditional. Remote AI providers, remote encrypted sync and external catalog lookups require explicit host configuration and user authorization. The desktop currently exposes AI/provider state and proposal workflows, while several advanced AI facade operations are verified through the shared backend command bus but are not yet fully surfaced as end-user desktop actions. Linux/macOS build workflows exist but have not been observed in this local Windows session.
+Dense workspaces use scrollable canvases rather than clipping controls. Dashboard, Library, Data View, Statistics, Review, Question and Exports use task-level surfaces so controls are grouped by intent instead of appearing as one long form. Review separates session setup, blinded screening and conflict adjudication; Dashboard surfaces project metrics and next actions; Library separates source discovery from the source list; Exports separates preview/write controls from the resulting receipt. Light, dark and high-contrast themes retain visible keyboard focus and measured text/selection contrast.
+
+Some capabilities remain conditional. Remote AI providers, remote encrypted sync and external catalog lookups require explicit host configuration and user authorization. The existing **Providers** page now configures the real secret-free model runtime, and the existing **Agent** page embeds a project-scoped assistant with durable history, real streaming, tool activity, and exact approval/deny controls for non-read tool requests. Advanced headless AI operations that do not remove desktop workflow friction remain intentionally unsurfaced. Linux/macOS build workflows exist but have not been observed in this local Windows session.
 
 ## Five-minute local start
 
@@ -46,11 +54,17 @@ uv run researchweave-cli capabilities
 
 ## Actual application views
 
-| Dashboard | Statistics | Review |
-|---|---|---|
-| ![Dashboard showing local project state](assets/screenshots/researchweave-dashboard-light.png) | ![Statistics screen in dark theme](assets/screenshots/researchweave-statistics-dark.png) | ![Review screen with synthetic project](assets/screenshots/researchweave-review-light.png) |
+These images come from the integrated Qt application with the same deterministic synthetic project. The capture workspace is disposable and visible paths abbreviate private OS account prefixes.
 
-The screenshot manifest records SHA-256 hashes, theme, screen and capture mode: [`assets/screenshots/manifest.json`](assets/screenshots/manifest.json).
+| Dashboard | Library | Statistics |
+|---|---|---|
+| ![Dashboard showing local project state](assets/screenshots/researchweave-dashboard-light.png) | ![Library with local source search and import](assets/screenshots/researchweave-library-light.png) | ![Statistics workspace with reproducible plot controls](assets/screenshots/researchweave-statistics-light.png) |
+
+| Review | Exports |
+|---|---|
+| ![Review workspace with staged screening controls](assets/screenshots/researchweave-review-dark.png) | ![Local export workspace with preview and approval controls](assets/screenshots/researchweave-exports-dark.png) |
+
+The complete 10-image light/dark screenshot set and SHA-256 manifest are under [`assets/screenshots`](assets/screenshots/); the machine-readable manifest is [`assets/screenshots/manifest.json`](assets/screenshots/manifest.json).
 
 ## Architecture
 
@@ -85,7 +99,7 @@ Evidence-domain operations cover protocols, study screening, extraction, PRISMA 
 
 ## AI and privacy
 
-AI is optional. Default `EgressPolicy` is offline, and provider/network operations require explicit configuration and authorization. Locally verified integration tests show that a restricted project is denied remote egress, local retrieval ingestion requires approval, and a durable agent plan can query verified local evidence through the common command bus.
+AI is optional. Default `EgressPolicy` is offline, and provider/network operations require explicit configuration and authorization. Model profiles store endpoint/model metadata and only the **name** of an external credential environment variable, never its secret value. Local OpenAI-compatible endpoints can be used while desktop offline mode remains enabled; hosted endpoints require offline mode to be disabled, explicit egress acknowledgement, and a host allowlist derived from the selected endpoint. Native Windows QA also verified streamed assistant output against a deterministic loopback OpenAI-compatible fixture, restart-persistent conversation history, safe failure for an unavailable loopback endpoint, and manual-mode fallback without any API key or model download.
 
 Consumer chat subscriptions are not treated as API credentials. Provider adapters require supported provider endpoints or local runtimes. See [`docs/INTEGRATIONS.md`](docs/INTEGRATIONS.md) for verified support levels.
 
@@ -104,6 +118,8 @@ powershell -ExecutionPolicy Bypass -File packaging\windows\smoke-portable.ps1
 
 The smoke script extracts the ZIP into a fresh temporary directory, launches the packaged executable without invoking a Python interpreter, verifies it remains alive, removes the package, and confirms simulated user-profile data remains intact. The locally observed ZIP is not committed to Git.
 
+The Windows executable uses the original ResearchWeave mark as its application icon. `scripts/generate_brand_icon.py` renders the reviewed SVG into release PNG/ICO assets, while the PyInstaller spec bundles the runtime SVG assets used by the desktop shell.
+
 Linux and macOS build scripts are included under [`packaging`](packaging/) and a GitHub Actions matrix is defined in [`.github/workflows/release-builds.yml`](.github/workflows/release-builds.yml). Those operating-system builds are **not locally verified in this Windows session**.
 
 ## Development checks
@@ -117,7 +133,13 @@ uv run --extra dev --extra formats python scripts/tasks.py metrics
 uv run --extra dev --extra formats python scripts/tasks.py readme
 ```
 
-The latest observed integrated run completed **703 tests passed, 10 explicitly skipped, with 3 warnings**. The source metric report currently measures **48,643 substantive first-party Python SLOC across 152 source files** using AST/tokenize rules documented in [`docs/verification/CODE_METRICS.json`](docs/verification/CODE_METRICS.json). `cloc`/`tokei` were not installed in the observed environment, so no second counter is claimed.
+Native screenshot evidence can be regenerated with:
+
+```powershell
+uv run --extra dev python scripts/capture_screenshots.py
+```
+
+The latest observed integrated run completed **729 tests passed, 10 explicitly skipped, with 3 warnings** and **84% total coverage**. The source metric report currently measures **51,222 substantive first-party Python SLOC across 156 source files** using AST/tokenize rules documented in [`docs/verification/CODE_METRICS.json`](docs/verification/CODE_METRICS.json). `cloc`/`tokei` were not installed in the observed environment, so no second counter is claimed.
 
 ## Security, dependencies and reproducibility
 

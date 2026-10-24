@@ -12,7 +12,7 @@ import http.client
 import ipaddress
 import socket
 import ssl
-from collections.abc import Mapping
+from collections.abc import Iterator, Mapping
 from typing import Protocol
 from urllib.parse import urlsplit
 
@@ -216,6 +216,91 @@ class PinnedHTTPTransport:
             if len(contents) > self.max_response_bytes:
                 raise AIError("RESOURCE_LIMIT", "Provider response exceeds byte budget")
             return bytes(contents)
+        except AIError:
+            raise
+        except (OSError, TimeoutError, http.client.HTTPException, ssl.SSLError) as exc:
+            raise AIError("PROVIDER_UNAVAILABLE", "Provider connection failed") from exc
+        finally:
+            if connection is not None:
+                connection.close()
+
+    def stream(
+        self,
+        url: str,
+        headers: Mapping[str, str],
+        payload: bytes,
+        timeout: float,
+        *,
+        chunk_size: int = 8192,
+    ) -> Iterator[bytes]:
+        """Yield bounded response bytes while preserving the same pinned-network policy as send."""
+
+        if not 1 <= chunk_size <= 262_144:
+            raise AIError("INVALID_INPUT", "Invalid provider stream chunk size")
+        parsed = urlsplit(url)
+        hostname = parsed.hostname
+        if hostname is None:
+            raise AIError("INVALID_INPUT", "Provider hostname missing")
+        try:
+            literal = ipaddress.ip_address(hostname)
+        except ValueError:
+            literal = None
+        local = (
+            parsed.scheme == "http"
+            or hostname.lower() in {"localhost", "localhost.localdomain"}
+            or bool(literal and literal.is_loopback)
+        )
+        validate_endpoint(url, local=local)
+        try:
+            port = parsed.port or (443 if parsed.scheme == "https" else 80)
+        except ValueError as exc:
+            raise AIError("INVALID_INPUT", "Provider port is malformed") from exc
+        if not 1 <= port <= 65535:
+            raise AIError("INVALID_INPUT", "Provider port is out of range")
+        if not 0.1 <= timeout <= 120:
+            raise AIError("INVALID_INPUT", "Provider timeout is out of range")
+        if not isinstance(payload, bytes) or len(payload) > self.max_request_bytes:
+            raise AIError("RESOURCE_LIMIT", "Provider request exceeds byte budget")
+        if any(
+            not isinstance(key, str)
+            or not isinstance(value, str)
+            or "\r" in key + value
+            or "\n" in key + value
+            for key, value in headers.items()
+        ):
+            raise AIError("INVALID_INPUT", "Invalid provider request header")
+        path = parsed.path or "/"
+        if parsed.query:
+            path += "?" + parsed.query
+        if len(path) > 8192 or any(ord(c) < 32 for c in path):
+            raise AIError("INVALID_INPUT", "Provider path contains invalid characters")
+        candidates = self.resolver.resolve(hostname, port)
+        pinned_ip = self._address_set(hostname, candidates, local)
+        connection: HTTPConnection | None = None
+        total = 0
+        try:
+            connection = self.factory.create(
+                hostname, pinned_ip, port, tls=parsed.scheme == "https", timeout=timeout
+            )
+            connection.request("POST", path, body=payload, headers=headers)
+            response = connection.getresponse()
+            status = response.status
+            if 300 <= status < 400:
+                raise AIError("PERMISSION_DENIED", "HTTP redirect blocked")
+            if status in {401, 403}:
+                raise AIError("PERMISSION_DENIED", f"Provider HTTP {status}")
+            if status == 429:
+                raise AIError("RATE_LIMITED", "Provider rate limit reached")
+            if not 200 <= status < 300:
+                raise AIError("PROVIDER_UNAVAILABLE", f"Provider HTTP {status}")
+            while True:
+                chunk = response.read(chunk_size)
+                if not chunk:
+                    break
+                total += len(chunk)
+                if total > self.max_response_bytes:
+                    raise AIError("RESOURCE_LIMIT", "Provider response exceeds byte budget")
+                yield bytes(chunk)
         except AIError:
             raise
         except (OSError, TimeoutError, http.client.HTTPException, ssl.SSLError) as exc:

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import json
 import re
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
-from typing import Any, Protocol
+from typing import Any, Protocol, cast
 from urllib.parse import quote
 
 from .errors import AIError
@@ -33,6 +33,13 @@ class ProviderUsage:
 
 
 @dataclass(frozen=True)
+class ProviderToolCall:
+    call_id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True)
 class ProviderResult:
     provider: str
     model: str
@@ -40,12 +47,13 @@ class ProviderResult:
     usage: ProviderUsage
     finish_reason: str | None = None
     incomplete: bool = False
+    tool_calls: tuple[ProviderToolCall, ...] = ()
 
 
 @dataclass(frozen=True)
 class ProviderCapabilities:
     chat: bool = True
-    streaming: bool = True
+    streaming: bool = False
     structured_output: bool = True
     tool_calling: bool = False
     embeddings: bool = False
@@ -119,6 +127,7 @@ class OpenAICompatibleAdapter:
         *,
         credential: str | None = None,
         local: bool = False,
+        tool_calling: bool = False,
         transport: HTTPTransport,
     ) -> None:
         if not identifier or not model:
@@ -129,7 +138,11 @@ class OpenAICompatibleAdapter:
         self.credential = credential
         self.local = local
         self.transport = transport
-        self.capabilities = ProviderCapabilities(local=local)
+        self.capabilities = ProviderCapabilities(
+            local=local,
+            streaming=True,
+            tool_calling=tool_calling,
+        )
 
     def _headers(self) -> dict[str, str]:
         headers = {"Content-Type": "application/json", "Accept": "application/json"}
@@ -145,18 +158,163 @@ class OpenAICompatibleAdapter:
         max_tokens: int = 512,
         temperature: float = 0.0,
     ) -> ProviderResult:
+        return self._complete(
+            messages,
+            policy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=None,
+        )
+
+    def complete_with_tools(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        tools: Sequence[Mapping[str, Any]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+    ) -> ProviderResult:
+        if not self.capabilities.tool_calling:
+            raise AIError(
+                "PROVIDER_UNAVAILABLE", "Selected model profile has no native tool calling"
+            )
+        if not 1 <= len(tools) <= 64:
+            raise AIError("RESOURCE_LIMIT", "Native tool list must contain 1-64 tools")
+        return self._complete(
+            messages,
+            policy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=tools,
+        )
+
+    def stream(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> ProviderResult:
+        return self._stream(
+            messages,
+            policy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=None,
+            on_delta=on_delta,
+        )
+
+    def stream_with_tools(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        tools: Sequence[Mapping[str, Any]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> ProviderResult:
+        if not self.capabilities.tool_calling:
+            raise AIError(
+                "PROVIDER_UNAVAILABLE", "Selected model profile has no native tool calling"
+            )
+        if not 1 <= len(tools) <= 64:
+            raise AIError("RESOURCE_LIMIT", "Native tool list must contain 1-64 tools")
+        return self._stream(
+            messages,
+            policy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=tools,
+            on_delta=on_delta,
+        )
+
+    def _stream(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        *,
+        max_tokens: int,
+        temperature: float,
+        tools: Sequence[Mapping[str, Any]] | None,
+        on_delta: Callable[[str], None] | None,
+    ) -> ProviderResult:
         _validate_generation(messages, max_tokens=max_tokens, temperature=temperature)
         policy.permit(self.endpoint, local=self.local)
+        streamer = getattr(self.transport, "stream", None)
+        if not callable(streamer):
+            raise AIError("DEPENDENCY_MISSING", "Configured transport does not support streaming")
+        request: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": message.role, "content": message.content} for message in messages
+            ],
+            "max_tokens": max_tokens,
+            "temperature": float(temperature),
+            "stream": True,
+            "stream_options": {"include_usage": True},
+        }
+        if tools is not None:
+            request["tools"] = list(tools)
+            request["parallel_tool_calls"] = False
+        payload = json.dumps(
+            request,
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode()
+        assembler = StreamAssembler()
+        chunks = cast(Any, self.transport).stream(
+            self.endpoint + "/chat/completions",
+            self._headers(),
+            payload,
+            timeout=60,
+        )
+        for event in sse_events(chunks):
+            delta = assembler.feed(event)
+            if delta and on_delta is not None:
+                on_delta(delta)
+        return ProviderResult(
+            provider=self.identifier,
+            model=self.model,
+            text=assembler.text,
+            usage=ProviderUsage(
+                input_tokens=_token(assembler.usage.get("prompt_tokens")),
+                output_tokens=_token(assembler.usage.get("completion_tokens")),
+                total_tokens=_token(assembler.usage.get("total_tokens")),
+            ),
+            finish_reason=assembler.finish_reason,
+            incomplete=False,
+            tool_calls=self._tool_calls(assembler.tool_calls),
+        )
+
+    def _complete(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        *,
+        max_tokens: int,
+        temperature: float,
+        tools: Sequence[Mapping[str, Any]] | None,
+    ) -> ProviderResult:
+        _validate_generation(messages, max_tokens=max_tokens, temperature=temperature)
+        policy.permit(self.endpoint, local=self.local)
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": [
+                {"role": message.role, "content": message.content} for message in messages
+            ],
+            "max_tokens": max_tokens,
+            "temperature": float(temperature),
+            "stream": False,
+        }
+        if tools is not None:
+            payload["tools"] = list(tools)
+            payload["parallel_tool_calls"] = False
         body = json.dumps(
-            {
-                "model": self.model,
-                "messages": [
-                    {"role": message.role, "content": message.content} for message in messages
-                ],
-                "max_tokens": max_tokens,
-                "temperature": float(temperature),
-                "stream": False,
-            },
+            payload,
             ensure_ascii=False,
             allow_nan=False,
         ).encode()
@@ -169,9 +327,16 @@ class OpenAICompatibleAdapter:
         response = _json_object(raw, self.identifier)
         try:
             choice = response["choices"][0]
-            text = _bounded_text(choice["message"]["content"], self.identifier)
+            message = choice["message"]
+            if not isinstance(message, Mapping):
+                raise TypeError
+            raw_text = message.get("content")
+            text = "" if raw_text is None else _bounded_text(raw_text, self.identifier)
         except (KeyError, IndexError, TypeError) as exc:
             raise AIError("SCHEMA_MISMATCH", "OpenAI-compatible response is malformed") from exc
+        tool_calls = self._tool_calls(message.get("tool_calls"))
+        if not text and not tool_calls:
+            raise AIError("SCHEMA_MISMATCH", "OpenAI-compatible response contains no output")
         usage = response.get("usage")
         usage_map = usage if isinstance(usage, Mapping) else {}
         return ProviderResult(
@@ -188,7 +353,44 @@ class OpenAICompatibleAdapter:
             else (
                 None if choice.get("finish_reason") is None else str(choice.get("finish_reason"))
             ),
+            tool_calls=tool_calls,
         )
+
+    def _tool_calls(self, raw: Any) -> tuple[ProviderToolCall, ...]:
+        if raw is None:
+            return ()
+        if not isinstance(raw, list) or len(raw) > 8:
+            raise AIError("SCHEMA_MISMATCH", "Provider tool calls are malformed or excessive")
+        calls: list[ProviderToolCall] = []
+        for item in raw:
+            if not isinstance(item, Mapping) or item.get("type") != "function":
+                raise AIError("SCHEMA_MISMATCH", "Unsupported provider tool call")
+            function = item.get("function")
+            if not isinstance(function, Mapping):
+                raise AIError("SCHEMA_MISMATCH", "Provider function call is malformed")
+            name = function.get("name")
+            arguments_raw = function.get("arguments")
+            if not isinstance(name, str) or not name or len(name) > 200:
+                raise AIError("SCHEMA_MISMATCH", "Provider tool name is invalid")
+            if not isinstance(arguments_raw, str) or len(arguments_raw.encode()) > 200_000:
+                raise AIError("SCHEMA_MISMATCH", "Provider tool arguments are invalid")
+            try:
+                arguments = json.loads(arguments_raw)
+            except (TypeError, ValueError) as exc:
+                raise AIError(
+                    "SCHEMA_MISMATCH", "Provider tool arguments are not valid JSON"
+                ) from exc
+            if not isinstance(arguments, dict):
+                raise AIError("SCHEMA_MISMATCH", "Provider tool arguments must be an object")
+            call_id = item.get("id")
+            calls.append(
+                ProviderToolCall(
+                    "" if call_id is None else str(call_id)[:200],
+                    name,
+                    dict(arguments),
+                )
+            )
+        return tuple(calls)
 
 
 class LMStudioAdapter(OpenAICompatibleAdapter):

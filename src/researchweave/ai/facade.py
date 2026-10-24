@@ -1,6 +1,9 @@
 from __future__ import annotations
 
-from collections.abc import Mapping
+import json
+from collections.abc import Callable, Mapping
+from dataclasses import asdict
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -11,12 +14,16 @@ from .agent_runtime_v2 import (
     ToolContract,
 )
 from .agents import AgentRuntime, Capability
+from .conversations import ConversationStore
 from .errors import AIError
 from .external_connectors import ConnectorRegistry, MCPBridge
 from .grounding import GroundingVerifier
+from .interactive_agent import ModelAgentLoop
+from .model_runtime import ConfiguredModelRuntime, ModelConfigStore, ModelProfile
 from .ollama import OllamaAdapter, OllamaMessage, OllamaOptions
 from .orchestration import LongTaskOrchestrator
 from .policy import Approval, ApprovalIssuer, EgressPolicy
+from .provider_adapters import ProviderMessage
 from .provider_services import ProviderCatalog, ProviderHealthService
 from .providers import ProviderRegistry
 from .remote_sync import EncryptedRemoteSync
@@ -49,11 +56,15 @@ class AIFacade:
     ) -> None:
         if not storage.is_dir():
             raise AIError("NOT_FOUND", "An existing host-controlled storage directory is required")
+        self.storage = storage
         self.policy = policy or EgressPolicy()
         self.providers = providers or ProviderRegistry()
         self.issuer = issuer
         self.ollama = ollama
         self.advanced_providers = advanced_providers or ProviderCatalog()
+        self.model_configs = ModelConfigStore(storage / "model-providers.json")
+        self.model_runtime = ConfiguredModelRuntime(self.model_configs, self.policy)
+        self.conversations = ConversationStore(storage / "conversations.sqlite")
         self.connectors = connectors or ConnectorRegistry()
         self.remote_sync = remote_sync
         self.mcp_bridge = mcp_bridge
@@ -96,10 +107,241 @@ class AIFacade:
                 reversible=True,
                 idempotent=True,
                 allowed_arguments=frozenset({"query", "limit"}),
+                description="Search indexed local evidence for passages relevant to a query.",
+                argument_schema={
+                    "type": "object",
+                    "properties": {
+                        "query": {"type": "string", "minLength": 1, "maxLength": 10_000},
+                        "limit": {"type": "integer", "minimum": 1, "maximum": 20},
+                    },
+                    "required": ["query"],
+                    "additionalProperties": False,
+                },
             )
         )
+        self.interactive_agent = ModelAgentLoop(self.model_runtime, self.durable_agents)
         self.prompts = PromptTemplateStore(storage / "prompt_templates.sqlite")
         self.jobs = LongTaskOrchestrator(storage / "long_jobs.sqlite")
+
+    def configure_runtime_policy(
+        self,
+        *,
+        offline: bool,
+        allowed_hosts: tuple[str, ...] = (),
+        allow_local_models: bool = True,
+    ) -> Mapping[str, Any]:
+        normalized = tuple(sorted({host.strip().lower() for host in allowed_hosts if host.strip()}))
+        self.policy = EgressPolicy(
+            offline=bool(offline),
+            allow_local_models=bool(allow_local_models),
+            allowed_hosts=normalized,
+        )
+        self.model_runtime.policy = self.policy
+        return {
+            "offline": self.policy.offline,
+            "allow_local_models": self.policy.allow_local_models,
+            "allowed_hosts": list(self.policy.allowed_hosts),
+        }
+
+    def _selected_profile(self, profile_id: str | None) -> str:
+        if profile_id is None:
+            return self.model_configs.active().identifier
+        return self.model_configs.get(profile_id).identifier
+
+    def _persist_agent_events(
+        self,
+        project_id: str,
+        conversation_id: str,
+        events: tuple[Any, ...],
+    ) -> None:
+        for event in events:
+            if event.result is None:
+                continue
+            content = json.dumps(
+                event.result,
+                ensure_ascii=False,
+                sort_keys=True,
+                separators=(",", ":"),
+            )
+            self.conversations.append(
+                project_id,
+                conversation_id,
+                "tool",
+                content,
+                metadata={
+                    "operation": event.operation,
+                    "effect": event.effect,
+                    "risk": event.risk,
+                },
+            )
+
+    def _store_pending(
+        self,
+        project_id: str,
+        conversation_id: str,
+        result: Any,
+        profile_id: str,
+    ) -> dict[str, Any] | None:
+        pending = result.pending_approval
+        if pending is None:
+            self.conversations.clear_pending_tool(project_id, conversation_id)
+            return None
+        return self.conversations.set_pending_tool(
+            project_id,
+            conversation_id,
+            operation=pending.operation,
+            effect=pending.effect,
+            risk=pending.risk,
+            arguments=pending.arguments,
+            profile_id=profile_id,
+        )
+
+    def _assistant_result(
+        self,
+        project_id: str,
+        conversation_id: str,
+        profile_id: str,
+        result: Any,
+    ) -> Mapping[str, Any]:
+        self._persist_agent_events(project_id, conversation_id, result.events)
+        pending = self._store_pending(project_id, conversation_id, result, profile_id)
+        if result.text:
+            self.conversations.append(project_id, conversation_id, "assistant", result.text)
+        return {
+            "conversation_id": conversation_id,
+            "profile_id": profile_id,
+            "text": result.text,
+            "iterations": result.iterations,
+            "tool_events": [asdict(event) for event in result.events],
+            "pending_tool": pending,
+        }
+
+    def assistant_history(self, project_id: str, conversation_id: str) -> Mapping[str, Any]:
+        return {
+            "conversation_id": conversation_id,
+            "messages": [
+                asdict(item) for item in self.conversations.history(project_id, conversation_id)
+            ],
+            "pending_tool": self.conversations.pending_tool(project_id, conversation_id),
+        }
+
+    def assistant_chat(
+        self,
+        project_id: str,
+        prompt: str,
+        *,
+        conversation_id: str | None = None,
+        profile_id: str | None = None,
+        max_chars: int = 32_000,
+        max_tokens: int = 1024,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> Mapping[str, Any]:
+        selected_profile = self._selected_profile(profile_id)
+        if conversation_id is None:
+            title = " ".join(prompt.strip().split())[:80] or "Research assistant"
+            conversation_id = self.conversations.create(project_id, title=title)
+        if self.conversations.pending_tool(project_id, conversation_id) is not None:
+            raise AIError(
+                "NEEDS_APPROVAL",
+                "Resolve the pending assistant tool request before sending another message",
+            )
+        self.conversations.append(project_id, conversation_id, "user", prompt)
+        messages = self.conversations.provider_context(
+            project_id,
+            conversation_id,
+            max_chars=max_chars,
+        )
+        result = self.interactive_agent.run(
+            project_id,
+            messages,
+            profile_id=selected_profile,
+            max_tokens=max_tokens,
+            on_delta=on_delta,
+        )
+        return self._assistant_result(project_id, conversation_id, selected_profile, result)
+
+    def assistant_approve(
+        self,
+        project_id: str,
+        conversation_id: str,
+        *,
+        max_chars: int = 32_000,
+        max_tokens: int = 1024,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> Mapping[str, Any]:
+        pending = self.conversations.pending_tool(project_id, conversation_id)
+        if pending is None:
+            raise AIError("NOT_FOUND", "No pending assistant tool request exists")
+        if self.issuer is None:
+            raise AIError("NEEDS_APPROVAL", "Trusted host approval issuer is required")
+        operation = str(pending["operation"])
+        arguments = dict(pending["arguments"])
+        approval = self.issuer.issue(
+            project_id,
+            "agent.tool",
+            {"operation": operation, "arguments": arguments},
+            datetime.now(UTC) + timedelta(minutes=2),
+        )
+        tool_result = dict(
+            self.durable_agents.invoke_tool(
+                project_id,
+                operation,
+                arguments,
+                approval=approval,
+            )
+        )
+        self.conversations.clear_pending_tool(project_id, conversation_id)
+        self.conversations.append(
+            project_id,
+            conversation_id,
+            "tool",
+            json.dumps(tool_result, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
+            metadata={
+                "operation": operation,
+                "effect": pending["effect"],
+                "risk": pending["risk"],
+                "approved": True,
+            },
+        )
+        profile_id = self._selected_profile(
+            None if pending.get("profile_id") in (None, "") else str(pending["profile_id"])
+        )
+        messages = self.conversations.provider_context(
+            project_id,
+            conversation_id,
+            max_chars=max_chars,
+        )
+        result = self.interactive_agent.run(
+            project_id,
+            messages,
+            profile_id=profile_id,
+            max_tokens=max_tokens,
+            on_delta=on_delta,
+        )
+        return self._assistant_result(project_id, conversation_id, profile_id, result)
+
+    def assistant_deny(self, project_id: str, conversation_id: str) -> Mapping[str, Any]:
+        pending = self.conversations.pending_tool(project_id, conversation_id)
+        if pending is None:
+            raise AIError("NOT_FOUND", "No pending assistant tool request exists")
+        self.conversations.clear_pending_tool(project_id, conversation_id)
+        self.conversations.append(
+            project_id,
+            conversation_id,
+            "tool",
+            f"User denied tool {pending['operation']}; it was not executed.",
+            metadata={
+                "operation": pending["operation"],
+                "effect": pending["effect"],
+                "risk": pending["risk"],
+                "approved": False,
+            },
+        )
+        return {
+            "conversation_id": conversation_id,
+            "denied": True,
+            "operation": pending["operation"],
+        }
 
     def capability_manifest(self) -> list[Mapping[str, Any]]:
         def entry(
@@ -119,6 +361,20 @@ class AIFacade:
             }
 
         return [
+            entry("assistant.conversation.create", "local-write", True, arguments=("title",)),
+            entry("assistant.conversation.list", "read", True),
+            entry(
+                "assistant.message.append",
+                "local-write",
+                True,
+                arguments=("conversation_id", "role", "content"),
+            ),
+            entry("assistant.history", "read", True, arguments=("conversation_id",)),
+            entry("assistant.context", "read", True, arguments=("conversation_id",)),
+            entry("model.config.get", "read", True),
+            entry("model.config.upsert", "local-write", True, arguments=("profile",)),
+            entry("model.config.activate", "local-write", True, arguments=("provider",)),
+            entry("model.chat", "external-network", True, arguments=("messages",)),
             entry("provider.list", "read", True),
             entry("provider.complete", "external-network", False, arguments=("provider", "prompt")),
             entry("provider.v2.list", "read", True),
@@ -227,8 +483,89 @@ class AIFacade:
                 if self.issuer is None:
                     raise AIError("NEEDS_APPROVAL", "Trusted host approval issuer is required")
                 self.issuer.verify(approval, str(context.get("project_id", "")), operation, args)
-            if operation == "provider.list":
-                result: Any = self.providers.list()
+            if operation == "assistant.conversation.create":
+                project_id = str(context.get("project_id", ""))
+                result: Any = {
+                    "conversation_id": self.conversations.create(
+                        project_id,
+                        title=str(args.get("title", "Research assistant")),
+                    )
+                }
+            elif operation == "assistant.conversation.list":
+                result = self.conversations.list_conversations(str(context.get("project_id", "")))
+            elif operation == "assistant.message.append":
+                message = self.conversations.append(
+                    str(context.get("project_id", "")),
+                    str(args["conversation_id"]),
+                    str(args["role"]),
+                    str(args["content"]),
+                    protected=bool(args.get("protected", False)),
+                    source_anchor=(
+                        None
+                        if args.get("source_anchor") in (None, "")
+                        else str(args.get("source_anchor"))
+                    ),
+                    metadata=(
+                        dict(args["metadata"])
+                        if isinstance(args.get("metadata"), Mapping)
+                        else None
+                    ),
+                )
+                result = asdict(message)
+            elif operation == "assistant.history":
+                result = [
+                    asdict(item)
+                    for item in self.conversations.history(
+                        str(context.get("project_id", "")),
+                        str(args["conversation_id"]),
+                        limit=int(args.get("limit", 500)),
+                    )
+                ]
+            elif operation == "assistant.context":
+                result = [
+                    asdict(item)
+                    for item in self.conversations.provider_context(
+                        str(context.get("project_id", "")),
+                        str(args["conversation_id"]),
+                        max_chars=int(args.get("max_chars", 32_000)),
+                    )
+                ]
+            elif operation == "model.config.get":
+                result = self.model_configs.snapshot()
+            elif operation == "model.config.upsert":
+                raw_profile = args.get("profile")
+                if not isinstance(raw_profile, dict):
+                    raise AIError("INVALID_INPUT", "Model profile must be an object")
+                result = self.model_configs.upsert(
+                    ModelProfile.from_mapping(raw_profile),
+                    activate=bool(args.get("activate", False)),
+                )
+            elif operation == "model.config.activate":
+                raw_provider = args.get("provider")
+                provider = None if raw_provider in (None, "") else str(raw_provider)
+                result = self.model_configs.activate(provider)
+            elif operation == "model.chat":
+                raw_messages = args.get("messages")
+                if not isinstance(raw_messages, list) or not raw_messages:
+                    raise AIError("INVALID_INPUT", "Model chat requires messages")
+                model_messages: list[ProviderMessage] = []
+                for raw in raw_messages:
+                    if not isinstance(raw, Mapping):
+                        raise AIError("INVALID_INPUT", "Model message must be an object")
+                    model_messages.append(
+                        ProviderMessage(str(raw.get("role", "")), str(raw.get("content", "")))
+                    )
+                completed = self.model_runtime.complete(
+                    model_messages,
+                    profile_id=(
+                        None if args.get("provider") in (None, "") else str(args["provider"])
+                    ),
+                    max_tokens=int(args.get("max_tokens", 512)),
+                    temperature=float(args.get("temperature", 0.0)),
+                )
+                result = asdict(completed)
+            elif operation == "provider.list":
+                result = self.providers.list()
             elif operation == "provider.v2.list":
                 result = self.advanced_providers.list()
             elif operation == "provider.v2.health":

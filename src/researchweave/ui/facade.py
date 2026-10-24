@@ -2879,6 +2879,7 @@ def build_ui_facade(
     export_authorizer: Callable[[str], bool] | None = None,
     backup_authorizer: Callable[[str, str], bool] | None = None,
     analysis_backend: AnalysisBackend | None = None,
+    ai_backend: AIBackend | None = None,
 ) -> UIFacade:
     """Construct a real local command host; caller controls all filesystem locations."""
     from platformdirs import user_data_dir
@@ -2893,4 +2894,5 @@ def build_ui_facade(
         export_authorizer=export_authorizer,
         backup_authorizer=backup_authorizer,
         analysis_backend=analysis_backend,
+        ai_backend=ai_backend,
     )

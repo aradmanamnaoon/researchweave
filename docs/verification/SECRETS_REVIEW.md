@@ -3,6 +3,11 @@
 `detect-secrets` was run after integration and its tracked-file candidates were reviewed manually.
 No live credential or private research datum was identified in the flagged tracked files.
 
+A final pre-release scan across all tracked files plus intended untracked public candidates reported
+**338 findings in 27 files**. Every finding falls into the reviewed categories below (synthetic
+security fixtures, hashes/manifests/scanner output, or the PDF-ingest validation alphabet). No new
+AI provider/runtime/conversation source file introduced a secret candidate.
+
 | Candidate group | Files / examples | Review result |
 |---|---|---|
 | Safe-character alphabet | `src/researchweave/ai/pdf_ingest.py` | Scanner flags the long alphanumeric allow-list used to validate document IDs. It is code, not secret material. |

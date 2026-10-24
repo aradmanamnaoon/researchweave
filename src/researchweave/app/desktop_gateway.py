@@ -10,6 +10,7 @@ from uuid import NAMESPACE_URL, UUID, uuid4, uuid5
 from researchweave.core import CommandBus, OperationRequest
 from researchweave.ui.facade import UIFacade
 from researchweave.ui.store import PreferenceStore
+from researchweave.ui.workflows import AIBackend
 
 
 class DesktopCommandGateway:
@@ -52,6 +53,10 @@ class DesktopCommandGateway:
     @backup_authorizer.setter
     def backup_authorizer(self, value: Callable[[str, str], bool] | None) -> None:
         self._ui.backup_authorizer = value
+
+    @property
+    def ai_backend(self) -> AIBackend | None:
+        return self._ui.ai_backend
 
     def capability_manifest(self) -> list[Mapping[str, Any]]:
         return self._ui.capability_manifest()

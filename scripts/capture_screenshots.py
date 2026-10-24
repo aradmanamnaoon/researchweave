@@ -5,6 +5,7 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import shutil
 import tempfile
 from pathlib import Path
 
@@ -105,13 +106,19 @@ def capture(root: Path, output: Path, theme: str, screen: str) -> dict[str, obje
 def main() -> int:
     repo = Path(__file__).resolve().parents[1]
     output_root = repo / "assets" / "screenshots"
-    with tempfile.TemporaryDirectory(prefix="researchweave-capture-") as temporary:
-        data_root = Path(temporary) / "workspace"
+    capture_root = Path(tempfile.gettempdir()) / "researchweave-public-native-capture"
+    if capture_root.exists():
+        shutil.rmtree(capture_root)
+    capture_root.mkdir(parents=True)
+    try:
+        data_root = capture_root / "workspace"
         records = []
         for theme in ("light", "dark"):
-            for screen in ("Dashboard", "Statistics", "Review"):
+            for screen in ("Dashboard", "Library", "Statistics", "Review", "Exports"):
                 filename = f"researchweave-{screen.lower().replace(' ', '-')}-{theme}.png"
                 records.append(capture(data_root, output_root / filename, theme, screen))
+    finally:
+        shutil.rmtree(capture_root, ignore_errors=True)
     manifest = {
         "schema_version": 1,
         "capture_mode": os.environ.get("QT_QPA_PLATFORM", "native"),

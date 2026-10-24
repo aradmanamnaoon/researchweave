@@ -24,7 +24,9 @@ class FakeHTTPResponse:
         self.data = data
 
     def read(self, size: int) -> bytes:
-        return self.data[:size]
+        chunk = self.data[:size]
+        self.data = self.data[size:]
+        return chunk
 
 
 class FakeConnection:
@@ -131,3 +133,18 @@ def test_bounded_provider_reply_and_request_header_injection_blocked():
         transport.send("https://example.org/v1", {"X-Bad": "line\r\nHost: private"}, b"{}", 5)
     assert error.value.code == "INVALID_INPUT"
     assert len(factory.connections) == before
+
+
+def test_stream_uses_same_dns_pinning_and_closes_connection():
+    payload = b"one-two-three"
+    resolver = FakeResolver(["8.8.8.8"])
+    factory = FakeConnectionFactory(data=payload)
+    transport = PinnedHTTPTransport(resolver, factory)
+    assert (
+        b"".join(
+            transport.stream("https://example.org/v1/chat/completions", {}, b"{}", 5, chunk_size=4)
+        )
+        == payload
+    )
+    assert factory.connections[0][1] == "8.8.8.8"
+    assert factory.connections[0][-1].closed is True

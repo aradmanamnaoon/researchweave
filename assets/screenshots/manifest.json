@@ -3,56 +3,92 @@
   "records": [
     {
       "actual_integrated_app": true,
-      "bytes": 77728,
+      "bytes": 106040,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-dashboard-light.png",
       "screen": "Dashboard",
-      "sha256": "d16903b3073698c7d308abd7346c52e8c224adc2d98adb8d9fdf7fec52a194f4",
+      "sha256": "ae2b9ab44735e4d991811183093ee4aacbd1466f27086b46f42fbaf94c6379df",
       "theme": "light"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 68032,
+      "bytes": 76620,
+      "fixture": "deterministic synthetic local project",
+      "path": "assets/screenshots/researchweave-library-light.png",
+      "screen": "Library",
+      "sha256": "ff5625ee1434441e52d123f0d51c9df466deb4920185b403a12b44c9eee931a9",
+      "theme": "light"
+    },
+    {
+      "actual_integrated_app": true,
+      "bytes": 91062,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-statistics-light.png",
       "screen": "Statistics",
-      "sha256": "7ca0de54ea41f33ab99744f438e824d782165579730ff96c95983bf8e9f1776c",
+      "sha256": "9861dfd6e61d4f757ea4d1829bf1f11b37be5e72a8146b83e22cd3f81dc581fa",
       "theme": "light"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 84435,
+      "bytes": 95071,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-review-light.png",
       "screen": "Review",
-      "sha256": "e099d4e2ff4fb3a996f0061470dd0ebf7fce9812190ccffb9b1252c19cff66fc",
+      "sha256": "241dadf533a96980cf505e9b7b5690a4a6b4cf87ed52e06c3e9fecb6f7f243ad",
       "theme": "light"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 79267,
+      "bytes": 74443,
+      "fixture": "deterministic synthetic local project",
+      "path": "assets/screenshots/researchweave-exports-light.png",
+      "screen": "Exports",
+      "sha256": "18aca53984324b271468df3d4644ccf7e4371865032c3101e5f6be9c856f9042",
+      "theme": "light"
+    },
+    {
+      "actual_integrated_app": true,
+      "bytes": 108549,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-dashboard-dark.png",
       "screen": "Dashboard",
-      "sha256": "5e83b3b199f85cf12fe9ce854f89e8aeef443a7983680b2fe7bf5f6605ab2997",
+      "sha256": "76ac05e0d7c5a07929dd3769ae3f8c0d76fcade302992961063501018ef818de",
       "theme": "dark"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 68362,
+      "bytes": 77215,
+      "fixture": "deterministic synthetic local project",
+      "path": "assets/screenshots/researchweave-library-dark.png",
+      "screen": "Library",
+      "sha256": "196feb933c042201cd690322207ad95e5f4f24c53d6cbdad4b80c086a65f830d",
+      "theme": "dark"
+    },
+    {
+      "actual_integrated_app": true,
+      "bytes": 91447,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-statistics-dark.png",
       "screen": "Statistics",
-      "sha256": "0a4f9300f1b002a75a879141fd2da647947ecf9d4d83b998e8f0431988e0c9c9",
+      "sha256": "4e565ed1a4d1a1f5b01b7cdc9a215184f4f063f7743023fc1ad871aebb59cece",
       "theme": "dark"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 85150,
+      "bytes": 95211,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-review-dark.png",
       "screen": "Review",
-      "sha256": "baa2fb66707b4f64d5ad8784d47914fa6b7d77d35a4f6326d7a255b635c13ca1",
+      "sha256": "03ca650e88be2d9edb5e1b70c60ace466e143dbf559e4317565aece02dacb73e",
+      "theme": "dark"
+    },
+    {
+      "actual_integrated_app": true,
+      "bytes": 74962,
+      "fixture": "deterministic synthetic local project",
+      "path": "assets/screenshots/researchweave-exports-dark.png",
+      "screen": "Exports",
+      "sha256": "9c0e9eb08bedc9872a623935bf413f05b277933802c9bf543bff82809183c352",
       "theme": "dark"
     }
   ],
