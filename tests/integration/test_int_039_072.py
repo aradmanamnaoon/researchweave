@@ -763,6 +763,48 @@ def test_int_048_sensitive_mixed_display_denied_and_project_isolated(
         assert imported["status"] == "ok", imported
         created = call("qualitative.create", {"project_id": "mixed_study"})
         assert created["status"] == "ok", created
+        content_hash = created["data"]["content_hash"]
+        code = call(
+            "qualitative.add_code",
+            {
+                "project_id": "mixed_study",
+                "expected_content_hash": content_hash,
+                "code_id": "theme",
+                "name": "Theme",
+                "actor": "researcher",
+            },
+        )
+        assert code["status"] == "ok", code
+        content_hash = code["data"]["content_hash"]
+        for case in range(1, 7):
+            transcript = call(
+                "qualitative.add_transcript",
+                {
+                    "project_id": "mixed_study",
+                    "expected_content_hash": content_hash,
+                    "source_id": f"transcript_{case}",
+                    "text": "coded text" if case <= 3 else "uncoded text",
+                    "case_id": str(case),
+                },
+            )
+            assert transcript["status"] == "ok", transcript
+            content_hash = transcript["data"]["content_hash"]
+            if case <= 3:
+                annotated = call(
+                    "qualitative.annotate",
+                    {
+                        "project_id": "mixed_study",
+                        "expected_content_hash": content_hash,
+                        "source_id": f"transcript_{case}",
+                        "start": 0,
+                        "end": 5,
+                        "code_id": "theme",
+                        "coder": "researcher",
+                        "unit_id": f"unit_{case}",
+                    },
+                )
+                assert annotated["status"] == "ok", annotated
+                content_hash = annotated["data"]["content_hash"]
         arguments = {
             "dataset_id": imported["data"]["dataset_id"],
             "revision": imported["data"]["revision"],
@@ -770,6 +812,20 @@ def test_int_048_sensitive_mixed_display_denied_and_project_isolated(
             "case_column": "case", "measure_column": "score",
             "code_id": "theme", "allow_quotes": True, "include_private": True,
         }
+        linked = call(
+            "mixed.joint_display",
+            {
+                key: value
+                for key, value in arguments.items()
+                if key not in {"allow_quotes", "include_private"}
+            },
+        )
+        assert linked["status"] == "ok", linked
+        assert linked["data"]["groups"]["coded"]["mean"] == pytest.approx(2.0)
+        assert linked["data"]["groups"]["not_coded"]["mean"] == pytest.approx(5.0)
+        assert linked["data"]["excerpts"] == []
+        assert linked["data"]["n_quantitative_cases"] == 6
+        assert linked["data"]["n_qualitative_cases"] == 6
         denied = call("mixed.joint_display_sensitive", arguments, approve=False)
         assert denied["status"] == "failed", denied
         assert denied["error"]["code"] == "NEEDS_APPROVAL"
