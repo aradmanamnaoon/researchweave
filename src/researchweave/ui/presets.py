@@ -18,13 +18,45 @@ MIN_PANEL = 120
 MAX_PANEL = 4000
 MAX_PRESETS = 50
 WORKSPACE_SCREENS = (
-    "Welcome", "Dashboard", "Question", "Search", "Protocol", "Library", "Reader",
-    "PDF Reader", "Evidence", "Review", "PRISMA", "Extraction", "Data View",
-    "Variable View", "Statistics", "Analysis Results", "Qualitative", "Codebook",
-    "Mixed Methods", "Manuscript", "References", "Notebook", "Publishing", "Agent",
-    "Providers", "Privacy", "Integrations", "Exports", "Backups", "Recovery",
-    "Diagnostics", "Jobs", "Notifications", "Tutorials", "Guidance", "Shortcuts",
-    "Preferences", "Activity", "About",
+    "Welcome",
+    "Dashboard",
+    "Question",
+    "Search",
+    "Protocol",
+    "Library",
+    "Reader",
+    "PDF Reader",
+    "Evidence",
+    "Review",
+    "PRISMA",
+    "Extraction",
+    "Data View",
+    "Variable View",
+    "Statistics",
+    "Analysis Results",
+    "Qualitative",
+    "Codebook",
+    "Mixed Methods",
+    "Manuscript",
+    "References",
+    "Notebook",
+    "Publishing",
+    "Agent",
+    "Providers",
+    "Privacy",
+    "Integrations",
+    "Exports",
+    "Backups",
+    "Recovery",
+    "Diagnostics",
+    "Jobs",
+    "Notifications",
+    "Tutorials",
+    "Guidance",
+    "Shortcuts",
+    "Preferences",
+    "Activity",
+    "About",
 )
 
 
@@ -48,12 +80,12 @@ class WorkspacePreset:
 
 def _text(value: Any, name: str, maximum: int, *, required: bool = True) -> str:
     if not isinstance(value, str) or len(value) > maximum:
-        raise UIError("INVALID_INPUT", f"{name} is invalid.",
-                      "Review the workspace preset fields.")
+        raise UIError("INVALID_INPUT", f"{name} is invalid.", "Review the workspace preset fields.")
     cleaned = value.strip()
     if required and not cleaned:
-        raise UIError("INVALID_INPUT", f"{name} is required.",
-                      "Enter a value before saving the preset.")
+        raise UIError(
+            "INVALID_INPUT", f"{name} is required.", "Enter a value before saving the preset."
+        )
     return cleaned
 
 
@@ -82,14 +114,16 @@ def sanitize_workspace(raw: dict[str, Any], *, known_screens: tuple[str, ...]) -
     sizes_raw = raw.get("panel_sizes", {})
     visibility = (
         {str(key): bool(value) for key, value in visibility_raw.items()}
-        if isinstance(visibility_raw, dict) else {}
+        if isinstance(visibility_raw, dict)
+        else {}
     )
     sizes = (
         {
             str(key): _clamp_int(value, MIN_PANEL, MAX_PANEL, MIN_PANEL)
             for key, value in sizes_raw.items()
         }
-        if isinstance(sizes_raw, dict) else {}
+        if isinstance(sizes_raw, dict)
+        else {}
     )
     table_raw = raw.get("table_settings", {})
     table = json.loads(json.dumps(table_raw)) if isinstance(table_raw, dict) else {}
@@ -112,7 +146,9 @@ def sanitize_workspace(raw: dict[str, Any], *, known_screens: tuple[str, ...]) -
 
 
 def decode_presets(
-    raw: Any, *, known_screens: tuple[str, ...],
+    raw: Any,
+    *,
+    known_screens: tuple[str, ...],
 ) -> tuple[list[WorkspacePreset], list[str]]:
     if not isinstance(raw, list):
         return [], ["Preset collection was corrupt and was ignored."]
@@ -140,7 +176,10 @@ def decode_presets(
 
 
 def save_preset(
-    raw_presets: Any, raw_preset: dict[str, Any], *, known_screens: tuple[str, ...],
+    raw_presets: Any,
+    raw_preset: dict[str, Any],
+    *,
+    known_screens: tuple[str, ...],
 ) -> tuple[list[dict[str, Any]], WorkspacePreset, list[str]]:
     presets, warnings = decode_presets(raw_presets, known_screens=known_screens)
     preset = sanitize_workspace(raw_preset, known_screens=known_screens)
@@ -154,14 +193,20 @@ def save_preset(
             break
     if not replaced:
         if len(presets) >= MAX_PRESETS:
-            raise UIError("RESOURCE_LIMIT", "Workspace preset limit reached.",
-                          "Delete an old preset before saving another.")
+            raise UIError(
+                "RESOURCE_LIMIT",
+                "Workspace preset limit reached.",
+                "Delete an old preset before saving another.",
+            )
         presets.append(preset)
     return [asdict(item) for item in presets], preset, warnings
 
 
 def delete_preset(
-    raw_presets: Any, preset_id: str, *, known_screens: tuple[str, ...],
+    raw_presets: Any,
+    preset_id: str,
+    *,
+    known_screens: tuple[str, ...],
 ) -> tuple[list[dict[str, Any]], bool, list[str]]:
     presets, warnings = decode_presets(raw_presets, known_screens=known_screens)
     remaining = [item for item in presets if item.id != preset_id]

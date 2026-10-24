@@ -77,14 +77,17 @@ def test_adjudication_can_be_reversed_without_losing_prior_decision(tmp_path: Pa
         reason="New source showed the adjudication used the wrong population",
     )
     assert reversed_result["previous_decision"] == "include"
-    assert _call(
-        facade,
-        "review.status",
-        project_id=project_id,
-        review_id="review",
-        record_id=record_id,
-        stage="title_abstract",
-    )["status"] == "conflict"
+    assert (
+        _call(
+            facade,
+            "review.status",
+            project_id=project_id,
+            review_id="review",
+            record_id=record_id,
+            stage="title_abstract",
+        )["status"]
+        == "conflict"
+    )
     history = _call(
         facade,
         "review.adjudication_history",

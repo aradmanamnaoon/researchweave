@@ -17,8 +17,14 @@ class JobSignals(QObject):
 
 
 class _Task(QRunnable):
-    def __init__(self, task_id: str, generation: int, stop: Event,
-                 callback: Callable[[Event], Any], signals: JobSignals) -> None:
+    def __init__(
+        self,
+        task_id: str,
+        generation: int,
+        stop: Event,
+        callback: Callable[[Event], Any],
+        signals: JobSignals,
+    ) -> None:
         super().__init__()
         self.task_id = task_id
         self.generation = generation
@@ -33,8 +39,9 @@ class _Task(QRunnable):
         try:
             result = self.callback(self.stop)
         except Exception:
-            self.signals.failed.emit(self.task_id, self.generation,
-                                     "Background task failed. Check the input and retry.")
+            self.signals.failed.emit(
+                self.task_id, self.generation, "Background task failed. Check the input and retry."
+            )
             return
         if self.stop.is_set():
             self.signals.cancelled.emit(self.task_id, self.generation)
@@ -105,8 +112,11 @@ class JobManager(QObject):
             self.cancel(task_id)
 
     def _current(self, task_id: str, generation: int) -> bool:
-        return (generation == self.generation and task_id in self.jobs
-                and self.jobs[task_id].generation == generation)
+        return (
+            generation == self.generation
+            and task_id in self.jobs
+            and self.jobs[task_id].generation == generation
+        )
 
     def _finished(self, task_id: str, generation: int, value: object) -> None:
         if self._current(task_id, generation):

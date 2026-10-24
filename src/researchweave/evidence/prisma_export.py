@@ -32,8 +32,9 @@ COUNTS = (
 )
 
 
-def prisma_export(accounting: Mapping[str, Any], *,
-                  format_name: str = "markdown") -> dict[str, Any]:
+def prisma_export(
+    accounting: Mapping[str, Any], *, format_name: str = "markdown"
+) -> dict[str, Any]:
     """Export only explicit counts and an integrity caveat from review.prisma.
 
     CSV is designed for automated review of exported counts. Mermaid is a
@@ -44,8 +45,11 @@ def prisma_export(accounting: Mapping[str, Any], *,
     require(isinstance(review_id, str) and bool(review_id), "Missing persisted review identity")
     for key, _ in COUNTS:
         value = accounting.get(key)
-        require(type(value) is int and value >= 0, f"Invalid persisted PRISMA count: {key}",
-                "INTEGRITY_FAILURE")
+        require(
+            type(value) is int and value >= 0,
+            f"Invalid persisted PRISMA count: {key}",
+            "INTEGRITY_FAILURE",
+        )
     complete = accounting.get("complete_prisma_2020") is True
     lines: list[str]
     if format_name == "csv":
@@ -58,35 +62,58 @@ def prisma_export(accounting: Mapping[str, Any], *,
     elif format_name == "mermaid":
         # Static node descriptions prevent accidental Markdown/Mermaid injection
         # through imported research names and arbitrary user metadata.
-        lines = ["flowchart TD",
-                 f"  A[\"Records identified: {accounting['records_identified']}\"]",
-                 f"  B[\"Duplicates removed: {accounting['duplicates_removed']}\"]",
-                 f"  C[\"Records screened: {accounting['records_screened_started']}\"]",
-                 f"  D[\"Title or abstract exclusions: {accounting['records_excluded_title']}\"]",
-                 f"  E[\"Reports sought: {accounting['reports_sought']}\"]",
-                 f"  F[\"Not retrieved: {accounting['reports_not_retrieved']}\"]",
-                 f"  G[\"Reports assessed: {accounting['reports_assessed']}\"]",
-                 f"  H[\"Full text exclusions: {accounting['reports_excluded_full_text']}\"]",
-                 f"  I[\"Reports included: {accounting['reports_included']}\"]",
-                 f"  J[\"Distinct studies included: {accounting['studies_included']}\"]",
-                 "  A --> B", "  A --> C", "  C --> D", "  C --> E",
-                 "  E --> F", "  E --> G", "  G --> H", "  G --> I", "  I --> J"]
+        lines = [
+            "flowchart TD",
+            f'  A["Records identified: {accounting["records_identified"]}"]',
+            f'  B["Duplicates removed: {accounting["duplicates_removed"]}"]',
+            f'  C["Records screened: {accounting["records_screened_started"]}"]',
+            f'  D["Title or abstract exclusions: {accounting["records_excluded_title"]}"]',
+            f'  E["Reports sought: {accounting["reports_sought"]}"]',
+            f'  F["Not retrieved: {accounting["reports_not_retrieved"]}"]',
+            f'  G["Reports assessed: {accounting["reports_assessed"]}"]',
+            f'  H["Full text exclusions: {accounting["reports_excluded_full_text"]}"]',
+            f'  I["Reports included: {accounting["reports_included"]}"]',
+            f'  J["Distinct studies included: {accounting["studies_included"]}"]',
+            "  A --> B",
+            "  A --> C",
+            "  C --> D",
+            "  C --> E",
+            "  E --> F",
+            "  E --> G",
+            "  G --> H",
+            "  G --> I",
+            "  I --> J",
+        ]
         if not complete:
-            lines.append("  K[\"INCOMPLETE: counts require reconciliation\"]")
+            lines.append('  K["INCOMPLETE: counts require reconciliation"]')
             lines.append("  J --> K")
         result = "\n".join(lines) + "\n"
     else:
-        lines = ["# PRISMA 2020 event accounting", "", f"Review ID: `{review_id}`", "",
-                 "Status: reconciled" if complete else "Status: INCOMPLETE — human review required",
-                 "",
-                 "| Persisted measurement | Count |", "| --- | ---: |"]
+        lines = [
+            "# PRISMA 2020 event accounting",
+            "",
+            f"Review ID: `{review_id}`",
+            "",
+            "Status: reconciled" if complete else "Status: INCOMPLETE — human review required",
+            "",
+            "| Persisted measurement | Count |",
+            "| --- | ---: |",
+        ]
         lines += [f"| {description} | {accounting[key]} |" for key, description in COUNTS]
-        lines += ["", "These values are derived from recorded ResearchWeave screening events.",
-                  "This export is a diagnostic PRISMA summary and does not certify methodology."]
+        lines += [
+            "",
+            "These values are derived from recorded ResearchWeave screening events.",
+            "This export is a diagnostic PRISMA summary and does not certify methodology.",
+        ]
         if not complete:
-            lines.append("Unresolved decisions, missing retrievals or source reconciliation "
-                         "must be fixed.")
+            lines.append(
+                "Unresolved decisions, missing retrievals or source reconciliation must be fixed."
+            )
         result = "\n".join(lines) + "\n"
-    return {"review_id": review_id, "format": format_name, "text": result,
-            "complete_prisma_2020": complete,
-            "warning": "" if complete else "Persisted PRISMA accounting is incomplete."}
+    return {
+        "review_id": review_id,
+        "format": format_name,
+        "text": result,
+        "complete_prisma_2020": complete,
+        "warning": "" if complete else "Persisted PRISMA accounting is incomplete.",
+    }

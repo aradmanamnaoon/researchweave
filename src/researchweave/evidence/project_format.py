@@ -25,19 +25,34 @@ FIXED_TIME = (2020, 1, 1, 0, 0, 0)
 
 def _valid_name(name: str) -> None:
     path = PurePosixPath(name)
-    require(name != "" and not name.endswith("/") and "\\" not in name and
-            not name.startswith("/") and ":" not in name and
-            all(part not in {"", ".", ".."} for part in name.split("/")) and
-            not any(ord(c) < 32 for c in name),
-            f"Unsafe archive entry: {name!r}", "UNTRUSTED_CONTENT")
+    require(
+        name != ""
+        and not name.endswith("/")
+        and "\\" not in name
+        and not name.startswith("/")
+        and ":" not in name
+        and all(part not in {"", ".", ".."} for part in name.split("/"))
+        and not any(ord(c) < 32 for c in name),
+        f"Unsafe archive entry: {name!r}",
+        "UNTRUSTED_CONTENT",
+    )
     require(str(path) == name, "Noncanonical archive path", "UNTRUSTED_CONTENT")
-    require(name == "manifest.json" or name == "README.txt" or name == "schema.json" or
-            name == "data/project.sqlite" or
-            (len(path.parts) == 3 and path.parts[0] == "objects" and
-             len(path.parts[1]) == 2 and len(path.parts[2]) == 64 and
-             path.parts[2].startswith(path.parts[1]) and
-             all(char in "0123456789abcdef" for char in path.parts[2])),
-            f"Unsupported archive location: {name}", "UNTRUSTED_CONTENT")
+    require(
+        name == "manifest.json"
+        or name == "README.txt"
+        or name == "schema.json"
+        or name == "data/project.sqlite"
+        or (
+            len(path.parts) == 3
+            and path.parts[0] == "objects"
+            and len(path.parts[1]) == 2
+            and len(path.parts[2]) == 64
+            and path.parts[2].startswith(path.parts[1])
+            and all(char in "0123456789abcdef" for char in path.parts[2])
+        ),
+        f"Unsupported archive location: {name}",
+        "UNTRUSTED_CONTENT",
+    )
 
 
 def _zipinfo(name: str) -> zipfile.ZipInfo:
@@ -96,8 +111,9 @@ def archive_project(store: ProjectStore, destination: Path) -> dict[str, Any]:
     staged_db: Path | None = None
     staged_archive: Path | None = None
     try:
-        with tempfile.NamedTemporaryFile(prefix="rw-db-", suffix=".sqlite", delete=False,
-                                         dir=store.root) as stream:
+        with tempfile.NamedTemporaryFile(
+            prefix="rw-db-", suffix=".sqlite", delete=False, dir=store.root
+        ) as stream:
             staged_db = Path(stream.name)
         store.backup_database(staged_db)
         files: dict[str, Path] = {"data/project.sqlite": staged_db}
@@ -108,32 +124,50 @@ def archive_project(store: ProjectStore, destination: Path) -> dict[str, Any]:
         inventory: list[dict[str, Any]] = []
         for name, file in sorted(files.items()):
             _valid_name(name)
-            require(file.is_file() and not file.is_symlink(),
-                    f"Object path is missing/unsafe: {name}", "INTEGRITY_FAILURE")
+            require(
+                file.is_file() and not file.is_symlink(),
+                f"Object path is missing/unsafe: {name}",
+                "INTEGRITY_FAILURE",
+            )
             digest, size = _hash_file(file)
             require(size <= MAX_MEMBER_BYTES, "Object too large", "RESOURCE_LIMIT")
             if name.startswith("objects/"):
-                require(digest == Path(name).name, "Object changed after audit",
-                        "INTEGRITY_FAILURE")
+                require(
+                    digest == Path(name).name, "Object changed after audit", "INTEGRITY_FAILURE"
+                )
             inventory.append({"path": name, "sha256": digest, "size": size})
         schema_bytes = _schema_descriptor(store)
         require(len(schema_bytes) <= 1024 * 1024, "Schema descriptor too large", "RESOURCE_LIMIT")
         inventory.append(
             {"path": "schema.json", "sha256": sha256(schema_bytes), "size": len(schema_bytes)}
         )
-        manifest = {"format": "researchweave-rwproj", "version": ARCHIVE_VERSION,
-                    "reader_schema": SCHEMA_VERSION, "project_id": store.info().id,
-                    "project_revision": store.info().revision, "objects": inventory,
-                    "encryption": "none", "privacy": store.info().privacy}
+        manifest = {
+            "format": "researchweave-rwproj",
+            "version": ARCHIVE_VERSION,
+            "reader_schema": SCHEMA_VERSION,
+            "project_id": store.info().id,
+            "project_revision": store.info().revision,
+            "objects": inventory,
+            "encryption": "none",
+            "privacy": store.info().privacy,
+        }
         manifest_bytes = (canonical_json(manifest) + "\n").encode("utf-8")
-        readme = (b"ResearchWeave native project archive.\n"
-                  b"Contains potentially private research content. Not encrypted.\n"
-                  b"Inspect manifest.json and SHA-256 checksums before opening.\n")
-        with tempfile.NamedTemporaryFile(prefix=".rw-export-", suffix=".tmp",
-                                         dir=destination.parent, delete=False) as stream:
+        readme = (
+            b"ResearchWeave native project archive.\n"
+            b"Contains potentially private research content. Not encrypted.\n"
+            b"Inspect manifest.json and SHA-256 checksums before opening.\n"
+        )
+        with tempfile.NamedTemporaryFile(
+            prefix=".rw-export-", suffix=".tmp", dir=destination.parent, delete=False
+        ) as stream:
             staged_archive = Path(stream.name)
-        with zipfile.ZipFile(staged_archive, mode="w", allowZip64=True,
-                             compression=zipfile.ZIP_DEFLATED, compresslevel=6) as archive:
+        with zipfile.ZipFile(
+            staged_archive,
+            mode="w",
+            allowZip64=True,
+            compression=zipfile.ZIP_DEFLATED,
+            compresslevel=6,
+        ) as archive:
             for name, data in (
                 ("manifest.json", manifest_bytes),
                 ("README.txt", readme),
@@ -143,17 +177,25 @@ def archive_project(store: ProjectStore, destination: Path) -> dict[str, Any]:
             for name, file in sorted(files.items()):
                 with file.open("rb") as source, archive.open(_zipinfo(name), "w") as target:
                     shutil.copyfileobj(source, target, length=1024 * 1024)
-        require(staged_archive.stat().st_size <= MAX_ARCHIVE_BYTES,
-                "Archive exceeds size limit", "RESOURCE_LIMIT")
+        require(
+            staged_archive.stat().st_size <= MAX_ARCHIVE_BYTES,
+            "Archive exceeds size limit",
+            "RESOURCE_LIMIT",
+        )
         verify_archive(staged_archive)
         # Atomic only when destination is absent and same filesystem. No pre-existing overwrite.
         if destination.exists():
-            raise EvidenceError("CONFLICT", "Archive appeared during export",
-                                "Choose a new destination filename.")
+            raise EvidenceError(
+                "CONFLICT", "Archive appeared during export", "Choose a new destination filename."
+            )
         os.replace(staged_archive, destination)
-        return {"archive": str(destination), "manifest_sha256": sha256(manifest_bytes),
-                "version": ARCHIVE_VERSION, "files": len(inventory),
-                "bytes": destination.stat().st_size}
+        return {
+            "archive": str(destination),
+            "manifest_sha256": sha256(manifest_bytes),
+            "version": ARCHIVE_VERSION,
+            "files": len(inventory),
+            "bytes": destination.stat().st_size,
+        }
     finally:
         if staged_db is not None:
             staged_db.unlink(missing_ok=True)
@@ -164,8 +206,7 @@ def archive_project(store: ProjectStore, destination: Path) -> dict[str, Any]:
 def verify_archive(archive_path: Path) -> dict[str, Any]:
     """Read and authenticate every payload, with no destination writes."""
     require(archive_path.is_file(), "Archive does not exist", "NOT_FOUND")
-    require(archive_path.stat().st_size <= MAX_ARCHIVE_BYTES,
-            "Archive too large", "RESOURCE_LIMIT")
+    require(archive_path.stat().st_size <= MAX_ARCHIVE_BYTES, "Archive too large", "RESOURCE_LIMIT")
     try:
         with zipfile.ZipFile(archive_path, "r") as archive:
             entries = archive.infolist()
@@ -175,36 +216,61 @@ def verify_archive(archive_path: Path) -> dict[str, Any]:
             for info in entries:
                 _valid_name(info.filename)
                 folded = info.filename.casefold()
-                require(folded not in normalized, "Duplicate/colliding archive member",
-                        "UNTRUSTED_CONTENT")
+                require(
+                    folded not in normalized,
+                    "Duplicate/colliding archive member",
+                    "UNTRUSTED_CONTENT",
+                )
                 normalized.add(folded)
                 mode = info.external_attr >> 16
-                require(not stat.S_ISLNK(mode) and not info.is_dir(),
-                        "Archive contains link/directory", "UNTRUSTED_CONTENT")
+                require(
+                    not stat.S_ISLNK(mode) and not info.is_dir(),
+                    "Archive contains link/directory",
+                    "UNTRUSTED_CONTENT",
+                )
                 require(info.file_size <= MAX_MEMBER_BYTES, "Member too large", "RESOURCE_LIMIT")
-                require(info.compress_size > 0 or info.file_size == 0,
-                        "Invalid compression size", "RESOURCE_LIMIT")
-                require(info.file_size <= max(1, info.compress_size) * MAX_RATIO,
-                        "Suspicious compression ratio", "RESOURCE_LIMIT")
+                require(
+                    info.compress_size > 0 or info.file_size == 0,
+                    "Invalid compression size",
+                    "RESOURCE_LIMIT",
+                )
+                require(
+                    info.file_size <= max(1, info.compress_size) * MAX_RATIO,
+                    "Suspicious compression ratio",
+                    "RESOURCE_LIMIT",
+                )
                 total += info.file_size
-                require(total <= MAX_ARCHIVE_BYTES, "Expanded archive too large",
-                        "RESOURCE_LIMIT")
-            require("manifest.json" in normalized and "schema.json" in normalized and
-                    "data/project.sqlite" in normalized,
-                    "Archive misses required project files", "INTEGRITY_FAILURE")
+                require(total <= MAX_ARCHIVE_BYTES, "Expanded archive too large", "RESOURCE_LIMIT")
+            require(
+                "manifest.json" in normalized
+                and "schema.json" in normalized
+                and "data/project.sqlite" in normalized,
+                "Archive misses required project files",
+                "INTEGRITY_FAILURE",
+            )
             manifest_bytes = archive.read("manifest.json")
             require(len(manifest_bytes) <= 1024 * 1024, "Manifest too large", "RESOURCE_LIMIT")
             manifest = json.loads(manifest_bytes)
-            require(isinstance(manifest, dict) and manifest.get("format") ==
-                    "researchweave-rwproj", "Unknown archive format", "SCHEMA_MISMATCH")
-            require(manifest.get("version") == ARCHIVE_VERSION and
-                    manifest.get("reader_schema") == SCHEMA_VERSION,
-                    "Unsupported project archive version", "SCHEMA_MISMATCH")
-            require(manifest.get("encryption") == "none", "Encrypted archive unsupported",
-                    "UNSUPPORTED_FORMAT")
+            require(
+                isinstance(manifest, dict) and manifest.get("format") == "researchweave-rwproj",
+                "Unknown archive format",
+                "SCHEMA_MISMATCH",
+            )
+            require(
+                manifest.get("version") == ARCHIVE_VERSION
+                and manifest.get("reader_schema") == SCHEMA_VERSION,
+                "Unsupported project archive version",
+                "SCHEMA_MISMATCH",
+            )
+            require(
+                manifest.get("encryption") == "none",
+                "Encrypted archive unsupported",
+                "UNSUPPORTED_FORMAT",
+            )
             schema_bytes = archive.read("schema.json")
-            require(len(schema_bytes) <= 1024 * 1024, "Schema descriptor too large",
-                    "RESOURCE_LIMIT")
+            require(
+                len(schema_bytes) <= 1024 * 1024, "Schema descriptor too large", "RESOURCE_LIMIT"
+            )
             schema = json.loads(schema_bytes)
             require(
                 isinstance(schema, dict)
@@ -217,46 +283,77 @@ def verify_archive(archive_path: Path) -> dict[str, Any]:
                 "SCHEMA_MISMATCH",
             )
             inventory = manifest.get("objects")
-            require(isinstance(inventory, list), "Invalid archive inventory",
-                    "INTEGRITY_FAILURE")
+            require(isinstance(inventory, list), "Invalid archive inventory", "INTEGRITY_FAILURE")
             expected: set[str] = set()
             for item in inventory:
                 require(isinstance(item, dict), "Invalid inventory entry", "INTEGRITY_FAILURE")
                 name = item.get("path")
                 digest = item.get("sha256")
                 size = item.get("size")
-                require(isinstance(name, str) and isinstance(digest, str) and
-                        isinstance(size, int) and size >= 0, "Malformed checksum entry",
-                        "INTEGRITY_FAILURE")
+                require(
+                    isinstance(name, str)
+                    and isinstance(digest, str)
+                    and isinstance(size, int)
+                    and size >= 0,
+                    "Malformed checksum entry",
+                    "INTEGRITY_FAILURE",
+                )
                 _valid_name(name)
-                require(name != "manifest.json" and name != "README.txt" and
-                        name not in expected, "Duplicate manifest entry", "INTEGRITY_FAILURE")
+                require(
+                    name != "manifest.json" and name != "README.txt" and name not in expected,
+                    "Duplicate manifest entry",
+                    "INTEGRITY_FAILURE",
+                )
                 expected.add(name)
-                require(name.casefold() in normalized, "Missing file named in manifest",
-                        "INTEGRITY_FAILURE")
+                require(
+                    name.casefold() in normalized,
+                    "Missing file named in manifest",
+                    "INTEGRITY_FAILURE",
+                )
                 with archive.open(name) as stream:
                     hasher = hashlib.sha256()
                     count = 0
                     for chunk in iter(lambda: stream.read(1024 * 1024), b""):
                         hasher.update(chunk)
                         count += len(chunk)
-                    require(hasher.hexdigest() == digest and count == size,
-                            "Archive checksum mismatch", "INTEGRITY_FAILURE")
-            require("data/project.sqlite" in expected, "Missing database checksum",
-                    "INTEGRITY_FAILURE")
-            require("schema.json" in expected, "Missing schema descriptor checksum",
-                    "INTEGRITY_FAILURE")
-            require(normalized - {"manifest.json", "readme.txt"} ==
-                    {x.casefold() for x in expected}, "Unlisted archive payloads",
-                    "UNTRUSTED_CONTENT")
-            return {"ok": True, "project_id": manifest["project_id"],
-                    "project_revision": manifest["project_revision"],
-                    "manifest_sha256": sha256(manifest_bytes), "files": len(inventory),
-                    "expanded_bytes": total}
-    except (zipfile.BadZipFile, UnicodeError, KeyError, ValueError, OSError,
-            RuntimeError, TypeError) as exc:
-        raise EvidenceError("INTEGRITY_FAILURE", "Archive validation failed",
-                            "Use an intact .rwproj exported by ResearchWeave.") from exc
+                    require(
+                        hasher.hexdigest() == digest and count == size,
+                        "Archive checksum mismatch",
+                        "INTEGRITY_FAILURE",
+                    )
+            require(
+                "data/project.sqlite" in expected, "Missing database checksum", "INTEGRITY_FAILURE"
+            )
+            require(
+                "schema.json" in expected, "Missing schema descriptor checksum", "INTEGRITY_FAILURE"
+            )
+            require(
+                normalized - {"manifest.json", "readme.txt"} == {x.casefold() for x in expected},
+                "Unlisted archive payloads",
+                "UNTRUSTED_CONTENT",
+            )
+            return {
+                "ok": True,
+                "project_id": manifest["project_id"],
+                "project_revision": manifest["project_revision"],
+                "manifest_sha256": sha256(manifest_bytes),
+                "files": len(inventory),
+                "expanded_bytes": total,
+            }
+    except (
+        zipfile.BadZipFile,
+        UnicodeError,
+        KeyError,
+        ValueError,
+        OSError,
+        RuntimeError,
+        TypeError,
+    ) as exc:
+        raise EvidenceError(
+            "INTEGRITY_FAILURE",
+            "Archive validation failed",
+            "Use an intact .rwproj exported by ResearchWeave.",
+        ) from exc
 
 
 def restore_archive(archive_path: Path, destination: Path) -> dict[str, Any]:
@@ -278,16 +375,21 @@ def restore_archive(archive_path: Path, destination: Path) -> dict[str, Any]:
                     shutil.copyfileobj(source, stream, length=1024 * 1024)
         with ProjectStore(staging) as project:
             audit = project.audit()
-            require(audit["ok"], "Restored project's integrity audit failed",
-                    "INTEGRITY_FAILURE")
-            require(project.info().id == verified["project_id"] and
-                    project.info().revision == verified["project_revision"],
-                    "Project identity/revision differs from manifest", "INTEGRITY_FAILURE")
+            require(audit["ok"], "Restored project's integrity audit failed", "INTEGRITY_FAILURE")
+            require(
+                project.info().id == verified["project_id"]
+                and project.info().revision == verified["project_revision"],
+                "Project identity/revision differs from manifest",
+                "INTEGRITY_FAILURE",
+            )
         require(not destination.exists(), "Restore destination appeared", "CONFLICT")
         os.replace(staging, destination)
-        return {"destination": str(destination), "project_id": verified["project_id"],
-                "manifest_sha256": verified["manifest_sha256"],
-                "revision": verified["project_revision"]}
+        return {
+            "destination": str(destination),
+            "project_id": verified["project_id"],
+            "manifest_sha256": verified["manifest_sha256"],
+            "revision": verified["project_revision"],
+        }
     finally:
         if staging.exists():
             shutil.rmtree(staging)

@@ -119,7 +119,8 @@ def test_project_store_rejects_bad_paths_corrupt_json_and_stale_writes(tmp_path:
     ],
 )
 def test_preference_validation_rejects_invalid_state(
-    changes: dict[str, Any], code: str,
+    changes: dict[str, Any],
+    code: str,
 ) -> None:
     preferences = replace(Preferences(), **changes)
     assert_error(lambda: PreferenceStore.validate(preferences), code)
@@ -157,14 +158,16 @@ def test_recovery_rejects_bad_targets_stale_corrupt_and_mismatched_hash(tmp_path
     path.write_text("{broken", encoding="utf-8")
     assert_error(lambda: journal.inspect(project.id, "notebook"), "INTEGRITY_FAILURE")
     path.write_text(
-        json.dumps({
-            "schema_version": 1,
-            "project_id": project.id,
-            "field": "notebook",
-            "base_revision": 1,
-            "text": "recover me",
-            "sha256": "0" * 64,
-        }),
+        json.dumps(
+            {
+                "schema_version": 1,
+                "project_id": project.id,
+                "field": "notebook",
+                "base_revision": 1,
+                "text": "recover me",
+                "sha256": "0" * 64,
+            }
+        ),
         encoding="utf-8",
     )
     assert_error(lambda: journal.inspect(project.id, "notebook"), "INTEGRITY_FAILURE")
@@ -310,9 +313,7 @@ def test_extraction_value_validation_covers_all_supported_types_and_failures() -
 
 def test_variable_analysis_provider_integration_and_notification_denials() -> None:
     project = basic_project()
-    project.datasets.append(
-        Dataset(id=new_id(), name="Synthetic", columns=["x"], rows=[["1"]])
-    )
+    project.datasets.append(Dataset(id=new_id(), name="Synthetic", columns=["x"], rows=[["1"]]))
     dataset_id = project.datasets[0].id
     assert_error(
         lambda: workflows.set_variable_metadata(

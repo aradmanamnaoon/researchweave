@@ -58,7 +58,9 @@ def test_collection_export_exposes_alias_provenance(tmp_path: Path) -> None:
         library = LibraryService(store)
         imported = library.import_bibliography(
             b"@article{a,title={Same},author={Doe, Ada},year={2024}}\n"
-            b"@article{b,title={Same},author={Doe, Ada},year={2024}}", "bibtex")
+            b"@article{b,title={Same},author={Doe, Ada},year={2024}}",
+            "bibtex",
+        )
         canonical, alias = [record["id"] for record in imported["references"]]
         library.merge_references(canonical, alias, "Reviewer confirmed duplicate")
         service = CollectionService(store)

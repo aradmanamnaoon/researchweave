@@ -42,8 +42,6 @@ def test_workspace_preset_sanitizes_geometry_and_corrupt_state() -> None:
     decoded, decode_warnings = decode_presets(raw, known_screens=SCREENS)
     assert not decode_warnings
     assert decoded[0].active_screen == "Data View"
-    remaining, deleted, _ = delete_preset(
-        raw, saved.id, known_screens=SCREENS
-    )
+    remaining, deleted, _ = delete_preset(raw, saved.id, known_screens=SCREENS)
     assert deleted is True
     assert remaining == []

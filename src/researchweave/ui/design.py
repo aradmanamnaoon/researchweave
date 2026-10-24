@@ -23,12 +23,15 @@ class Colors:
 
 
 THEMES = {
-    "light": Colors("#F7F8FB", "#FFFFFF", "#182339", "#445269", "#315FAC",
-                    "#DCE3ED", "#235BC4", "#A9243E"),
-    "dark": Colors("#111823", "#1A2635", "#EFF4FB", "#B9C9DF", "#8EB5FF",
-                   "#39485D", "#BDD6FF", "#FF9FAD"),
-    "contrast": Colors("#000000", "#111111", "#FFFFFF", "#FFFFFF", "#FFFF00",
-                       "#FFFFFF", "#00FFFF", "#FF8899"),
+    "light": Colors(
+        "#F7F8FB", "#FFFFFF", "#182339", "#445269", "#315FAC", "#DCE3ED", "#235BC4", "#A9243E"
+    ),
+    "dark": Colors(
+        "#111823", "#1A2635", "#EFF4FB", "#B9C9DF", "#8EB5FF", "#39485D", "#BDD6FF", "#FF9FAD"
+    ),
+    "contrast": Colors(
+        "#000000", "#111111", "#FFFFFF", "#FFFFFF", "#FFFF00", "#FFFFFF", "#00FFFF", "#FF8899"
+    ),
 }
 
 
@@ -44,8 +47,10 @@ def apply_theme(app: QApplication, preferences: Preferences) -> None:
     palette.setColor(QPalette.ColorRole.Text, QColor(color.text))
     palette.setColor(QPalette.ColorRole.ButtonText, QColor(color.text))
     palette.setColor(QPalette.ColorRole.Highlight, QColor(color.accent))
-    palette.setColor(QPalette.ColorRole.HighlightedText,
-                     QColor("#000000" if preferences.theme == "contrast" else "#FFFFFF"))
+    palette.setColor(
+        QPalette.ColorRole.HighlightedText,
+        QColor("#000000" if preferences.theme == "contrast" else "#FFFFFF"),
+    )
     palette.setColor(QPalette.ColorRole.PlaceholderText, QColor(color.muted))
     app.setPalette(palette)
     font = QFont("Segoe UI")

@@ -169,9 +169,10 @@ def test_desktop_analysis_bridge_runs_production_scientific_code(tmp_path: Path)
         assert record["estimates"]["mean"] == 2.5
         assert record["estimates"]["n_valid"] == 4
         assert record["uncertainty"]["mean_confidence_interval_95"] is not None
-        assert record["provenance"]["staged_csv_sha256"] == record["provenance"][
-            "analysis_source_sha256"
-        ]
+        assert (
+            record["provenance"]["staged_csv_sha256"]
+            == record["provenance"]["analysis_source_sha256"]
+        )
         assert not list(services.paths.imports.glob("ui-analysis-*.csv"))
     finally:
         services.close()
@@ -194,5 +195,64 @@ def test_desktop_gateway_routes_human_mutations_through_shared_audit(tmp_path: P
         assert event["operation"] == "ui.project.create"
         assert event["actor"] == "desktop-user"
         assert event["effect"] == "local-write"
+    finally:
+        services.close()
+
+
+def test_ai_retrieval_and_durable_agent_run_through_shared_bus(tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    try:
+        project_id = uuid4()
+        project_text = str(project_id)
+        privacy = services.bus.dispatch(
+            request(
+                "privacy.classify",
+                project_id,
+                {"project_class": "restricted", "provider_local": False},
+            )
+        )
+        assert privacy["status"] == "ok"
+        assert privacy["data"]["may_leave_device"] is False
+
+        ingest = request(
+            "retrieval.ingest",
+            project_id,
+            {"source_id": "synthetic-source", "content": "Synthetic evidence about memory."},
+        )
+        assert approved(services, ingest)["status"] == "ok"
+
+        plan = request(
+            "agent.v2.plan",
+            project_id,
+            {
+                "project_id": project_text,
+                "steps": [
+                    {
+                        "step_id": "search",
+                        "operation": "retrieval.query",
+                        "arguments": {"query": "memory", "limit": 2},
+                    }
+                ],
+            },
+        )
+        planned = approved(services, plan)
+        assert planned["status"] == "ok"
+        plan_id = planned["data"]["plan_id"]
+
+        execute = request(
+            "agent.v2.execute",
+            project_id,
+            {"plan_id": plan_id, "step_id": "search"},
+        )
+        executed = approved(services, execute)
+        assert executed["status"] == "ok"
+        assert executed["data"]["hits"][0]["source_id"] == "synthetic-source"
+        operations = [event["operation"] for event in services.audit.events()]
+        assert operations[-4:] == [
+            "privacy.classify",
+            "retrieval.ingest",
+            "agent.v2.plan",
+            "agent.v2.execute",
+        ]
     finally:
         services.close()

@@ -300,9 +300,7 @@ def _load_review_packet(path: Path) -> tuple[dict[str, Any], dict[str, Any], str
         )
         files = manifest.get("files")
         require(isinstance(files, list) and len(files) <= 20, "Invalid review packet inventory")
-        inventory_names = {
-            item.get("path") for item in files if isinstance(item, dict)
-        }
+        inventory_names = {item.get("path") for item in files if isinstance(item, dict)}
         require(
             inventory_names == set(names) - {"manifest.json"},
             "Review packet inventory does not match archive members",
@@ -460,8 +458,7 @@ def export_review_packet(
     ]
     prisma = ReviewService(store).prisma(review_id)
     explicit_fields = {
-        value.casefold().replace("-", "_").replace(" ", "_")
-        for value in (redact_fields or [])
+        value.casefold().replace("-", "_").replace(" ", "_") for value in (redact_fields or [])
     }
     require(
         len(explicit_fields) == len(redact_fields or []),
@@ -645,10 +642,16 @@ def merge_review_packet(
         if prior is not None:
             prior_conflicts = json.loads(prior["conflicts_json"])
             prior_warnings = json.loads(prior["warnings_json"])
-            require(isinstance(prior_conflicts, list), "Stored packet conflicts are corrupt",
-                    "INTEGRITY_FAILURE")
-            require(isinstance(prior_warnings, list), "Stored packet warnings are corrupt",
-                    "INTEGRITY_FAILURE")
+            require(
+                isinstance(prior_conflicts, list),
+                "Stored packet conflicts are corrupt",
+                "INTEGRITY_FAILURE",
+            )
+            require(
+                isinstance(prior_warnings, list),
+                "Stored packet warnings are corrupt",
+                "INTEGRITY_FAILURE",
+            )
             return {
                 "packet_sha256": packet_sha256,
                 "source_project_id": str(prior["source_project_id"]),
@@ -682,9 +685,15 @@ def merge_review_packet(
 
     conflicts: list[dict[str, Any]] = []
     warnings: list[dict[str, Any]] = []
-    counts = {"references_inserted": 0, "records_inserted": 0, "votes_inserted": 0,
-              "adjudications_inserted": 0, "extractions_inserted": 0,
-              "protocol_versions_inserted": 0, "skipped_identical": 0}
+    counts = {
+        "references_inserted": 0,
+        "records_inserted": 0,
+        "votes_inserted": 0,
+        "adjudications_inserted": 0,
+        "extractions_inserted": 0,
+        "protocol_versions_inserted": 0,
+        "skipped_identical": 0,
+    }
 
     def persist(conn: Any) -> None:
         conn.execute(
@@ -723,9 +732,7 @@ def merge_review_packet(
             mapped = origin_lookup("reference", source_id)
             if mapped is not None:
                 require(
-                    conn.execute(
-                        "SELECT 1 FROM reference WHERE id=?", (mapped,)
-                    ).fetchone()
+                    conn.execute("SELECT 1 FROM reference WHERE id=?", (mapped,)).fetchone()
                     is not None,
                     "Packet origin reference is missing",
                     "INTEGRITY_FAILURE",
@@ -751,21 +758,32 @@ def merge_review_packet(
                 }
                 if differences:
                     conflicts.append(
-                        {"entity": "reference", "source_id": source_id, "doi": doi,
-                         "differences": differences, "resolution": "kept_existing"}
+                        {
+                            "entity": "reference",
+                            "source_id": source_id,
+                            "doi": doi,
+                            "differences": differences,
+                            "resolution": "kept_existing",
+                        }
                     )
                 destination_id = str(existing["id"])
             elif len(candidates) > 1:
                 conflicts.append(
-                    {"entity": "reference", "source_id": source_id, "doi": doi,
-                     "resolution": "ambiguous_existing_match"}
+                    {
+                        "entity": "reference",
+                        "source_id": source_id,
+                        "doi": doi,
+                        "resolution": "ambiguous_existing_match",
+                    }
                 )
                 continue
             else:
                 destination_id = new_id()
-                status = row.get("status") if row.get("status") in {
-                    "unverified", "verified", "mismatch", "unknown"
-                } else "unverified"
+                status = (
+                    row.get("status")
+                    if row.get("status") in {"unverified", "verified", "mismatch", "unknown"}
+                    else "unverified"
+                )
                 conn.execute(
                     "INSERT INTO reference VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                     (
@@ -793,8 +811,11 @@ def merge_review_packet(
             require(bool(source_id and source_reference_id), "Packet review record is incomplete")
             if source_reference_id not in reference_map:
                 conflicts.append(
-                    {"entity": "review_record", "source_id": source_id,
-                     "resolution": "reference_unresolved"}
+                    {
+                        "entity": "review_record",
+                        "source_id": source_id,
+                        "resolution": "reference_unresolved",
+                    }
                 )
                 continue
             mapped = origin_lookup("review_record", source_id)
@@ -815,13 +836,20 @@ def merge_review_packet(
                 }
                 if differences:
                     conflicts.append(
-                        {"entity": "review_record", "source_id": source_id,
-                         "differences": differences, "resolution": "kept_existing"}
+                        {
+                            "entity": "review_record",
+                            "source_id": source_id,
+                            "differences": differences,
+                            "resolution": "kept_existing",
+                        }
                     )
             else:
                 destination_id = new_id()
-                stage = row.get("stage") if row.get("stage") in {"title_abstract", "full_text"} \
+                stage = (
+                    row.get("stage")
+                    if row.get("stage") in {"title_abstract", "full_text"}
                     else "title_abstract"
+                )
                 conn.execute(
                     "INSERT INTO review_records VALUES (?,?,?,?,?)",
                     (
@@ -840,8 +868,11 @@ def merge_review_packet(
             source_record = str(row.get("record_id", ""))
             if source_record not in record_map:
                 conflicts.append(
-                    {"entity": "vote", "record_id": source_record,
-                     "resolution": "record_unresolved"}
+                    {
+                        "entity": "vote",
+                        "record_id": source_record,
+                        "resolution": "record_unresolved",
+                    }
                 )
                 continue
             vote_key = (
@@ -866,16 +897,24 @@ def merge_review_packet(
                 counts["skipped_identical"] += 1
             else:
                 conflicts.append(
-                    {"entity": "vote", "record_id": source_record, "reviewer": vote_key[2],
-                     "stage": vote_key[3], "resolution": "kept_existing"}
+                    {
+                        "entity": "vote",
+                        "record_id": source_record,
+                        "reviewer": vote_key[2],
+                        "stage": vote_key[3],
+                        "resolution": "kept_existing",
+                    }
                 )
 
         for row in adjudications:
             source_record = str(row.get("record_id", ""))
             if source_record not in record_map:
                 conflicts.append(
-                    {"entity": "adjudication", "record_id": source_record,
-                     "resolution": "record_unresolved"}
+                    {
+                        "entity": "adjudication",
+                        "record_id": source_record,
+                        "resolution": "record_unresolved",
+                    }
                 )
                 continue
             adjudication_key = (
@@ -904,9 +943,12 @@ def merge_review_packet(
                 counts["skipped_identical"] += 1
             else:
                 conflicts.append(
-                    {"entity": "adjudication", "record_id": source_record,
-                     "stage": adjudication_key[2],
-                     "resolution": "kept_existing"}
+                    {
+                        "entity": "adjudication",
+                        "record_id": source_record,
+                        "stage": adjudication_key[2],
+                        "resolution": "kept_existing",
+                    }
                 )
 
         for row in extractions:
@@ -914,8 +956,11 @@ def merge_review_packet(
             source_record = str(row.get("record_id", ""))
             if not source_id or source_record not in record_map:
                 conflicts.append(
-                    {"entity": "extraction", "source_id": source_id,
-                     "resolution": "record_unresolved"}
+                    {
+                        "entity": "extraction",
+                        "source_id": source_id,
+                        "resolution": "record_unresolved",
+                    }
                 )
                 continue
             mapped = origin_lookup("extraction", source_id)
@@ -926,8 +971,11 @@ def merge_review_packet(
             source_anchor = row.get("source_anchor")
             if source_anchor is not None:
                 warnings.append(
-                    {"entity": "extraction", "source_id": source_id,
-                     "warning": "source_anchor_omitted_from_packet"}
+                    {
+                        "entity": "extraction",
+                        "source_id": source_id,
+                        "warning": "source_anchor_omitted_from_packet",
+                    }
                 )
             conn.execute(
                 "INSERT INTO extractions VALUES (?,?,?,?,?,?,?,?)",
@@ -979,8 +1027,12 @@ def merge_review_packet(
                 counts["skipped_identical"] += 1
             else:
                 conflicts.append(
-                    {"entity": "protocol", "source_id": source_id, "version": version,
-                     "resolution": "kept_existing"}
+                    {
+                        "entity": "protocol",
+                        "source_id": source_id,
+                        "version": version,
+                        "resolution": "kept_existing",
+                    }
                 )
 
         conn.execute(

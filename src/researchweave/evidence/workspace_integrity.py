@@ -180,9 +180,7 @@ def scan_workspace(workspace_root: Path) -> dict[str, Any]:
     project_paths = [
         path
         for path in entries
-        if path.is_dir()
-        and not path.is_symlink()
-        and (path / "data" / "project.sqlite").is_file()
+        if path.is_dir() and not path.is_symlink() and (path / "data" / "project.sqlite").is_file()
     ]
     require(
         len(project_paths) <= MAX_PROJECTS,

@@ -16,8 +16,11 @@ MAX_SNAPSHOTS = 20
 def _snapshot_dir(store: ProjectStore) -> Path:
     directory = Path(store.root) / ".recovery"
     directory.mkdir(exist_ok=True)
-    require(directory.is_dir() and not directory.is_symlink(),
-            "Recovery directory is unsafe", "INTEGRITY_FAILURE")
+    require(
+        directory.is_dir() and not directory.is_symlink(),
+        "Recovery directory is unsafe",
+        "INTEGRITY_FAILURE",
+    )
     return directory
 
 
@@ -43,26 +46,33 @@ def list_recovery_snapshots(store: ProjectStore) -> list[dict[str, Any]]:
     directory = store.root / ".recovery"
     if not directory.exists():
         return []
-    require(directory.is_dir() and not directory.is_symlink(),
-            "Recovery directory is unsafe", "INTEGRITY_FAILURE")
+    require(
+        directory.is_dir() and not directory.is_symlink(),
+        "Recovery directory is unsafe",
+        "INTEGRITY_FAILURE",
+    )
     snapshots: list[dict[str, Any]] = []
     for path in sorted(directory.glob("*.rwproj")):
         try:
             verified = verify_archive(path)
-            snapshots.append({
-                "snapshot": path.name,
-                "ok": True,
-                "project_id": verified["project_id"],
-                "revision": verified["project_revision"],
-                "bytes": path.stat().st_size,
-            })
+            snapshots.append(
+                {
+                    "snapshot": path.name,
+                    "ok": True,
+                    "project_id": verified["project_id"],
+                    "revision": verified["project_revision"],
+                    "bytes": path.stat().st_size,
+                }
+            )
         except EvidenceError as exc:
-            snapshots.append({
-                "snapshot": path.name,
-                "ok": False,
-                "error": exc.to_dict(),
-                "bytes": path.stat().st_size,
-            })
+            snapshots.append(
+                {
+                    "snapshot": path.name,
+                    "ok": False,
+                    "error": exc.to_dict(),
+                    "bytes": path.stat().st_size,
+                }
+            )
     return snapshots
 
 
@@ -99,22 +109,28 @@ def recovery_journal(store: ProjectStore, *, after_revision: int | None = None) 
     }
 
 
-def recovery_status(store: ProjectStore, *, now: str | None = None,
-                    max_age_minutes: int = 15) -> dict[str, Any]:
+def recovery_status(
+    store: ProjectStore, *, now: str | None = None, max_age_minutes: int = 15
+) -> dict[str, Any]:
     """Tell a trusted host whether a recovery snapshot is due, without writing.
 
     Revision drift always makes a snapshot due. When the latest verified
     snapshot matches the current revision, age can request a refresh for
     defense-in-depth. This function never schedules or creates a snapshot.
     """
-    require(type(max_age_minutes) is int and 1 <= max_age_minutes <= 24 * 60 * 30,
-            "Recovery max age must be between 1 minute and 30 days")
+    require(
+        type(max_age_minutes) is int and 1 <= max_age_minutes <= 24 * 60 * 30,
+        "Recovery max age must be between 1 minute and 30 days",
+    )
     instant_text = now or datetime.now(UTC).isoformat()
     try:
         instant = datetime.fromisoformat(instant_text)
     except ValueError as exc:
-        raise EvidenceError("INVALID_INPUT", "Invalid recovery clock timestamp",
-                            "Use an ISO-8601 timestamp with timezone.") from exc
+        raise EvidenceError(
+            "INVALID_INPUT",
+            "Invalid recovery clock timestamp",
+            "Use an ISO-8601 timestamp with timezone.",
+        ) from exc
     require(instant.tzinfo is not None, "Recovery clock must include timezone")
     instant = instant.astimezone(UTC)
     snapshots = list_recovery_snapshots(store)
@@ -126,8 +142,9 @@ def recovery_status(store: ProjectStore, *, now: str | None = None,
     latest_modified: datetime | None = None
     if latest_path is not None:
         latest_modified = datetime.fromtimestamp(latest_path.stat().st_mtime, UTC)
-    age_minutes = ((instant - latest_modified).total_seconds() / 60.0
-                   if latest_modified is not None else None)
+    age_minutes = (
+        (instant - latest_modified).total_seconds() / 60.0 if latest_modified is not None else None
+    )
     revision_changed = latest_revision != current_revision
     age_due = age_minutes is not None and age_minutes >= max_age_minutes
     due = latest is None or revision_changed or age_due
@@ -175,6 +192,9 @@ def restore_recovery_snapshot(
     )
     path = store.root / ".recovery" / snapshot
     verified = verify_archive(path)
-    require(verified["project_id"] == store.info().id,
-            "Recovery snapshot belongs to another project", "CONFLICT")
+    require(
+        verified["project_id"] == store.info().id,
+        "Recovery snapshot belongs to another project",
+        "CONFLICT",
+    )
     return restore_archive(path, destination)

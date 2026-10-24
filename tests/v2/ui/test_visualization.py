@@ -25,15 +25,24 @@ from researchweave.ui.visualization import (
 
 def seeded(tmp_path: Path):
     facade = build_ui_facade(tmp_path)
-    project = facade.execute("ui.project.create", {
-        "title": "Chart experiment", "question": "Distribution?",
-        "study_type": "quantitative",
-    })
+    project = facade.execute(
+        "ui.project.create",
+        {
+            "title": "Chart experiment",
+            "question": "Distribution?",
+            "study_type": "quantitative",
+        },
+    )
     pid = project["data"]["project_id"]
-    dataset = facade.execute("ui.dataset.import", {
-        "project_id": pid, "expected_revision": 1, "name": "Synthetic",
-        "csv_text": "points\n1\n2\n2\n3\n\"\"\n4\n",
-    })
+    dataset = facade.execute(
+        "ui.dataset.import",
+        {
+            "project_id": pid,
+            "expected_revision": 1,
+            "name": "Synthetic",
+            "csv_text": 'points\n1\n2\n2\n3\n""\n4\n',
+        },
+    )
     assert dataset["status"] == "ok", dataset
     return facade, pid, dataset["data"]["dataset_id"]
 
@@ -55,8 +64,9 @@ def test_constant_and_missing_values_keep_counts() -> None:
 
 
 def test_svg_contains_accessible_labels_and_escapes(tmp_path: Path) -> None:
-    spec = histogram([1, 1, 2, 4], column="<points & units>", bins=4,
-                     source_label="Synthetic <> &", unit="m&n")
+    spec = histogram(
+        [1, 1, 2, 4], column="<points & units>", bins=4, source_label="Synthetic <> &", unit="m&n"
+    )
     svg = chart_svg(spec, width=900, height=480)
     assert "&lt;points &amp; units&gt;" in svg
     assert "Observation count" in svg
@@ -90,31 +100,57 @@ def test_chart_facade_and_qt_render(tmp_path: Path) -> None:
     if not isinstance(app, QApplication):
         app = QApplication([])
     facade, pid, dataset_id = seeded(tmp_path)
-    raw = facade.execute("ui.chart.histogram", {
-        "project_id": pid, "dataset_id": dataset_id, "column": "points", "bins": 3,
-    })
+    raw = facade.execute(
+        "ui.chart.histogram",
+        {
+            "project_id": pid,
+            "dataset_id": dataset_id,
+            "column": "points",
+            "bins": 3,
+        },
+    )
     assert raw["status"] == "ok", raw
     data = raw["data"]["chart"]
     assert data["n"] == 5
     assert data["missing_n"] == 1
     assert sum(item["count"] for item in data["accessibility_data"]) == 5
-    svg = facade.execute("ui.chart.svg", {
-        "project_id": pid, "dataset_id": dataset_id, "column": "points",
-        "width": 800, "height": 400,
-    })
+    svg = facade.execute(
+        "ui.chart.svg",
+        {
+            "project_id": pid,
+            "dataset_id": dataset_id,
+            "column": "points",
+            "width": 800,
+            "height": 400,
+        },
+    )
     assert svg["status"] == "ok", svg
     assert svg["data"]["format"] == "image/svg+xml"
-    bar = facade.execute("ui.chart.bar", {
-        "project_id": pid, "dataset_id": dataset_id, "column": "points",
-        "title": "Observed synthetic groups", "x_label": "Value", "y_label": "Count",
-    })
+    bar = facade.execute(
+        "ui.chart.bar",
+        {
+            "project_id": pid,
+            "dataset_id": dataset_id,
+            "column": "points",
+            "title": "Observed synthetic groups",
+            "x_label": "Value",
+            "y_label": "Count",
+        },
+    )
     assert bar["status"] == "ok", bar
     assert bar["data"]["chart"]["kind"] == "bar"
     assert bar["data"]["chart"]["title"] == "Observed synthetic groups"
-    png = facade.execute("ui.chart.png", {
-        "project_id": pid, "dataset_id": dataset_id, "column": "points",
-        "plot_type": "histogram", "width": 800, "height": 400,
-    })
+    png = facade.execute(
+        "ui.chart.png",
+        {
+            "project_id": pid,
+            "dataset_id": dataset_id,
+            "column": "points",
+            "plot_type": "histogram",
+            "width": 800,
+            "height": 400,
+        },
+    )
     assert png["status"] == "ok", png
     assert png["data"]["format"] == "image/png"
     assert bytes.fromhex(png["data"]["png_hex"]).startswith(b"\x89PNG")

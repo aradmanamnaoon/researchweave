@@ -127,15 +127,20 @@ def test_forest_interval_is_exported_and_bad_standard_errors_rejected(tmp_path: 
         low == pytest.approx(estimate - 1.96 * error)
         and high == pytest.approx(estimate + 1.96 * error)
         for low, estimate, high, error in zip(
-            data["ci_lower"], data["estimate"], data["ci_upper"],
-            [0.10, 0.12, 0.09, 0.11, 0.13, 0.10], strict=True
+            data["ci_lower"],
+            data["estimate"],
+            data["ci_upper"],
+            [0.10, 0.12, 0.09, 0.11, 0.13, 0.10],
+            strict=True,
         )
     )
     invalid = tmp_path / "bad.csv"
     invalid.write_text("effect,se,label\n1,0,trial\n", encoding="utf-8")
     with pytest.raises(AnalysisError, match="standard errors must be positive"):
         render_plot(
-            import_csv(invalid), x="effect", kind="forest",
+            import_csv(invalid),
+            x="effect",
+            kind="forest",
             options={"se_column": "se", "label_column": "label"},
             output=tmp_path / "bad.svg",
         )

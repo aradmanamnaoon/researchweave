@@ -22,8 +22,9 @@ def new_id() -> str:
 
 
 def canonical_json(value: Any) -> str:
-    return json.dumps(value, sort_keys=True, ensure_ascii=False, separators=(",", ":"),
-                      allow_nan=False)
+    return json.dumps(
+        value, sort_keys=True, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+    )
 
 
 def sha256(data: bytes) -> str:

@@ -52,9 +52,7 @@ def test_reference_exports_are_deterministic_and_do_not_invent_identifiers(
         assert bibtex["warnings"]
 
         csv_export = service.export_references("csv", reference_ids=ids)
-        rows = list(
-            csv.DictReader(io.StringIO(csv_export["bytes"].decode("utf-8-sig")))
-        )
+        rows = list(csv.DictReader(io.StringIO(csv_export["bytes"].decode("utf-8-sig"))))
         assert rows[0]["researchweave_id"] in ids
         assert {row["doi"] for row in rows} == {"10.1000/a", ""}
 

@@ -18,9 +18,7 @@ MAX_SNIPPET = 320
 
 @dataclass(frozen=True)
 class SearchHit:
-    kind: Literal[
-        "source", "annotation", "evidence", "claim", "manuscript", "notebook", "protocol"
-    ]
+    kind: Literal["source", "annotation", "evidence", "claim", "manuscript", "notebook", "protocol"]
     record_id: str
     title: str
     snippet: str
@@ -68,23 +66,26 @@ def search_project(
     categories: tuple[str, ...] | None = None,
 ) -> dict[str, object]:
     if not isinstance(query, str) or not query.strip() or len(query) > MAX_QUERY:
-        raise UIError("INVALID_INPUT", "Search requires 1–200 characters.",
-                      "Enter a shorter term or phrase.")
-    if (isinstance(limit, bool) or not isinstance(limit, int)
-            or not 1 <= limit <= MAX_RESULTS):
-        raise UIError("INVALID_INPUT", "Search page limit must be 1–500.",
-                      "Choose a smaller results page.")
+        raise UIError(
+            "INVALID_INPUT", "Search requires 1–200 characters.", "Enter a shorter term or phrase."
+        )
+    if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= MAX_RESULTS:
+        raise UIError(
+            "INVALID_INPUT", "Search page limit must be 1–500.", "Choose a smaller results page."
+        )
     if isinstance(offset, bool) or not isinstance(offset, int) or offset < 0:
-        raise UIError("INVALID_INPUT", "Search page offset must be nonnegative.",
-                      "Go back to the first page.")
-    permitted = {
-        "source", "annotation", "evidence", "claim", "manuscript", "notebook", "protocol"
-    }
+        raise UIError(
+            "INVALID_INPUT", "Search page offset must be nonnegative.", "Go back to the first page."
+        )
+    permitted = {"source", "annotation", "evidence", "claim", "manuscript", "notebook", "protocol"}
     if categories is None:
         categories = tuple(sorted(permitted))
     if not isinstance(categories, tuple) or any(name not in permitted for name in categories):
-        raise UIError("INVALID_INPUT", "Unknown research search category.",
-                      "Filter by source, annotation, manuscript, notebook or protocol.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Unknown research search category.",
+            "Filter by source, annotation, manuscript, notebook or protocol.",
+        )
     term = query.strip()
     hits: list[SearchHit] = []
     if "source" in categories:
@@ -92,44 +93,75 @@ def search_project(
             for segment, label in ((source.title, "title"), (source.text, "text")):
                 start = _matches(segment, term)
                 if start >= 0:
-                    hits.append(SearchHit(
-                        "source", source.id, source.title,
-                        _fragment(segment, start, len(term)), start,
-                        len(term), source.verified, source.id,
-                        f"{source.source_label} · {label}",
-                    ))
+                    hits.append(
+                        SearchHit(
+                            "source",
+                            source.id,
+                            source.title,
+                            _fragment(segment, start, len(term)),
+                            start,
+                            len(term),
+                            source.verified,
+                            source.id,
+                            f"{source.source_label} · {label}",
+                        )
+                    )
                     break
     if "annotation" in categories:
         for note in project.annotations:
             for segment in (note.quote, note.memo, note.code):
                 start = _matches(segment, term)
                 if start >= 0:
-                    hits.append(SearchHit(
-                        "annotation", note.id, f"Code: {note.code}",
-                        _fragment(segment, start, len(term)), start,
-                        len(term), False, note.source_id, "Coded source excerpt",
-                    ))
+                    hits.append(
+                        SearchHit(
+                            "annotation",
+                            note.id,
+                            f"Code: {note.code}",
+                            _fragment(segment, start, len(term)),
+                            start,
+                            len(term),
+                            False,
+                            note.source_id,
+                            "Coded source excerpt",
+                        )
+                    )
                     break
     if "evidence" in categories:
         for evidence in project.evidence:
             for segment in (evidence.quote, evidence.note):
                 start = _matches(segment, term)
                 if start >= 0:
-                    hits.append(SearchHit(
-                        "evidence", evidence.id, "Evidence passage",
-                        _fragment(segment, start, len(term)), start, len(term),
-                        False, evidence.source_id, "Source-linked evidence anchor",
-                    ))
+                    hits.append(
+                        SearchHit(
+                            "evidence",
+                            evidence.id,
+                            "Evidence passage",
+                            _fragment(segment, start, len(term)),
+                            start,
+                            len(term),
+                            False,
+                            evidence.source_id,
+                            "Source-linked evidence anchor",
+                        )
+                    )
                     break
     if "claim" in categories:
         for claim in project.claims:
             start = _matches(claim.text, term)
             if start >= 0:
-                hits.append(SearchHit(
-                    "claim", claim.id, "Draft claim",
-                    _fragment(claim.text, start, len(term)), start, len(term),
-                    False, "", "Draft claim requiring human scientific review",
-                ))
+                hits.append(
+                    SearchHit(
+                        "claim",
+                        claim.id,
+                        "Draft claim",
+                        _fragment(claim.text, start, len(term)),
+                        start,
+                        len(term),
+                        False,
+                        "",
+                        "Draft claim requiring human scientific review",
+                    )
+                )
     for category, title, content in (
         ("manuscript", "Manuscript draft", project.manuscript),
         ("notebook", "Research notes", project.notebook),
@@ -137,11 +169,19 @@ def search_project(
         if category in categories:
             start = _matches(content, term)
             if start >= 0:
-                hits.append(SearchHit(
-                    cast(Literal["manuscript", "notebook"], category), project.id, title,
-                    _fragment(content, start, len(term)), start,
-                    len(term), False, "", "Locally authored draft",
-                ))
+                hits.append(
+                    SearchHit(
+                        cast(Literal["manuscript", "notebook"], category),
+                        project.id,
+                        title,
+                        _fragment(content, start, len(term)),
+                        start,
+                        len(term),
+                        False,
+                        "",
+                        "Locally authored draft",
+                    )
+                )
     if "protocol" in categories:
         protocol = project.protocol
         if isinstance(protocol, dict):
@@ -152,15 +192,27 @@ def search_project(
                         continue
                     found = _matches(value, term)
                     if found >= 0:
-                        hits.append(SearchHit(
-                            "protocol", project.id,
-                            f"Protocol: {key.replace('_', ' ').title()}",
-                            _fragment(value, found, len(term)), found,
-                            len(term), False, "", "Unverified draft protocol",
-                        ))
+                        hits.append(
+                            SearchHit(
+                                "protocol",
+                                project.id,
+                                f"Protocol: {key.replace('_', ' ').title()}",
+                                _fragment(value, found, len(term)),
+                                found,
+                                len(term),
+                                False,
+                                "",
+                                "Unverified draft protocol",
+                            )
+                        )
     priority = {
-        "source": 0, "evidence": 1, "annotation": 2, "claim": 3,
-        "protocol": 4, "manuscript": 5, "notebook": 6,
+        "source": 0,
+        "evidence": 1,
+        "annotation": 2,
+        "claim": 3,
+        "protocol": 4,
+        "manuscript": 5,
+        "notebook": 6,
     }
     hits.sort(key=lambda hit: (priority[hit.kind], hit.title.casefold(), hit.record_id))
     return {
@@ -168,7 +220,7 @@ def search_project(
         "total": len(hits),
         "limit": limit,
         "offset": offset,
-        "hits": [hit.as_dict() for hit in hits[offset:offset + limit]],
+        "hits": [hit.as_dict() for hit in hits[offset : offset + limit]],
         "search_method": "literal Unicode casefold; local project only",
         "partial": False,
         "warnings": (

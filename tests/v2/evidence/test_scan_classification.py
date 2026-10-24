@@ -30,12 +30,14 @@ def test_image_only_blank_and_unknown_pages_are_distinguished() -> None:
     document = import_document(
         original,
         "application/pdf",
-        pdf_reader_factory=_reader([
-            Page("", [object()]),
-            Page("", []),
-            Page(""),
-            Page("Readable text", []),
-        ]),
+        pdf_reader_factory=_reader(
+            [
+                Page("", [object()]),
+                Page("", []),
+                Page(""),
+                Page("Readable text", []),
+            ]
+        ),
     )
     assert [(page.status, page.scan_evidence) for page in document.pages] == [
         ("needs_ocr", "image_detected"),

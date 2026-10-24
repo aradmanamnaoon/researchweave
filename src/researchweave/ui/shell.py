@@ -48,8 +48,7 @@ from .visualization import Bin, ChartSpec, HistogramWidget
 SCREENS = WORKSPACE_SCREENS
 
 
-def button(text: str, callback: Callable[..., Any], *,
-           primary: bool = False) -> QPushButton:
+def button(text: str, callback: Callable[..., Any], *, primary: bool = False) -> QPushButton:
     widget = QPushButton(text)
     named(widget, text)
     if primary:
@@ -91,7 +90,8 @@ class CommandPalette(QDialog):
         entries = parent.command_entries()
         exact_screen = next(
             (
-                entry for entry in entries
+                entry
+                for entry in entries
                 if entry["kind"] == "screen"
                 and entry["value"].casefold() == query.strip().casefold()
             ),
@@ -150,8 +150,10 @@ class ResearchWindow(QMainWindow):
         self.resize(max(760, self.prefs.window_width), max(490, self.prefs.window_height))
         self._build()
         self._draft_timers: dict[str, QTimer] = {}
-        for field, editor in (("manuscript", self.manuscript_editor),
-                              ("notebook", self.notebook_editor)):
+        for field, editor in (
+            ("manuscript", self.manuscript_editor),
+            ("notebook", self.notebook_editor),
+        ):
             timer = QTimer(self)
             timer.setSingleShot(True)
             timer.setInterval(250)
@@ -168,8 +170,7 @@ class ResearchWindow(QMainWindow):
             self.navigate("Welcome")
         else:
             self.navigate(
-                self.prefs.selected_screen if self.prefs.selected_screen in SCREENS
-                else "Dashboard"
+                self.prefs.selected_screen if self.prefs.selected_screen in SCREENS else "Dashboard"
             )
         self._set_status("Offline-ready · no AI credentials required")
 
@@ -240,10 +241,12 @@ class ResearchWindow(QMainWindow):
         summary.setObjectName("muted")
         layout.addWidget(summary)
         if name not in ("Guidance", "Shortcuts"):
-            layout.addWidget(button(
-                "Help for this screen",
-                lambda _checked=False, screen=name: self.open_context_help(screen),
-            ))
+            layout.addWidget(
+                button(
+                    "Help for this screen",
+                    lambda _checked=False, screen=name: self.open_context_help(screen),
+                )
+            )
         self.pages.addWidget(page)
         page.setAccessibleName(f"{name} workspace")
         return layout
@@ -262,8 +265,9 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.welcome_status)
         layout.addWidget(button("Create my first project", self.create_project, primary=True))
         layout.addWidget(button("Open synthetic local demo", self.create_local_demo))
-        layout.addWidget(button("Show research-question tutorial",
-                                lambda: self.navigate("Question")))
+        layout.addWidget(
+            button("Show research-question tutorial", lambda: self.navigate("Question"))
+        )
         layout.addWidget(button("Finish first-run guide", self.finish_onboarding))
         self.welcome_privacy = QLabel(
             "No provider is required. Demo content is synthetic and is not a research finding."
@@ -294,10 +298,17 @@ class ResearchWindow(QMainWindow):
         self.question_exposure = QLineEdit()
         self.question_outcome = QLineEdit()
         self.question_type = QComboBox()
-        self.question_type.addItems([
-            "descriptive", "association", "causal", "prediction", "qualitative",
-            "systematic-review", "mixed-methods",
-        ])
+        self.question_type.addItems(
+            [
+                "descriptive",
+                "association",
+                "causal",
+                "prediction",
+                "qualitative",
+                "systematic-review",
+                "mixed-methods",
+            ]
+        )
         self.question_editable = QPlainTextEdit()
         self.question_editable.setMaximumHeight(110)
         question_form = QFormLayout()
@@ -328,10 +339,18 @@ class ResearchWindow(QMainWindow):
         self.global_query.returnPressed.connect(self.search_global)
         layout.addWidget(self.global_query)
         self.global_kind = QComboBox()
-        self.global_kind.addItems([
-            "All", "source", "evidence", "annotation", "claim",
-            "protocol", "manuscript", "notebook"
-        ])
+        self.global_kind.addItems(
+            [
+                "All",
+                "source",
+                "evidence",
+                "annotation",
+                "claim",
+                "protocol",
+                "manuscript",
+                "notebook",
+            ]
+        )
         named(self.global_kind, "Global search category filter")
         layout.addWidget(self.global_kind)
         layout.addWidget(button("Search project", self.search_global, primary=True))
@@ -358,8 +377,7 @@ class ResearchWindow(QMainWindow):
         self.template_picker = QComboBox()
         named(self.template_picker, "Research design template")
         layout.addWidget(self.template_picker)
-        layout.addWidget(button("Start protocol from template", self.start_protocol,
-                                primary=True))
+        layout.addWidget(button("Start protocol from template", self.start_protocol, primary=True))
         self.protocol_summary = QLabel(
             "Choose a template, then save each field. Protocols require human review."
         )
@@ -437,8 +455,9 @@ class ResearchWindow(QMainWindow):
         named(self.reader_text, "Read-only source content")
         layout.addWidget(self.reader_text)
         layout.addWidget(button("Code selected text", self.annotate_selection))
-        layout.addWidget(button("Capture selected text as evidence",
-                                self.capture_evidence, primary=True))
+        layout.addWidget(
+            button("Capture selected text as evidence", self.capture_evidence, primary=True)
+        )
 
         layout = self._page(
             "PDF Reader",
@@ -471,8 +490,9 @@ class ResearchWindow(QMainWindow):
         self.claim_entry.setMaximumHeight(90)
         named(self.claim_entry, "New source-linked claim draft")
         layout.addWidget(self.claim_entry)
-        layout.addWidget(button("Create claim from selected evidence",
-                                self.create_evidence_claim, primary=True))
+        layout.addWidget(
+            button("Create claim from selected evidence", self.create_evidence_claim, primary=True)
+        )
         self.claim_list = QListWidget()
         named(self.claim_list, "Draft claims and evidence linkage")
         self.claim_list.currentItemChanged.connect(self.inspect_selected_claim)
@@ -489,8 +509,11 @@ class ResearchWindow(QMainWindow):
         )
         reviewer_row = QHBoxLayout()
         self.reviewer_alias = QLineEdit("Reviewer 1")
-        named(self.reviewer_alias, "Local reviewer alias",
-              "A local session label only; this is not authenticated identity.")
+        named(
+            self.reviewer_alias,
+            "Local reviewer alias",
+            "A local session label only; this is not authenticated identity.",
+        )
         reviewer_row.addWidget(QLabel("Reviewer alias"))
         reviewer_row.addWidget(self.reviewer_alias)
         layout.addLayout(reviewer_row)
@@ -498,10 +521,17 @@ class ResearchWindow(QMainWindow):
         self.review_summary.setWordWrap(True)
         layout.addWidget(self.review_summary)
         self.review_filter = QComboBox()
-        self.review_filter.addItems([
-            "All", "pending", "needs-your-review", "awaiting-second",
-            "conflict", "agreed", "adjudicated",
-        ])
+        self.review_filter.addItems(
+            [
+                "All",
+                "pending",
+                "needs-your-review",
+                "awaiting-second",
+                "conflict",
+                "agreed",
+                "adjudicated",
+            ]
+        )
         named(self.review_filter, "Review queue decision filter")
         self.review_filter.currentTextChanged.connect(self.refresh_review)
         self.reviewer_alias.textChanged.connect(self.refresh_review)
@@ -515,8 +545,12 @@ class ResearchWindow(QMainWindow):
         named(self.review_reason, "Screening exclusion reason")
         layout.addWidget(self.review_reason)
         for status in ("include", "exclude", "unsure"):
-            layout.addWidget(button(f"Screen: {status.title()}",
-                                    lambda _checked=False, choice=status: self.vote(choice)))
+            layout.addWidget(
+                button(
+                    f"Screen: {status.title()}",
+                    lambda _checked=False, choice=status: self.vote(choice),
+                )
+            )
         self.adjudicator_alias = QLineEdit()
         self.adjudicator_alias.setPlaceholderText("Independent adjudicator alias")
         named(self.adjudicator_alias, "Independent adjudicator alias")
@@ -602,8 +636,9 @@ class ResearchWindow(QMainWindow):
         self.extraction_fields_list = QListWidget()
         named(self.extraction_fields_list, "Pending extraction form fields")
         layout.addWidget(self.extraction_fields_list)
-        layout.addWidget(button("Save versioned extraction form", self.save_extraction_schema,
-                                primary=True))
+        layout.addWidget(
+            button("Save versioned extraction form", self.save_extraction_schema, primary=True)
+        )
         self.extraction_source = QComboBox()
         named(self.extraction_source, "Source for extraction record")
         layout.addWidget(self.extraction_source)
@@ -679,9 +714,12 @@ class ResearchWindow(QMainWindow):
         self.variable_missing.setPlaceholderText("NA, -99")
         self.variable_description = QLineEdit()
         for label, widget in (
-            ("Type", self.variable_type), ("Role", self.variable_role),
-            ("Units", self.variable_units), ("Categorical levels", self.variable_levels),
-            ("Missing codes", self.variable_missing), ("Description", self.variable_description),
+            ("Type", self.variable_type),
+            ("Role", self.variable_role),
+            ("Units", self.variable_units),
+            ("Categorical levels", self.variable_levels),
+            ("Missing codes", self.variable_missing),
+            ("Description", self.variable_description),
         ):
             named(widget, f"Variable metadata {label.lower()}")
             variable_form.addRow(label, widget)
@@ -704,9 +742,12 @@ class ResearchWindow(QMainWindow):
         self.plot_config_name.setPlaceholderText("Saved plot configuration name")
         self.plot_export_name = QLineEdit("plot.svg")
         for label, widget in (
-            ("Plot type", self.plot_type), ("Title", self.plot_title),
-            ("X-axis label", self.plot_x_label), ("Y-axis label", self.plot_y_label),
-            ("Units", self.plot_unit), ("Config name", self.plot_config_name),
+            ("Plot type", self.plot_type),
+            ("Title", self.plot_title),
+            ("X-axis label", self.plot_x_label),
+            ("Y-axis label", self.plot_y_label),
+            ("Units", self.plot_unit),
+            ("Config name", self.plot_config_name),
             ("Export filename", self.plot_export_name),
         ):
             named(widget, f"Plot {label.lower()}")
@@ -779,8 +820,10 @@ class ResearchWindow(QMainWindow):
         self.code_exclusion = QLineEdit()
         self.code_marker = QLineEdit("●")
         for label, widget in (
-            ("Name", self.code_name), ("Description", self.code_description),
-            ("Inclusion rule", self.code_inclusion), ("Exclusion rule", self.code_exclusion),
+            ("Name", self.code_name),
+            ("Description", self.code_description),
+            ("Inclusion rule", self.code_inclusion),
+            ("Exclusion rule", self.code_exclusion),
             ("Text marker", self.code_marker),
         ):
             named(widget, f"Codebook {label.lower()}")
@@ -818,8 +861,10 @@ class ResearchWindow(QMainWindow):
         for label, widget in (
             ("Qualitative refs", self.mixed_qual_refs),
             ("Quantitative refs", self.mixed_quant_refs),
-            ("Relation", self.mixed_relation), ("Units", self.mixed_units),
-            ("Group definition", self.mixed_groups), ("Evidence origin", self.mixed_origin),
+            ("Relation", self.mixed_relation),
+            ("Units", self.mixed_units),
+            ("Group definition", self.mixed_groups),
+            ("Evidence origin", self.mixed_origin),
             ("Interpretation", self.mixed_interpretation),
         ):
             named(widget, f"Mixed methods {label.lower()}")
@@ -877,17 +922,21 @@ class ResearchWindow(QMainWindow):
         self.reference_url = QLineEdit()
         self.reference_verified = QCheckBox("Metadata manually verified")
         for label, widget in (
-            ("Title", self.reference_title), ("Authors", self.reference_authors),
-            ("Year", self.reference_year), ("Journal / container", self.reference_container),
-            ("DOI", self.reference_doi), ("URL", self.reference_url),
+            ("Title", self.reference_title),
+            ("Authors", self.reference_authors),
+            ("Year", self.reference_year),
+            ("Journal / container", self.reference_container),
+            ("DOI", self.reference_doi),
+            ("URL", self.reference_url),
         ):
             named(widget, f"Reference {label.lower()}")
             reference_form.addRow(label, widget)
         reference_form.addRow("", self.reference_verified)
         layout.addLayout(reference_form)
         layout.addWidget(button("Save reference", self.save_reference, primary=True))
-        layout.addWidget(button("Insert selected citation into manuscript",
-                                self.insert_selected_citation))
+        layout.addWidget(
+            button("Insert selected citation into manuscript", self.insert_selected_citation)
+        )
         self.reference_detail = QLabel("Select a reference to inspect its verification state.")
         self.reference_detail.setWordWrap(True)
         layout.addWidget(self.reference_detail)
@@ -910,10 +959,10 @@ class ResearchWindow(QMainWindow):
             "Review manuscript readiness and unresolved requirements. "
             "No approval or journal compliance can be inferred automatically.",
         )
-        layout.addWidget(button("Inspect submission draft gates",
-                                self.preview_publishing, primary=True))
-        layout.addWidget(button("Generate review packet preview",
-                                self.preview_submission_markdown))
+        layout.addWidget(
+            button("Inspect submission draft gates", self.preview_publishing, primary=True)
+        )
+        layout.addWidget(button("Generate review packet preview", self.preview_submission_markdown))
         self.publication_summary = QLabel(
             "Write a draft and link original evidence before checking submission readiness."
         )
@@ -957,8 +1006,9 @@ class ResearchWindow(QMainWindow):
         agent_form.addRow("", self.agent_egress)
         agent_form.addRow("", self.agent_destructive)
         layout.addLayout(agent_form)
-        layout.addWidget(button("Create scope-bound proposal", self.create_agent_action,
-                                primary=True))
+        layout.addWidget(
+            button("Create scope-bound proposal", self.create_agent_action, primary=True)
+        )
         self.agent_timeline = QListWidget()
         named(self.agent_timeline, "Persistent agent action timeline")
         self.agent_timeline.currentItemChanged.connect(self.inspect_agent_action)
@@ -986,7 +1036,8 @@ class ResearchWindow(QMainWindow):
         self.provider_scope = QLineEdit()
         self.provider_scope.setPlaceholderText("source-text, evidence")
         for label, widget in (
-            ("Mode", self.provider_mode), ("Provider identifier", self.provider_id),
+            ("Mode", self.provider_mode),
+            ("Provider identifier", self.provider_id),
             ("Selected data scope", self.provider_scope),
         ):
             named(widget, f"Provider {label.lower()}")
@@ -1027,8 +1078,9 @@ class ResearchWindow(QMainWindow):
         named(self.integration_list, "Optional integration adapters")
         layout.addWidget(self.integration_list)
         layout.addWidget(button("Refresh integration catalog", self.refresh_integrations))
-        layout.addWidget(button("Disconnect selected integration", self.disconnect_integration,
-                                primary=True))
+        layout.addWidget(
+            button("Disconnect selected integration", self.disconnect_integration, primary=True)
+        )
         self.integration_status = QLabel("No external integration is required.")
         self.integration_status.setWordWrap(True)
         layout.addWidget(self.integration_status)
@@ -1062,22 +1114,23 @@ class ResearchWindow(QMainWindow):
         named(self.backup_list, "Local project backup archives")
         self.backup_list.currentItemChanged.connect(self.inspect_backup)
         layout.addWidget(self.backup_list)
-        layout.addWidget(button("Restore selected backup as new project",
-                                self.restore_backup))
+        layout.addWidget(button("Restore selected backup as new project", self.restore_backup))
         self.backup_receipt = QLabel("Backups are local, immutable ZIP data archives.")
         self.backup_receipt.setWordWrap(True)
         layout.addWidget(self.backup_receipt)
 
         layout = self._page(
-            "Recovery", "Inspect unsaved editor copies after an interrupted session. "
-            "Restoring into an editor never overwrites saved project files."
+            "Recovery",
+            "Inspect unsaved editor copies after an interrupted session. "
+            "Restoring into an editor never overwrites saved project files.",
         )
         layout.addWidget(button("Refresh recovery drafts", self.refresh_recovery))
         self.recovery_list = QListWidget()
         named(self.recovery_list, "Available journaled research drafts")
         layout.addWidget(self.recovery_list)
-        layout.addWidget(button("Restore selected into editor", self.restore_recovery,
-                                primary=True))
+        layout.addWidget(
+            button("Restore selected into editor", self.restore_recovery, primary=True)
+        )
         self.recovery_receipt = QLabel("No recovery draft selected.")
         self.recovery_receipt.setWordWrap(True)
         layout.addWidget(self.recovery_receipt)
@@ -1087,8 +1140,7 @@ class ResearchWindow(QMainWindow):
             "Audit local source hashes, research links, screening decisions and "
             "table structure. Passing this audit does not certify research validity.",
         )
-        layout.addWidget(button("Run project integrity audit",
-                                self.run_diagnostics, primary=True))
+        layout.addWidget(button("Run project integrity audit", self.run_diagnostics, primary=True))
         self.audit_summary = QLabel("No integrity audit has been run.")
         self.audit_summary.setWordWrap(True)
         layout.addWidget(self.audit_summary)
@@ -1134,8 +1186,11 @@ class ResearchWindow(QMainWindow):
         self.tutorial_list = QListWidget()
         named(self.tutorial_list, "Research tutorial progress")
         layout.addWidget(self.tutorial_list)
-        layout.addWidget(button("Mark selected tutorial action complete",
-                                self.complete_tutorial_step, primary=True))
+        layout.addWidget(
+            button(
+                "Mark selected tutorial action complete", self.complete_tutorial_step, primary=True
+            )
+        )
         layout.addWidget(button("Refresh tutorial progress", self.refresh_tutorials))
 
         layout = self._page(
@@ -1258,32 +1313,65 @@ class ResearchWindow(QMainWindow):
             status.showMessage(message)
 
     def _call(self, operation: str, **values: Any) -> dict[str, Any] | None:
-        if operation not in ("ui.project.list", "ui.project.create", "ui.project.open",
-                             "ui.templates.list", "ui.guidance.search",
-                             "ui.backup.list", "ui.backup.inspect", "ui.backup.restore",
-                             "ui.preferences.read", "ui.preferences.update", "ui.agent.propose",
-                             "ui.agent.deny", "ui.localization.read",
-                             "ui.workspace.preset.list", "ui.workspace.preset.save",
-                             "ui.workspace.preset.delete"):
+        if operation not in (
+            "ui.project.list",
+            "ui.project.create",
+            "ui.project.open",
+            "ui.templates.list",
+            "ui.guidance.search",
+            "ui.backup.list",
+            "ui.backup.inspect",
+            "ui.backup.restore",
+            "ui.preferences.read",
+            "ui.preferences.update",
+            "ui.agent.propose",
+            "ui.agent.deny",
+            "ui.localization.read",
+            "ui.workspace.preset.list",
+            "ui.workspace.preset.save",
+            "ui.workspace.preset.delete",
+        ):
             if not self.project_id:
                 self._set_status("Create or select a project first.")
                 return None
             values.setdefault("project_id", self.project_id)
         if operation in {
-            "ui.project.update", "ui.source.add", "ui.review.vote", "ui.qual.annotate",
+            "ui.project.update",
+            "ui.source.add",
+            "ui.review.vote",
+            "ui.qual.annotate",
             "ui.qual.annotation.update",
-            "ui.screening.vote", "ui.screening.adjudicate",
-            "ui.dataset.import", "ui.manuscript.save", "ui.manuscript.sections.update",
-            "ui.notebook.save", "ui.tutorial.step",
-            "ui.protocol.start", "ui.protocol.update", "ui.protocol.deviation.add",
-            "ui.evidence.capture", "ui.claim.create",
-            "ui.question.update", "ui.prisma.update",
-            "ui.extraction.schema.update", "ui.extraction.record.save",
-            "ui.variable.metadata.update", "ui.analysis.run", "ui.chart.config.save",
-            "ui.codebook.upsert", "ui.codebook.merge", "ui.mixed.add",
-            "ui.reference.upsert", "ui.agent.action.propose", "ui.agent.action.approve",
-            "ui.agent.action.deny", "ui.agent.action.record", "ui.provider.update",
-            "ui.integration.disconnect", "ui.notification.add", "ui.notification.dismiss",
+            "ui.screening.vote",
+            "ui.screening.adjudicate",
+            "ui.dataset.import",
+            "ui.manuscript.save",
+            "ui.manuscript.sections.update",
+            "ui.notebook.save",
+            "ui.tutorial.step",
+            "ui.protocol.start",
+            "ui.protocol.update",
+            "ui.protocol.deviation.add",
+            "ui.evidence.capture",
+            "ui.claim.create",
+            "ui.question.update",
+            "ui.prisma.update",
+            "ui.extraction.schema.update",
+            "ui.extraction.record.save",
+            "ui.variable.metadata.update",
+            "ui.analysis.run",
+            "ui.chart.config.save",
+            "ui.codebook.upsert",
+            "ui.codebook.merge",
+            "ui.mixed.add",
+            "ui.reference.upsert",
+            "ui.agent.action.propose",
+            "ui.agent.action.approve",
+            "ui.agent.action.deny",
+            "ui.agent.action.record",
+            "ui.provider.update",
+            "ui.integration.disconnect",
+            "ui.notification.add",
+            "ui.notification.dismiss",
         }:
             values.setdefault("expected_revision", self.revision)
         result = self.facade.execute(operation, values)
@@ -1429,55 +1517,62 @@ class ResearchWindow(QMainWindow):
             }
             for screen in SCREENS
         ]
-        entries.extend([
-            {
-                "label": "Create project",
-                "kind": "action",
-                "value": "create-project",
-                "enabled": True,
-                "reason": "",
-                "summary": "Create a new local research project.",
-            },
-            {
-                "label": "Import text source",
-                "kind": "action",
-                "value": "import-source",
-                "enabled": project_required,
-                "reason": "Open or create a project first.",
-                "summary": "Add user-supplied source text to the current project.",
-            },
-            {
-                "label": "Search library",
-                "kind": "action",
-                "value": "search-library",
-                "enabled": project_required,
-                "reason": "Open or create a project first.",
-                "summary": "Focus the current project's local source search.",
-            },
-            {
-                "label": "Preview export",
-                "kind": "action",
-                "value": "export-preview",
-                "enabled": project_required,
-                "reason": "Open or create a project first.",
-                "summary": "Open the local export preview without writing a file.",
-            },
-        ])
+        entries.extend(
+            [
+                {
+                    "label": "Create project",
+                    "kind": "action",
+                    "value": "create-project",
+                    "enabled": True,
+                    "reason": "",
+                    "summary": "Create a new local research project.",
+                },
+                {
+                    "label": "Import text source",
+                    "kind": "action",
+                    "value": "import-source",
+                    "enabled": project_required,
+                    "reason": "Open or create a project first.",
+                    "summary": "Add user-supplied source text to the current project.",
+                },
+                {
+                    "label": "Search library",
+                    "kind": "action",
+                    "value": "search-library",
+                    "enabled": project_required,
+                    "reason": "Open or create a project first.",
+                    "summary": "Focus the current project's local source search.",
+                },
+                {
+                    "label": "Preview export",
+                    "kind": "action",
+                    "value": "export-preview",
+                    "enabled": project_required,
+                    "reason": "Open or create a project first.",
+                    "summary": "Open the local export preview without writing a file.",
+                },
+            ]
+        )
         surfaced = {
-            "ui.project.create", "ui.source.add", "ui.search.global", "ui.export.preview",
+            "ui.project.create",
+            "ui.source.add",
+            "ui.search.global",
+            "ui.export.preview",
         }
         for capability in self.facade.capability_manifest():
             operation = str(capability["operation"])
             if operation in surfaced:
                 continue
-            entries.append({
-                "label": operation,
-                "kind": "capability",
-                "value": operation,
-                "enabled": False,
-                "reason": "Use its workspace screen to provide the required structured inputs.",
-                "summary": str(capability["summary"]),
-            })
+            entries.append(
+                {
+                    "label": operation,
+                    "kind": "capability",
+                    "value": operation,
+                    "enabled": False,
+                    "reason": "Use its workspace screen to provide the required structured inputs.",
+                    "summary": str(capability["summary"]),
+                }
+            )
         return entries
 
     def execute_palette_entry(self, entry: Mapping[str, Any]) -> None:
@@ -1529,7 +1624,8 @@ class ResearchWindow(QMainWindow):
             return
         kind = self.global_kind.currentText()
         response = self._call(
-            "ui.search.global", query=query,
+            "ui.search.global",
+            query=query,
             kind="" if kind == "All" else kind,
             offset=self.global_offset,
             limit=self.global_page_size,
@@ -1537,9 +1633,7 @@ class ResearchWindow(QMainWindow):
         if response is None:
             return
         for hit in response["hits"]:
-            item = QListWidgetItem(
-                f"{hit['kind'].upper()} · {hit['title']}\n{hit['snippet']}"
-            )
+            item = QListWidgetItem(f"{hit['kind'].upper()} · {hit['title']}\n{hit['snippet']}")
             item.setData(Qt.ItemDataRole.UserRole, hit)
             self.global_results.addItem(item)
         self.global_total = response["total"]
@@ -1677,7 +1771,8 @@ class ResearchWindow(QMainWindow):
         return any(
             document is not None and document.isModified()
             for document in (
-                self.manuscript_editor.document(), self.notebook_editor.document(),
+                self.manuscript_editor.document(),
+                self.notebook_editor.document(),
                 *(editor.document() for editor in self.protocol_fields.values()),
             )
         )
@@ -1690,18 +1785,24 @@ class ResearchWindow(QMainWindow):
         if not self.project_id or self._editor_loading:
             return
         editor = self.manuscript_editor if field == "manuscript" else self.notebook_editor
-        self._call("ui.recovery.save", field=field,
-                   text=editor.toPlainText(), expected_revision=self.revision)
+        self._call(
+            "ui.recovery.save",
+            field=field,
+            text=editor.toPlainText(),
+            expected_revision=self.revision,
+        )
 
     def _confirm_leave_project(self) -> bool:
         """Protect draft text before project switching and application shutdown."""
         if not self.project_id or not self._writing_dirty():
             return True
         outcome = QMessageBox.question(
-            self, "Unsaved research writing",
+            self,
+            "Unsaved research writing",
             "Save manuscript and notes before leaving this project?",
-            QMessageBox.StandardButton.Save | QMessageBox.StandardButton.Discard |
-            QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Save
+            | QMessageBox.StandardButton.Discard
+            | QMessageBox.StandardButton.Cancel,
             QMessageBox.StandardButton.Save,
         )
         if outcome == QMessageBox.StandardButton.Cancel:
@@ -1709,7 +1810,8 @@ class ResearchWindow(QMainWindow):
         if outcome == QMessageBox.StandardButton.Save:
             if not self._save_both():
                 QMessageBox.warning(
-                    self, "Save failed",
+                    self,
+                    "Save failed",
                     "Your changes could not be saved. The project remains open. "
                     "Check the status message and retry.",
                 )
@@ -1727,9 +1829,7 @@ class ResearchWindow(QMainWindow):
             document = editor.document()
             if document is None or not document.isModified():
                 continue
-            result = self._call(operation, **{
-                operation.split(".")[1]: editor.toPlainText()
-            })
+            result = self._call(operation, **{operation.split(".")[1]: editor.toPlainText()})
             if result is None:
                 return False
             document.setModified(False)
@@ -1738,8 +1838,7 @@ class ResearchWindow(QMainWindow):
             bool(document and document.isModified())
             for document in (editor.document() for editor in self.protocol_fields.values())
         ):
-            values = {key: editor.toPlainText()
-                      for key, editor in self.protocol_fields.items()}
+            values = {key: editor.toPlainText() for key, editor in self.protocol_fields.items()}
             if self._call("ui.protocol.update", values=values) is None:
                 return False
             for editor in self.protocol_fields.values():
@@ -1759,8 +1858,11 @@ class ResearchWindow(QMainWindow):
         question.setPlaceholderText("What do you want to understand?")
         study = QComboBox()
         study.addItems(["literature", "qualitative", "quantitative", "mixed"])
-        for label, field in (("Project title", title), ("Research question", question),
-                             ("Study type", study)):
+        for label, field in (
+            ("Project title", title),
+            ("Research question", question),
+            ("Study type", study),
+        ):
             field.setAccessibleName(label)
             form.addRow(label, field)
         actions = QDialogButtonBox(
@@ -1772,8 +1874,12 @@ class ResearchWindow(QMainWindow):
         title.setFocus()
         if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        result = self._call("ui.project.create", title=title.text(),
-                            question=question.text(), study_type=study.currentText())
+        result = self._call(
+            "ui.project.create",
+            title=title.text(),
+            question=question.text(),
+            study_type=study.currentText(),
+        )
         if result:
             self.project_id = result["project_id"]
             self.refresh_projects()
@@ -1940,8 +2046,9 @@ class ResearchWindow(QMainWindow):
             self.adjudication_reason.clear()
             self.refresh_review()
 
-    def _select_review_source(self, current: QListWidgetItem | None,
-                              previous: QListWidgetItem | None) -> None:
+    def _select_review_source(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
         if current is None:
             return
         self.current_source_id = current.data(Qt.ItemDataRole.UserRole)
@@ -1987,10 +2094,7 @@ class ResearchWindow(QMainWindow):
                 if source["computed_status"] == "blinded"
                 else source["final_decision"] or "no final outcome"
             )
-            item = QListWidgetItem(
-                f"{source['status'].upper()} · {source['title']} · "
-                f"{outcome}"
-            )
+            item = QListWidgetItem(f"{source['status'].upper()} · {source['title']} · {outcome}")
             item.setData(Qt.ItemDataRole.UserRole, source["source_id"])
             item.setToolTip(f"{source['title']}; screening status {source['status']}")
             self.review_queue.addItem(item)
@@ -2020,7 +2124,8 @@ class ResearchWindow(QMainWindow):
             record.get("editable_question", response["fallback_question"])
         )
         self.question_status.setText(
-            "Saved structured question loaded." if record
+            "Saved structured question loaded."
+            if record
             else "No structured question yet. Existing free-text question is shown for editing."
         )
 
@@ -2053,10 +2158,7 @@ class ResearchWindow(QMainWindow):
             return
         screening = response["screening"]
         states = screening["status_counts"]
-        jobs = [
-            f"{job.task_id}: {job.state} ({job.progress}%)"
-            for job in self.jobs.jobs.values()
-        ]
+        jobs = [f"{job.task_id}: {job.state} ({job.progress}%)" for job in self.jobs.jobs.values()]
         self.dashboard.setText(
             f"{response['title']}\n\nResearch question: {response['question']}\n"
             f"Sources: {response['source_count']} · datasets: {response['dataset_count']}\n"
@@ -2269,9 +2371,7 @@ class ResearchWindow(QMainWindow):
             name: self._extraction_widget_value(widget)
             for name, widget in self.extraction_value_widgets.items()
         }
-        if self._call(
-            "ui.extraction.record.save", source_id=source_id, values=values
-        ) is not None:
+        if self._call("ui.extraction.record.save", source_id=source_id, values=values) is not None:
             self.refresh_extraction()
 
     def annotate_selection(self) -> None:
@@ -2284,15 +2384,15 @@ class ResearchWindow(QMainWindow):
             return
         try:
             start, end = qt_range_to_codepoints(
-                self.reader_text.toPlainText(), cursor.selectionStart(),
-                cursor.selectionEnd()
+                self.reader_text.toPlainText(), cursor.selectionStart(), cursor.selectionEnd()
             )
         except UIError as exc:
             self._set_status(f"{exc.message} {exc.recovery}")
             return
         code, accepted = QInputDialog.getText(self, "Code selected source text", "Code label")
-        if accepted and self._call("ui.qual.annotate", source_id=self.current_source_id,
-                                   start=start, end=end, code=code):
+        if accepted and self._call(
+            "ui.qual.annotate", source_id=self.current_source_id, start=start, end=end, code=code
+        ):
             self.refresh_annotations()
 
     def refresh_annotations(self) -> None:
@@ -2303,13 +2403,9 @@ class ResearchWindow(QMainWindow):
         if value:
             for item in value["annotations"]:
                 overlap = (
-                    f" · overlaps {item['overlap_count']}"
-                    if item.get("overlap_count")
-                    else ""
+                    f" · overlaps {item['overlap_count']}" if item.get("overlap_count") else ""
                 )
-                row = QListWidgetItem(
-                    f"{item['code']}: {item['quote'][:120]}{overlap}"
-                )
+                row = QListWidgetItem(f"{item['code']}: {item['quote'][:120]}{overlap}")
                 row.setData(Qt.ItemDataRole.UserRole, item)
                 if item.get("overlap_ids"):
                     row.setToolTip(
@@ -2341,9 +2437,7 @@ class ResearchWindow(QMainWindow):
         self.reader_text.ensureCursorVisible()
         self.navigate("Reader")
 
-    def open_selected_annotation_source(
-        self, item: QListWidgetItem | bool | None = None
-    ) -> None:
+    def open_selected_annotation_source(self, item: QListWidgetItem | bool | None = None) -> None:
         selected = item if isinstance(item, QListWidgetItem) else self.annotation_list.currentItem()
         if selected is None:
             self._set_status("Select an annotation first.")
@@ -2505,7 +2599,8 @@ class ResearchWindow(QMainWindow):
                 "url": self.reference_url.text(),
                 "verified": self.reference_verified.isChecked(),
                 "verification_note": (
-                    "Manually verified by local user." if self.reference_verified.isChecked()
+                    "Manually verified by local user."
+                    if self.reference_verified.isChecked()
                     else "Metadata remains unverified."
                 ),
             },
@@ -2616,11 +2711,13 @@ class ResearchWindow(QMainWindow):
             section = item.data(Qt.ItemDataRole.UserRole)
             if not isinstance(section, dict):
                 continue
-            sections.append({
-                "id": str(section.get("id", "")),
-                "title": str(section.get("title", "")),
-                "body": str(section.get("body", "")),
-            })
+            sections.append(
+                {
+                    "id": str(section.get("id", "")),
+                    "title": str(section.get("title", "")),
+                    "body": str(section.get("body", "")),
+                }
+            )
         response = self._call("ui.manuscript.sections.update", sections=sections)
         if response is not None:
             project = self._call("ui.project.open", project_id=self.project_id)
@@ -2704,8 +2801,10 @@ class ResearchWindow(QMainWindow):
             self.data_model.set_records([], [])
             return
         response = self._call(
-            "ui.dataset.page", dataset_id=self.current_dataset_id,
-            offset=self.data_offset, limit=self.data_page_size,
+            "ui.dataset.page",
+            dataset_id=self.current_dataset_id,
+            offset=self.data_offset,
+            limit=self.data_page_size,
             filter_text=self.data_filter.text(),
             sort_column=str(self.data_sort.currentData() or ""),
             sort_desc=self.data_sort_desc.isChecked(),
@@ -2744,33 +2843,42 @@ class ResearchWindow(QMainWindow):
         if not self.current_dataset_id:
             self._set_status("Import CSV data in Data View first.")
             return
-        result = self._call("ui.dataset.describe", dataset_id=self.current_dataset_id,
-                            column=self.variable_picker.currentText())
+        result = self._call(
+            "ui.dataset.describe",
+            dataset_id=self.current_dataset_id,
+            column=self.variable_picker.currentText(),
+        )
         if result is not None:
-            self.stats_result.setPlainText("\n".join(
-                f"{key}: {value}" for key, value in result.items()
-            ))
+            self.stats_result.setPlainText(
+                "\n".join(f"{key}: {value}" for key, value in result.items())
+            )
             chart_response = self._call(
-                "ui.chart.histogram", dataset_id=self.current_dataset_id,
+                "ui.chart.histogram",
+                dataset_id=self.current_dataset_id,
                 column=self.variable_picker.currentText(),
                 bins=10,
             )
             if chart_response is not None:
                 data = chart_response["chart"]
                 spec = ChartSpec(
-                    title=data["title"], column=data["column"],
+                    title=data["title"],
+                    column=data["column"],
                     kind=data["kind"],
-                    x_label=data["x_label"], y_label=data["y_label"],
+                    x_label=data["x_label"],
+                    y_label=data["y_label"],
                     bins=tuple(Bin(**item) for item in data["bins"]),
-                    n=data["n"], missing_n=data["missing_n"],
-                    min_value=data["min_value"], max_value=data["max_value"],
-                    mean=data["mean"], source_label=data["source_label"],
+                    n=data["n"],
+                    missing_n=data["missing_n"],
+                    min_value=data["min_value"],
+                    max_value=data["max_value"],
+                    mean=data["mean"],
+                    source_label=data["source_label"],
                     description=data["description"],
                 )
                 self.histogram_chart.set_chart(spec)
                 self.stats_result.appendPlainText(
-                    "\nHistogram table (accessible alternative):\n" +
-                    "\n".join(
+                    "\nHistogram table (accessible alternative):\n"
+                    + "\n".join(
                         f"{item['interval']}: {item['count']} observations"
                         for item in data["accessibility_data"]
                     )
@@ -2793,8 +2901,7 @@ class ResearchWindow(QMainWindow):
             self._set_status("Choose a dataset and variable before plotting.")
             return
         operation = (
-            "ui.chart.bar" if self.plot_type.currentText() == "bar"
-            else "ui.chart.histogram"
+            "ui.chart.bar" if self.plot_type.currentText() == "bar" else "ui.chart.histogram"
         )
         args = self._configured_plot_args()
         args.pop("plot_type", None)
@@ -2867,9 +2974,7 @@ class ResearchWindow(QMainWindow):
         if response is None:
             return
         for config in response["configs"]:
-            item = QListWidgetItem(
-                f"{config['name']} · {config['plot_type']} · {config['column']}"
-            )
+            item = QListWidgetItem(f"{config['name']} · {config['plot_type']} · {config['column']}")
             item.setData(Qt.ItemDataRole.UserRole, config)
             self.plot_configs.addItem(item)
 
@@ -3072,9 +3177,11 @@ class ResearchWindow(QMainWindow):
             self._set_status("Project records save automatically after each operation.")
 
     def preview_agent(self) -> None:
-        result = self._call("ui.agent.propose",
-                            summary=self.agent_proposal.toPlainText(),
-                            risk=self.risk_picker.currentText())
+        result = self._call(
+            "ui.agent.propose",
+            summary=self.agent_proposal.toPlainText(),
+            risk=self.risk_picker.currentText(),
+        )
         if result:
             self.agent_status.setText(
                 f"Review needed · {result['effect']}\n"
@@ -3082,8 +3189,7 @@ class ResearchWindow(QMainWindow):
             )
 
     def deny_agent(self) -> None:
-        result = self._call("ui.agent.deny",
-                            summary=self.agent_proposal.toPlainText())
+        result = self._call("ui.agent.deny", summary=self.agent_proposal.toPlainText())
         if result:
             self.agent_status.setText(result["message"])
 
@@ -3182,14 +3288,10 @@ class ResearchWindow(QMainWindow):
             self._set_status("Select a proposed action to deny.")
             return
         record = current.data(Qt.ItemDataRole.UserRole)
-        reason, accepted = QInputDialog.getText(
-            self, "Deny proposed action", "Reason for denial"
-        )
+        reason, accepted = QInputDialog.getText(self, "Deny proposed action", "Reason for denial")
         if not accepted:
             return
-        response = self._call(
-            "ui.agent.action.deny", action_id=record["id"], reason=reason
-        )
+        response = self._call("ui.agent.action.deny", action_id=record["id"], reason=reason)
         if response is not None:
             self.refresh_agent_timeline()
             self.agent_status.setText(
@@ -3236,9 +3338,7 @@ class ResearchWindow(QMainWindow):
             self.refresh_provider()
 
     def save_offline_mode(self) -> None:
-        response = self._call(
-            "ui.preferences.update", offline=self.offline_toggle.isChecked()
-        )
+        response = self._call("ui.preferences.update", offline=self.offline_toggle.isChecked())
         if response is not None:
             self.prefs = Preferences(**response["preferences"])
             self.refresh_privacy()
@@ -3277,8 +3377,7 @@ class ResearchWindow(QMainWindow):
             return
         for record in response["integrations"]:
             item = QListWidgetItem(
-                f"{record['id']} · {record['status']} · "
-                f"{', '.join(record['capabilities'])}"
+                f"{record['id']} · {record['status']} · {', '.join(record['capabilities'])}"
             )
             item.setData(Qt.ItemDataRole.UserRole, record)
             self.integration_list.addItem(item)
@@ -3345,8 +3444,14 @@ class ResearchWindow(QMainWindow):
             return
         completed = set(response["completed"])
         for step in (
-            "research-question", "source-import", "screening", "data",
-            "evidence", "writing", "export", "privacy",
+            "research-question",
+            "source-import",
+            "screening",
+            "data",
+            "evidence",
+            "writing",
+            "export",
+            "privacy",
         ):
             item = QListWidgetItem(
                 f"{'DONE' if step in completed else 'NEXT'} · {step.replace('-', ' ')}"
@@ -3396,7 +3501,8 @@ class ResearchWindow(QMainWindow):
         if preview is None:
             return
         outcome = QMessageBox.question(
-            self, "Approve local export",
+            self,
+            "Approve local export",
             f"Write {preview['filename']} ({preview['bytes']} bytes) to your local export folder?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No,
@@ -3437,24 +3543,25 @@ class ResearchWindow(QMainWindow):
         plan = self._call("ui.backup.plan")
         if plan is None:
             return
-        if QMessageBox.question(
-            self, "Approve local snapshot",
-            f"Write a new immutable backup for {plan['title']}, revision "
-            f"{plan['revision']}? Existing backups will be preserved.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) != QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Approve local snapshot",
+                f"Write a new immutable backup for {plan['title']}, revision "
+                f"{plan['revision']}? Existing backups will be preserved.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
             self._set_status("Backup canceled. No data was written.")
             return
         old = self.facade.backup_authorizer
-        self.facade.backup_authorizer = (
-            lambda action, identifier: action == "create"
-            and identifier == self.project_id
+        self.facade.backup_authorizer = lambda action, identifier: (
+            action == "create" and identifier == self.project_id
         )
         try:
-            result = self._call(
-                "ui.backup.create", expected_revision=plan["revision"]
-            )
+            result = self._call("ui.backup.create", expected_revision=plan["revision"])
         finally:
             self.facade.backup_authorizer = old
         if result is not None:
@@ -3477,8 +3584,9 @@ class ResearchWindow(QMainWindow):
             item.setData(Qt.ItemDataRole.UserRole, name)
             self.backup_list.addItem(item)
 
-    def inspect_backup(self, current: QListWidgetItem | None,
-                       previous: QListWidgetItem | None) -> None:
+    def inspect_backup(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
         if current is None:
             return
         name = current.data(Qt.ItemDataRole.UserRole)
@@ -3501,24 +3609,29 @@ class ResearchWindow(QMainWindow):
         verified = self._call("ui.backup.inspect", backup_id=backup_id)
         if verified is None:
             return
-        if QMessageBox.question(
-            self, "Approve recovery",
-            f"Restore {verified['title']} from this verified archive "
-            "as an additional project? No existing project will be overwritten.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-            QMessageBox.StandardButton.No,
-        ) != QMessageBox.StandardButton.Yes:
+        if (
+            QMessageBox.question(
+                self,
+                "Approve recovery",
+                f"Restore {verified['title']} from this verified archive "
+                "as an additional project? No existing project will be overwritten.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No,
+            )
+            != QMessageBox.StandardButton.Yes
+        ):
             self._set_status("Restore cancelled.")
             return
         if not self._confirm_leave_project():
             return
         previous = self.facade.backup_authorizer
-        self.facade.backup_authorizer = (
-            lambda action, identifier: action == "restore" and identifier == backup_id
+        self.facade.backup_authorizer = lambda action, identifier: (
+            action == "restore" and identifier == backup_id
         )
         try:
             restored = self._call(
-                "ui.backup.restore", backup_id=backup_id,
+                "ui.backup.restore",
+                backup_id=backup_id,
                 expected_sha256=verified["sha256"],
             )
         finally:
@@ -3537,8 +3650,7 @@ class ResearchWindow(QMainWindow):
         if result is not None:
             for draft in result["drafts"]:
                 item = QListWidgetItem(
-                    f"{draft['field']} · "
-                    f"{'conflict' if draft.get('conflict') else 'ready'}"
+                    f"{draft['field']} · {'conflict' if draft.get('conflict') else 'ready'}"
                 )
                 item.setData(Qt.ItemDataRole.UserRole, draft["field"])
                 self.recovery_list.addItem(item)
@@ -3555,7 +3667,8 @@ class ResearchWindow(QMainWindow):
         target = self.manuscript_editor if field == "manuscript" else self.notebook_editor
         if result["conflict"]:
             answer = QMessageBox.question(
-                self, "Review changed project",
+                self,
+                "Review changed project",
                 "The saved project changed since this draft. Load the recovery text "
                 "into the editor for comparison? Saved files stay unchanged.",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
@@ -3587,14 +3700,14 @@ class ResearchWindow(QMainWindow):
         )
         for finding in report["findings"]:
             item = QListWidgetItem(
-                f"{finding['severity'].upper()} · {finding['title']} · "
-                f"{finding['location']}"
+                f"{finding['severity'].upper()} · {finding['title']} · {finding['location']}"
             )
             item.setData(Qt.ItemDataRole.UserRole, finding)
             self.audit_findings.addItem(item)
 
-    def inspect_finding(self, current: QListWidgetItem | None,
-                        previous: QListWidgetItem | None) -> None:
+    def inspect_finding(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
         if current is None:
             return
         finding = current.data(Qt.ItemDataRole.UserRole)
@@ -3621,14 +3734,13 @@ class ResearchWindow(QMainWindow):
             "Publication approval: No · Ethics approval: Not verified"
         )
         for gate in result["gates"]:
-            item = QListWidgetItem(
-                f"{gate['state'].upper()} · {gate['heading']}"
-            )
+            item = QListWidgetItem(f"{gate['state'].upper()} · {gate['heading']}")
             item.setData(Qt.ItemDataRole.UserRole, gate)
             self.release_gates.addItem(item)
 
-    def inspect_release_gate(self, current: QListWidgetItem | None,
-                             previous: QListWidgetItem | None) -> None:
+    def inspect_release_gate(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
         if current is None:
             return
         item = current.data(Qt.ItemDataRole.UserRole)
@@ -3769,9 +3881,8 @@ class ResearchWindow(QMainWindow):
         project_id = str(preset.get("project_id", ""))
         if project_id and project_id != self.project_id:
             available = {
-                project["id"] for project in (self._call("ui.project.list") or {}).get(
-                    "projects", []
-                )
+                project["id"]
+                for project in (self._call("ui.project.list") or {}).get("projects", [])
             }
             if project_id in available:
                 if not self._confirm_leave_project():
@@ -3946,8 +4057,12 @@ class ResearchWindow(QMainWindow):
         if templates is None:
             return
         matched = next(
-            (template for template in templates["templates"]
-             if template["id"] == record["template_id"]), None
+            (
+                template
+                for template in templates["templates"]
+                if template["id"] == record["template_id"]
+            ),
+            None,
         )
         if matched is None:
             self._set_status("Protocol template is missing; preserve existing draft.")
@@ -3958,10 +4073,14 @@ class ResearchWindow(QMainWindow):
             editor.setMaximumHeight(125)
             editor.setPlainText(record["values"].get(spec["name"], ""))
             editor.setPlaceholderText(spec["help_text"])
-            named(editor, f"{spec['label']} {'required' if spec['required'] else 'optional'}",
-                  spec["help_text"])
+            named(
+                editor,
+                f"{spec['label']} {'required' if spec['required'] else 'optional'}",
+                spec["help_text"],
+            )
             self.protocol_form.addRow(
-                f"{spec['label']} {'*' if spec['required'] else ''}", editor,
+                f"{spec['label']} {'*' if spec['required'] else ''}",
+                editor,
             )
             self.protocol_fields[spec["name"]] = editor
 
@@ -4018,8 +4137,7 @@ class ResearchWindow(QMainWindow):
         response = self._call("ui.protocol.complete")
         if response is not None:
             self.protocol_summary.setText(
-                f"{response['template']}: required fields are complete.\n"
-                f"{response['note']}"
+                f"{response['template']}: required fields are complete.\n{response['note']}"
             )
 
     def refresh_guidance(self, unused: str = "") -> None:
@@ -4038,8 +4156,9 @@ class ResearchWindow(QMainWindow):
                 "No matching topic. Try a general term such as source or variable."
             )
 
-    def _select_guidance(self, current: QListWidgetItem | None,
-                         previous: QListWidgetItem | None) -> None:
+    def _select_guidance(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
         if current is None:
             return
         item = current.data(Qt.ItemDataRole.UserRole)
@@ -4061,8 +4180,7 @@ class ResearchWindow(QMainWindow):
             return
         try:
             start, end = qt_range_to_codepoints(
-                self.reader_text.toPlainText(), cursor.selectionStart(),
-                cursor.selectionEnd()
+                self.reader_text.toPlainText(), cursor.selectionStart(), cursor.selectionEnd()
             )
         except UIError as exc:
             self._set_status(f"{exc.message} {exc.recovery}")
@@ -4073,8 +4191,11 @@ class ResearchWindow(QMainWindow):
         if not accepted:
             return
         result = self._call(
-            "ui.evidence.capture", source_id=self.current_source_id,
-            start=start, end=end, note=note,
+            "ui.evidence.capture",
+            source_id=self.current_source_id,
+            start=start,
+            end=end,
+            note=note,
         )
         if result is not None:
             self.navigate("Evidence")
@@ -4089,9 +4210,7 @@ class ResearchWindow(QMainWindow):
         if saved is not None:
             self.evidence_list.clear()
             for record in saved["records"]:
-                item = QListWidgetItem(
-                    f"{record['integrity'].upper()} · {record['quote'][:100]}"
-                )
+                item = QListWidgetItem(f"{record['integrity'].upper()} · {record['quote'][:100]}")
                 item.setData(Qt.ItemDataRole.UserRole, record["id"])
                 self.evidence_list.addItem(item)
         claims = self._call("ui.claim.list")
@@ -4105,8 +4224,9 @@ class ResearchWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, claim["id"])
                 self.claim_list.addItem(item)
 
-    def inspect_selected_evidence(self, current: QListWidgetItem | None,
-                                  previous: QListWidgetItem | None) -> None:
+    def inspect_selected_evidence(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
         if current is None:
             return
         response = self._call(
@@ -4123,9 +4243,7 @@ class ResearchWindow(QMainWindow):
                 f"Checks: {response['checks']}\n\n{response['note']}"
             )
 
-    def open_selected_evidence_source(
-        self, item: QListWidgetItem | bool | None = None
-    ) -> None:
+    def open_selected_evidence_source(self, item: QListWidgetItem | bool | None = None) -> None:
         selected = item if isinstance(item, QListWidgetItem) else self.evidence_list.currentItem()
         if selected is None:
             self._set_status("Select an evidence passage first.")
@@ -4149,7 +4267,8 @@ class ResearchWindow(QMainWindow):
             self._set_status("Select the evidence passage that supports the draft.")
             return
         created = self._call(
-            "ui.claim.create", text=self.claim_entry.toPlainText(),
+            "ui.claim.create",
+            text=self.claim_entry.toPlainText(),
             supporting_evidence=[item.data(Qt.ItemDataRole.UserRole)],
             challenging_evidence=[],
         )
@@ -4158,8 +4277,9 @@ class ResearchWindow(QMainWindow):
             self.refresh_evidence()
             self._set_status("Claim draft saved; independent scientific review is required.")
 
-    def inspect_selected_claim(self, current: QListWidgetItem | None,
-                               previous: QListWidgetItem | None) -> None:
+    def inspect_selected_claim(
+        self, current: QListWidgetItem | None, previous: QListWidgetItem | None
+    ) -> None:
         if current is None:
             return
         claim_id = current.data(Qt.ItemDataRole.UserRole)

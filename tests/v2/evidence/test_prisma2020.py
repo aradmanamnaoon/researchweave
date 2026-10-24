@@ -11,7 +11,8 @@ from researchweave.evidence.storage import ProjectStore
 def _fixture(store: ProjectStore) -> None:
     refs = LibraryService(store).import_bibliography(
         b"@article{a,title={Report A},author={Doe, Ada},year={2024}}\n"
-        b"@article{b,title={Report B},author={Doe, Ada},year={2025}}", "bibtex"
+        b"@article{b,title={Report B},author={Doe, Ada},year={2025}}",
+        "bibtex",
     )["references"]
     review = ReviewService(store)
     run_a = review.begin_search("review", "database-a", "query A", 1)

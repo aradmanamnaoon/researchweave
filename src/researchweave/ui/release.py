@@ -20,8 +20,7 @@ MAX_MANUSCRIPT_PREVIEW = 250_000
 MAX_RELEASE_ITEMS = 500
 MAX_FILE_LABEL = 120
 _HEADER = re.compile(r"^#{1,6}\s+\S+", re.MULTILINE)
-_CITATION = re.compile(r"\[\s*(?:citation needed|source needed|todo citation)\s*\]",
-                       re.IGNORECASE)
+_CITATION = re.compile(r"\[\s*(?:citation needed|source needed|todo citation)\s*\]", re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -61,9 +60,11 @@ class SubmissionPreview:
             "manuscript_sha256": self.manuscript_sha256,
             "manuscript_characters": self.manuscript_characters,
             "structural_status": (
-                "blocked" if blocking else
-                "requires-manual-review" if manual else
-                "structurally-ready-for-human-review"
+                "blocked"
+                if blocking
+                else "requires-manual-review"
+                if manual
+                else "structurally-ready-for-human-review"
             ),
             "submission_approved": False,
             "ethics_approved": False,
@@ -101,8 +102,11 @@ def _gate(
 def inspect_submission(project: Project) -> dict[str, Any]:
     """Return a current, immutable in-memory preview; no external calls occur."""
     if len(project.manuscript) > MAX_MANUSCRIPT_PREVIEW:
-        raise UIError("RESOURCE_LIMIT", "Manuscript exceeds preview capacity.",
-                      "Split large text into smaller sections.")
+        raise UIError(
+            "RESOURCE_LIMIT",
+            "Manuscript exceeds preview capacity.",
+            "Split large text into smaller sections.",
+        )
     preview = SubmissionPreview(
         project_id=project.id,
         project_revision=project.revision,
@@ -112,103 +116,144 @@ def inspect_submission(project: Project) -> dict[str, Any]:
     )
 
     if not project.manuscript.strip():
-        preview.gates.append(_gate(
-            "MANUSCRIPT_MISSING", "Draft manuscript",
-            "blocked", "No manuscript body has been saved.",
-            "Write and save a manuscript draft before preparing a submission.",
-        ))
+        preview.gates.append(
+            _gate(
+                "MANUSCRIPT_MISSING",
+                "Draft manuscript",
+                "blocked",
+                "No manuscript body has been saved.",
+                "Write and save a manuscript draft before preparing a submission.",
+            )
+        )
     else:
-        preview.gates.append(_gate(
-            "MANUSCRIPT_PRESENT", "Draft manuscript",
-            "pass", "A nonempty local draft is saved.",
-            "Review structure, journal style and accuracy with a human reader.",
-        ))
+        preview.gates.append(
+            _gate(
+                "MANUSCRIPT_PRESENT",
+                "Draft manuscript",
+                "pass",
+                "A nonempty local draft is saved.",
+                "Review structure, journal style and accuracy with a human reader.",
+            )
+        )
 
     headers = _HEADER.findall(project.manuscript)
     if not headers:
-        preview.gates.append(_gate(
-            "STRUCTURE_HEADINGS", "Document structure",
-            "manual-review", "No Markdown section headings were detected.",
-            "Confirm the required title, abstract and section structure for the venue.",
-        ))
+        preview.gates.append(
+            _gate(
+                "STRUCTURE_HEADINGS",
+                "Document structure",
+                "manual-review",
+                "No Markdown section headings were detected.",
+                "Confirm the required title, abstract and section structure for the venue.",
+            )
+        )
     else:
-        preview.gates.append(_gate(
-            "STRUCTURE_HEADINGS", "Document structure",
-            "pass", f"{len(headers)} Markdown section headings were detected.",
-            "Confirm required sections and capitalization against venue instructions.",
-            len(headers),
-        ))
+        preview.gates.append(
+            _gate(
+                "STRUCTURE_HEADINGS",
+                "Document structure",
+                "pass",
+                f"{len(headers)} Markdown section headings were detected.",
+                "Confirm required sections and capitalization against venue instructions.",
+                len(headers),
+            )
+        )
 
     placeholder_count = len(_CITATION.findall(project.manuscript))
     if placeholder_count:
-        preview.gates.append(_gate(
-            "CITATION_PLACEHOLDER", "Unresolved citations",
-            "blocked",
-            f"{placeholder_count} explicit citation placeholders remain in manuscript text.",
-            "Replace placeholders only after checking genuine source metadata.",
-            placeholder_count,
-        ))
+        preview.gates.append(
+            _gate(
+                "CITATION_PLACEHOLDER",
+                "Unresolved citations",
+                "blocked",
+                f"{placeholder_count} explicit citation placeholders remain in manuscript text.",
+                "Replace placeholders only after checking genuine source metadata.",
+                placeholder_count,
+            )
+        )
     else:
-        preview.gates.append(_gate(
-            "CITATION_PLACEHOLDER", "Unresolved citations",
-            "manual-review",
-            "No explicit placeholder markers detected; uncited claims may still exist.",
-            "Inspect every factual assertion and the real reference list.",
-        ))
+        preview.gates.append(
+            _gate(
+                "CITATION_PLACEHOLDER",
+                "Unresolved citations",
+                "manual-review",
+                "No explicit placeholder markers detected; uncited claims may still exist.",
+                "Inspect every factual assertion and the real reference list.",
+            )
+        )
 
-    hashes = {
-        source.id: _sha256(source.text)
-        for source in project.sources
-    }
+    hashes = {source.id: _sha256(source.text) for source in project.sources}
     broken_source_ids = [
-        source.id for source in project.sources
+        source.id
+        for source in project.sources
         if source.content_hash and hashes[source.id] != source.content_hash
     ]
     for source in project.sources[:MAX_RELEASE_ITEMS]:
-        preview.source_registry.append({
-            "source_id": source.id,
-            "title": source.title,
-            "user_label": source.source_label,
-            "content_sha256": hashes[source.id],
-            "checksum_matched": source.id not in broken_source_ids,
-            "metadata_verified": source.verified,
-            "has_complete_bibliography": False,
-        })
+        preview.source_registry.append(
+            {
+                "source_id": source.id,
+                "title": source.title,
+                "user_label": source.source_label,
+                "content_sha256": hashes[source.id],
+                "checksum_matched": source.id not in broken_source_ids,
+                "metadata_verified": source.verified,
+                "has_complete_bibliography": False,
+            }
+        )
     if broken_source_ids:
-        preview.gates.append(_gate(
-            "SOURCE_INTEGRITY", "Source integrity",
-            "blocked", f"{len(broken_source_ids)} source content hashes do not match.",
-            "Restore the original source records before linking citations.",
-        ))
+        preview.gates.append(
+            _gate(
+                "SOURCE_INTEGRITY",
+                "Source integrity",
+                "blocked",
+                f"{len(broken_source_ids)} source content hashes do not match.",
+                "Restore the original source records before linking citations.",
+            )
+        )
     elif project.sources:
-        preview.gates.append(_gate(
-            "SOURCE_INTEGRITY", "Source integrity",
-            "pass", "Recorded source content hashes match current local source text.",
-            "Verify source authenticity and bibliographic metadata separately.",
-            len(project.sources),
-        ))
+        preview.gates.append(
+            _gate(
+                "SOURCE_INTEGRITY",
+                "Source integrity",
+                "pass",
+                "Recorded source content hashes match current local source text.",
+                "Verify source authenticity and bibliographic metadata separately.",
+                len(project.sources),
+            )
+        )
     else:
-        preview.gates.append(_gate(
-            "SOURCE_INTEGRITY", "Source integrity",
-            "manual-review", "No local evidence sources are registered.",
-            "Import the sources supporting each manuscript claim.",
-        ))
+        preview.gates.append(
+            _gate(
+                "SOURCE_INTEGRITY",
+                "Source integrity",
+                "manual-review",
+                "No local evidence sources are registered.",
+                "Import the sources supporting each manuscript claim.",
+            )
+        )
 
     unverified_sources = sum(not source.verified for source in project.sources)
     if unverified_sources:
-        preview.gates.append(_gate(
-            "BIBLIOGRAPHY_VERIFICATION", "Bibliographic metadata",
-            "manual-review",
-            f"{unverified_sources} source records still have unverified metadata.",
-            "Check publication details using the original source and venue style.",
-            unverified_sources,
-        ))
+        preview.gates.append(
+            _gate(
+                "BIBLIOGRAPHY_VERIFICATION",
+                "Bibliographic metadata",
+                "manual-review",
+                f"{unverified_sources} source records still have unverified metadata.",
+                "Check publication details using the original source and venue style.",
+                unverified_sources,
+            )
+        )
     else:
-        preview.gates.append(_gate(
-            "BIBLIOGRAPHY_VERIFICATION", "Bibliographic metadata",
-            "manual-review", "Local flags cannot independently certify a citation.",
-            "Validate all citations and DOIs against actual publications.",
-        ))
+        preview.gates.append(
+            _gate(
+                "BIBLIOGRAPHY_VERIFICATION",
+                "Bibliographic metadata",
+                "manual-review",
+                "Local flags cannot independently certify a citation.",
+                "Validate all citations and DOIs against actual publications.",
+            )
+        )
 
     unlinked_claims = 0
     invalid_claims = 0
@@ -219,104 +264,148 @@ def inspect_submission(project: Project) -> dict[str, Any]:
             check = inspect_claim(project, claim)
             if check["integrity"] != "matched":
                 invalid_claims += 1
-            preview.claims.append({
-                "claim_id": claim.id,
-                "draft_text": claim.text,
-                "supporting_count": len(check["supporting"]),
-                "challenging_count": len(check["challenging"]),
-                "evidence_integrity": check["integrity"],
-                "scientifically_verified": False,
-                "warnings": check["warnings"],
-            })
+            preview.claims.append(
+                {
+                    "claim_id": claim.id,
+                    "draft_text": claim.text,
+                    "supporting_count": len(check["supporting"]),
+                    "challenging_count": len(check["challenging"]),
+                    "evidence_integrity": check["integrity"],
+                    "scientifically_verified": False,
+                    "warnings": check["warnings"],
+                }
+            )
         except UIError:
             invalid_claims += 1
-            preview.claims.append({
-                "claim_id": claim.id,
-                "draft_text": claim.text,
-                "evidence_integrity": "failed",
-                "scientifically_verified": False,
-                "warnings": ["Referenced source or evidence record is missing."],
-            })
+            preview.claims.append(
+                {
+                    "claim_id": claim.id,
+                    "draft_text": claim.text,
+                    "evidence_integrity": "failed",
+                    "scientifically_verified": False,
+                    "warnings": ["Referenced source or evidence record is missing."],
+                }
+            )
     if invalid_claims:
-        preview.gates.append(_gate(
-            "CLAIM_LINKS", "Evidence linkage",
-            "blocked", f"{invalid_claims} claims reference broken evidence records.",
-            "Inspect original source excerpts and repair the claim links.",
-        ))
+        preview.gates.append(
+            _gate(
+                "CLAIM_LINKS",
+                "Evidence linkage",
+                "blocked",
+                f"{invalid_claims} claims reference broken evidence records.",
+                "Inspect original source excerpts and repair the claim links.",
+            )
+        )
     elif unlinked_claims:
-        preview.gates.append(_gate(
-            "CLAIM_LINKS", "Evidence linkage",
-            "manual-review", f"{unlinked_claims} claim drafts have no supporting anchor.",
-            "Link claims to relevant verified sources and examine contradictions.",
-        ))
+        preview.gates.append(
+            _gate(
+                "CLAIM_LINKS",
+                "Evidence linkage",
+                "manual-review",
+                f"{unlinked_claims} claim drafts have no supporting anchor.",
+                "Link claims to relevant verified sources and examine contradictions.",
+            )
+        )
     else:
-        preview.gates.append(_gate(
-            "CLAIM_LINKS", "Evidence linkage",
-            "manual-review",
-            "All saved claim links are present, but semantic support is unverified.",
-            "Have a qualified human review whether sources support each claim.",
-            len(project.claims),
-        ))
+        preview.gates.append(
+            _gate(
+                "CLAIM_LINKS",
+                "Evidence linkage",
+                "manual-review",
+                "All saved claim links are present, but semantic support is unverified.",
+                "Have a qualified human review whether sources support each claim.",
+                len(project.claims),
+            )
+        )
 
     integrity = audit_project(project)
     errors = integrity["summary"]["errors"]
     if errors:
-        preview.gates.append(_gate(
-            "PROJECT_INTEGRITY", "Project integrity",
-            "blocked", f"{errors} structural integrity findings need attention.",
-            "Open Diagnostics and resolve failed source, annotation and dataset checks.",
-        ))
+        preview.gates.append(
+            _gate(
+                "PROJECT_INTEGRITY",
+                "Project integrity",
+                "blocked",
+                f"{errors} structural integrity findings need attention.",
+                "Open Diagnostics and resolve failed source, annotation and dataset checks.",
+            )
+        )
     else:
-        preview.gates.append(_gate(
-            "PROJECT_INTEGRITY", "Project integrity",
-            "pass", "No structural integrity errors were detected.",
-            "Continue methodological, ethics and source-quality review.",
-        ))
+        preview.gates.append(
+            _gate(
+                "PROJECT_INTEGRITY",
+                "Project integrity",
+                "pass",
+                "No structural integrity errors were detected.",
+                "Continue methodological, ethics and source-quality review.",
+            )
+        )
 
     if project.protocol:
         missing = [
-            name for name, text in project.protocol.get("values", {}).items()
+            name
+            for name, text in project.protocol.get("values", {}).items()
             if isinstance(text, str) and not text.strip()
         ]
-        preview.gates.append(_gate(
-            "PROTOCOL_REVIEW", "Research design protocol",
-            "manual-review", f"{len(missing)} protocol fields are currently empty.",
-            "Complete the relevant required fields and obtain methodological review.",
-        ))
+        preview.gates.append(
+            _gate(
+                "PROTOCOL_REVIEW",
+                "Research design protocol",
+                "manual-review",
+                f"{len(missing)} protocol fields are currently empty.",
+                "Complete the relevant required fields and obtain methodological review.",
+            )
+        )
     else:
-        preview.gates.append(_gate(
-            "PROTOCOL_REVIEW", "Research design protocol",
-            "manual-review", "No saved methods protocol accompanies this draft.",
-            "Create a study design protocol and document deviations transparently.",
-        ))
+        preview.gates.append(
+            _gate(
+                "PROTOCOL_REVIEW",
+                "Research design protocol",
+                "manual-review",
+                "No saved methods protocol accompanies this draft.",
+                "Create a study design protocol and document deviations transparently.",
+            )
+        )
 
-    preview.gates.extend([
-        _gate(
-            "ETHICS", "Research ethics", "manual-review",
-            "Ethics approval or exemption has not been validated.",
-            "Provide real approval, consent or documented exemption where applicable.",
-        ),
-        _gate(
-            "DATA_ACCESS", "Data availability and privacy", "manual-review",
-            "Licensing, data sharing permissions and disclosure risks were not inspected.",
-            "Review dataset licenses, consent terms and disclosure obligations.",
-        ),
-        _gate(
-            "VENUE", "Journal or conference requirements", "manual-review",
-            "No venue-specific submission rules were verified.",
-            "Read the target journal's current author instructions and forms.",
-        ),
-        _gate(
-            "AUTHORSHIP", "Authorship, funding and conflicts", "manual-review",
-            "Identity, contribution, funding and interest disclosures need human completion.",
-            "Confirm author information and all mandatory declarations.",
-        ),
-    ])
-    preview.warnings.extend([
-        "Never submit this preview as evidence of ethics or peer-review approval.",
-        "BibTeX/DOI metadata were not retrieved or fabricated.",
-        "A clean hash and an attached quotation cannot establish research truth.",
-    ])
+    preview.gates.extend(
+        [
+            _gate(
+                "ETHICS",
+                "Research ethics",
+                "manual-review",
+                "Ethics approval or exemption has not been validated.",
+                "Provide real approval, consent or documented exemption where applicable.",
+            ),
+            _gate(
+                "DATA_ACCESS",
+                "Data availability and privacy",
+                "manual-review",
+                "Licensing, data sharing permissions and disclosure risks were not inspected.",
+                "Review dataset licenses, consent terms and disclosure obligations.",
+            ),
+            _gate(
+                "VENUE",
+                "Journal or conference requirements",
+                "manual-review",
+                "No venue-specific submission rules were verified.",
+                "Read the target journal's current author instructions and forms.",
+            ),
+            _gate(
+                "AUTHORSHIP",
+                "Authorship, funding and conflicts",
+                "manual-review",
+                "Identity, contribution, funding and interest disclosures need human completion.",
+                "Confirm author information and all mandatory declarations.",
+            ),
+        ]
+    )
+    preview.warnings.extend(
+        [
+            "Never submit this preview as evidence of ethics or peer-review approval.",
+            "BibTeX/DOI metadata were not retrieved or fabricated.",
+            "A clean hash and an attached quotation cannot establish research truth.",
+        ]
+    )
     if len(project.sources) > MAX_RELEASE_ITEMS or len(project.claims) > MAX_RELEASE_ITEMS:
         preview.warnings.append(
             "Only first 500 source/claim records were shown; the entire project was not "
@@ -341,9 +430,7 @@ def submission_markdown(project: Project) -> dict[str, Any]:
         "",
     ]
     for gate in status["gates"]:
-        lines.append(
-            f"- [{gate['state']}] {gate['heading']}: {gate['rationale']}"
-        )
+        lines.append(f"- [{gate['state']}] {gate['heading']}: {gate['rationale']}")
         lines.append(f"  Next: {gate['next_action']}")
     lines.extend(["", "## Draft claims and source trace", ""])
     for claim in project.claims[:MAX_RELEASE_ITEMS]:
@@ -352,20 +439,28 @@ def submission_markdown(project: Project) -> dict[str, Any]:
             source_text = ", ".join(reference["source_ids"])
         except UIError:
             source_text = "unavailable or broken source links"
-        lines.extend([
-            f"- Draft: {claim.text}",
-            f"  Source record IDs: {source_text}",
-            "  Citation: [Requires human verification of bibliographic metadata]",
-        ])
-    lines.extend([
-        "", "## Draft manuscript", "",
-        project.manuscript or "[No manuscript text saved]",
-        "", "## Disclosure", "",
-        "This is a local file review preview with synthetic-capable tooling. "
-        "It provides no publication, citation, methodological, ethics or "
-        "authorship certification.",
-        "",
-    ])
+        lines.extend(
+            [
+                f"- Draft: {claim.text}",
+                f"  Source record IDs: {source_text}",
+                "  Citation: [Requires human verification of bibliographic metadata]",
+            ]
+        )
+    lines.extend(
+        [
+            "",
+            "## Draft manuscript",
+            "",
+            project.manuscript or "[No manuscript text saved]",
+            "",
+            "## Disclosure",
+            "",
+            "This is a local file review preview with synthetic-capable tooling. "
+            "It provides no publication, citation, methodological, ethics or "
+            "authorship certification.",
+            "",
+        ]
+    )
     content = "\n".join(lines)
     return {
         "filename_suggestion": "submission-review.md",

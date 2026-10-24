@@ -60,8 +60,7 @@ class ChartSpec:
 
     def accessible_table(self) -> list[dict[str, Any]]:
         return [
-            {"interval": item.label, "count": item.count,
-             "lower": item.lower, "upper": item.upper}
+            {"interval": item.label, "count": item.count, "lower": item.lower, "upper": item.upper}
             for item in self.bins
         ]
 
@@ -69,8 +68,11 @@ class ChartSpec:
 def nice_number(value: float) -> str:
     """Finite numeric formatting suitable for labels, not statistical inference."""
     if not math.isfinite(value):
-        raise UIError("INVALID_INPUT", "Non-finite values cannot be plotted.",
-                      "Exclude missing or invalid numeric records.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Non-finite values cannot be plotted.",
+            "Exclude missing or invalid numeric records.",
+        )
     if abs(value) >= 1e7 or 0 < abs(value) < 1e-4:
         return f"{value:.3g}"
     return f"{value:.6g}"
@@ -85,33 +87,54 @@ def histogram(
     unit: str = "",
 ) -> ChartSpec:
     if len(values) > MAX_CHART_VALUES:
-        raise UIError("RESOURCE_LIMIT", "Chart exceeds 50,000 sample values.",
-                      "Plot a reviewed bounded dataset or aggregate first.")
+        raise UIError(
+            "RESOURCE_LIMIT",
+            "Chart exceeds 50,000 sample values.",
+            "Plot a reviewed bounded dataset or aggregate first.",
+        )
     if isinstance(bins, bool) or not isinstance(bins, int) or not 1 <= bins <= MAX_BINS:
-        raise UIError("INVALID_INPUT", "Histogram bins must be between 1 and 60.",
-                      "Choose a smaller positive whole number of bins.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Histogram bins must be between 1 and 60.",
+            "Choose a smaller positive whole number of bins.",
+        )
     if not isinstance(column, str) or not column.strip() or len(column) > 100:
-        raise UIError("INVALID_INPUT", "Missing descriptive chart variable.",
-                      "Choose a named numeric variable.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Missing descriptive chart variable.",
+            "Choose a named numeric variable.",
+        )
     if not isinstance(unit, str) or len(unit) > 60:
-        raise UIError("INVALID_INPUT", "Unit label is too long.",
-                      "Use a short measurement unit or leave blank.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Unit label is too long.",
+            "Use a short measurement unit or leave blank.",
+        )
     if not isinstance(source_label, str) or len(source_label) > 180:
-        raise UIError("INVALID_INPUT", "Dataset origin label is too long.",
-                      "Record a short origin description.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Dataset origin label is too long.",
+            "Record a short origin description.",
+        )
     filtered = []
     for value in values:
         if value is None:
             continue
         if isinstance(value, bool) or not isinstance(value, (int, float)):
-            raise UIError("INVALID_INPUT", "Dataset contains a nonnumeric chart value.",
-                          "Review variable typing before plotting.")
+            raise UIError(
+                "INVALID_INPUT",
+                "Dataset contains a nonnumeric chart value.",
+                "Review variable typing before plotting.",
+            )
         if not math.isfinite(value):
             continue
         filtered.append(float(value))
     if not filtered:
-        raise UIError("INVALID_INPUT", "No finite values are available for plotting.",
-                      "Choose a numeric variable with observed measurements.")
+        raise UIError(
+            "INVALID_INPUT",
+            "No finite values are available for plotting.",
+            "Choose a numeric variable with observed measurements.",
+        )
     low = min(filtered)
     high = max(filtered)
     count = len(filtered)
@@ -127,15 +150,18 @@ def histogram(
         index = min(bins - 1, max(0, math.floor((value - low) / increment)))
         buckets[index] += 1
     if sum(buckets) != count:
-        raise UIError("INTEGRITY_FAILURE", "Histogram lost input observations.",
-                      "Review dataset values and retry.")
+        raise UIError(
+            "INTEGRITY_FAILURE",
+            "Histogram lost input observations.",
+            "Review dataset values and retry.",
+        )
     groups = tuple(
         Bin(
             lower=low + index * increment,
             upper=low + (index + 1) * increment,
             count=buckets[index],
             label=f"{nice_number(low + index * increment)}–"
-                  f"{nice_number(low + (index + 1) * increment)}",
+            f"{nice_number(low + (index + 1) * increment)}",
         )
         for index in range(bins)
     )
@@ -241,8 +267,11 @@ def chart_svg(
 ) -> str:
     """Export a deterministic self-contained SVG with readable axis titles."""
     if not 400 <= width <= 4096 or not 240 <= height <= 2160:
-        raise UIError("INVALID_INPUT", "Unsupported SVG chart dimensions.",
-                      "Choose a width between 400 and 4096 and height 240–2160.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Unsupported SVG chart dimensions.",
+            "Choose a width between 400 and 4096 and height 240–2160.",
+        )
     margins = (88, 54, 30, 86)
     left, top, right, bottom = margins
     plot_width = width - left - right
@@ -260,8 +289,8 @@ def chart_svg(
         f'<svg xmlns="http://www.w3.org/2000/svg" '
         f'width="{width}" height="{height}" viewBox="0 0 {width} {height}" '
         'role="img" aria-labelledby="title desc">',
-        f"<title id=\"title\">{escaped_title}</title>",
-        f"<desc id=\"desc\">{escaped_description}</desc>",
+        f'<title id="title">{escaped_title}</title>',
+        f'<desc id="desc">{escaped_description}</desc>',
         f'<rect x="0" y="0" width="{width}" height="{height}" fill="#FFFFFF"/>',
         f'<text x="{left}" y="32" font-family="sans-serif" '
         f'font-size="19" fill="#182339">{escaped_title}</text>',
@@ -282,7 +311,7 @@ def chart_svg(
         components.append(
             f'<text x="{left - 10}" y="{y + 5:.2f}" text-anchor="end" '
             f'font-family="sans-serif" font-size="12" fill="#445269">'
-            f'{nice_number(amount)}</text>'
+            f"{nice_number(amount)}</text>"
         )
     for position, item in enumerate(spec.bins):
         fraction = item.count / max_count
@@ -291,24 +320,28 @@ def chart_svg(
         y = top + plot_height - bar_height
         bar_width = max(0.5, column_width - padding)
         escaped_interval = html.escape(item.label, quote=True)
-        components.extend([
-            f'<rect x="{x:.2f}" y="{y:.2f}" width="{bar_width:.2f}" '
-            f'height="{bar_height:.2f}" fill="#315FAC">'
-            f"<title>{escaped_interval}: {item.count}</title></rect>"
-        ])
-    components.extend([
-        f'<text x="{left + plot_width / 2:.2f}" y="{height - 42}" '
-        f'text-anchor="middle" font-family="sans-serif" '
-        f'font-size="14" fill="#182339">{escaped_x}</text>',
-        f'<text x="18" y="{top + plot_height / 2:.2f}" '
-        f'transform="rotate(-90 18 {top + plot_height / 2:.2f})" '
-        f'text-anchor="middle" font-family="sans-serif" '
-        f'font-size="14" fill="#182339">{escaped_y}</text>',
-        f'<text x="{left}" y="{height - 16}" '
-        f'font-family="sans-serif" font-size="11" '
-        f'fill="#445269">{escaped_source}</text>',
-        "</svg>",
-    ])
+        components.extend(
+            [
+                f'<rect x="{x:.2f}" y="{y:.2f}" width="{bar_width:.2f}" '
+                f'height="{bar_height:.2f}" fill="#315FAC">'
+                f"<title>{escaped_interval}: {item.count}</title></rect>"
+            ]
+        )
+    components.extend(
+        [
+            f'<text x="{left + plot_width / 2:.2f}" y="{height - 42}" '
+            f'text-anchor="middle" font-family="sans-serif" '
+            f'font-size="14" fill="#182339">{escaped_x}</text>',
+            f'<text x="18" y="{top + plot_height / 2:.2f}" '
+            f'transform="rotate(-90 18 {top + plot_height / 2:.2f})" '
+            f'text-anchor="middle" font-family="sans-serif" '
+            f'font-size="14" fill="#182339">{escaped_y}</text>',
+            f'<text x="{left}" y="{height - 16}" '
+            f'font-family="sans-serif" font-size="11" '
+            f'fill="#445269">{escaped_source}</text>',
+            "</svg>",
+        ]
+    )
     return "\n".join(components)
 
 
@@ -334,7 +367,7 @@ def chart_png(spec: ChartSpec, *, width: int = 900, height: int = 500) -> bytes:
     def set_pixel(x: int, y: int, rgb: tuple[int, int, int]) -> None:
         if 0 <= x < width and 0 <= y < height:
             offset = (y * width + x) * 3
-            pixels[offset:offset + 3] = bytes(rgb)
+            pixels[offset : offset + 3] = bytes(rgb)
 
     def horizontal(y: int, x1: int, x2: int, rgb: tuple[int, int, int]) -> None:
         for x in range(max(0, x1), min(width, x2 + 1)):
@@ -374,7 +407,7 @@ def chart_png(spec: ChartSpec, *, width: int = 900, height: int = 500) -> bytes:
     stride = width * 3
     for y in range(height):
         start = y * stride
-        rows.append(b"\x00" + bytes(pixels[start:start + stride]))
+        rows.append(b"\x00" + bytes(pixels[start : start + stride]))
     png = bytearray(b"\x89PNG\r\n\x1a\n")
     png += chunk(
         b"IHDR",
@@ -425,17 +458,18 @@ class HistogramWidget(QFrame):
         painter.fillRect(self.rect(), QColor("#FFFFFF"))
         painter.setPen(QPen(self._axis_color))
         if self.spec is None:
-            painter.drawText(self.rect(), Qt.AlignmentFlag.AlignCenter,
-                             "No descriptive chart computed")
+            painter.drawText(
+                self.rect(), Qt.AlignmentFlag.AlignCenter, "No descriptive chart computed"
+            )
             painter.end()
             return
         spec = self.spec
         width = max(1, self.width())
         height = max(1, self.height())
         metrics = QFontMetrics(painter.font())
-        painter.drawText(16, 24, metrics.elidedText(
-            spec.title, Qt.TextElideMode.ElideRight, max(50, width - 40)
-        ))
+        painter.drawText(
+            16, 24, metrics.elidedText(spec.title, Qt.TextElideMode.ElideRight, max(50, width - 40))
+        )
         left = 60
         top = 42
         right = 20
@@ -443,8 +477,7 @@ class HistogramWidget(QFrame):
         plot_width = max(1, width - left - right)
         plot_height = max(1, height - top - bottom)
         painter.drawLine(left, top, left, top + plot_height)
-        painter.drawLine(left, top + plot_height, left + plot_width,
-                         top + plot_height)
+        painter.drawLine(left, top + plot_height, left + plot_width, top + plot_height)
         max_value = max(1, max(item.count for item in spec.bins))
         for tick in range(5):
             amount = round(max_value * tick / 4)
@@ -457,14 +490,21 @@ class HistogramWidget(QFrame):
         painter.setPen(QPen(self._bar_color))
         for index, group in enumerate(spec.bins):
             h = plot_height * group.count / max_value
-            painter.fillRect(QRectF(
-                left + index * bar_width + 1,
-                top + plot_height - h,
-                max(1, bar_width - 2), h,
-            ), self._bar_color)
+            painter.fillRect(
+                QRectF(
+                    left + index * bar_width + 1,
+                    top + plot_height - h,
+                    max(1, bar_width - 2),
+                    h,
+                ),
+                self._bar_color,
+            )
         painter.setPen(QPen(self._axis_color))
-        painter.drawText(left, height - 15, metrics.elidedText(
-            spec.x_label, Qt.TextElideMode.ElideRight,
-            max(50, width - left - right)
-        ))
+        painter.drawText(
+            left,
+            height - 15,
+            metrics.elidedText(
+                spec.x_label, Qt.TextElideMode.ElideRight, max(50, width - left - right)
+            ),
+        )
         painter.end()

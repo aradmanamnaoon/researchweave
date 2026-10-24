@@ -12,9 +12,7 @@ from researchweave.evidence.storage import ProjectStore
 
 
 def _downgrade(root: Path, version: int) -> str:
-    with ProjectStore.create(
-        root, "نسخه قدیمی", "آیا داده حفظ می‌شود؟", "observational"
-    ) as store:
+    with ProjectStore.create(root, "نسخه قدیمی", "آیا داده حفظ می‌شود؟", "observational") as store:
         project_id = store.info().id
     db = root / "data" / "project.sqlite"
     connection = sqlite3.connect(db)
@@ -122,9 +120,7 @@ def test_migration_is_available_before_legacy_project_open_through_facade(
     temporary.rename(destination)
 
     read_only = build_evidence_facade(workspace)
-    preview = read_only.execute(
-        "project.migration_preview", {"project_id": project_id}, {}
-    )
+    preview = read_only.execute("project.migration_preview", {"project_id": project_id}, {})
     assert preview["status"] == "ok"
     assert preview["data"]["current_version"] == 0
     blocked = read_only.execute("project.migrate", {"project_id": project_id}, {})

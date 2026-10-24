@@ -16,8 +16,10 @@ def _text_pdf(text: str) -> bytes:
     objects = [
         b"<< /Type /Catalog /Pages 2 0 R >>",
         b"<< /Type /Pages /Kids [3 0 R] /Count 1 >>",
-        (b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
-         b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"),
+        (
+            b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 612 792] "
+            b"/Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>"
+        ),
         b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
     ]
@@ -34,8 +36,7 @@ def _text_pdf(text: str) -> bytes:
     for offset in offsets[1:]:
         output.extend(f"{offset:010d} 00000 n \n".encode())
     output.extend(
-        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\n"
-        f"startxref\n{xref}\n%%EOF\n".encode()
+        f"trailer\n<< /Size {len(objects) + 1} /Root 1 0 R >>\nstartxref\n{xref}\n%%EOF\n".encode()
     )
     return bytes(output)
 

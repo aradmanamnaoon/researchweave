@@ -31,12 +31,18 @@ class FieldDefinition:
     maximum: float | None = None
 
     def __post_init__(self) -> None:
-        require(self.name.isidentifier() and len(self.name) <= 128,
-                "Extraction field needs a stable identifier")
-        require(self.minimum is None or self.maximum is None or
-                self.minimum <= self.maximum, "Invalid extraction numeric bounds")
-        require(self.datatype != "category" or bool(self.permitted_values),
-                "Category fields require listed permitted values")
+        require(
+            self.name.isidentifier() and len(self.name) <= 128,
+            "Extraction field needs a stable identifier",
+        )
+        require(
+            self.minimum is None or self.maximum is None or self.minimum <= self.maximum,
+            "Invalid extraction numeric bounds",
+        )
+        require(
+            self.datatype != "category" or bool(self.permitted_values),
+            "Category fields require listed permitted values",
+        )
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,8 +59,10 @@ class ExtractedValue:
 
 def validate_field(field: FieldDefinition, extracted: ExtractedValue) -> dict[str, Any]:
     require(extracted.field == field.name, "Field name does not match schema")
-    require(extracted.missingness in {"present", "not_reported", "not_applicable",
-                                      "not_extracted"}, "Unknown missingness state")
+    require(
+        extracted.missingness in {"present", "not_reported", "not_applicable", "not_extracted"},
+        "Unknown missingness state",
+    )
     for name, metadata_value in (
         ("population", extracted.population),
         ("timepoint", extracted.timepoint),
@@ -62,17 +70,23 @@ def validate_field(field: FieldDefinition, extracted: ExtractedValue) -> dict[st
     ):
         require(
             metadata_value is None
-            or isinstance(metadata_value, str) and len(metadata_value) <= 4000,
+            or isinstance(metadata_value, str)
+            and len(metadata_value) <= 4000,
             f"Extraction {name} must be bounded text",
         )
     if extracted.missingness != "present":
         require(extracted.value is None, "Missing data must have null value")
         require(not field.required, "Required extraction field is missing")
-        return {"field": field.name, "value": None,
-                "missingness": extracted.missingness, "unit": field.unit,
-                "original_text": extracted.original_text,
-                "population": extracted.population, "timepoint": extracted.timepoint,
-                "uncertainty": extracted.uncertainty}
+        return {
+            "field": field.name,
+            "value": None,
+            "missingness": extracted.missingness,
+            "unit": field.unit,
+            "original_text": extracted.original_text,
+            "population": extracted.population,
+            "timepoint": extracted.timepoint,
+            "uncertainty": extracted.uncertainty,
+        }
     require(extracted.value is not None, "Present extraction has null value")
     value = extracted.value
     if field.datatype == "boolean":
@@ -81,58 +95,111 @@ def validate_field(field: FieldDefinition, extracted: ExtractedValue) -> dict[st
         require(type(value) is int, "Integer field requires an integer")
     elif field.datatype == "number":
         require(type(value) in {int, float}, "Numeric field requires a number")
-        require(isinstance(value, (int, float)) and math.isfinite(value),
-                "Numeric extraction must be finite")
+        require(
+            isinstance(value, (int, float)) and math.isfinite(value),
+            "Numeric extraction must be finite",
+        )
     else:
         require(isinstance(value, str), "Text/category field requires string")
-        require(isinstance(value, str) and len(value) <= 100_000,
-                "Text extraction exceeds limit", "RESOURCE_LIMIT")
+        require(
+            isinstance(value, str) and len(value) <= 100_000,
+            "Text extraction exceeds limit",
+            "RESOURCE_LIMIT",
+        )
         if field.datatype == "category":
             require(value in field.permitted_values, "Category outside allowed values")
     if field.datatype in {"number", "integer"}:
         if field.minimum is not None:
-            require(isinstance(value, (int, float)) and value >= field.minimum,
-                    "Value below field minimum")
+            require(
+                isinstance(value, (int, float)) and value >= field.minimum,
+                "Value below field minimum",
+            )
         if field.maximum is not None:
-            require(isinstance(value, (int, float)) and value <= field.maximum,
-                    "Value above field maximum")
-    require(extracted.unit == field.unit or extracted.unit is None,
-            "Unit mismatch; conversions must be explicit")
-    return {"field": field.name, "value": value, "missingness": "present",
-            "unit": field.unit, "original_text": extracted.original_text,
-            "population": extracted.population, "timepoint": extracted.timepoint,
-            "uncertainty": extracted.uncertainty}
+            require(
+                isinstance(value, (int, float)) and value <= field.maximum,
+                "Value above field maximum",
+            )
+    require(
+        extracted.unit == field.unit or extracted.unit is None,
+        "Unit mismatch; conversions must be explicit",
+    )
+    return {
+        "field": field.name,
+        "value": value,
+        "missingness": "present",
+        "unit": field.unit,
+        "original_text": extracted.original_text,
+        "population": extracted.population,
+        "timepoint": extracted.timepoint,
+        "uncertainty": extracted.uncertainty,
+    }
 
 
 class ExtractionService:
     def __init__(self, store: ProjectStore) -> None:
         self.store = store
 
-    def create_entry(self, record_id: str, schema: FieldDefinition,
-                     extracted: ExtractedValue, reviewer: str,
-                     anchor_id: str | None = None, *,
-                     expected_revision: int | None = None) -> dict[str, Any]:
+    def create_entry(
+        self,
+        record_id: str,
+        schema: FieldDefinition,
+        extracted: ExtractedValue,
+        reviewer: str,
+        anchor_id: str | None = None,
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
         require(bool(reviewer.strip()) and len(reviewer) <= 255, "Reviewer is required")
         parsed = validate_field(schema, extracted)
         entry_id = new_id()
 
         def insert(conn: Any) -> None:
-            require(conn.execute("SELECT 1 FROM review_records WHERE id=?", (record_id,))
-                    .fetchone() is not None, "Review record does not exist", "NOT_FOUND")
+            require(
+                conn.execute("SELECT 1 FROM review_records WHERE id=?", (record_id,)).fetchone()
+                is not None,
+                "Review record does not exist",
+                "NOT_FOUND",
+            )
             if anchor_id is not None:
-                require(conn.execute("SELECT verified FROM anchors WHERE id=?",
-                                     (anchor_id,)).fetchone() is not None,
-                        "Unknown evidence anchor", "NOT_FOUND")
-            conn.execute("INSERT INTO extractions VALUES (?,?,?,?,?,?,?,?)",
-                         (entry_id, record_id, schema.name, canonical_json(parsed),
-                          schema.unit, anchor_id, reviewer, now_utc()))
+                require(
+                    conn.execute("SELECT verified FROM anchors WHERE id=?", (anchor_id,)).fetchone()
+                    is not None,
+                    "Unknown evidence anchor",
+                    "NOT_FOUND",
+                )
+            conn.execute(
+                "INSERT INTO extractions VALUES (?,?,?,?,?,?,?,?)",
+                (
+                    entry_id,
+                    record_id,
+                    schema.name,
+                    canonical_json(parsed),
+                    schema.unit,
+                    anchor_id,
+                    reviewer,
+                    now_utc(),
+                ),
+            )
 
-        _, revision = self.store.mutate("review.extract", {
-            "record_id": record_id, "field": schema.name, "entry_id": entry_id,
-            "anchor_id": anchor_id, "reviewer": reviewer,
-        }, insert, expected_revision=expected_revision)
-        return {"entry_id": entry_id, "field": schema.name, "value": parsed,
-                "revision": revision, "verified_anchor": anchor_id is not None}
+        _, revision = self.store.mutate(
+            "review.extract",
+            {
+                "record_id": record_id,
+                "field": schema.name,
+                "entry_id": entry_id,
+                "anchor_id": anchor_id,
+                "reviewer": reviewer,
+            },
+            insert,
+            expected_revision=expected_revision,
+        )
+        return {
+            "entry_id": entry_id,
+            "field": schema.name,
+            "value": parsed,
+            "revision": revision,
+            "verified_anchor": anchor_id is not None,
+        }
 
     def matrix(self, review_id: str) -> list[dict[str, Any]]:
         rows = self.store.conn.execute(
@@ -142,11 +209,19 @@ class ExtractionService:
             "WHERE r.review_id=? ORDER BY r.study_id,e.record_id,e.field_name,e.recorded_at",
             (review_id,),
         ).fetchall()
-        return [{"record_id": r["record_id"], "study_id": r["study_id"],
-                 "reference_id": r["reference_id"], "field": r["field_name"],
-                 "extracted": json.loads(r["value_json"]), "unit": r["unit"],
-                 "source_anchor": r["source_anchor"], "reviewer": r["reviewer"]}
-                for r in rows]
+        return [
+            {
+                "record_id": r["record_id"],
+                "study_id": r["study_id"],
+                "reference_id": r["reference_id"],
+                "field": r["field_name"],
+                "extracted": json.loads(r["value_json"]),
+                "unit": r["unit"],
+                "source_anchor": r["source_anchor"],
+                "reviewer": r["reviewer"],
+            }
+            for r in rows
+        ]
 
     def matrix_csv(self, review_id: str) -> str:
         rows = self.matrix(review_id)

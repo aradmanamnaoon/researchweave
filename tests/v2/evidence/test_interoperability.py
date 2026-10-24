@@ -17,25 +17,28 @@ from researchweave.evidence.storage import ProjectStore
 
 
 def _zotero_export() -> bytes:
-    return json.dumps([
-        {
-            "id": "Z1",
-            "type": "article-journal",
-            "title": "Unicode شواهد",
-            "author": [{"family": "Doe", "given": "Ada"}],
-            "issued": {"date-parts": [[2024]]},
-            "DOI": "https://doi.org/10.1000/TRACE",
-            "collections": ["systematic-review"],
-            "notes": ["screen manually"],
-            "attachments": [{"title": "PDF", "path": "not-in-csl-export"}],
-            "custom": "preserved in raw export",
-        },
-        {
-            "id": "Z2",
-            "type": "article-journal",
-            "author": [{"literal": "No title consortium"}],
-        },
-    ], ensure_ascii=False).encode("utf-8")
+    return json.dumps(
+        [
+            {
+                "id": "Z1",
+                "type": "article-journal",
+                "title": "Unicode شواهد",
+                "author": [{"family": "Doe", "given": "Ada"}],
+                "issued": {"date-parts": [[2024]]},
+                "DOI": "https://doi.org/10.1000/TRACE",
+                "collections": ["systematic-review"],
+                "notes": ["screen manually"],
+                "attachments": [{"title": "PDF", "path": "not-in-csl-export"}],
+                "custom": "preserved in raw export",
+            },
+            {
+                "id": "Z2",
+                "type": "article-journal",
+                "author": [{"literal": "No title consortium"}],
+            },
+        ],
+        ensure_ascii=False,
+    ).encode("utf-8")
 
 
 def test_zotero_export_preview_import_receipt_reopen_and_undo(tmp_path: Path) -> None:
@@ -45,8 +48,9 @@ def test_zotero_export_preview_import_receipt_reopen_and_undo(tmp_path: Path) ->
     assert preview["mapped"] == 1
     assert preview["skipped"] == 1
     assert preview["records"][0]["doi"] == "10.1000/trace"
-    assert "attachment_metadata_preserved_but_attachment_bytes_not_in_csl_json" in (
-        preview["information_loss"]
+    assert (
+        "attachment_metadata_preserved_but_attachment_bytes_not_in_csl_json"
+        in (preview["information_loss"])
     )
 
     root = tmp_path / "project"
@@ -71,15 +75,9 @@ def test_zotero_export_preview_import_receipt_reopen_and_undo(tmp_path: Path) ->
         assert exported["attachment_bytes_reconstructed"] is False
         assert __import__("base64").b64decode(exported["data_base64"]) == data
         assert exported["mappings"][0]["source_record_id"] == "Z1"
-        assert exported["mappings"][0]["preserved_mapping"]["collections"] == [
-            "systematic-review"
-        ]
-        assert exported["mappings"][0]["preserved_mapping"]["notes"] == [
-            "screen manually"
-        ]
-        assert exported["mappings"][0]["preserved_mapping"]["attachments"][0][
-            "title"
-        ] == "PDF"
+        assert exported["mappings"][0]["preserved_mapping"]["collections"] == ["systematic-review"]
+        assert exported["mappings"][0]["preserved_mapping"]["notes"] == ["screen manually"]
+        assert exported["mappings"][0]["preserved_mapping"]["attachments"][0]["title"] == "PDF"
         assert service.receipt(batch_id)["undone"] is False
         undone = service.undo(batch_id)
         assert undone["removed_references"] == 1
@@ -113,9 +111,12 @@ def test_zotero_undo_refuses_downstream_review_dependency(tmp_path: Path) -> Non
         with pytest.raises(EvidenceError) as conflict:
             service.undo(imported["batch_id"])
         assert conflict.value.code == "CONFLICT"
-        assert store.conn.execute(
-            "SELECT COUNT(*) FROM reference WHERE id=?", (reference_id,)
-        ).fetchone()[0] == 1
+        assert (
+            store.conn.execute(
+                "SELECT COUNT(*) FROM reference WHERE id=?", (reference_id,)
+            ).fetchone()[0]
+            == 1
+        )
 
 
 def test_obsidian_bidirectional_roundtrip_links_and_path_traversal(tmp_path: Path) -> None:
@@ -152,9 +153,9 @@ def test_obsidian_bidirectional_roundtrip_links_and_path_traversal(tmp_path: Pat
         undone = service.undo(batch_id)
         assert undone["soft_deleted_sources"] == 3
     with ProjectStore(root) as reopened:
-        assert reopened.conn.execute(
-            "SELECT COUNT(*) FROM sources WHERE deleted=0"
-        ).fetchone()[0] == 0
+        assert (
+            reopened.conn.execute("SELECT COUNT(*) FROM sources WHERE deleted=0").fetchone()[0] == 0
+        )
 
 
 class _ZoteroTransport:

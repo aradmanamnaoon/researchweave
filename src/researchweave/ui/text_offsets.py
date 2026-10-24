@@ -23,8 +23,9 @@ def qt_range_to_codepoints(text: str, start: int, end: int) -> tuple[int, int]:
         or start < 0
         or start >= end
     ):
-        raise UIError("INVALID_INPUT", "Invalid Qt selection.",
-                      "Highlight a complete source passage.")
+        raise UIError(
+            "INVALID_INPUT", "Invalid Qt selection.", "Highlight a complete source passage."
+        )
     utf16_index = 0
     first: int | None = None
     last: int | None = None
@@ -36,19 +37,28 @@ def qt_range_to_codepoints(text: str, start: int, end: int) -> tuple[int, int]:
             break
         advance = 2 if ord(char) > 0xFFFF else 1
         if utf16_index < start < utf16_index + advance:
-            raise UIError("INVALID_INPUT", "Selection splits a Unicode symbol.",
-                          "Select the complete symbol and retry.")
+            raise UIError(
+                "INVALID_INPUT",
+                "Selection splits a Unicode symbol.",
+                "Select the complete symbol and retry.",
+            )
         if utf16_index < end < utf16_index + advance:
-            raise UIError("INVALID_INPUT", "Selection splits a Unicode symbol.",
-                          "Select the complete symbol and retry.")
+            raise UIError(
+                "INVALID_INPUT",
+                "Selection splits a Unicode symbol.",
+                "Select the complete symbol and retry.",
+            )
         utf16_index += advance
     if utf16_index == start and first is None:
         first = len(text)
     if utf16_index == end and last is None:
         last = len(text)
     if first is None or last is None or first >= last:
-        raise UIError("INVALID_INPUT", "Selection is outside the source text.",
-                      "Highlight existing source text before coding.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Selection is outside the source text.",
+            "Highlight existing source text before coding.",
+        )
     return first, last
 
 

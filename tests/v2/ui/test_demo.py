@@ -17,8 +17,7 @@ def test_seed_reuses_synthetic_project(tmp_path: Path) -> None:
     assert project_id == repeated_id
     assert project["id"] == repeated["id"]
     assert project["sources"][0]["source_label"].startswith("Synthetic")
-    assert repeated["datasets"][0]["rows"] == [["12", "1"], ["18", "2"],
-                                                 ["15", "3"], ["21", "4"]]
+    assert repeated["datasets"][0]["rows"] == [["12", "1"], ["18", "2"], ["15", "3"], ["21", "4"]]
 
 
 def test_capture_labeled_prototype(tmp_path: Path) -> None:

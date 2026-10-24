@@ -22,15 +22,24 @@ from researchweave.ui.diagnostics import audit_project
 
 def seeded(tmp_path: Path):
     facade = build_ui_facade(tmp_path)
-    created = facade.execute("ui.project.create", {
-        "title": "Integrity", "question": "What is reliable?",
-        "study_type": "qualitative",
-    })
+    created = facade.execute(
+        "ui.project.create",
+        {
+            "title": "Integrity",
+            "question": "What is reliable?",
+            "study_type": "qualitative",
+        },
+    )
     pid = created["data"]["project_id"]
-    facade.execute("ui.source.add", {
-        "project_id": pid, "expected_revision": 1,
-        "title": "Synthetic source", "text": "Invented content",
-    })
+    facade.execute(
+        "ui.source.add",
+        {
+            "project_id": pid,
+            "expected_revision": 1,
+            "title": "Synthetic source",
+            "text": "Invented content",
+        },
+    )
     return facade, pid
 
 
@@ -50,33 +59,49 @@ def test_detect_malformed_records_without_repair(tmp_path: Path) -> None:
     facade, pid = seeded(tmp_path)
     project = facade.store.open(pid)
     project.sources[0].content_hash = "tampered-hash"
-    project.sources.append(Source(
-        id="11111111-1111-1111-1111-111111111111",
-        title="duplicate", text="Invented content",
-        content_hash=project.sources[0].content_hash,
-    ))
-    project.votes.append(ReviewVote(
-        "22222222-2222-2222-2222-222222222222", "exclude", reason=""
-    ))
-    project.annotations.append(Annotation(
-        id="33333333-3333-3333-3333-333333333333",
-        source_id=project.sources[0].id, start=4, end=7,
-        quote="wrong", code="broken",
-    ))
-    project.datasets.append(Dataset(
-        id="44444444-4444-4444-4444-444444444444",
-        name="bad", columns=["x", "x"], rows=[["1"], ["", "2"]],
-    ))
+    project.sources.append(
+        Source(
+            id="11111111-1111-1111-1111-111111111111",
+            title="duplicate",
+            text="Invented content",
+            content_hash=project.sources[0].content_hash,
+        )
+    )
+    project.votes.append(ReviewVote("22222222-2222-2222-2222-222222222222", "exclude", reason=""))
+    project.annotations.append(
+        Annotation(
+            id="33333333-3333-3333-3333-333333333333",
+            source_id=project.sources[0].id,
+            start=4,
+            end=7,
+            quote="wrong",
+            code="broken",
+        )
+    )
+    project.datasets.append(
+        Dataset(
+            id="44444444-4444-4444-4444-444444444444",
+            name="bad",
+            columns=["x", "x"],
+            rows=[["1"], ["", "2"]],
+        )
+    )
     project.notebook = "Do not display a private_key or token in diagnostic output"
     project.activity.append(Activity(100, "test.bad", "Gap"))
     original_revision = project.revision
     result = audit_project(project)
     codes = {item["code"] for item in result["findings"]}
     assert {
-        "SOURCE_HASH_MISMATCH", "DUPLICATE_SOURCE", "ORPHAN_VOTE",
-        "ANNOTATION_INVALID", "EXCLUSION_REASON_MISSING",
-        "DUPLICATE_COLUMN", "RAGGED_DATASET", "MISSING_DATA",
-        "AUDIT_SEQUENCE", "POTENTIAL_SECRET_IN_NOTES",
+        "SOURCE_HASH_MISMATCH",
+        "DUPLICATE_SOURCE",
+        "ORPHAN_VOTE",
+        "ANNOTATION_INVALID",
+        "EXCLUSION_REASON_MISSING",
+        "DUPLICATE_COLUMN",
+        "RAGGED_DATASET",
+        "MISSING_DATA",
+        "AUDIT_SEQUENCE",
+        "POTENTIAL_SECRET_IN_NOTES",
     } <= codes
     assert result["summary"]["errors"] > 0
     assert result["status"] == "integrity-issues"

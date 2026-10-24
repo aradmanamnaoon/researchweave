@@ -24,31 +24,51 @@ def ok(facade, operation, **args):
 
 def seeded(tmp_path: Path):
     facade = build_ui_facade(tmp_path)
-    project = ok(facade, "ui.project.create", title="Evidence pilot",
-                 question="Can a quotation remain linked?",
-                 study_type="qualitative")
+    project = ok(
+        facade,
+        "ui.project.create",
+        title="Evidence pilot",
+        question="Can a quotation remain linked?",
+        study_type="qualitative",
+    )
     pid = project["project_id"]
-    source = ok(facade, "ui.source.add", project_id=pid,
-                expected_revision=1, title="Synthetic illustration",
-                text="First 🧠 example. Second example.")
+    source = ok(
+        facade,
+        "ui.source.add",
+        project_id=pid,
+        expected_revision=1,
+        title="Synthetic illustration",
+        text="First 🧠 example. Second example.",
+    )
     return facade, pid, source["source_id"]
 
 
 def test_evidence_claim_roundtrip_and_citation_safety(tmp_path: Path) -> None:
     facade, pid, source_id = seeded(tmp_path)
-    passage = ok(facade, "ui.evidence.capture", project_id=pid,
-                 expected_revision=2, source_id=source_id, start=6, end=7,
-                 note="Only synthetic text")
+    passage = ok(
+        facade,
+        "ui.evidence.capture",
+        project_id=pid,
+        expected_revision=2,
+        source_id=source_id,
+        start=6,
+        end=7,
+        note="Only synthetic text",
+    )
     quote_id = passage["evidence"]["id"]
     assert passage["integrity"]["quote"] == "🧠"
     assert passage["integrity"]["integrity"] == "matched"
     assert not passage["integrity"]["scientific_claim_verified"]
     inspected = ok(facade, "ui.evidence.inspect", project_id=pid, evidence_id=quote_id)
     assert inspected["checks"]["quote_matches"]
-    claim = ok(facade, "ui.claim.create", project_id=pid,
-               expected_revision=3,
-               text="A fictional source includes a brain emoji.",
-               supporting_evidence=[quote_id])
+    claim = ok(
+        facade,
+        "ui.claim.create",
+        project_id=pid,
+        expected_revision=3,
+        text="A fictional source includes a brain emoji.",
+        supporting_evidence=[quote_id],
+    )
     claim_id = claim["claim"]["id"]
     assert claim["review"]["human_assessment_required"] is True
     reference = ok(facade, "ui.claim.reference", project_id=pid, claim_id=claim_id)
@@ -58,37 +78,65 @@ def test_evidence_claim_roundtrip_and_citation_safety(tmp_path: Path) -> None:
     reopened = build_ui_facade(tmp_path)
     assert len(ok(reopened, "ui.evidence.list", project_id=pid)["records"]) == 1
     assert len(ok(reopened, "ui.claim.list", project_id=pid)["claims"]) == 1
-    assert ok(reopened, "ui.claim.inspect", project_id=pid,
-              claim_id=claim_id)["integrity"] == "matched"
+    assert (
+        ok(reopened, "ui.claim.inspect", project_id=pid, claim_id=claim_id)["integrity"]
+        == "matched"
+    )
 
 
 def test_reject_fabricated_quote_duplicate_anchors_and_orphans(tmp_path: Path) -> None:
     facade, pid, source_id = seeded(tmp_path)
-    invalid = facade.execute("ui.evidence.capture", {
-        "project_id": pid, "expected_revision": 2,
-        "source_id": source_id, "start": 6, "end": 1000,
-    })
+    invalid = facade.execute(
+        "ui.evidence.capture",
+        {
+            "project_id": pid,
+            "expected_revision": 2,
+            "source_id": source_id,
+            "start": 6,
+            "end": 1000,
+        },
+    )
     assert invalid["error"]["code"] == "INVALID_INPUT"
-    missing = facade.execute("ui.evidence.capture", {
-        "project_id": pid, "expected_revision": 2,
-        "source_id": "11111111-1111-1111-1111-111111111111",
-        "start": 0, "end": 2,
-    })
+    missing = facade.execute(
+        "ui.evidence.capture",
+        {
+            "project_id": pid,
+            "expected_revision": 2,
+            "source_id": "11111111-1111-1111-1111-111111111111",
+            "start": 0,
+            "end": 2,
+        },
+    )
     assert missing["error"]["code"] == "NOT_FOUND"
-    orphan = facade.execute("ui.claim.create", {
-        "project_id": pid, "expected_revision": 2,
-        "text": "A claim that invents evidence",
-        "supporting_evidence": ["fake-evidence-identifier"],
-    })
+    orphan = facade.execute(
+        "ui.claim.create",
+        {
+            "project_id": pid,
+            "expected_revision": 2,
+            "text": "A claim that invents evidence",
+            "supporting_evidence": ["fake-evidence-identifier"],
+        },
+    )
     assert orphan["error"]["code"] == "NOT_FOUND"
-    excerpt = ok(facade, "ui.evidence.capture", project_id=pid,
-                 expected_revision=2, source_id=source_id, start=0, end=5)
+    excerpt = ok(
+        facade,
+        "ui.evidence.capture",
+        project_id=pid,
+        expected_revision=2,
+        source_id=source_id,
+        start=0,
+        end=5,
+    )
     eid = excerpt["evidence"]["id"]
-    duplicate = facade.execute("ui.claim.create", {
-        "project_id": pid, "expected_revision": 3,
-        "text": "A duplicate reference",
-        "supporting_evidence": [eid, eid],
-    })
+    duplicate = facade.execute(
+        "ui.claim.create",
+        {
+            "project_id": pid,
+            "expected_revision": 3,
+            "text": "A duplicate reference",
+            "supporting_evidence": [eid, eid],
+        },
+    )
     assert duplicate["error"]["code"] == "INVALID_INPUT"
     project = facade.store.open(pid)
     source = project.sources[0]

@@ -178,8 +178,10 @@ class PublishingService:
         supplied_metadata: dict[str, Any] | None = None,
     ) -> dict[str, Any]:
         """Atomically write a checksum-verified draft submission ZIP."""
-        require(destination.name.endswith(".rw-submission.zip"),
-                "Submission export needs .rw-submission.zip suffix")
+        require(
+            destination.name.endswith(".rw-submission.zip"),
+            "Submission export needs .rw-submission.zip suffix",
+        )
         destination = destination.resolve()
         require(destination.parent.is_dir(), "Submission destination parent must exist")
         require(not destination.exists(), "Submission destination already exists", "CONFLICT")
@@ -200,9 +202,7 @@ class PublishingService:
             set(metadata).issubset(allowed_metadata),
             "Submission metadata contains unsupported fields",
         )
-        base = self.submission_packet(
-            manuscript_id, journal, allow_incomplete=allow_incomplete
-        )
+        base = self.submission_packet(manuscript_id, journal, allow_incomplete=allow_incomplete)
         sections = self.writing.sections(manuscript_id)
         section_names = {row["section"] for row in sections}
         unmet: list[dict[str, Any]] = []
@@ -216,25 +216,28 @@ class PublishingService:
                 if missing:
                     unmet.append({"requirement": name, "status": "unmet", "missing": missing})
             elif name == "max_abstract_characters":
-                require(type(rule) is int and rule > 0,
-                        "max_abstract_characters must be positive")
+                require(type(rule) is int and rule > 0, "max_abstract_characters must be positive")
                 abstract = next(
                     (row["body"] for row in sections if row["section"] == "Abstract"),
                     "",
                 )
                 if len(abstract) > rule:
-                    unmet.append({
-                        "requirement": name,
-                        "status": "unmet",
-                        "actual": len(abstract),
-                        "maximum": rule,
-                    })
+                    unmet.append(
+                        {
+                            "requirement": name,
+                            "status": "unmet",
+                            "actual": len(abstract),
+                            "maximum": rule,
+                        }
+                    )
             else:
-                unmet.append({
-                    "requirement": name,
-                    "status": "manual_review_required",
-                    "rule": rule,
-                })
+                unmet.append(
+                    {
+                        "requirement": name,
+                        "status": "manual_review_required",
+                        "rule": rule,
+                    }
+                )
         if unmet and not allow_incomplete:
             raise EvidenceError(
                 "INCOMPLETE_SUBMISSION",
@@ -291,11 +294,14 @@ class PublishingService:
             "bibliography.txt": str(base["files"]["bibliography.txt"]).encode(),
             "integrity-report.json": (canonical_json(validation) + "\n").encode(),
             "venue-requirements.json": (
-                canonical_json({
-                    "journal": journal,
-                    "requirements": rules,
-                    "unmet_or_manual": unmet,
-                }) + "\n"
+                canonical_json(
+                    {
+                        "journal": journal,
+                        "requirements": rules,
+                        "unmet_or_manual": unmet,
+                    }
+                )
+                + "\n"
             ).encode(),
             "supplied-metadata.json": (canonical_json(metadata) + "\n").encode(),
         }

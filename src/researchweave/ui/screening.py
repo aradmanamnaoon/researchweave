@@ -40,82 +40,124 @@ def _source_ids(project: Project) -> set[str]:
 
 def _alias(value: str) -> str:
     if not isinstance(value, str) or not 1 <= len(value) <= 60:
-        raise UIError("INVALID_INPUT", "Reviewer alias must be 1–60 characters.",
-                      "Choose a short reviewer alias.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Reviewer alias must be 1–60 characters.",
+            "Choose a short reviewer alias.",
+        )
     name = value.strip()
     if not name or any(ord(character) < 32 for character in name):
-        raise UIError("INVALID_INPUT", "Reviewer alias contains invalid characters.",
-                      "Use readable letters or numbers.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Reviewer alias contains invalid characters.",
+            "Use readable letters or numbers.",
+        )
     return name
 
 
 def _decision(value: str) -> Decision:
     if value not in ("include", "exclude", "unsure"):
-        raise UIError("INVALID_INPUT", "Unknown screening decision.",
-                      "Select include, exclude or unsure.")
+        raise UIError(
+            "INVALID_INPUT", "Unknown screening decision.", "Select include, exclude or unsure."
+        )
     return cast(Decision, value)
 
 
 def submit_decision(
-    project: Project, *, source_id: str, reviewer: str,
-    decision: str, reason: str = "",
+    project: Project,
+    *,
+    source_id: str,
+    reviewer: str,
+    decision: str,
+    reason: str = "",
 ) -> ScreeningDecision:
     if source_id not in _source_ids(project):
-        raise UIError("NOT_FOUND", "Screening source was not found.",
-                      "Select an existing source.")
+        raise UIError("NOT_FOUND", "Screening source was not found.", "Select an existing source.")
     alias = _alias(reviewer)
     selected = _decision(decision)
     if not isinstance(reason, str) or len(reason) > 1200:
-        raise UIError("INVALID_INPUT", "Screening rationale exceeds limits.",
-                      "Write a short reason.")
+        raise UIError(
+            "INVALID_INPUT", "Screening rationale exceeds limits.", "Write a short reason."
+        )
     if selected == "exclude" and not reason.strip():
-        raise UIError("INVALID_INPUT", "Exclusion requires a reason.",
-                      "Record the study's predefined exclusion criterion.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Exclusion requires a reason.",
+            "Record the study's predefined exclusion criterion.",
+        )
     if len(project.screening_decisions) >= MAX_REVIEW_EVENTS:
-        raise UIError("RESOURCE_LIMIT", "Screening event capacity reached.",
-                      "Archive this review before continuing.")
+        raise UIError(
+            "RESOURCE_LIMIT",
+            "Screening event capacity reached.",
+            "Archive this review before continuing.",
+        )
     if len({item.reviewer for item in project.screening_decisions} | {alias}) > MAX_REVIEWERS:
-        raise UIError("RESOURCE_LIMIT", "Too many reviewer aliases.",
-                      "Keep a bounded local reviewer roster.")
-    if any(item.source_id == source_id and item.reviewer == alias
-           for item in project.screening_decisions):
-        raise UIError("CONFLICT", "Reviewer has already screened this source.",
-                      "Existing decisions are retained; use a separate adjudication.")
+        raise UIError(
+            "RESOURCE_LIMIT", "Too many reviewer aliases.", "Keep a bounded local reviewer roster."
+        )
+    if any(
+        item.source_id == source_id and item.reviewer == alias
+        for item in project.screening_decisions
+    ):
+        raise UIError(
+            "CONFLICT",
+            "Reviewer has already screened this source.",
+            "Existing decisions are retained; use a separate adjudication.",
+        )
     if any(item.source_id == source_id for item in project.adjudications):
-        raise UIError("CONFLICT", "Source was already adjudicated.",
-                      "Review the existing final decision before making changes.")
+        raise UIError(
+            "CONFLICT",
+            "Source was already adjudicated.",
+            "Review the existing final decision before making changes.",
+        )
     result = ScreeningDecision(source_id, alias, selected, reason.strip())
     project.screening_decisions.append(result)
     return result
 
 
 def adjudicate(
-    project: Project, *, source_id: str, adjudicator: str,
-    final_decision: str, rationale: str,
+    project: Project,
+    *,
+    source_id: str,
+    adjudicator: str,
+    final_decision: str,
+    rationale: str,
 ) -> Adjudication:
     alias = _alias(adjudicator)
     selected = _decision(final_decision)
     if not isinstance(rationale, str) or not 1 <= len(rationale.strip()) <= 1200:
-        raise UIError("INVALID_INPUT", "Adjudication requires a written rationale.",
-                      "Explain how disagreement was resolved.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Adjudication requires a written rationale.",
+            "Explain how disagreement was resolved.",
+        )
     if any(item.source_id == source_id for item in project.adjudications):
-        raise UIError("CONFLICT", "Source already has an adjudication.",
-                      "Preserve the existing record and inspect its rationale.")
-    decisions = [item for item in project.screening_decisions
-                 if item.source_id == source_id]
+        raise UIError(
+            "CONFLICT",
+            "Source already has an adjudication.",
+            "Preserve the existing record and inspect its rationale.",
+        )
+    decisions = [item for item in project.screening_decisions if item.source_id == source_id]
     if len(decisions) < 2 or len({item.decision for item in decisions}) < 2:
-        raise UIError("INVALID_INPUT", "No independent reviewer conflict to adjudicate.",
-                      "Obtain two distinct reviewer decisions first.")
+        raise UIError(
+            "INVALID_INPUT",
+            "No independent reviewer conflict to adjudicate.",
+            "Obtain two distinct reviewer decisions first.",
+        )
     if alias in {item.reviewer for item in decisions}:
-        raise UIError("PERMISSION_DENIED", "Adjudicator participated in this screening.",
-                      "Use a separate adjudicator alias to record an independent decision.")
+        raise UIError(
+            "PERMISSION_DENIED",
+            "Adjudicator participated in this screening.",
+            "Use a separate adjudicator alias to record an independent decision.",
+        )
     result = Adjudication(source_id, alias, selected, rationale.strip())
     project.adjudications.append(result)
     return result
 
 
 def _computed_status(
-    decisions: list[ScreeningDecision], adjudication: Adjudication | None,
+    decisions: list[ScreeningDecision],
+    adjudication: Adjudication | None,
 ) -> tuple[str, str]:
     if adjudication:
         return "adjudicated", adjudication.final_decision
@@ -131,8 +173,9 @@ def _computed_status(
     return "agreed", next(iter(choices))
 
 
-def review_queue(project: Project, *, reveal_all: bool = False,
-                 reviewer: str = "") -> dict[str, Any]:
+def review_queue(
+    project: Project, *, reveal_all: bool = False, reviewer: str = ""
+) -> dict[str, Any]:
     """Hide peer decisions while an identified reviewer has not voted.
 
     Reviewer aliases are provided by the local UI; this is a convenience
@@ -142,27 +185,28 @@ def review_queue(project: Project, *, reveal_all: bool = False,
         reviewer = _alias(reviewer)
     records = []
     for source in project.sources:
-        prior = [item for item in project.screening_decisions
-                 if item.source_id == source.id]
-        resolved = next((item for item in project.adjudications
-                         if item.source_id == source.id), None)
+        prior = [item for item in project.screening_decisions if item.source_id == source.id]
+        resolved = next(
+            (item for item in project.adjudications if item.source_id == source.id), None
+        )
         status, final = _computed_status(prior, resolved)
         peer_hidden = bool(
-            reviewer and not reveal_all and
-            not any(item.reviewer == reviewer for item in prior)
+            reviewer and not reveal_all and not any(item.reviewer == reviewer for item in prior)
         )
         visible = [] if peer_hidden else [asdict(item) for item in prior]
-        records.append({
-            "source_id": source.id,
-            "title": source.title,
-            "status": "needs-your-review" if peer_hidden and prior else status,
-            "computed_status": status if not peer_hidden else "blinded",
-            "final_decision": final if not peer_hidden else "",
-            "review_count": len(prior) if not peer_hidden else None,
-            "decisions": visible,
-            "adjudication": asdict(resolved) if resolved and not peer_hidden else None,
-            "source_metadata_verified": source.verified,
-        })
+        records.append(
+            {
+                "source_id": source.id,
+                "title": source.title,
+                "status": "needs-your-review" if peer_hidden and prior else status,
+                "computed_status": status if not peer_hidden else "blinded",
+                "final_decision": final if not peer_hidden else "",
+                "review_count": len(prior) if not peer_hidden else None,
+                "decisions": visible,
+                "adjudication": asdict(resolved) if resolved and not peer_hidden else None,
+                "source_metadata_verified": source.verified,
+            }
+        )
     return {
         "total_sources": len(records),
         "records": records,
@@ -178,9 +222,16 @@ def review_queue(project: Project, *, reveal_all: bool = False,
 def screening_flow(project: Project) -> dict[str, Any]:
     """Compute only grounded screening counts; never invent upstream PRISMA phases."""
     queue = review_queue(project, reveal_all=True)
-    counts = {name: 0 for name in (
-        "pending", "awaiting-second", "conflict", "agreed", "adjudicated",
-    )}
+    counts = {
+        name: 0
+        for name in (
+            "pending",
+            "awaiting-second",
+            "conflict",
+            "agreed",
+            "adjudicated",
+        )
+    }
     included = excluded = unsure = 0
     excluded_reasons: dict[str, int] = {}
     for source in queue["records"]:
@@ -194,8 +245,14 @@ def screening_flow(project: Project) -> dict[str, Any]:
             if source["adjudication"]:
                 why = source["adjudication"]["rationale"]
             else:
-                why = next((item["reason"] for item in source["decisions"]
-                            if item["decision"] == "exclude"), "")
+                why = next(
+                    (
+                        item["reason"]
+                        for item in source["decisions"]
+                        if item["decision"] == "exclude"
+                    ),
+                    "",
+                )
             excluded_reasons[why or "Unspecified rationale"] = (
                 excluded_reasons.get(why or "Unspecified rationale", 0) + 1
             )
@@ -203,8 +260,11 @@ def screening_flow(project: Project) -> dict[str, Any]:
             unsure += 1
     screened = counts["agreed"] + counts["adjudicated"]
     if included + excluded + unsure != screened:
-        raise UIError("INTEGRITY_FAILURE", "Screening outcome count is inconsistent.",
-                      "Inspect reviewer decisions and adjudications.")
+        raise UIError(
+            "INTEGRITY_FAILURE",
+            "Screening outcome count is inconsistent.",
+            "Inspect reviewer decisions and adjudications.",
+        )
     return {
         "phase": "source-screening-only",
         "local_source_records": len(project.sources),

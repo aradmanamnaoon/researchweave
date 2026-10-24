@@ -118,9 +118,7 @@ class ArtifactFormatService:
                 if reference.doi:
                     fields.append(f"doi = {{{_bibtex_escape(reference.doi)}}}")
                 fields.append(f"researchweave_id = {{{reference.id}}}")
-                blocks.append(
-                    "@article{" + key + ",\n  " + ",\n  ".join(fields) + "\n}"
-                )
+                blocks.append("@article{" + key + ",\n  " + ",\n  ".join(fields) + "\n}")
             data = ("\n\n".join(blocks) + ("\n" if blocks else "")).encode()
             warnings.append(
                 "BibTeX item type is conservatively rendered as @article; "
@@ -246,8 +244,7 @@ class ArtifactFormatService:
         items = []
         for artifact in artifacts:
             require(
-                isinstance(artifact.get("format"), str)
-                and isinstance(artifact.get("sha256"), str),
+                isinstance(artifact.get("format"), str) and isinstance(artifact.get("sha256"), str),
                 "Artifact receipt is incomplete",
             )
             items.append(

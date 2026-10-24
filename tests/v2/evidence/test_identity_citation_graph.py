@@ -25,22 +25,30 @@ def test_identity_exact_mismatch_persistence_and_reopen(tmp_path: Path) -> None:
     with ProjectStore.create(root, "Identity", "Which citation is this?", "exploratory") as store:
         exact_id, _ = _refs(store)
         reference = LibraryService(store).get_reference(exact_id)
-        exact = compare_identity(reference, "crossref", {
-            "title": "Exact Study",
-            "authors": ["Doe, Ada"],
-            "year": 2024,
-            "doi": "https://doi.org/10.1000/EXACT",
-            "provider_id": "10.1000/exact",
-        })
+        exact = compare_identity(
+            reference,
+            "crossref",
+            {
+                "title": "Exact Study",
+                "authors": ["Doe, Ada"],
+                "year": 2024,
+                "doi": "https://doi.org/10.1000/EXACT",
+                "provider_id": "10.1000/exact",
+            },
+        )
         assert exact["identity"] == "exact"
         assert exact["claim_support"] == "unassessed"
         service = IdentityService(store)
-        recorded = service.record(exact_id, "crossref", {
-            "title": "Different work",
-            "authors": ["Other, Person"],
-            "year": 2020,
-            "doi": "10.1000/exact",
-        })
+        recorded = service.record(
+            exact_id,
+            "crossref",
+            {
+                "title": "Different work",
+                "authors": ["Other, Person"],
+                "year": 2020,
+                "doi": "10.1000/exact",
+            },
+        )
         assert recorded["identity"] == "metadata_mismatch"
         assert set(recorded["mismatches"]) >= {"title", "year", "authors"}
     with ProjectStore(root) as reopened:
@@ -55,9 +63,7 @@ def test_identity_invalid_doi_never_becomes_verified(tmp_path: Path) -> None:
             b"@article{x,title={Unknown},author={Doe, Ada},doi={10.}}", "bibtex"
         )
         reference = LibraryService(store).get_reference(imported["references"][0]["id"])
-        result = compare_identity(reference, "manual", {
-            "title": "Unknown", "doi": "10.1000/other"
-        })
+        result = compare_identity(reference, "manual", {"title": "Unknown", "doi": "10.1000/other"})
         assert result["doi_syntax"] == "absent_or_invalid"
         assert result["doi_existence"] == "unknown"
         assert result["scientific_claims_verified"] is False

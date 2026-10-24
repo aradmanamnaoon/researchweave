@@ -73,8 +73,7 @@ def test_submission_zip_is_atomic_checksummed_and_never_claims_submission(
         assert figures[0]["label"] == "Figure 1"
         assert archive.read(figures[0]["path"]).startswith(b"\x89PNG")
         assert any(
-            item["requirement"] == "cover_letter"
-            and item["status"] == "manual_review_required"
+            item["requirement"] == "cover_letter" and item["status"] == "manual_review_required"
             for item in manifest["unmet_or_manual_requirements"]
         )
         for item in manifest["files"]:

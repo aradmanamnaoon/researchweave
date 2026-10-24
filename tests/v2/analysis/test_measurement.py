@@ -78,9 +78,7 @@ def test_factor_varimax_preserves_reproduced_covariance_and_improves_simple_stru
     assert varimax_objective(final) >= varimax_objective(initial) - 1e-8
     # Reconstruct an independently calculated Pearson correlation model.
     empirical = np.corrcoef(values, rowvar=False)
-    predicted = final_reproduction + np.diag(
-        [rotated["uniqueness"][column] for column in columns]
-    )
+    predicted = final_reproduction + np.diag([rotated["uniqueness"][column] for column in columns])
     off_diagonal = empirical - predicted
     np.fill_diagonal(off_diagonal, 0)
     expected_rmsr = np.sqrt(np.sum(off_diagonal**2) / (len(columns) * (len(columns) - 1)))

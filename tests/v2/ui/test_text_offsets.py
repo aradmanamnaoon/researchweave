@@ -48,15 +48,24 @@ def test_reader_captures_correct_offset_after_emoji(tmp_path: Path, monkeypatch)
     if not isinstance(app, QApplication):
         app = QApplication([])
     facade = build_ui_facade(tmp_path)
-    created = facade.execute("ui.project.create", {
-        "title": "Unicode", "question": "Exact offset?",
-        "study_type": "qualitative",
-    })["data"]
+    created = facade.execute(
+        "ui.project.create",
+        {
+            "title": "Unicode",
+            "question": "Exact offset?",
+            "study_type": "qualitative",
+        },
+    )["data"]
     pid = created["project_id"]
-    source = facade.execute("ui.source.add", {
-        "project_id": pid, "expected_revision": 1,
-        "title": "Synthetic", "text": "🧠brain in a 🧬 sample",
-    })["data"]
+    source = facade.execute(
+        "ui.source.add",
+        {
+            "project_id": pid,
+            "expected_revision": 1,
+            "title": "Synthetic",
+            "text": "🧠brain in a 🧬 sample",
+        },
+    )["data"]
     window = build_ui_shell(fake_services=facade)
     window.open_project(pid)
     window.current_source_id = source["source_id"]

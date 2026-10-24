@@ -10,6 +10,15 @@ TASKS = {
     "test": [["pytest", "-q", "--cov=researchweave", "--cov-report=term-missing"]],
     "skills": [[sys.executable, "scripts/validate_skills.py"]],
     "audit": [["pip-audit", "--local"]],
+    "metrics": [
+        [
+            sys.executable,
+            "scripts/measure_source.py",
+            "--output",
+            "docs/verification/CODE_METRICS.json",
+        ]
+    ],
+    "readme": [[sys.executable, "scripts/verify_readme.py"]],
 }
 
 

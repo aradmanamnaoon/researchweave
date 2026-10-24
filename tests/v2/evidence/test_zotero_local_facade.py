@@ -18,9 +18,7 @@ class _LocalZotero:
 def test_facade_exposes_read_only_authorized_zotero_local_bridge(tmp_path: Path) -> None:
     transport = _LocalZotero()
     facade = build_evidence_facade(tmp_path, zotero_transport=transport)
-    result = facade.execute(
-        "migration.zotero_local_read", {"path": "/api/users/0/items"}, {}
-    )
+    result = facade.execute("migration.zotero_local_read", {"path": "/api/users/0/items"}, {})
     assert result["status"] == "ok"
     assert result["data"]["read_only"] is True
     assert result["data"]["data"][0]["key"] == "ITEM1"
@@ -29,8 +27,6 @@ def test_facade_exposes_read_only_authorized_zotero_local_bridge(tmp_path: Path)
 
 def test_zotero_local_facade_is_denied_without_injected_transport(tmp_path: Path) -> None:
     facade = build_evidence_facade(tmp_path)
-    result = facade.execute(
-        "migration.zotero_local_read", {"path": "/api/users/0/items"}, {}
-    )
+    result = facade.execute("migration.zotero_local_read", {"path": "/api/users/0/items"}, {})
     assert result["status"] == "failed"
     assert result["error"]["code"] == "OFFLINE_DENIED"

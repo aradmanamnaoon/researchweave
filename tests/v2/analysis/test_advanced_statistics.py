@@ -148,13 +148,9 @@ def test_ordinal_parallel_slopes_screen_is_structured_and_finite(tmp_path: Path)
         tmp_path,
         "ordinal.csv",
         "x,y\n"
-        + "".join(
-            f"{value:.12g},{level}\n" for value, level in zip(x, levels, strict=True)
-        ),
+        + "".join(f"{value:.12g},{level}\n" for value, level in zip(x, levels, strict=True)),
     )
-    result = ordinal_logistic(
-        dataset, outcome="y", predictors=["x"], levels=["low", "mid", "high"]
-    )
+    result = ordinal_logistic(dataset, outcome="y", predictors=["x"], levels=["low", "mid", "high"])
     diagnostic = result["parallel_slopes_diagnostic"]
     assert diagnostic["available"] is True
     assert len(diagnostic["threshold_fits"]) == 2

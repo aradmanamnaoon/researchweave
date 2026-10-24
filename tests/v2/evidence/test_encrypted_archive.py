@@ -79,8 +79,8 @@ def test_encrypted_archive_rejects_authenticated_header_substitution(tmp_path: P
     first_bytes = first.read_bytes()
     second_bytes = second.read_bytes()
     prefix = len(b"RWPENC1\n")
-    first_header_size = int.from_bytes(first_bytes[prefix:prefix + 4], "big")
-    second_header_size = int.from_bytes(second_bytes[prefix:prefix + 4], "big")
+    first_header_size = int.from_bytes(first_bytes[prefix : prefix + 4], "big")
+    second_header_size = int.from_bytes(second_bytes[prefix : prefix + 4], "big")
     first_header_end = prefix + 4 + first_header_size
     second_header_end = prefix + 4 + second_header_size
     substituted = tmp_path / "substituted.rwproj.enc"

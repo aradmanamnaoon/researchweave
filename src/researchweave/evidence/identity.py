@@ -32,12 +32,13 @@ def compare_identity(
     observed_year = observation.get("year")
     observed_doi_raw = observation.get("doi")
     observed_authors = _authors(observation.get("authors"))
-    require(observed_title is None or isinstance(observed_title, str),
-            "Provider title must be text")
-    require(observed_year is None or type(observed_year) is int,
-            "Provider year must be an integer")
-    require(observed_doi_raw is None or isinstance(observed_doi_raw, str),
-            "Provider DOI must be text")
+    require(
+        observed_title is None or isinstance(observed_title, str), "Provider title must be text"
+    )
+    require(observed_year is None or type(observed_year) is int, "Provider year must be an integer")
+    require(
+        observed_doi_raw is None or isinstance(observed_doi_raw, str), "Provider DOI must be text"
+    )
 
     local_doi = normalize_doi(reference.doi)
     observed_doi = normalize_doi(observed_doi_raw if isinstance(observed_doi_raw, str) else None)
@@ -47,8 +48,7 @@ def compare_identity(
             None, normalize_title(reference.title), normalize_title(observed_title)
         ).ratio()
     year_match = (
-        None if reference.year is None or observed_year is None
-        else reference.year == observed_year
+        None if reference.year is None or observed_year is None else reference.year == observed_year
     )
     doi_match = None if local_doi is None or observed_doi is None else local_doi == observed_doi
     author_overlap: float | None = None
@@ -166,8 +166,7 @@ class IdentityService:
 
     def history(self, reference_id: str) -> list[dict[str, Any]]:
         exists = self.store.conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' "
-            "AND name='reference_identity_checks'"
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='reference_identity_checks'"
         ).fetchone()
         if exists is None:
             return []

@@ -26,7 +26,7 @@ def _rgb(color: str) -> tuple[int, int, int]:
     if len(color) != 7 or not color.startswith("#"):
         raise ValueError("Expected a six-digit hexadecimal color")
     try:
-        values = tuple(int(color[index:index + 2], 16) for index in (1, 3, 5))
+        values = tuple(int(color[index : index + 2], 16) for index in (1, 3, 5))
     except ValueError as exc:
         raise ValueError("Invalid hexadecimal color") from exc
     return values  # type: ignore[return-value]
@@ -39,8 +39,7 @@ def _linear(channel: int) -> float:
 
 def luminance(color: str) -> float:
     red, green, blue = _rgb(color)
-    return (0.2126 * _linear(red) + 0.7152 * _linear(green)
-            + 0.0722 * _linear(blue))
+    return 0.2126 * _linear(red) + 0.7152 * _linear(green) + 0.0722 * _linear(blue)
 
 
 def contrast_ratio(first: str, second: str) -> float:
@@ -82,8 +81,7 @@ class AccessibleIssue:
 def inspect_widgets(parent: QWidget) -> list[AccessibleIssue]:
     """Inspect keyboard-focus controls without mutating focus or user settings."""
     issue_list: list[AccessibleIssue] = []
-    classes = (QAbstractButton, QAbstractItemView, QLineEdit, QPlainTextEdit,
-               QTextEdit, QComboBox)
+    classes = (QAbstractButton, QAbstractItemView, QLineEdit, QPlainTextEdit, QTextEdit, QComboBox)
     for widget in parent.findChildren(QWidget):
         if not isinstance(widget, classes):
             continue
@@ -108,15 +106,21 @@ def inspect_widgets(parent: QWidget) -> list[AccessibleIssue]:
             # Text buttons have native spoken labels; still require names for icon-only controls.
             if isinstance(widget, QAbstractButton) and widget.text().strip():
                 continue
-            issue_list.append(AccessibleIssue(
-                type(widget).__name__, widget.objectName(),
-                "Focusable control lacks an accessible name",
-            ))
+            issue_list.append(
+                AccessibleIssue(
+                    type(widget).__name__,
+                    widget.objectName(),
+                    "Focusable control lacks an accessible name",
+                )
+            )
         if widget.focusPolicy().value == 0:
-            issue_list.append(AccessibleIssue(
-                type(widget).__name__, widget.objectName(),
-                "Enabled interactive control does not accept keyboard focus",
-            ))
+            issue_list.append(
+                AccessibleIssue(
+                    type(widget).__name__,
+                    widget.objectName(),
+                    "Enabled interactive control does not accept keyboard focus",
+                )
+            )
     return issue_list
 
 

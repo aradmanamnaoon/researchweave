@@ -49,8 +49,9 @@ def test_structured_exports_annotation_sections_and_activity(tmp_path: Path) -> 
     protocol_payload = json.loads(protocol_export["content"])
     assert protocol_payload["project_id"] == pid
     assert len(protocol_payload["history"]) == 1
-    assert hashlib.sha256(protocol_export["content"].encode()).hexdigest() == (
-        protocol_export["sha256"]
+    assert (
+        hashlib.sha256(protocol_export["content"].encode()).hexdigest()
+        == (protocol_export["sha256"])
     )
 
     prisma = ok(
@@ -136,14 +137,12 @@ def test_structured_exports_annotation_sections_and_activity(tmp_path: Path) -> 
 
     activity = ok(reopened, "ui.activity.list", project_id=pid)
     section_event = next(
-        item for item in activity["events"]
-        if item["operation"] == "ui.manuscript.sections.update"
+        item for item in activity["events"] if item["operation"] == "ui.manuscript.sections.update"
     )
     assert section_event["target_kind"] == "manuscript"
     assert "sections" in section_event["changed_fields"]
     annotation_event = next(
-        item for item in activity["events"]
-        if item["operation"] == "ui.qual.annotation.update"
+        item for item in activity["events"] if item["operation"] == "ui.qual.annotation.update"
     )
     assert annotation_event["target_id"] == annotation["annotation"]["id"]
 

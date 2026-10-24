@@ -21,13 +21,29 @@ def _ok(facade, operation, **args):
 
 def _project(tmp_path: Path):
     facade = build_ui_facade(tmp_path)
-    project = _ok(facade, "ui.project.create", title="Search test",
-                  question="What is the role of attention?", study_type="literature")
+    project = _ok(
+        facade,
+        "ui.project.create",
+        title="Search test",
+        question="What is the role of attention?",
+        study_type="literature",
+    )
     pid = project["project_id"]
-    source = _ok(facade, "ui.source.add", project_id=pid, expected_revision=1,
-                 title="Attention overview", text="Only synthetic attention evidence.")
-    _ok(facade, "ui.notebook.save", project_id=pid, expected_revision=2,
-        notebook="Attention is only a fictional search term here.")
+    source = _ok(
+        facade,
+        "ui.source.add",
+        project_id=pid,
+        expected_revision=1,
+        title="Attention overview",
+        text="Only synthetic attention evidence.",
+    )
+    _ok(
+        facade,
+        "ui.notebook.save",
+        project_id=pid,
+        expected_revision=2,
+        notebook="Attention is only a fictional search term here.",
+    )
     return facade, pid, source["source_id"]
 
 
@@ -38,15 +54,19 @@ def test_global_search_returns_distinct_types(tmp_path: Path) -> None:
     assert {item["kind"] for item in hits["hits"]} == {"source", "notebook"}
     assert hits["hits"][0]["source_id"] == source_id
     assert all(hit["snippet"] for hit in hits["hits"])
-    filtered = _ok(facade, "ui.search.global", project_id=pid,
-                   query="attention", kind="notebook")
+    filtered = _ok(facade, "ui.search.global", project_id=pid, query="attention", kind="notebook")
     assert filtered["total"] == 1
     assert filtered["hits"][0]["kind"] == "notebook"
     absent = _ok(facade, "ui.search.global", project_id=pid, query="unavailable")
     assert absent["total"] == 0
-    bad = facade.execute("ui.search.global", {
-        "project_id": pid, "query": "attention", "kind": "unsafe",
-    })
+    bad = facade.execute(
+        "ui.search.global",
+        {
+            "project_id": pid,
+            "query": "attention",
+            "kind": "unsafe",
+        },
+    )
     assert bad["error"]["code"] == "INVALID_INPUT"
 
 

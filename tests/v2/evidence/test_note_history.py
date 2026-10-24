@@ -45,9 +45,12 @@ def test_note_revision_tombstone_history_and_export_reopen(tmp_path: Path) -> No
         assert history["deleted"] is True
         assert history["tombstone"]["reason"] == "Superseded by structured extraction."
         assert len(history["revisions"]) == 2
-        assert reopened.conn.execute(
-            "SELECT COUNT(*) FROM notes WHERE id=?", (note["note_id"],)
-        ).fetchone()[0] == 1
+        assert (
+            reopened.conn.execute(
+                "SELECT COUNT(*) FROM notes WHERE id=?", (note["note_id"],)
+            ).fetchone()[0]
+            == 1
+        )
         assert reopened.audit()["ok"]
 
 
@@ -67,9 +70,7 @@ def test_legacy_note_is_adopted_without_losing_original_timestamp(tmp_path: Path
             expected_revision=None,
         )
         library = LibraryService(store)
-        library.revise_note(
-            note_id, "Legacy", "Updated", "Researcher", "Adopt old note."
-        )
+        library.revise_note(note_id, "Legacy", "Updated", "Researcher", "Adopt old note.")
         history = library.note_history(note_id)
         assert history["revisions"][0]["recorded_at"] == original_time
         assert history["revisions"][0]["body"] == "Original"

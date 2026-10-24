@@ -43,13 +43,13 @@ class HTTPResponse:
 
 
 class HTTPTransport(Protocol):
-    def get(self, url: str, *, headers: Mapping[str, str],
-            timeout: float) -> HTTPResponse: ...
+    def get(self, url: str, *, headers: Mapping[str, str], timeout: float) -> HTTPResponse: ...
 
 
 class _NoRedirect(urllib.request.HTTPRedirectHandler):
-    def redirect_request(self, request: Any, fp: Any, code: Any, msg: Any,
-                         headers: Any, newurl: Any) -> None:
+    def redirect_request(
+        self, request: Any, fp: Any, code: Any, msg: Any, headers: Any, newurl: Any
+    ) -> None:
         return None
 
 
@@ -59,35 +59,47 @@ class StdlibHTTPS:
     def __init__(self) -> None:
         self._opener = urllib.request.build_opener(_NoRedirect())
 
-    def get(self, url: str, *, headers: Mapping[str, str],
-            timeout: float) -> HTTPResponse:
+    def get(self, url: str, *, headers: Mapping[str, str], timeout: float) -> HTTPResponse:
         parts = urllib.parse.urlsplit(url)
-        require(parts.scheme == "https" and parts.hostname in
-                {host for host, _ in HOSTS.values()} and
-                not parts.username and not parts.password and parts.port is None,
-                "Untrusted metadata host", "PERMISSION_DENIED")
+        require(
+            parts.scheme == "https"
+            and parts.hostname in {host for host, _ in HOSTS.values()}
+            and not parts.username
+            and not parts.password
+            and parts.port is None,
+            "Untrusted metadata host",
+            "PERMISSION_DENIED",
+        )
         require(0 < timeout <= MAX_TIMEOUT_SECONDS, "Invalid provider timeout")
         request = urllib.request.Request(url, headers=dict(headers), method="GET")  # noqa: S310
         try:
             # Scheme, host, port, userinfo and redirects are validated/blocked above.
             with self._opener.open(request, timeout=timeout) as response:  # noqa: S310
-                response_headers = {key.lower(): value for key, value in
-                                    response.headers.items()}
+                response_headers = {key.lower(): value for key, value in response.headers.items()}
                 body = response.read(MAX_RESPONSE_BYTES + 1)
-                require(len(body) <= MAX_RESPONSE_BYTES,
-                        "Metadata provider response exceeds size limit", "RESOURCE_LIMIT")
+                require(
+                    len(body) <= MAX_RESPONSE_BYTES,
+                    "Metadata provider response exceeds size limit",
+                    "RESOURCE_LIMIT",
+                )
                 return HTTPResponse(response.status, body, response_headers)
         except urllib.error.HTTPError as exc:
             # HTTPError is a response wrapper; reading its bounded body is safe.
             with exc:
                 body = exc.read(MAX_RESPONSE_BYTES + 1)
-                require(len(body) <= MAX_RESPONSE_BYTES,
-                        "Provider error body exceeds limit", "RESOURCE_LIMIT")
+                require(
+                    len(body) <= MAX_RESPONSE_BYTES,
+                    "Provider error body exceeds limit",
+                    "RESOURCE_LIMIT",
+                )
                 response_headers = {key.lower(): value for key, value in exc.headers.items()}
                 return HTTPResponse(exc.code, body, response_headers)
         except (urllib.error.URLError, TimeoutError) as exc:
-            raise EvidenceError("PROVIDER_UNAVAILABLE", "Metadata provider unreachable",
-                                "Check network access or retry later.") from exc
+            raise EvidenceError(
+                "PROVIDER_UNAVAILABLE",
+                "Metadata provider unreachable",
+                "Check network access or retry later.",
+            ) from exc
 
 
 def _single_string(value: Any) -> str:
@@ -109,8 +121,9 @@ def _authors_crossref(item: Mapping[str, Any]) -> list[str]:
     for author in item.get("author", [])[:100]:
         if not isinstance(author, dict):
             continue
-        name = " ".join(part for part in (author.get("given"), author.get("family"))
-                        if isinstance(part, str))
+        name = " ".join(
+            part for part in (author.get("given"), author.get("family")) if isinstance(part, str)
+        )
         output.append(name or _single_string(author.get("name")))
     return output
 
@@ -122,12 +135,23 @@ def _crossref_editorial_flags(item: Mapping[str, Any]) -> tuple[bool, bool]:
     kind = _single_string(item.get("type")).casefold()
     subtype = _single_string(item.get("subtype")).casefold()
     is_retracted = (
-        "retraction" in kind or "retraction" in subtype
+        "retraction" in kind
+        or "retraction" in subtype
         or bool(keys & {"is-retracted-by", "retracts"})
     )
-    is_corrected = bool(keys & {
-        "is-corrected-by", "corrects", "is-updated-by", "updates",
-    }) or "correction" in kind or "correction" in subtype
+    is_corrected = (
+        bool(
+            keys
+            & {
+                "is-corrected-by",
+                "corrects",
+                "is-updated-by",
+                "updates",
+            }
+        )
+        or "correction" in kind
+        or "correction" in subtype
+    )
     return is_retracted, is_corrected
 
 
@@ -146,17 +170,28 @@ def _crossref(data: Mapping[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(years, dict):
             years = {}
         date_parts = years.get("date-parts", [])
-        published = (date_parts[0][0] if isinstance(date_parts, list) and date_parts and
-                     isinstance(date_parts[0], list) and date_parts[0] else None)
+        published = (
+            date_parts[0][0]
+            if isinstance(date_parts, list)
+            and date_parts
+            and isinstance(date_parts[0], list)
+            and date_parts[0]
+            else None
+        )
         retracted, corrected = _crossref_editorial_flags(item)
-        records.append({"title": _single_string(item.get("title")),
-                        "authors": _authors_crossref(item),
-                        "doi": normalize_doi(_single_string(item.get("DOI"))),
-                        "year": _year(published), "pmid": None,
-                        "provider_id": _single_string(item.get("DOI")),
-                        "kind": _single_string(item.get("type")),
-                        "is_retracted": retracted,
-                        "is_corrected": corrected})
+        records.append(
+            {
+                "title": _single_string(item.get("title")),
+                "authors": _authors_crossref(item),
+                "doi": normalize_doi(_single_string(item.get("DOI"))),
+                "year": _year(published),
+                "pmid": None,
+                "provider_id": _single_string(item.get("DOI")),
+                "kind": _single_string(item.get("type")),
+                "is_retracted": retracted,
+                "is_corrected": corrected,
+            }
+        )
     return records
 
 
@@ -177,13 +212,19 @@ def _openalex(data: Mapping[str, Any]) -> list[dict[str, Any]]:
                 name = _single_string(author.get("display_name"))
                 if name:
                     authors.append(name)
-        records.append({"title": _single_string(item.get("title")),
-                        "authors": authors, "year": _year(item.get("publication_year")),
-                        "doi": normalize_doi(_single_string(item.get("doi"))),
-                        "pmid": None, "provider_id": _single_string(item.get("id")),
-                        "kind": _single_string(item.get("type")),
-                        "is_retracted": item.get("is_retracted") is True,
-                        "is_corrected": False})
+        records.append(
+            {
+                "title": _single_string(item.get("title")),
+                "authors": authors,
+                "year": _year(item.get("publication_year")),
+                "doi": normalize_doi(_single_string(item.get("doi"))),
+                "pmid": None,
+                "provider_id": _single_string(item.get("id")),
+                "kind": _single_string(item.get("type")),
+                "is_retracted": item.get("is_retracted") is True,
+                "is_corrected": False,
+            }
+        )
     return records
 
 
@@ -198,17 +239,20 @@ def _europepmc(data: Mapping[str, Any]) -> list[dict[str, Any]]:
             continue
         raw_author = _single_string(item.get("authorString"))
         pub_type = _single_string(item.get("pubType"))
-        records.append({"title": _single_string(item.get("title")),
-                        "authors": [raw_author] if raw_author else [],
-                        "year": _year(item.get("pubYear")),
-                        "doi": normalize_doi(_single_string(item.get("doi"))),
-                        "pmid": _single_string(item.get("pmid")) or None,
-                        "provider_id": _single_string(item.get("id")),
-                        "kind": pub_type,
-                        "is_retracted": item.get("isRetracted") is True
-                        or item.get("isWithdrawn") is True,
-                        "is_corrected": "correction" in pub_type.casefold()
-                        or "erratum" in pub_type.casefold()})
+        records.append(
+            {
+                "title": _single_string(item.get("title")),
+                "authors": [raw_author] if raw_author else [],
+                "year": _year(item.get("pubYear")),
+                "doi": normalize_doi(_single_string(item.get("doi"))),
+                "pmid": _single_string(item.get("pmid")) or None,
+                "provider_id": _single_string(item.get("id")),
+                "kind": pub_type,
+                "is_retracted": item.get("isRetracted") is True or item.get("isWithdrawn") is True,
+                "is_corrected": "correction" in pub_type.casefold()
+                or "erratum" in pub_type.casefold(),
+            }
+        )
     return records
 
 
@@ -226,29 +270,52 @@ def _pubmed(data: Mapping[str, Any]) -> list[dict[str, Any]]:
         item = block.get(uid, {})
         if not isinstance(item, dict):
             continue
-        authors = [author.get("name") for author in item.get("authors", [])[:100]
-                   if isinstance(author, dict) and isinstance(author.get("name"), str)]
-        dois = [a.get("value", "") for a in item.get("articleids", [])[:100]
-                if isinstance(a, dict) and a.get("idtype") == "doi"]
-        pub_types = [str(value) for value in item.get("pubtype", [])[:100]
-                     if isinstance(value, str)]
+        authors = [
+            author.get("name")
+            for author in item.get("authors", [])[:100]
+            if isinstance(author, dict) and isinstance(author.get("name"), str)
+        ]
+        dois = [
+            a.get("value", "")
+            for a in item.get("articleids", [])[:100]
+            if isinstance(a, dict) and a.get("idtype") == "doi"
+        ]
+        pub_types = [
+            str(value) for value in item.get("pubtype", [])[:100] if isinstance(value, str)
+        ]
         lowered_types = {value.casefold() for value in pub_types}
-        records.append({"title": _single_string(item.get("title")), "authors": authors,
-                        "year": _year(item.get("pubdate")),
-                        "doi": normalize_doi(dois[0]) if dois else None,
-                        "pmid": uid, "provider_id": uid,
-                        "kind": "pubmed-summary",
-                        "is_retracted": bool(lowered_types & {
-                            "retracted publication", "retraction of publication",
-                        }),
-                        "is_corrected": bool(lowered_types & {
-                            "published erratum", "corrected and republished article",
-                        })})
+        records.append(
+            {
+                "title": _single_string(item.get("title")),
+                "authors": authors,
+                "year": _year(item.get("pubdate")),
+                "doi": normalize_doi(dois[0]) if dois else None,
+                "pmid": uid,
+                "provider_id": uid,
+                "kind": "pubmed-summary",
+                "is_retracted": bool(
+                    lowered_types
+                    & {
+                        "retracted publication",
+                        "retraction of publication",
+                    }
+                ),
+                "is_corrected": bool(
+                    lowered_types
+                    & {
+                        "published erratum",
+                        "corrected and republished article",
+                    }
+                ),
+            }
+        )
     return records
 
 
 PARSERS: Mapping[str, Callable[[Mapping[str, Any]], list[dict[str, Any]]]] = {
-    "crossref": _crossref, "openalex": _openalex, "europepmc": _europepmc,
+    "crossref": _crossref,
+    "openalex": _openalex,
+    "europepmc": _europepmc,
     "pubmed": _pubmed,
 }
 
@@ -256,12 +323,17 @@ PARSERS: Mapping[str, Callable[[Mapping[str, Any]], list[dict[str, Any]]]] = {
 class CatalogClient:
     """Deterministic metadata normalization with bounded, permissioned transport."""
 
-    def __init__(self, transport: HTTPTransport | None = None, *,
-                 offline: bool = True, openalex_key: str | None = None,
-                 contact_email: str | None = None,
-                 clock: Callable[[], float] = time.monotonic,
-                 sleeper: Callable[[float], None] = time.sleep,
-                 min_interval_seconds: float = 1.0) -> None:
+    def __init__(
+        self,
+        transport: HTTPTransport | None = None,
+        *,
+        offline: bool = True,
+        openalex_key: str | None = None,
+        contact_email: str | None = None,
+        clock: Callable[[], float] = time.monotonic,
+        sleeper: Callable[[float], None] = time.sleep,
+        min_interval_seconds: float = 1.0,
+    ) -> None:
         self.transport = transport
         self.offline = offline
         require(
@@ -285,14 +357,21 @@ class CatalogClient:
         self.cooldown_until: dict[str, float] = {}
         self.cache: dict[tuple[str, str, int], dict[str, Any]] = {}
 
-    def _call(self, provider: str, endpoint: str,
-              params: Mapping[str, str], headers: Mapping[str, str]) -> tuple[dict[str, Any], str]:
+    def _call(
+        self, provider: str, endpoint: str, params: Mapping[str, str], headers: Mapping[str, str]
+    ) -> tuple[dict[str, Any], str]:
         if self.offline or self.transport is None:
-            raise EvidenceError("OFFLINE_DENIED", "Remote catalog access is disabled",
-                                "Enable provider access through the trusted host.")
+            raise EvidenceError(
+                "OFFLINE_DENIED",
+                "Remote catalog access is disabled",
+                "Enable provider access through the trusted host.",
+            )
         host, _ = HOSTS[provider]
-        require(endpoint.startswith("/") and ".." not in endpoint,
-                "Catalog endpoint must be a safe fixed route", "PERMISSION_DENIED")
+        require(
+            endpoint.startswith("/") and ".." not in endpoint,
+            "Catalog endpoint must be a safe fixed route",
+            "PERMISSION_DENIED",
+        )
         instant = self.clock()
         if instant < self.cooldown_until.get(provider, float("-inf")):
             raise EvidenceError(
@@ -311,49 +390,77 @@ class CatalogClient:
         require(len(uri) <= 5000, "Provider URL exceeds limit", "RESOURCE_LIMIT")
         response = self.transport.get(uri, headers=headers, timeout=10.0)
         if response.status == 429:
-            retry_after = next((value for key, value in response.headers.items()
-                                if key.lower() == "retry-after"), "")
+            retry_after = next(
+                (value for key, value in response.headers.items() if key.lower() == "retry-after"),
+                "",
+            )
             try:
                 retry_seconds = min(3600.0, max(1.0, float(retry_after)))
             except ValueError:
                 retry_seconds = max(1.0, self.min_interval_seconds)
             self.cooldown_until[provider] = self.clock() + retry_seconds
-            raise EvidenceError("RATE_LIMITED", "Provider rejected request rate",
-                                "Read Retry-After and retry with a slower cadence.")
+            raise EvidenceError(
+                "RATE_LIMITED",
+                "Provider rejected request rate",
+                "Read Retry-After and retry with a slower cadence.",
+            )
         if response.status in {401, 403}:
-            raise EvidenceError("PERMISSION_DENIED", "Provider refused credentials or access",
-                                "Check provider terms and optional credentials.")
+            raise EvidenceError(
+                "PERMISSION_DENIED",
+                "Provider refused credentials or access",
+                "Check provider terms and optional credentials.",
+            )
         if not 200 <= response.status < 300:
-            raise EvidenceError("PROVIDER_UNAVAILABLE", "Provider returned an error",
-                                "Inspect provider availability and retry later.")
-        require(len(response.body) <= MAX_RESPONSE_BYTES,
-                "Metadata response exceeds size limit", "RESOURCE_LIMIT")
+            raise EvidenceError(
+                "PROVIDER_UNAVAILABLE",
+                "Provider returned an error",
+                "Inspect provider availability and retry later.",
+            )
+        require(
+            len(response.body) <= MAX_RESPONSE_BYTES,
+            "Metadata response exceeds size limit",
+            "RESOURCE_LIMIT",
+        )
         try:
             payload = json.loads(response.body.decode("utf-8"))
         except (UnicodeError, json.JSONDecodeError) as exc:
-            raise EvidenceError("PROVIDER_UNAVAILABLE", "Provider response was invalid JSON",
-                                "Retry or use locally exported metadata.") from exc
-        require(isinstance(payload, dict), "Provider payload is not a JSON object",
-                "PROVIDER_UNAVAILABLE")
+            raise EvidenceError(
+                "PROVIDER_UNAVAILABLE",
+                "Provider response was invalid JSON",
+                "Retry or use locally exported metadata.",
+            ) from exc
+        require(
+            isinstance(payload, dict),
+            "Provider payload is not a JSON object",
+            "PROVIDER_UNAVAILABLE",
+        )
         return payload, sha256(response.body)
 
-    def search(self, provider: str, query: str, limit: int = 20,
-               *, use_cache: bool = True) -> dict[str, Any]:
+    def search(
+        self, provider: str, query: str, limit: int = 20, *, use_cache: bool = True
+    ) -> dict[str, Any]:
         require(provider in HOSTS, "Unsupported catalog provider", "UNSUPPORTED_FORMAT")
-        require(bool(query.strip()) and len(query) <= MAX_QUERY_LENGTH,
-                "Research query must be between 1 and 500 characters")
-        require(type(limit) is int and 1 <= limit <= MAX_RESULTS,
-                "Result limit must be 1..50")
+        require(
+            bool(query.strip()) and len(query) <= MAX_QUERY_LENGTH,
+            "Research query must be between 1 and 500 characters",
+        )
+        require(type(limit) is int and 1 <= limit <= MAX_RESULTS, "Result limit must be 1..50")
         if self.offline or self.transport is None:
-            raise EvidenceError("OFFLINE_DENIED", "Remote catalog search needs approval",
-                                "Use offline references or allow provider access through host.")
+            raise EvidenceError(
+                "OFFLINE_DENIED",
+                "Remote catalog search needs approval",
+                "Use offline references or allow provider access through host.",
+            )
         cache_key = (provider, query, limit)
         if use_cache and cache_key in self.cache:
             result = dict(self.cache[cache_key])
             result["cache"] = "memory"
             return result
-        headers: dict[str, str] = {"Accept": "application/json", "Accept-Encoding": "identity",
-                                   "User-Agent": "ResearchWeave/0.1 (opt-in metadata lookup)"}
+        headers: dict[str, str] = {
+            "Accept": "application/json",
+            "Accept-Encoding": "identity",
+            "User-Agent": "ResearchWeave/0.1 (opt-in metadata lookup)",
+        }
         host, endpoint = HOSTS[provider]
         if provider == "crossref":
             params = {"query.bibliographic": query, "rows": str(limit)}
@@ -364,39 +471,64 @@ class CatalogClient:
             if self.openalex_key:
                 headers["Authorization"] = f"Bearer {self.openalex_key}"
         elif provider == "europepmc":
-            params = {"query": query, "format": "json", "pageSize": str(limit),
-                      "resultType": "lite"}
+            params = {
+                "query": query,
+                "format": "json",
+                "pageSize": str(limit),
+                "resultType": "lite",
+            }
         else:
-            params = {"db": "pubmed", "term": query, "retmode": "json",
-                      "retmax": str(limit)}
+            params = {"db": "pubmed", "term": query, "retmode": "json", "retmax": str(limit)}
         payload, response_hash = self._call(provider, endpoint, params, headers)
         response_hashes = [response_hash]
         if provider == "pubmed":
             search_block = payload.get("esearchresult", {})
             uids = search_block.get("idlist", []) if isinstance(search_block, dict) else []
-            require(isinstance(uids, list) and len(uids) <= limit and
-                    all(isinstance(uid, str) and uid.isdigit() for uid in uids),
-                    "Invalid PubMed identifier list", "PROVIDER_UNAVAILABLE")
+            require(
+                isinstance(uids, list)
+                and len(uids) <= limit
+                and all(isinstance(uid, str) and uid.isdigit() for uid in uids),
+                "Invalid PubMed identifier list",
+                "PROVIDER_UNAVAILABLE",
+            )
             if uids:
                 payload, digest = self._call(
-                    provider, "/entrez/eutils/esummary.fcgi",
-                    {"db": "pubmed", "id": ",".join(uids), "retmode": "json"}, headers)
+                    provider,
+                    "/entrez/eutils/esummary.fcgi",
+                    {"db": "pubmed", "id": ",".join(uids), "retmode": "json"},
+                    headers,
+                )
                 response_hashes.append(digest)
             else:
                 payload = {"result": {"uids": []}}
         try:
             records = PARSERS[provider](payload)
         except (ValueError, TypeError, KeyError, IndexError) as exc:
-            raise EvidenceError("PROVIDER_UNAVAILABLE", "Malformed metadata record",
-                                "Retry or inspect an exported provider response.") from exc
-        result = {"provider": provider, "query": query,
-                  "fetched_at_utc": now_utc(), "cache": "miss",
-                  "raw_response_sha256": response_hashes,
-                  "records": [{**r, "provider": provider, "metadata_status": "unverified",
-                               "full_text_access": "unknown"} for r in records],
-                  "count": len(records), "network_hosts": [host],
-                  "scientific_claims_verified": False,
-                  "license_note": "Identifier metadata is not proof of full-text availability"}
+            raise EvidenceError(
+                "PROVIDER_UNAVAILABLE",
+                "Malformed metadata record",
+                "Retry or inspect an exported provider response.",
+            ) from exc
+        result = {
+            "provider": provider,
+            "query": query,
+            "fetched_at_utc": now_utc(),
+            "cache": "miss",
+            "raw_response_sha256": response_hashes,
+            "records": [
+                {
+                    **r,
+                    "provider": provider,
+                    "metadata_status": "unverified",
+                    "full_text_access": "unknown",
+                }
+                for r in records
+            ],
+            "count": len(records),
+            "network_hosts": [host],
+            "scientific_claims_verified": False,
+            "license_note": "Identifier metadata is not proof of full-text availability",
+        }
         self.cache[cache_key] = result
         return result
 
@@ -507,9 +639,7 @@ class CatalogClient:
         exact = [
             record
             for record in normalized_records
-            if normalize_doi(
-                record.get("doi") if isinstance(record.get("doi"), str) else None
-            )
+            if normalize_doi(record.get("doi") if isinstance(record.get("doi"), str) else None)
             == exact_doi
         ]
         return {
@@ -525,8 +655,11 @@ class CatalogClient:
             "paper_read": False,
             "warning": (
                 "Exact DOI returned by provider; verify editorial notices and original source."
-                if exact else
-                "Bounded provider lookup did not return the DOI; this does not prove nonexistence."
+                if exact
+                else (
+                    "Bounded provider lookup did not return the DOI; this does not prove "
+                    "nonexistence."
+                )
             ),
         }
 
@@ -540,14 +673,15 @@ class CatalogClient:
     ) -> dict[str, Any]:
         """Fetch several bounded provider pages within one explicit remote operation."""
         require(provider in HOSTS, "Unsupported catalog provider", "UNSUPPORTED_FORMAT")
-        require(bool(query.strip()) and len(query) <= MAX_QUERY_LENGTH,
-                "Research query must be between 1 and 500 characters")
+        require(
+            bool(query.strip()) and len(query) <= MAX_QUERY_LENGTH,
+            "Research query must be between 1 and 500 characters",
+        )
         require(
             type(total_limit) is int and 1 <= total_limit <= MAX_PAGED_RESULTS,
             "Total result limit must be 1..200",
         )
-        require(type(page_size) is int and 1 <= page_size <= MAX_RESULTS,
-                "Page size must be 1..50")
+        require(type(page_size) is int and 1 <= page_size <= MAX_RESULTS, "Page size must be 1..50")
         if self.offline or self.transport is None:
             raise EvidenceError(
                 "OFFLINE_DENIED",
@@ -614,11 +748,7 @@ class CatalogClient:
             response_hashes.append(digest)
             if provider == "pubmed":
                 search_block = payload.get("esearchresult", {})
-                uids = (
-                    search_block.get("idlist", [])
-                    if isinstance(search_block, dict)
-                    else []
-                )
+                uids = search_block.get("idlist", []) if isinstance(search_block, dict) else []
                 require(
                     isinstance(uids, list)
                     and len(uids) <= size
@@ -655,27 +785,27 @@ class CatalogClient:
                 if identity_key in seen:
                     continue
                 seen.add(identity_key)
-                records.append({
-                    **record,
-                    "provider": provider,
-                    "metadata_status": "unverified",
-                    "full_text_access": "unknown",
-                })
+                records.append(
+                    {
+                        **record,
+                        "provider": provider,
+                        "metadata_status": "unverified",
+                        "full_text_access": "unknown",
+                    }
+                )
                 added += 1
                 if len(records) >= total_limit:
                     break
-            pages.append({
-                "page": page_index + 1,
-                "returned": len(page_records),
-                "added": added,
-            })
+            pages.append(
+                {
+                    "page": page_index + 1,
+                    "returned": len(page_records),
+                    "added": added,
+                }
+            )
             if provider == "crossref":
                 message = payload.get("message", {})
-                next_token = (
-                    message.get("next-cursor")
-                    if isinstance(message, dict)
-                    else None
-                )
+                next_token = message.get("next-cursor") if isinstance(message, dict) else None
                 token = next_token if isinstance(next_token, str) and next_token else None
             elif provider == "openalex":
                 meta = payload.get("meta", {})

@@ -81,32 +81,48 @@ def _decoded(value: object, expected_size: int, label: str) -> bytes:
             f"Invalid encrypted archive {label}",
             "Use an intact encrypted archive exported by ResearchWeave.",
         ) from exc
-    require(len(decoded) == expected_size, f"Invalid encrypted archive {label}",
-            "INTEGRITY_FAILURE")
+    require(
+        len(decoded) == expected_size, f"Invalid encrypted archive {label}", "INTEGRITY_FAILURE"
+    )
     return decoded
 
 
 def _read_envelope(path: Path) -> tuple[dict[str, Any], bytes, bytes]:
-    require(path.is_file() and not path.is_symlink(), "Encrypted archive does not exist",
-            "NOT_FOUND")
-    require(path.stat().st_size <= MAX_ARCHIVE_BYTES + MAX_HEADER_BYTES + 1024,
-            "Encrypted archive exceeds size limit", "RESOURCE_LIMIT")
+    require(
+        path.is_file() and not path.is_symlink(), "Encrypted archive does not exist", "NOT_FOUND"
+    )
+    require(
+        path.stat().st_size <= MAX_ARCHIVE_BYTES + MAX_HEADER_BYTES + 1024,
+        "Encrypted archive exceeds size limit",
+        "RESOURCE_LIMIT",
+    )
     try:
         with path.open("rb") as stream:
-            require(stream.read(len(MAGIC)) == MAGIC, "Unknown encrypted archive format",
-                    "SCHEMA_MISMATCH")
+            require(
+                stream.read(len(MAGIC)) == MAGIC,
+                "Unknown encrypted archive format",
+                "SCHEMA_MISMATCH",
+            )
             raw_length = stream.read(4)
-            require(len(raw_length) == 4, "Truncated encrypted archive header",
-                    "INTEGRITY_FAILURE")
+            require(len(raw_length) == 4, "Truncated encrypted archive header", "INTEGRITY_FAILURE")
             header_length = struct.unpack(">I", raw_length)[0]
-            require(1 <= header_length <= MAX_HEADER_BYTES, "Encrypted archive header too large",
-                    "RESOURCE_LIMIT")
+            require(
+                1 <= header_length <= MAX_HEADER_BYTES,
+                "Encrypted archive header too large",
+                "RESOURCE_LIMIT",
+            )
             header_bytes = stream.read(header_length)
-            require(len(header_bytes) == header_length, "Truncated encrypted archive header",
-                    "INTEGRITY_FAILURE")
+            require(
+                len(header_bytes) == header_length,
+                "Truncated encrypted archive header",
+                "INTEGRITY_FAILURE",
+            )
             ciphertext = stream.read()
-        require(16 <= len(ciphertext) <= MAX_ARCHIVE_BYTES + 16,
-                "Encrypted archive payload size is invalid", "RESOURCE_LIMIT")
+        require(
+            16 <= len(ciphertext) <= MAX_ARCHIVE_BYTES + 16,
+            "Encrypted archive payload size is invalid",
+            "RESOURCE_LIMIT",
+        )
         header = json.loads(header_bytes.decode("utf-8"))
     except EvidenceError:
         raise
@@ -116,26 +132,41 @@ def _read_envelope(path: Path) -> tuple[dict[str, Any], bytes, bytes]:
             "Encrypted archive envelope is malformed",
             "Use an intact encrypted archive exported by ResearchWeave.",
         ) from exc
-    require(isinstance(header, dict), "Encrypted archive header is malformed",
-            "INTEGRITY_FAILURE")
+    require(isinstance(header, dict), "Encrypted archive header is malformed", "INTEGRITY_FAILURE")
     return header, header_bytes, ciphertext
 
 
 def _validate_header(header: dict[str, Any]) -> tuple[bytes, bytes]:
-    require(header.get("format") == FORMAT and header.get("version") == VERSION,
-            "Unsupported encrypted archive version", "SCHEMA_MISMATCH")
-    require(header.get("cipher") == "AES-256-GCM" and header.get("kdf") == "scrypt",
-            "Unsupported encrypted archive cryptography", "SCHEMA_MISMATCH")
-    require(header.get("scrypt_n") == SCRYPT_N and header.get("scrypt_r") == SCRYPT_R and
-            header.get("scrypt_p") == SCRYPT_P,
-            "Unsupported encrypted archive KDF parameters", "SCHEMA_MISMATCH")
-    require(isinstance(header.get("project_id"), str) and
-            isinstance(header.get("project_revision"), int) and
-            isinstance(header.get("plaintext_sha256"), str) and
-            isinstance(header.get("plaintext_bytes"), int),
-            "Encrypted archive metadata is malformed", "INTEGRITY_FAILURE")
-    require(0 < int(header["plaintext_bytes"]) <= MAX_ARCHIVE_BYTES,
-            "Encrypted archive plaintext size is invalid", "RESOURCE_LIMIT")
+    require(
+        header.get("format") == FORMAT and header.get("version") == VERSION,
+        "Unsupported encrypted archive version",
+        "SCHEMA_MISMATCH",
+    )
+    require(
+        header.get("cipher") == "AES-256-GCM" and header.get("kdf") == "scrypt",
+        "Unsupported encrypted archive cryptography",
+        "SCHEMA_MISMATCH",
+    )
+    require(
+        header.get("scrypt_n") == SCRYPT_N
+        and header.get("scrypt_r") == SCRYPT_R
+        and header.get("scrypt_p") == SCRYPT_P,
+        "Unsupported encrypted archive KDF parameters",
+        "SCHEMA_MISMATCH",
+    )
+    require(
+        isinstance(header.get("project_id"), str)
+        and isinstance(header.get("project_revision"), int)
+        and isinstance(header.get("plaintext_sha256"), str)
+        and isinstance(header.get("plaintext_bytes"), int),
+        "Encrypted archive metadata is malformed",
+        "INTEGRITY_FAILURE",
+    )
+    require(
+        0 < int(header["plaintext_bytes"]) <= MAX_ARCHIVE_BYTES,
+        "Encrypted archive plaintext size is invalid",
+        "RESOURCE_LIMIT",
+    )
     salt = _decoded(header.get("salt"), SALT_BYTES, "salt")
     nonce = _decoded(header.get("nonce"), NONCE_BYTES, "nonce")
     return salt, nonce
@@ -150,8 +181,7 @@ def encrypt_project_archive(
     destination = destination.resolve()
     require(destination.parent.is_dir(), "Archive destination parent must exist")
     require(not destination.exists(), "Archive already exists", "CONFLICT")
-    require(destination.name.endswith(".rwproj.enc"),
-            "Encrypted archives need .rwproj.enc suffix")
+    require(destination.name.endswith(".rwproj.enc"), "Encrypted archives need .rwproj.enc suffix")
     staged_plain: Path | None = None
     staged_encrypted: Path | None = None
     try:
@@ -193,8 +223,11 @@ def encrypt_project_archive(
             stream.write(ciphertext)
             stream.flush()
             os.fsync(stream.fileno())
-        require(staged_encrypted.stat().st_size <= MAX_ARCHIVE_BYTES + MAX_HEADER_BYTES + 1024,
-                "Encrypted archive exceeds size limit", "RESOURCE_LIMIT")
+        require(
+            staged_encrypted.stat().st_size <= MAX_ARCHIVE_BYTES + MAX_HEADER_BYTES + 1024,
+            "Encrypted archive exceeds size limit",
+            "RESOURCE_LIMIT",
+        )
         verify_encrypted_archive(staged_encrypted, password)
         require(not destination.exists(), "Archive appeared during export", "CONFLICT")
         os.replace(staged_encrypted, destination)
@@ -228,9 +261,12 @@ def _decrypt_to_temp(path: Path, password: str, directory: Path) -> tuple[Path, 
             "Encrypted archive password is wrong or the archive was modified",
             "Verify the password and use an intact backup.",
         ) from exc
-    require(len(plaintext) == header["plaintext_bytes"] and
-            sha256(plaintext) == header["plaintext_sha256"],
-            "Decrypted archive checksum mismatch", "INTEGRITY_FAILURE")
+    require(
+        len(plaintext) == header["plaintext_bytes"]
+        and sha256(plaintext) == header["plaintext_sha256"],
+        "Decrypted archive checksum mismatch",
+        "INTEGRITY_FAILURE",
+    )
     with tempfile.NamedTemporaryFile(
         prefix=".rw-decrypted-", suffix=".rwproj", dir=directory, delete=False
     ) as stream:
@@ -247,10 +283,12 @@ def verify_encrypted_archive(path: Path, password: str) -> dict[str, Any]:
     try:
         temporary, header = _decrypt_to_temp(path.resolve(), password, path.resolve().parent)
         inner = verify_archive(temporary)
-        require(inner["project_id"] == header["project_id"] and
-                inner["project_revision"] == header["project_revision"],
-                "Encrypted archive identity does not match its authenticated envelope",
-                "INTEGRITY_FAILURE")
+        require(
+            inner["project_id"] == header["project_id"]
+            and inner["project_revision"] == header["project_revision"],
+            "Encrypted archive identity does not match its authenticated envelope",
+            "INTEGRITY_FAILURE",
+        )
         return {
             "ok": True,
             "project_id": inner["project_id"],
@@ -274,10 +312,12 @@ def restore_encrypted_archive(path: Path, destination: Path, password: str) -> d
     try:
         temporary, header = _decrypt_to_temp(path.resolve(), password, destination.parent)
         inner = verify_archive(temporary)
-        require(inner["project_id"] == header["project_id"] and
-                inner["project_revision"] == header["project_revision"],
-                "Encrypted archive identity does not match its authenticated envelope",
-                "INTEGRITY_FAILURE")
+        require(
+            inner["project_id"] == header["project_id"]
+            and inner["project_revision"] == header["project_revision"],
+            "Encrypted archive identity does not match its authenticated envelope",
+            "INTEGRITY_FAILURE",
+        )
         restored = restore_archive(temporary, destination)
         if not isinstance(restored, dict):
             raise EvidenceError(

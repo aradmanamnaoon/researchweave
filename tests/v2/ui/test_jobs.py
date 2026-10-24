@@ -121,25 +121,27 @@ def test_old_generation_result_does_not_overwrite(qt_app) -> None:
 def test_unsaved_close_cancel_preserves_window(qt_app, tmp_path, monkeypatch) -> None:
     facade = build_ui_facade(tmp_path)
     created = facade.execute(
-        "ui.project.create", {"title": "Recovery", "question": "Any change?",
-                              "study_type": "literature"})
+        "ui.project.create",
+        {"title": "Recovery", "question": "Any change?", "study_type": "literature"},
+    )
     window = build_ui_shell(fake_services=facade)
     window.open_project(created["data"]["project_id"])
     window.navigate("Notebook")
     window.notebook_editor.insertPlainText("Important unsaved note")
     monkeypatch.setattr(
-        QMessageBox, "question",
+        QMessageBox,
+        "question",
         lambda *args: QMessageBox.StandardButton.Cancel,
     )
     window.close()
     assert window._writing_dirty()
     assert window.notebook_editor.toPlainText() == "Important unsaved note"
     monkeypatch.setattr(
-        QMessageBox, "question",
+        QMessageBox,
+        "question",
         lambda *args: QMessageBox.StandardButton.Save,
     )
     window.close()
-    assert facade.execute("ui.project.open", {
-        "project_id": created["data"]["project_id"]})["data"]["project"]["notebook"] == (
-        "Important unsaved note"
-    )
+    assert facade.execute("ui.project.open", {"project_id": created["data"]["project_id"]})["data"][
+        "project"
+    ]["notebook"] == ("Important unsaved note")

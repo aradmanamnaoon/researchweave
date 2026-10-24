@@ -37,9 +37,7 @@ def test_review_packet_preview_merge_conflict_receipt_and_reopen(tmp_path: Path)
     packet = tmp_path / "review.rw-review.zip"
     _source_packet(tmp_path / "source", packet)
     target_root = tmp_path / "target"
-    with ProjectStore.create(
-        target_root, "Target", "Which study?", "systematic_review"
-    ) as store:
+    with ProjectStore.create(target_root, "Target", "Which study?", "systematic_review") as store:
         existing = LibraryService(store).import_bibliography(
             (
                 b"@article{x,title={Local corrected title},author={Doe, Ada},"
@@ -62,9 +60,7 @@ def test_review_packet_preview_merge_conflict_receipt_and_reopen(tmp_path: Path)
         assert merged["conflict_count"] >= 1
         assert merged["counts"]["records_inserted"] == 1
         assert LibraryService(store).get_reference(existing["id"]).title == "Local corrected title"
-        assert store.conn.execute(
-            "SELECT COUNT(*) FROM review_packet_origins"
-        ).fetchone()[0] >= 2
+        assert store.conn.execute("SELECT COUNT(*) FROM review_packet_origins").fetchone()[0] >= 2
     with ProjectStore(target_root) as reopened:
         record = reopened.conn.execute(
             "SELECT * FROM review_records WHERE review_id='imported-review'"
@@ -96,6 +92,9 @@ def test_review_packet_tamper_is_rejected_before_merge(tmp_path: Path) -> None:
             merge_review_packet(store, rewritten, actor="Researcher")
         assert integrity.value.code == "INTEGRITY_FAILURE"
         assert store.info().revision == before
-        assert store.conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE name='review_packet_imports'"
-        ).fetchone() is None
+        assert (
+            store.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE name='review_packet_imports'"
+            ).fetchone()
+            is None
+        )

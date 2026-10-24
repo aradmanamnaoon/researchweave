@@ -63,9 +63,7 @@ def test_private_review_packet_requires_confirmation_and_excludes_sources(
             export_review_packet(store, destination, "review-1")
         assert denied.value.code == "NEEDS_APPROVAL"
         assert not destination.exists()
-        receipt = export_review_packet(
-            store, destination, "review-1", confirm_private_export=True
-        )
+        receipt = export_review_packet(store, destination, "review-1", confirm_private_export=True)
     assert receipt["privacy"] == "private"
     with zipfile.ZipFile(destination) as archive:
         manifest = json.loads(archive.read("manifest.json"))
@@ -113,9 +111,7 @@ def test_review_packet_redacts_structured_secrets_and_participant_fields(tmp_pat
         assert redactions["redaction_count"] == receipt["redaction_count"]
         assert "participant_id" in redactions["requested_fields"]
         combined = b"".join(
-            archive.read(name)
-            for name in archive.namelist()
-            if name.endswith(".json")
+            archive.read(name) for name in archive.namelist() if name.endswith(".json")
         )
         assert b"super-secret-token" not in combined
         assert b"participant@example.org" not in combined
@@ -132,8 +128,7 @@ def test_review_packet_merge_reports_conflicts_without_overwrite_and_survives_re
     ) as source:
         library = LibraryService(source)
         imported = library.import_bibliography(
-            b"@article{x,title={Incoming Title},author={Doe, Ada},year={2024},"
-            b"doi={10.1000/merge}}",
+            b"@article{x,title={Incoming Title},author={Doe, Ada},year={2024},doi={10.1000/merge}}",
             "bibtex",
         )
         reference_id = imported["references"][0]["id"]
@@ -200,8 +195,7 @@ def test_review_packet_merge_reports_conflicts_without_overwrite_and_survives_re
     with ProjectStore(destination_root) as reopened:
         assert reopened.audit()["ok"]
         assert (
-            reopened.conn.execute("SELECT COUNT(*) FROM review_packet_imports").fetchone()[0]
-            == 1
+            reopened.conn.execute("SELECT COUNT(*) FROM review_packet_imports").fetchone()[0] == 1
         )
         assert reopened.conn.execute("SELECT COUNT(*) FROM reference").fetchone()[0] == 1
         assert reopened.conn.execute("SELECT COUNT(*) FROM review_records").fetchone()[0] == 1
@@ -230,9 +224,12 @@ def test_review_packet_merge_rejects_tampered_member(tmp_path: Path) -> None:
             merge_review_packet(store, tampered, actor="Collaborator")
         assert error.value.code == "INTEGRITY_FAILURE"
         assert store.info().revision == before
-        assert store.conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_packet_imports'"
-        ).fetchone() is None
+        assert (
+            store.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_packet_imports'"
+            ).fetchone()
+            is None
+        )
 
 
 def test_selective_clone_preserves_dependencies_with_new_project_identity(

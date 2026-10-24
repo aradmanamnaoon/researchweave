@@ -176,8 +176,11 @@ class ProjectStore:
             self.conn.execute("INSERT INTO migrations VALUES (?, ?)", (SCHEMA_VERSION, now_utc()))
         elif version != SCHEMA_VERSION:
             self.conn.close()
-            raise EvidenceError("SCHEMA_MISMATCH", f"Unsupported schema {version}",
-                                "Open with a compatible ResearchWeave version.")
+            raise EvidenceError(
+                "SCHEMA_MISMATCH",
+                f"Unsupported schema {version}",
+                "Open with a compatible ResearchWeave version.",
+            )
 
     def __enter__(self) -> ProjectStore:
         return self
@@ -200,50 +203,99 @@ class ProjectStore:
             self.conn.commit()
 
     @classmethod
-    def create(cls, root: Path, title: str, question: str, design: str,
-               locale: str = "en", privacy: str = "private",
-               project_id: str | None = None) -> ProjectStore:
+    def create(
+        cls,
+        root: Path,
+        title: str,
+        question: str,
+        design: str,
+        locale: str = "en",
+        privacy: str = "private",
+        project_id: str | None = None,
+    ) -> ProjectStore:
         require(bool(title.strip()) and len(title) <= 300, "A project title is required")
-        require(bool(question.strip()) and len(question) <= 4000,
-                "A research question is required")
-        require(design in {"exploratory", "observational", "experimental", "qualitative",
-                           "mixed", "mixed_methods", "secondary_analysis", "computational",
-                           "systematic_review", "replication", "nonacademic"},
-                "Unsupported research design")
+        require(bool(question.strip()) and len(question) <= 4000, "A research question is required")
+        require(
+            design
+            in {
+                "exploratory",
+                "observational",
+                "experimental",
+                "qualitative",
+                "mixed",
+                "mixed_methods",
+                "secondary_analysis",
+                "computational",
+                "systematic_review",
+                "replication",
+                "nonacademic",
+            },
+            "Unsupported research design",
+        )
         require(privacy in {"private", "restricted", "public"}, "Unknown privacy setting")
-        require(2 <= len(locale) <= 16 and locale.replace("-", "").isalpha(),
-                "Locale must be a language code")
+        require(
+            2 <= len(locale) <= 16 and locale.replace("-", "").isalpha(),
+            "Locale must be a language code",
+        )
         store = cls(root, create=True)
         with store.transaction() as conn:
-            conn.execute("INSERT INTO project VALUES (?,?,?,?,?,?,0,?)",
-                         (project_id or new_id(), title.strip(), question.strip(), design, locale,
-                          privacy, now_utc()))
+            conn.execute(
+                "INSERT INTO project VALUES (?,?,?,?,?,?,0,?)",
+                (
+                    project_id or new_id(),
+                    title.strip(),
+                    question.strip(),
+                    design,
+                    locale,
+                    privacy,
+                    now_utc(),
+                ),
+            )
         return store
 
     def info(self) -> ProjectInfo:
         row = self.conn.execute("SELECT * FROM project").fetchone()
         if row is None:
-            raise EvidenceError("INTEGRITY_FAILURE", "Project metadata is missing",
-                                "Restore a verified backup.")
-        return ProjectInfo(id=row["id"], title=row["title"], question=row["question"],
-                           design=row["design"], locale=row["locale"],
-                           privacy=row["privacy"], revision=row["revision"])
+            raise EvidenceError(
+                "INTEGRITY_FAILURE", "Project metadata is missing", "Restore a verified backup."
+            )
+        return ProjectInfo(
+            id=row["id"],
+            title=row["title"],
+            question=row["question"],
+            design=row["design"],
+            locale=row["locale"],
+            privacy=row["privacy"],
+            revision=row["revision"],
+        )
 
-    def mutate(self, operation: str, payload: Mapping[str, Any],
-               callback: Callable[[sqlite3.Connection], T], *,
-               expected_revision: int | None, request_id: str | None = None,
-               actor: str = "local-user") -> tuple[T, int]:
+    def mutate(
+        self,
+        operation: str,
+        payload: Mapping[str, Any],
+        callback: Callable[[sqlite3.Connection], T],
+        *,
+        expected_revision: int | None,
+        request_id: str | None = None,
+        actor: str = "local-user",
+    ) -> tuple[T, int]:
         """Commit domain update and event atomically; same request cannot run twice."""
         require(bool(operation) and len(operation) < 120, "Invalid operation")
         request_id = request_id or new_id()
         with self.transaction() as conn:
             if conn.execute("SELECT 1 FROM events WHERE request_id=?", (request_id,)).fetchone():
-                raise EvidenceError("CONFLICT", "Request was already applied",
-                                    "Refresh project state and use a new request ID.")
+                raise EvidenceError(
+                    "CONFLICT",
+                    "Request was already applied",
+                    "Refresh project state and use a new request ID.",
+                )
             current = self.info().revision
             if expected_revision is not None and current != expected_revision:
-                raise EvidenceError("STALE_REVISION", "Project changed since preview",
-                                    "Refresh and review the current revision.")
+                raise EvidenceError(
+                    "STALE_REVISION",
+                    "Project changed since preview",
+                    "Refresh and review the current revision.",
+                )
             result = callback(conn)
             event_payload = canonical_json(dict(payload))
             digest = sha256(event_payload.encode("utf-8"))
@@ -252,17 +304,33 @@ class ProjectStore:
             predecessor = previous[0] if previous else "0" * 64
             seq = current + 1
             timestamp = now_utc()
-            event_hash = sha256(canonical_json([seq, request_id, operation, actor,
-                                                digest, predecessor, timestamp]).encode())
-            conn.execute("INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)",
-                         (seq, request_id, operation, actor, event_payload, digest,
-                          predecessor, event_hash, timestamp))
+            event_hash = sha256(
+                canonical_json(
+                    [seq, request_id, operation, actor, digest, predecessor, timestamp]
+                ).encode()
+            )
+            conn.execute(
+                "INSERT INTO events VALUES (?,?,?,?,?,?,?,?,?)",
+                (
+                    seq,
+                    request_id,
+                    operation,
+                    actor,
+                    event_payload,
+                    digest,
+                    predecessor,
+                    event_hash,
+                    timestamp,
+                ),
+            )
             conn.execute("UPDATE project SET revision=?", (seq,))
         return result, seq
 
     def object_path(self, digest: str) -> Path:
-        require(len(digest) == 64 and all(c in "0123456789abcdef" for c in digest),
-                "Invalid SHA-256 digest")
+        require(
+            len(digest) == 64 and all(c in "0123456789abcdef" for c in digest),
+            "Invalid SHA-256 digest",
+        )
         return self.objects_dir / digest[:2] / digest
 
     def put_object(self, data: bytes) -> str:
@@ -271,9 +339,13 @@ class ProjectStore:
         destination = self.object_path(digest)
         destination.parent.mkdir(parents=True, exist_ok=True)
         if destination.exists():
-            require(destination.is_file() and not destination.is_symlink() and
-                    sha256(destination.read_bytes()) == digest,
-                    "Existing object failed integrity check", "INTEGRITY_FAILURE")
+            require(
+                destination.is_file()
+                and not destination.is_symlink()
+                and sha256(destination.read_bytes()) == digest,
+                "Existing object failed integrity check",
+                "INTEGRITY_FAILURE",
+            )
         else:
             fd, temporary = tempfile.mkstemp(prefix=".rw-", dir=destination.parent)
             try:
@@ -286,18 +358,25 @@ class ProjectStore:
                 if os.path.exists(temporary):
                     os.unlink(temporary)
         with self.transaction() as conn:
-            conn.execute("INSERT OR IGNORE INTO objects(digest,size) VALUES (?,?)",
-                         (digest, len(data)))
+            conn.execute(
+                "INSERT OR IGNORE INTO objects(digest,size) VALUES (?,?)", (digest, len(data))
+            )
         return str(digest)
 
     def get_object(self, digest: str) -> bytes:
         path = self.object_path(digest)
         if not path.is_file() or path.is_symlink():
-            raise EvidenceError("INTEGRITY_FAILURE", "Attachment is missing or unsafe",
-                                "Run project integrity scan and restore backup.")
+            raise EvidenceError(
+                "INTEGRITY_FAILURE",
+                "Attachment is missing or unsafe",
+                "Run project integrity scan and restore backup.",
+            )
         if path.stat().st_size > MAX_BLOB_BYTES:
-            raise EvidenceError("RESOURCE_LIMIT", "Attachment exceeds size limit",
-                                "Inspect attachment outside the app.")
+            raise EvidenceError(
+                "RESOURCE_LIMIT",
+                "Attachment exceeds size limit",
+                "Inspect attachment outside the app.",
+            )
         data = path.read_bytes()
         require(sha256(data) == digest, "Attachment checksum mismatch", "INTEGRITY_FAILURE")
         return data
@@ -307,11 +386,24 @@ class ProjectStore:
         previous = "0" * 64
         for row in self.conn.execute("SELECT * FROM events ORDER BY sequence"):
             digest = sha256(row["payload_json"].encode("utf-8"))
-            expected = sha256(canonical_json([row["sequence"], row["request_id"],
-                                               row["operation"], row["actor"], digest,
-                                               previous, row["timestamp"]]).encode())
-            if digest != row["payload_hash"] or row["previous_hash"] != previous or \
-                    row["event_hash"] != expected:
+            expected = sha256(
+                canonical_json(
+                    [
+                        row["sequence"],
+                        row["request_id"],
+                        row["operation"],
+                        row["actor"],
+                        digest,
+                        previous,
+                        row["timestamp"],
+                    ]
+                ).encode()
+            )
+            if (
+                digest != row["payload_hash"]
+                or row["previous_hash"] != previous
+                or row["event_hash"] != expected
+            ):
                 issues.append({"code": "EVENT_CHAIN", "id": str(row["sequence"])})
             previous = row["event_hash"]
         for row in self.conn.execute("SELECT digest,size FROM objects"):
@@ -328,8 +420,12 @@ class ProjectStore:
             issues.append({"code": "FOREIGN_KEY", "id": "database"})
         if self.info().revision != self.conn.execute("SELECT COUNT(*) FROM events").fetchone()[0]:
             issues.append({"code": "REVISION_DIVERGENCE", "id": "project"})
-        return {"ok": not issues, "issues": issues, "revision": self.info().revision,
-                "objects_checked": self.conn.execute("SELECT COUNT(*) FROM objects").fetchone()[0]}
+        return {
+            "ok": not issues,
+            "issues": issues,
+            "revision": self.info().revision,
+            "objects_checked": self.conn.execute("SELECT COUNT(*) FROM objects").fetchone()[0],
+        }
 
     def backup_database(self, destination: Path) -> None:
         destination.parent.mkdir(parents=True, exist_ok=True)
@@ -348,14 +444,20 @@ class ProjectStore:
         """
         root = root.resolve()
         db = root / "data" / "project.sqlite"
-        require(db.is_file() and not db.is_symlink(), "Project database is missing or unsafe",
-                "NOT_FOUND")
+        require(
+            db.is_file() and not db.is_symlink(),
+            "Project database is missing or unsafe",
+            "NOT_FOUND",
+        )
         connection = sqlite3.connect(db, isolation_level=None, timeout=10)
         snapshot: Path | None = None
         try:
             current = int(connection.execute("PRAGMA user_version").fetchone()[0])
-            require(current == 1, "Only explicit schema 1 to 2 migration is supported",
-                    "SCHEMA_MISMATCH")
+            require(
+                current == 1,
+                "Only explicit schema 1 to 2 migration is supported",
+                "SCHEMA_MISMATCH",
+            )
             backup_dir = db.parent / "migration_backups"
             backup_dir.mkdir(exist_ok=True)
             snapshot = backup_dir / f"pre-v2-{new_id()}.sqlite"
@@ -364,8 +466,7 @@ class ProjectStore:
                 connection.backup(target)
             finally:
                 target.close()
-            require(snapshot.stat().st_size > 0, "Migration backup was empty",
-                    "INTEGRITY_FAILURE")
+            require(snapshot.stat().st_size > 0, "Migration backup was empty", "INTEGRITY_FAILURE")
             connection.execute("PRAGMA foreign_keys=ON")
             connection.execute("BEGIN IMMEDIATE")
             try:
@@ -373,8 +474,11 @@ class ProjectStore:
                     connection.execute(statement)
                 connection.execute("INSERT INTO migrations VALUES (?,?)", (2, now_utc()))
                 connection.execute("PRAGMA user_version=2")
-                require(connection.execute("PRAGMA foreign_key_check").fetchone() is None,
-                        "Migration introduced foreign-key violations", "INTEGRITY_FAILURE")
+                require(
+                    connection.execute("PRAGMA foreign_key_check").fetchone() is None,
+                    "Migration introduced foreign-key violations",
+                    "INTEGRITY_FAILURE",
+                )
                 connection.commit()
             except BaseException:
                 connection.rollback()

@@ -14,14 +14,35 @@ from typing import Any
 from .errors import require
 
 _ARRAYS = {
-    "files", "inventory", "reference_ids", "source_ids", "collection_ids",
-    "review_ids", "protocol_ids", "tags", "searches", "sections", "unresolved", "actions",
+    "files",
+    "inventory",
+    "reference_ids",
+    "source_ids",
+    "collection_ids",
+    "review_ids",
+    "protocol_ids",
+    "tags",
+    "searches",
+    "sections",
+    "unresolved",
+    "actions",
     "redact_fields",
 }
 _OBJECTS = {
-    "advanced", "candidate", "citations", "extracted", "finding", "metadata",
-    "migration", "observed", "policies", "requirements", "responses", "schema",
-    "supplied_metadata", "values",
+    "advanced",
+    "candidate",
+    "citations",
+    "extracted",
+    "finding",
+    "metadata",
+    "migration",
+    "observed",
+    "policies",
+    "requirements",
+    "responses",
+    "schema",
+    "supplied_metadata",
+    "values",
 }
 _INTEGERS = {
     "end",
@@ -41,26 +62,59 @@ _INTEGERS = {
     "version",
 }
 _OPTIONAL: dict[str, str] = {
-    "privacy": "string", "locale": "string", "filename": "string",
-    "format": "string", "author": "string", "include_revoked": "boolean",
-    "include_notes": "boolean", "confirm_private_export": "boolean",
-    "allow_incomplete": "boolean", "strict": "boolean",
-    "search": "string", "limit": "integer", "offset": "integer",
-    "page": "integer", "year_from": "integer", "year_to": "integer",
-    "body": "string", "fields": "object", "filters": "object",
-    "kind": "string", "source_id": "string", "reference_id": "string",
-    "rationale": "string", "actor": "string", "review_id": "string",
-    "checked_at": "string", "start": "integer", "end": "integer",
-    "expected_records": "integer", "allow_network": "boolean",
-    "collection_ids": "array", "review_ids": "array", "protocol_ids": "array",
-    "mode": "string", "stage": "string", "description": "string",
-    "tags": "array", "advanced": "object", "metadata": "object",
-    "anchor_id": "string", "interpretation": "boolean", "relationship": "string",
-    "status": "string", "priority": "string", "style": "string",
-    "version": "integer", "requirements": "object", "supplied_metadata": "object",
-    "reference_ids": "array", "redact_fields": "array",
+    "privacy": "string",
+    "locale": "string",
+    "filename": "string",
+    "format": "string",
+    "author": "string",
+    "include_revoked": "boolean",
+    "include_notes": "boolean",
+    "confirm_private_export": "boolean",
+    "allow_incomplete": "boolean",
+    "strict": "boolean",
+    "search": "string",
+    "limit": "integer",
+    "offset": "integer",
+    "page": "integer",
+    "year_from": "integer",
+    "year_to": "integer",
+    "body": "string",
+    "fields": "object",
+    "filters": "object",
+    "kind": "string",
+    "source_id": "string",
+    "reference_id": "string",
+    "rationale": "string",
+    "actor": "string",
+    "review_id": "string",
+    "checked_at": "string",
+    "start": "integer",
+    "end": "integer",
+    "expected_records": "integer",
+    "allow_network": "boolean",
+    "collection_ids": "array",
+    "review_ids": "array",
+    "protocol_ids": "array",
+    "mode": "string",
+    "stage": "string",
+    "description": "string",
+    "tags": "array",
+    "advanced": "object",
+    "metadata": "object",
+    "anchor_id": "string",
+    "interpretation": "boolean",
+    "relationship": "string",
+    "status": "string",
+    "priority": "string",
+    "style": "string",
+    "version": "integer",
+    "requirements": "object",
+    "supplied_metadata": "object",
+    "reference_ids": "array",
+    "redact_fields": "array",
     "destination_review_id": "string",
-    "total_limit": "integer", "page_size": "integer",
+    "total_limit": "integer",
+    "page_size": "integer",
 }
 _NUMERIC_MIN = {
     "start": 0,
@@ -85,28 +139,46 @@ _ENUMS = {
     "decision": ["include", "exclude", "unsure"],
     "disposition": ["retained", "duplicate", "removed_automation", "removed_other"],
 }
-_MAX_ITEMS = {"files": 1000, "reference_ids": 5000, "source_ids": 5000,
-              "collection_ids": 5000, "review_ids": 5000, "protocol_ids": 5000,
-              "tags": 500, "searches": 2000, "sections": 1000,
-              "inventory": 10000, "unresolved": 10000, "actions": 20,
-              "redact_fields": 100}
+_MAX_ITEMS = {
+    "files": 1000,
+    "reference_ids": 5000,
+    "source_ids": 5000,
+    "collection_ids": 5000,
+    "review_ids": 5000,
+    "protocol_ids": 5000,
+    "tags": 500,
+    "searches": 2000,
+    "sections": 1000,
+    "inventory": 10000,
+    "unresolved": 10000,
+    "actions": 20,
+    "redact_fields": 100,
+}
 
 
 def _schema_for(name: str, operation: str) -> dict[str, Any]:
     if name == "data_base64":
-        return {"type": "string", "minLength": 1, "maxLength": 45 * 1024 * 1024,
-                "contentEncoding": "base64"}
+        return {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 45 * 1024 * 1024,
+            "contentEncoding": "base64",
+        }
     if name == "password":
-        return {"type": "string", "minLength": 1, "maxLength": 1024,
-                "writeOnly": True}
+        return {"type": "string", "minLength": 1, "maxLength": 1024, "writeOnly": True}
     if name == "mode" and operation.startswith("project.wizard_"):
         return {"type": "string", "enum": ["beginner", "advanced"]}
     if name == "stage" and operation.startswith("project.wizard_"):
         return {
             "type": "string",
             "enum": [
-                "planning", "protocol", "discovery", "screening", "extraction",
-                "synthesis", "writing",
+                "planning",
+                "protocol",
+                "discovery",
+                "screening",
+                "extraction",
+                "synthesis",
+                "writing",
             ],
         }
     if name == "status" and operation == "review.gap_update":
@@ -133,9 +205,11 @@ def _schema_for(name: str, operation: str) -> dict[str, Any]:
     if name in _ARRAYS:
         result: dict[str, Any] = {"type": "array", "maxItems": _MAX_ITEMS[name]}
         if name != "unresolved":
-            result["items"] = ({"type": "object"} if name in {
-                "files", "inventory", "searches", "sections"
-            } else {"type": "string"})
+            result["items"] = (
+                {"type": "object"}
+                if name in {"files", "inventory", "searches", "sections"}
+                else {"type": "string"}
+            )
         return result
     if name in _INTEGERS or name in {"year_from", "year_to"}:
         result = {"type": "integer"}
@@ -152,13 +226,35 @@ def _schema_for(name: str, operation: str) -> dict[str, Any]:
         return {"type": "boolean"}
     if name in _OPTIONAL and _OPTIONAL[name] == "object":
         return {"type": "object", "maxProperties": 500}
-    result = {"type": "string", "maxLength": 20000 if name in {
-        "rationale", "reason", "limitations", "provenance", "quote", "question"
-    } else 5000}
-    if name in {"project_id", "source_id", "reference_id", "record_id", "anchor_id",
-                "review_id", "run_id", "collection_id", "plan_id", "form_id",
-                "outline_id", "protocol_id", "batch_id", "edge_id", "snapshot",
-                "note_id", "question_id", "study_id", "gap_id", "manuscript_id", "figure_id"}:
+    result = {
+        "type": "string",
+        "maxLength": 20000
+        if name in {"rationale", "reason", "limitations", "provenance", "quote", "question"}
+        else 5000,
+    }
+    if name in {
+        "project_id",
+        "source_id",
+        "reference_id",
+        "record_id",
+        "anchor_id",
+        "review_id",
+        "run_id",
+        "collection_id",
+        "plan_id",
+        "form_id",
+        "outline_id",
+        "protocol_id",
+        "batch_id",
+        "edge_id",
+        "snapshot",
+        "note_id",
+        "question_id",
+        "study_id",
+        "gap_id",
+        "manuscript_id",
+        "figure_id",
+    }:
         result["minLength"] = 1
         result["maxLength"] = 255
     if name in _ENUMS:
@@ -174,28 +270,42 @@ def arguments_schema(operation: str, required: tuple[str, ...]) -> dict[str, Any
         properties["body"] = _schema_for("body", operation)
     if "fields" in required:
         properties["fields"] = _schema_for("fields", operation)
-    return {"$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object", "required": list(required),
-            "properties": properties, "additionalProperties": True,
-            "maxProperties": 250}
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": list(required),
+        "properties": properties,
+        "additionalProperties": True,
+        "maxProperties": 250,
+    }
 
 
 def response_schema() -> dict[str, Any]:
     """Actual public response envelope (success and failure share a shape)."""
-    return {"$schema": "https://json-schema.org/draft/2020-12/schema",
-            "type": "object",
-            "required": ["request_id", "status", "data", "artifacts", "warnings",
-                         "error", "provenance", "impact"],
-            "properties": {
-                "request_id": {"type": "string"},
-                "status": {"type": "string", "enum": ["ok", "failed"]},
-                "data": {"type": "object"},
-                "artifacts": {"type": "array"},
-                "warnings": {"type": "array"},
-                "error": {"type": ["object", "null"]},
-                "provenance": {"type": "array"},
-                "impact": {"type": "object"},
-            }}
+    return {
+        "$schema": "https://json-schema.org/draft/2020-12/schema",
+        "type": "object",
+        "required": [
+            "request_id",
+            "status",
+            "data",
+            "artifacts",
+            "warnings",
+            "error",
+            "provenance",
+            "impact",
+        ],
+        "properties": {
+            "request_id": {"type": "string"},
+            "status": {"type": "string", "enum": ["ok", "failed"]},
+            "data": {"type": "object"},
+            "artifacts": {"type": "array"},
+            "warnings": {"type": "array"},
+            "error": {"type": ["object", "null"]},
+            "provenance": {"type": "array"},
+            "impact": {"type": "object"},
+        },
+    }
 
 
 def _validate_field(value: Any, schema: Mapping[str, Any], name: str) -> None:
@@ -212,35 +322,49 @@ def _validate_field(value: Any, schema: Mapping[str, Any], name: str) -> None:
     if "enum" in schema:
         require(value in schema["enum"], f"Unsupported value for {name}")
     if dtype == "string":
-        require(len(value) <= schema.get("maxLength", 2**31),
-                f"Argument exceeds length limit: {name}", "RESOURCE_LIMIT")
-        require(len(value) >= schema.get("minLength", 0),
-                f"Missing argument text: {name}")
+        require(
+            len(value) <= schema.get("maxLength", 2**31),
+            f"Argument exceeds length limit: {name}",
+            "RESOURCE_LIMIT",
+        )
+        require(len(value) >= schema.get("minLength", 0), f"Missing argument text: {name}")
     if dtype == "integer":
-        require(value >= schema.get("minimum", -(2**63)),
-                f"Argument outside range: {name}")
-        require(value <= schema.get("maximum", 2**63 - 1),
-                f"Argument outside range: {name}", "RESOURCE_LIMIT")
+        require(value >= schema.get("minimum", -(2**63)), f"Argument outside range: {name}")
+        require(
+            value <= schema.get("maximum", 2**63 - 1),
+            f"Argument outside range: {name}",
+            "RESOURCE_LIMIT",
+        )
     if dtype == "object":
-        require(len(value) <= schema.get("maxProperties", 5000),
-                f"Too many properties in {name}", "RESOURCE_LIMIT")
-        require(all(isinstance(key, str) for key in value),
-                f"Argument object must use string keys: {name}")
+        require(
+            len(value) <= schema.get("maxProperties", 5000),
+            f"Too many properties in {name}",
+            "RESOURCE_LIMIT",
+        )
+        require(
+            all(isinstance(key, str) for key in value),
+            f"Argument object must use string keys: {name}",
+        )
     if dtype == "array":
-        require(len(value) <= schema.get("maxItems", 5000),
-                f"Too many array values in {name}", "RESOURCE_LIMIT")
+        require(
+            len(value) <= schema.get("maxItems", 5000),
+            f"Too many array values in {name}",
+            "RESOURCE_LIMIT",
+        )
         if "items" in schema:
             for item in value:
                 _validate_field(item, schema["items"], f"{name}[]")
 
 
-def validate_arguments(operation: str, required: tuple[str, ...],
-                       arguments: Mapping[str, Any]) -> None:
+def validate_arguments(
+    operation: str, required: tuple[str, ...], arguments: Mapping[str, Any]
+) -> None:
     """Check actual user input against every advertised required field schema."""
     require(isinstance(arguments, Mapping), "Arguments must be an object")
     schema = arguments_schema(operation, required)
-    require(len(arguments) <= schema["maxProperties"],
-            "Too many command arguments", "RESOURCE_LIMIT")
+    require(
+        len(arguments) <= schema["maxProperties"], "Too many command arguments", "RESOURCE_LIMIT"
+    )
     for name in required:
         require(name in arguments, f"Missing required argument: {name}")
     properties = schema["properties"]

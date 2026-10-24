@@ -1,0 +1,14 @@
+{
+  "id": "INT-074",
+  "name": "Portable removal and user-data retention",
+  "command": "powershell -ExecutionPolicy Bypass -File packaging\\windows\\smoke-portable.ps1",
+  "observed": {
+    "package_removed": true,
+    "user_profile_sentinel_preserved": true,
+    "result": "pass"
+  },
+  "status": "native verified on Windows",
+  "limitations": [
+    "This verifies portable-package deletion, not a platform installer with registry/service changes."
+  ]
+}

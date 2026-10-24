@@ -16,12 +16,8 @@ def test_diagnostics_distinguish_interop_raw_input_from_true_cas_orphan(tmp_path
     root = tmp_path / "project"
     with ProjectStore.create(root, "Diagnostics", "Question", "exploratory") as store:
         interop = InteroperabilityService(store)
-        interop.import_zotero(
-            b'[{"id":"z1","title":"Owned export","type":"article-journal"}]'
-        )
-        preserved = store.conn.execute(
-            "SELECT raw_digest FROM interop_batches"
-        ).fetchone()[0]
+        interop.import_zotero(b'[{"id":"z1","title":"Owned export","type":"article-journal"}]')
+        preserved = store.conn.execute("SELECT raw_digest FROM interop_batches").fetchone()[0]
         orphan = store.put_object(b"unreferenced")
         report = library_diagnostics(store)
         assert preserved not in report["orphan_objects"]

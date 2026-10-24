@@ -15,16 +15,15 @@ from .storage import ProjectStore
 def _field_from_wire(data: Mapping[str, Any]) -> FieldDefinition:
     permitted = data.get("permitted_values", ())
     require(
-        isinstance(permitted, (list, tuple))
-        and all(isinstance(value, str) for value in permitted),
+        isinstance(permitted, (list, tuple)) and all(isinstance(value, str) for value in permitted),
         "permitted_values must contain strings",
     )
     dtype = data.get("datatype")
-    require(isinstance(dtype, str) and dtype in
-            {"number", "integer", "string", "boolean", "category"},
-            "Unsupported extraction field datatype")
-    typed_dtype = cast(Literal["number", "integer", "string", "boolean", "category"],
-                       dtype)
+    require(
+        isinstance(dtype, str) and dtype in {"number", "integer", "string", "boolean", "category"},
+        "Unsupported extraction field datatype",
+    )
+    typed_dtype = cast(Literal["number", "integer", "string", "boolean", "category"], dtype)
     return FieldDefinition(
         name=str(data.get("name", "")),
         datatype=typed_dtype,
@@ -86,8 +85,10 @@ class ExtractionFormService:
     ) -> dict[str, Any]:
         require(bool(name.strip()) and len(name) <= 300, "Extraction form name is required")
         require(bool(author.strip()) and len(author) <= 255, "Extraction form author is required")
-        require(bool(rationale.strip()) and len(rationale) <= 5000,
-                "Extraction form rationale is required")
+        require(
+            bool(rationale.strip()) and len(rationale) <= 5000,
+            "Extraction form rationale is required",
+        )
         self._validate_schema(fields)
         schema = [_field_wire(field) for field in fields]
         encoded = canonical_json(schema)
@@ -99,8 +100,14 @@ class ExtractionFormService:
             conn.execute(
                 "INSERT INTO extraction_forms VALUES (?,?,?,?,?,?,?,?)",
                 (
-                    form_id, 1, name.strip(), encoded, rationale.strip(), author.strip(),
-                    now_utc(), digest,
+                    form_id,
+                    1,
+                    name.strip(),
+                    encoded,
+                    rationale.strip(),
+                    author.strip(),
+                    now_utc(),
+                    digest,
                 ),
             )
 
@@ -167,11 +174,14 @@ class ExtractionFormService:
             raw = values[field.name]
             require(isinstance(raw, Mapping), f"Extraction value {field.name} must be an object")
             missingness = raw.get("missingness", "present")
-            require(isinstance(missingness, str) and missingness in
-                    {"present", "not_reported", "not_applicable", "not_extracted"},
-                    "Invalid extraction missingness")
-            typed_missingness = cast(Literal["present", "not_reported", "not_applicable",
-                                             "not_extracted"], missingness)
+            require(
+                isinstance(missingness, str)
+                and missingness in {"present", "not_reported", "not_applicable", "not_extracted"},
+                "Invalid extraction missingness",
+            )
+            typed_missingness = cast(
+                Literal["present", "not_reported", "not_applicable", "not_extracted"], missingness
+            )
             extracted = ExtractedValue(
                 field=field.name,
                 value=raw.get("value"),
@@ -193,8 +203,14 @@ class ExtractionFormService:
             conn.execute(
                 "INSERT INTO extraction_form_values VALUES (?,?,?,?,?,?,?,?)",
                 (
-                    value_id, form_id, latest["version"], record_id,
-                    canonical_json(parsed), reviewer.strip(), None, now_utc(),
+                    value_id,
+                    form_id,
+                    latest["version"],
+                    record_id,
+                    canonical_json(parsed),
+                    reviewer.strip(),
+                    None,
+                    now_utc(),
                 ),
             )
 
@@ -234,8 +250,10 @@ class ExtractionFormService:
         old_fields = [_field_from_wire(item) for item in prior["fields"]]
         old_names = {field.name for field in old_fields}
         new_names = {field.name for field in fields}
-        require(set(migration) == old_names,
-                "Migration map must explicitly account for every prior field")
+        require(
+            set(migration) == old_names,
+            "Migration map must explicitly account for every prior field",
+        )
         targets = [target for target in migration.values() if target is not None]
         require(len(targets) == len(set(targets)), "Migration targets must be unique")
         require(set(targets).issubset(new_names), "Migration target is absent from new schema")
@@ -288,16 +306,28 @@ class ExtractionFormService:
             conn.execute(
                 "INSERT INTO extraction_forms VALUES (?,?,?,?,?,?,?,?)",
                 (
-                    form_id, version, prior["name"], encoded, rationale.strip(),
-                    author.strip(), now_utc(), digest,
+                    form_id,
+                    version,
+                    prior["name"],
+                    encoded,
+                    rationale.strip(),
+                    author.strip(),
+                    now_utc(),
+                    digest,
                 ),
             )
             for value_id, record_id, mapped, source_id in migrated_rows:
                 conn.execute(
                     "INSERT INTO extraction_form_values VALUES (?,?,?,?,?,?,?,?)",
                     (
-                        value_id, form_id, version, record_id, canonical_json(mapped),
-                        "schema-migration", source_id, now_utc(),
+                        value_id,
+                        form_id,
+                        version,
+                        record_id,
+                        canonical_json(mapped),
+                        "schema-migration",
+                        source_id,
+                        now_utc(),
                     ),
                 )
 
@@ -327,10 +357,7 @@ class ExtractionFormService:
                 "NOT_FOUND", "Extraction form not found", "Choose an existing form."
             )
         if version is None:
-            query = (
-                "SELECT * FROM extraction_form_values WHERE form_id=? "
-                "ORDER BY recorded_at,id"
-            )
+            query = "SELECT * FROM extraction_form_values WHERE form_id=? ORDER BY recorded_at,id"
             params: tuple[Any, ...] = (form_id,)
         else:
             query = (

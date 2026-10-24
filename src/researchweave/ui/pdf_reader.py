@@ -67,40 +67,60 @@ def validate_pdf_file(path: str | Path) -> tuple[Path, int, str]:
     """Bounded validation of a user-chosen local path without assuming trust."""
     candidate = Path(path)
     if candidate.is_symlink() or not candidate.is_file():
-        raise UIError("NOT_FOUND", "Selected document is not a regular file.",
-                      "Choose an existing local PDF file.")
+        raise UIError(
+            "NOT_FOUND",
+            "Selected document is not a regular file.",
+            "Choose an existing local PDF file.",
+        )
     if candidate.suffix.casefold() != ".pdf":
-        raise UIError("INVALID_INPUT", "Selected document must have a .pdf filename.",
-                      "Choose a local PDF document.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Selected document must have a .pdf filename.",
+            "Choose a local PDF document.",
+        )
     try:
         size = candidate.stat().st_size
     except OSError as exc:
-        raise UIError("NOT_FOUND", "PDF file cannot be accessed.",
-                      "Choose a readable local PDF.") from exc
+        raise UIError(
+            "NOT_FOUND", "PDF file cannot be accessed.", "Choose a readable local PDF."
+        ) from exc
     if size < 8 or size > MAX_PDF_BYTES:
-        raise UIError("RESOURCE_LIMIT", "PDF size is outside the 64 MiB preview limit.",
-                      "Use a smaller document or create a reduced working copy.")
+        raise UIError(
+            "RESOURCE_LIMIT",
+            "PDF size is outside the 64 MiB preview limit.",
+            "Use a smaller document or create a reduced working copy.",
+        )
     digest = hashlib.sha256()
     try:
         with candidate.open("rb") as stream:
             prefix = stream.read(8)
             if not prefix.startswith(b"%PDF-"):
-                raise UIError("INVALID_INPUT", "File does not contain a PDF header.",
-                              "Choose a valid PDF rather than a renamed file.")
+                raise UIError(
+                    "INVALID_INPUT",
+                    "File does not contain a PDF header.",
+                    "Choose a valid PDF rather than a renamed file.",
+                )
             digest.update(prefix)
             consumed = len(prefix)
             while piece := stream.read(CHUNK):
                 consumed += len(piece)
                 if consumed > MAX_PDF_BYTES:
-                    raise UIError("RESOURCE_LIMIT", "PDF changed while opening.",
-                                  "Try a stable copy of the document.")
+                    raise UIError(
+                        "RESOURCE_LIMIT",
+                        "PDF changed while opening.",
+                        "Try a stable copy of the document.",
+                    )
                 digest.update(piece)
         if consumed != size:
-            raise UIError("STALE_REVISION", "PDF changed while its hash was being recorded.",
-                          "Choose a stable copy of this file.")
+            raise UIError(
+                "STALE_REVISION",
+                "PDF changed while its hash was being recorded.",
+                "Choose a stable copy of this file.",
+            )
     except PermissionError as exc:
-        raise UIError("NOT_FOUND", "PDF file is not readable.",
-                      "Check local file access permissions.") from exc
+        raise UIError(
+            "NOT_FOUND", "PDF file is not readable.", "Check local file access permissions."
+        ) from exc
     return candidate.resolve(), size, digest.hexdigest()
 
 
@@ -114,8 +134,9 @@ class PDFReader(QWidget):
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
         named(
-            self, "Local PDF reader",
-            "Read a selected local PDF. Page numbering is one-based in this interface."
+            self,
+            "Local PDF reader",
+            "Read a selected local PDF. Page numbering is one-based in this interface.",
         )
         self.document = QPdfDocument(self)
         self.view = QPdfView(self)
@@ -178,9 +199,7 @@ class PDFReader(QWidget):
         search_tools.addWidget(self.search_next)
         column.addLayout(search_tools)
         column.addWidget(self.view)
-        self.status_label = QLabel(
-            "Select a local PDF. No file contents are uploaded or indexed."
-        )
+        self.status_label = QLabel("Select a local PDF. No file contents are uploaded or indexed.")
         self.status_label.setWordWrap(True)
         named(self.status_label, "PDF document status")
         column.addWidget(self.status_label)
@@ -193,7 +212,9 @@ class PDFReader(QWidget):
 
     def choose_file(self) -> None:
         filename, accepted_filter = QFileDialog.getOpenFileName(
-            self, "Open PDF for local viewing", os.path.expanduser("~"),
+            self,
+            "Open PDF for local viewing",
+            os.path.expanduser("~"),
             "PDF documents (*.pdf)",
         )
         if filename:
@@ -217,9 +238,7 @@ class PDFReader(QWidget):
                 QPdfDocument.Error.IncorrectPassword: (
                     "Encrypted PDF needs a password; the viewer cannot open it."
                 ),
-                QPdfDocument.Error.InvalidFileFormat: (
-                    "QtPdf could not interpret this document."
-                ),
+                QPdfDocument.Error.InvalidFileFormat: ("QtPdf could not interpret this document."),
                 QPdfDocument.Error.UnsupportedSecurityScheme: (
                     "The PDF uses an unsupported protection scheme."
                 ),
@@ -230,8 +249,11 @@ class PDFReader(QWidget):
             return None
         self.current_path = candidate
         self.metadata = PDFMetadata(
-            path=str(candidate), title=candidate.name,
-            pages=self.document.pageCount(), bytes=size, sha256=digest,
+            path=str(candidate),
+            title=candidate.name,
+            pages=self.document.pageCount(),
+            bytes=size,
+            sha256=digest,
         )
         self.search_model.setDocument(self.document)
         self.search_model.setSearchString("")
@@ -266,10 +288,13 @@ class PDFReader(QWidget):
         navigator = self.view.pageNavigator()
         if navigator is None:
             return 0
-        return max(1, min(
-            self.document.pageCount(),
-            navigator.currentPage() + 1,
-        ))
+        return max(
+            1,
+            min(
+                self.document.pageCount(),
+                navigator.currentPage() + 1,
+            ),
+        )
 
     def _on_pages(self, count: int) -> None:
         self._sync_enabled()
@@ -321,9 +346,7 @@ class PDFReader(QWidget):
         query = self.search_input.text().strip()
         if not query:
             self.search_model.setSearchString("")
-            self.status_label.setText(
-                "Enter text to search the PDF's existing local text layer."
-            )
+            self.status_label.setText("Enter text to search the PDF's existing local text layer.")
             self._sync_enabled()
             return
         self.search_model.setSearchString(query)

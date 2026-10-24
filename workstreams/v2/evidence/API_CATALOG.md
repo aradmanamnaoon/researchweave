@@ -10,15 +10,25 @@ from researchweave.evidence import build_evidence_facade
 facade = build_evidence_facade(Path("./my-local-workspace"), allow_local_writes=True)
 created = facade.execute(
     "project.create",
-    {"title": "Memory project", "question": "How does recall vary?",
-     "design": "exploratory", "privacy": "private"}, {}
+    {
+        "title": "Memory project",
+        "question": "How does recall vary?",
+        "design": "exploratory",
+        "privacy": "private",
+    },
+    {},
 )
 project_id = created["data"]["project_id"]
-source = facade.execute("library.import", {
-    "project_id": project_id, "title": "Synthetic source",
-    "media_type": "text/plain",
-    "data_base64": base64.b64encode(b"Synthetic observation.").decode()
-}, {})
+source = facade.execute(
+    "library.import",
+    {
+        "project_id": project_id,
+        "title": "Synthetic source",
+        "media_type": "text/plain",
+        "data_base64": base64.b64encode(b"Synthetic observation.").decode(),
+    },
+    {},
+)
 print(facade.execute("project.integrity", {"project_id": project_id}, {}))
 ```
 

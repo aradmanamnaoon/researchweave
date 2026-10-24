@@ -287,9 +287,7 @@ def factorial_anova(
         "Every factor needs at least two observed levels",
     )
     contrast = "sum_to_zero" if typ == 3 else "treatment"
-    coded_terms = [
-        f"C(f{i}, Sum)" if typ == 3 else f"C(f{i})" for i in range(len(factors))
-    ]
+    coded_terms = [f"C(f{i}, Sum)" if typ == 3 else f"C(f{i})" for i in range(len(factors))]
     terms = " * ".join(coded_terms)
     try:
         fit = smf.ols(f"y ~ {terms}", data=frame).fit()
@@ -532,9 +530,7 @@ def ancova(
     main = " + ".join([group_term, *[f"x{i}" for i in range(len(covariates))]])
     formula = f"y ~ {main}"
     if include_slope_interactions:
-        formula += " + " + " + ".join(
-            f"{group_term}:x{i}" for i in range(len(covariates))
-        )
+        formula += " + " + " + ".join(f"{group_term}:x{i}" for i in range(len(covariates)))
     try:
         fit = smf.ols(formula, data=frame).fit()
         require(
@@ -566,9 +562,7 @@ def ancova(
     covariate_means = {
         f"x{index}": float(frame[f"x{index}"].mean()) for index in range(len(covariates))
     }
-    reference_rows = pd.DataFrame(
-        [{"group": level, **covariate_means} for level in group_levels]
-    )
+    reference_rows = pd.DataFrame([{"group": level, **covariate_means} for level in group_levels])
     right_hand_side = formula.split("~", maxsplit=1)[1]
     reference_matrix = dmatrix(right_hand_side, reference_rows, return_type="dataframe")
     require(
@@ -946,8 +940,7 @@ def bca_bootstrap_mean(
     )
     adjusted = stats.norm.cdf(z0 + (z0 + z_alpha) / denominator_terms)
     require(
-        bool(np.all(np.isfinite(adjusted)))
-        and 0 <= float(adjusted[0]) < float(adjusted[1]) <= 1,
+        bool(np.all(np.isfinite(adjusted))) and 0 <= float(adjusted[0]) < float(adjusted[1]) <= 1,
         "BCa confidence limits are not estimable for this sample",
     )
     lower, upper = np.quantile(estimates, adjusted)

@@ -240,9 +240,7 @@ def test_facade_study_forms_notes_and_synthesis_lifecycle(tmp_path: Path) -> Non
         {
             "project_id": project_id,
             "question": "What is missing?",
-            "searches": [
-                {"database": "Synthetic DB", "date": "2026-10-23", "strategy": "term"}
-            ],
+            "searches": [{"database": "Synthetic DB", "date": "2026-10-23", "strategy": "term"}],
             "limitations": "Only a synthetic search was run.",
         },
     )

@@ -35,25 +35,34 @@ class _TextExtractor(HTMLParser):
 def extract_text(data: bytes, media_type: str) -> tuple[str, dict[str, str]]:
     require(len(data) <= MAX_TEXT_BYTES, "Text exceeds extraction limit", "RESOURCE_LIMIT")
     if media_type not in {"text/plain", "text/markdown", "text/html"}:
-        raise EvidenceError("UNSUPPORTED_FORMAT", "Text extraction adapter unavailable",
-                            "Use UTF-8 text or add a licensed PDF/DOCX adapter.")
+        raise EvidenceError(
+            "UNSUPPORTED_FORMAT",
+            "Text extraction adapter unavailable",
+            "Use UTF-8 text or add a licensed PDF/DOCX adapter.",
+        )
     try:
         text = data.decode("utf-8-sig")
     except UnicodeError as exc:
-        raise EvidenceError("INVALID_INPUT", "Document text is not UTF-8",
-                            "Convert the document to UTF-8.") from exc
+        raise EvidenceError(
+            "INVALID_INPUT", "Document text is not UTF-8", "Convert the document to UTF-8."
+        ) from exc
     if media_type == "text/html":
         parser = _TextExtractor()
         parser.feed(text)
         text = "".join(parser.parts)
-    return text, {"body_sha256": sha256(text.encode("utf-8")),
-                  "extraction_version": "rw-text-1", "source_type": media_type}
+    return text, {
+        "body_sha256": sha256(text.encode("utf-8")),
+        "extraction_version": "rw-text-1",
+        "source_type": media_type,
+    }
 
 
 def check_quote(body: str, quote: str, start: int, end: int) -> bool:
     """Verify exact codepoint offsets; never fuzzy-confirm a scientific quotation."""
-    require(isinstance(start, int) and isinstance(end, int) and
-            0 <= start <= end <= len(body), "Invalid quote offsets")
+    require(
+        isinstance(start, int) and isinstance(end, int) and 0 <= start <= end <= len(body),
+        "Invalid quote offsets",
+    )
     require(bool(quote) and len(quote) <= 20_000, "Invalid quoted text")
     return body[start:end] == quote
 
@@ -68,19 +77,31 @@ def find_quote_locations(body: str, quote: str, *, limit: int = 20) -> list[tupl
     return locations
 
 
-def make_anchor(source_id: str, body: str, quote: str, start: int, end: int,
-                page: int | None = None) -> EvidenceAnchor:
-    require(page is None or isinstance(page, int) and page > 0,
-            "Page must be a positive integer")
-    return EvidenceAnchor(new_id(), source_id, quote, start, end, page,
-                          sha256(body.encode("utf-8")), check_quote(body, quote, start, end))
+def make_anchor(
+    source_id: str, body: str, quote: str, start: int, end: int, page: int | None = None
+) -> EvidenceAnchor:
+    require(page is None or isinstance(page, int) and page > 0, "Page must be a positive integer")
+    return EvidenceAnchor(
+        new_id(),
+        source_id,
+        quote,
+        start,
+        end,
+        page,
+        sha256(body.encode("utf-8")),
+        check_quote(body, quote, start, end),
+    )
 
 
 def relocate_anchor(anchor: EvidenceAnchor, changed_body: str) -> dict[str, object]:
     matches = find_quote_locations(changed_body, anchor.quote, limit=3)
     if len(matches) == 1:
-        return {"status": "unique-exact-match", "start": matches[0][0],
-                "end": matches[0][1], "verified": True}
+        return {
+            "status": "unique-exact-match",
+            "start": matches[0][0],
+            "end": matches[0][1],
+            "verified": True,
+        }
     if not matches:
         return {"status": "unresolved", "verified": False}
     return {"status": "ambiguous", "matches": matches, "verified": False}

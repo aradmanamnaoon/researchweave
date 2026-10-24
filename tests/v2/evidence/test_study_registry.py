@@ -18,12 +18,8 @@ def _records(store: ProjectStore) -> tuple[str, str]:
         "bibtex",
     )
     review = ReviewService(store)
-    first = review.register(
-        "review-1", imported["references"][0]["id"], "legacy-study-a"
-    )
-    second = review.register(
-        "review-1", imported["references"][1]["id"], "legacy-study-b"
-    )
+    first = review.register("review-1", imported["references"][0]["id"], "legacy-study-a")
+    second = review.register("review-1", imported["references"][1]["id"], "legacy-study-b")
     return first["record_id"], second["record_id"]
 
 
@@ -39,18 +35,12 @@ def test_one_study_can_group_multiple_reports_without_identity_inference(
             "Trial Alpha",
             {"population": "Synthetic adults", "design": "parallel RCT"},
         )
-        service.attach_report(
-            study["study_id"], first, "primary", "Primary trial report."
-        )
-        service.attach_report(
-            study["study_id"], second, "secondary", "Follow-up publication."
-        )
+        service.attach_report(study["study_id"], first, "primary", "Primary trial report.")
+        service.attach_report(study["study_id"], second, "secondary", "Follow-up publication.")
         studies = service.studies("review-1")
         assert len(studies) == 1
         assert studies[0]["report_count"] == 2
-        assert {
-            row["relationship"] for row in studies[0]["reports"]
-        } == {"primary", "secondary"}
+        assert {row["relationship"] for row in studies[0]["reports"]} == {"primary", "secondary"}
         reconciliation = service.reconcile_unassigned("review-1")
         assert reconciliation["assigned"] == 2
         assert reconciliation["unassigned"] == []

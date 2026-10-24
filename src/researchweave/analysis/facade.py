@@ -526,9 +526,7 @@ class AnalysisFacade:
             data = icc_two_way_absolute(list(arguments["ratings"]))
         elif operation == "qualitative.create":
             project_id = str(arguments["project_id"])
-            data = self.qualitative_store.save(
-                project_id, QualitativeState(), create_only=True
-            )
+            data = self.qualitative_store.save(project_id, QualitativeState(), create_only=True)
         elif operation == "qualitative.inspect":
             project_id = str(arguments["project_id"])
             state, content_hash = self.qualitative_store.load_snapshot(project_id)
@@ -645,9 +643,7 @@ class AnalysisFacade:
             data = proposal.__dict__
         elif operation == "qualitative.kappa":
             first = {str(key): str(value) for key, value in dict(arguments["first"]).items()}
-            second = {
-                str(key): str(value) for key, value in dict(arguments["second"]).items()
-            }
+            second = {str(key): str(value) for key, value in dict(arguments["second"]).items()}
             data = cohen_kappa(first, second)
         elif operation == "qualitative.adjudicate":
             state = self.qualitative_store.load(str(arguments["project_id"]))
@@ -657,13 +653,11 @@ class AnalysisFacade:
                 coder_b=str(arguments["coder_b"]),
                 unit_ids=list(arguments["unit_ids"]),
                 resolutions={
-                    str(key): str(value)
-                    for key, value in dict(arguments["resolutions"]).items()
+                    str(key): str(value) for key, value in dict(arguments["resolutions"]).items()
                 },
                 adjudicator=str(arguments["adjudicator"]),
                 rationales={
-                    str(key): str(value)
-                    for key, value in dict(arguments["rationales"]).items()
+                    str(key): str(value) for key, value in dict(arguments["rationales"]).items()
                 },
             )
         elif operation in {"mixed.joint_display", "mixed.joint_display_sensitive"}:
@@ -873,9 +867,7 @@ class AnalysisFacade:
                 updated, receipt = simple_impute(
                     obj,
                     str(arguments["column"]),
-                    strategy=cast(
-                        Literal["mean", "median", "mode"], str(arguments["strategy"])
-                    ),
+                    strategy=cast(Literal["mean", "median", "mode"], str(arguments["strategy"])),
                 )
             else:
                 updated = recode_missing(
@@ -1119,8 +1111,7 @@ class AnalysisFacade:
                 else:
                     order_values = [int(value) for value in arguments["order"]]
                     seasonal_values = [
-                        int(value)
-                        for value in arguments.get("seasonal_order", [0, 0, 0, 0])
+                        int(value) for value in arguments.get("seasonal_order", [0, 0, 0, 0])
                     ]
                     require(len(order_values) == 3, "ARIMA order must have three integers")
                     require(

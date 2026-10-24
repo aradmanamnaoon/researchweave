@@ -58,7 +58,8 @@ def shell_fixture(tmp_path: Path):
 
 
 def test_codebook_mixed_references_and_activity_surfaces(
-    qt_app: QApplication, tmp_path: Path,
+    qt_app: QApplication,
+    tmp_path: Path,
 ) -> None:
     facade, shell, pid, source, _ = shell_fixture(tmp_path)
     shell.navigate("Codebook")
@@ -138,7 +139,8 @@ def test_codebook_mixed_references_and_activity_surfaces(
 
 
 def test_analysis_prisma_tutorial_and_notification_surfaces(
-    qt_app: QApplication, tmp_path: Path,
+    qt_app: QApplication,
+    tmp_path: Path,
 ) -> None:
     facade, shell, pid, _source, dataset = shell_fixture(tmp_path)
     shell.navigate("Statistics")

@@ -12,7 +12,6 @@ import json
 import tokenize
 from pathlib import Path
 
-
 SOURCE_ROOT = Path(__file__).resolve().parents[3] / "src" / "researchweave" / "evidence"
 OUTPUT = Path(__file__).with_name("CODE_METRICS.json")
 
@@ -34,9 +33,15 @@ def code_lines(path: Path) -> int:
     meaningful: set[int] = set()
     stream = tokenize.generate_tokens(io.StringIO(source).readline)
     for token in stream:
-        if token.type in (tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE,
-                          tokenize.INDENT, tokenize.DEDENT, tokenize.ENDMARKER,
-                          tokenize.ENCODING):
+        if token.type in (
+            tokenize.COMMENT,
+            tokenize.NL,
+            tokenize.NEWLINE,
+            tokenize.INDENT,
+            tokenize.DEDENT,
+            tokenize.ENDMARKER,
+            tokenize.ENCODING,
+        ):
             continue
         meaningful.update(range(token.start[0], token.end[0] + 1))
     return len(meaningful - docstring_lines)
@@ -54,8 +59,11 @@ def main() -> None:
         "exclusions": "tests, workstreams, Markdown, fixtures, docstrings, comments, blanks",
     }
     OUTPUT.write_text(json.dumps(result, indent=2) + "\n", encoding="utf-8")
-    print(json.dumps({"files": result["files"],
-                      "meaningful_source_lines": result["meaningful_source_lines"]}))
+    print(
+        json.dumps(
+            {"files": result["files"], "meaningful_source_lines": result["meaningful_source_lines"]}
+        )
+    )
 
 
 if __name__ == "__main__":

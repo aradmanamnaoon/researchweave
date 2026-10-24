@@ -351,16 +351,17 @@ def import_table(
             raise AnalysisError(
                 "DEPENDENCY_MISSING", f"Reader for {kind} is not installed"
             ) from exc
-        readstat = cast(Callable[..., tuple[Any, Any]], {
-            "sav": pyreadstat.read_sav,
-            "zsav": pyreadstat.read_sav,
-            "por": pyreadstat.read_por,
-            "dta": pyreadstat.read_dta,
-            "xpt": pyreadstat.read_xport,
-        }[kind])
-        readstat_options: dict[str, Any] = (
-            {} if kind == "xpt" else {"apply_value_formats": False}
+        readstat = cast(
+            Callable[..., tuple[Any, Any]],
+            {
+                "sav": pyreadstat.read_sav,
+                "zsav": pyreadstat.read_sav,
+                "por": pyreadstat.read_por,
+                "dta": pyreadstat.read_dta,
+                "xpt": pyreadstat.read_xport,
+            }[kind],
         )
+        readstat_options: dict[str, Any] = {} if kind == "xpt" else {"apply_value_formats": False}
         if kind in {"sav", "zsav"}:
             # Preserve SPSS user-missing values in the data so the dictionary can
             # distinguish them from system missing values instead of silently
@@ -393,9 +394,7 @@ def import_table(
                             str(entry.get("lo"))
                             if isinstance(entry, dict) and entry.get("lo") == entry.get("hi")
                             else f"{entry.get('lo')}..{entry.get('hi')}"
-                            if isinstance(entry, dict)
-                            and "lo" in entry
-                            and "hi" in entry
+                            if isinstance(entry, dict) and "lo" in entry and "hi" in entry
                             else str(entry)
                         )
                         for entry in (missing_ranges.get(name, []) or [])
@@ -627,9 +626,7 @@ def scan_parquet_page(
             sliced = batch.slice(local_start, local_length)
             converted = sliced.to_pylist()
             converted_rows += len(converted)
-            rows.extend(
-                {str(key): value for key, value in record.items()} for record in converted
-            )
+            rows.extend({str(key): value for key, value in record.items()} for record in converted)
             if len(rows) >= limit:
                 break
         schema = {

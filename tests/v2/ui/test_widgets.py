@@ -19,8 +19,10 @@ from researchweave.ui.shell import SCREENS, CommandPalette
 
 def test_navigation_refresh_and_state(qt_app: QApplication, tmp_path: Path) -> None:
     facade = build_ui_facade(tmp_path)
-    created = facade.execute("ui.project.create", {
-        "title": "Lab", "question": "What is observed?", "study_type": "literature"})["data"]
+    created = facade.execute(
+        "ui.project.create",
+        {"title": "Lab", "question": "What is observed?", "study_type": "literature"},
+    )["data"]
     shell = build_ui_shell(fake_services=facade)
     shell.open_project(created["project_id"])
     shell.navigate("Notebook")
@@ -33,8 +35,12 @@ def test_navigation_refresh_and_state(qt_app: QApplication, tmp_path: Path) -> N
     assert shell.stats_result.accessibleName() == "Text alternative for numeric summary"
     shell.close()
     reopened = build_ui_facade(tmp_path)
-    assert reopened.execute("ui.project.open", {"project_id": created["project_id"]})[
-        "data"]["project"]["notebook"] == "Recorded note"
+    assert (
+        reopened.execute("ui.project.open", {"project_id": created["project_id"]})["data"][
+            "project"
+        ]["notebook"]
+        == "Recorded note"
+    )
 
 
 def test_palette_filters_and_keyboard_activation(qt_app: QApplication, tmp_path: Path) -> None:

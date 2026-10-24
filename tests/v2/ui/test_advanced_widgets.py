@@ -27,7 +27,8 @@ def create_open_shell(tmp_path: Path):
 
 
 def test_first_run_demo_is_local_synthetic_and_persistent(
-    qt_app: QApplication, tmp_path: Path,
+    qt_app: QApplication,
+    tmp_path: Path,
 ) -> None:
     facade = build_ui_facade(tmp_path)
     shell = build_ui_shell(fake_services=facade)
@@ -44,7 +45,8 @@ def test_first_run_demo_is_local_synthetic_and_persistent(
 
 
 def test_question_extraction_and_variable_metadata_visible_roundtrip(
-    qt_app: QApplication, tmp_path: Path,
+    qt_app: QApplication,
+    tmp_path: Path,
 ) -> None:
     facade, shell, _ = create_open_shell(tmp_path)
     shell.question_topic.setText("attention")
@@ -106,7 +108,8 @@ def test_question_extraction_and_variable_metadata_visible_roundtrip(
 
 
 def test_visible_independent_screening_blinds_second_reviewer_then_adjudicates(
-    qt_app: QApplication, tmp_path: Path,
+    qt_app: QApplication,
+    tmp_path: Path,
 ) -> None:
     facade, shell, _ = create_open_shell(tmp_path)
     source = facade.execute(
@@ -142,7 +145,8 @@ def test_visible_independent_screening_blinds_second_reviewer_then_adjudicates(
 
 
 def test_privacy_provider_locale_and_workspace_preset_controls(
-    qt_app: QApplication, tmp_path: Path,
+    qt_app: QApplication,
+    tmp_path: Path,
 ) -> None:
     facade, shell, _ = create_open_shell(tmp_path)
     shell.navigate("Providers")
@@ -172,12 +176,11 @@ def test_privacy_provider_locale_and_workspace_preset_controls(
 
 
 def test_notebook_code_execution_remains_explicitly_disabled(
-    qt_app: QApplication, tmp_path: Path,
+    qt_app: QApplication,
+    tmp_path: Path,
 ) -> None:
     facade, shell, _ = create_open_shell(tmp_path)
-    status = facade.execute(
-        "ui.code.execution.status", {"project_id": shell.project_id}
-    )
+    status = facade.execute("ui.code.execution.status", {"project_id": shell.project_id})
     assert status["status"] == "ok"
     assert status["data"]["enabled"] is False
     assert status["data"]["required_integration"]["shell_true"] is False

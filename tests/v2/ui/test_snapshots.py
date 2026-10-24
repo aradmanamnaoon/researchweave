@@ -26,12 +26,22 @@ def good(facade, operation, **kwargs):
 
 def project_with_source(tmp_path: Path):
     facade = build_ui_facade(tmp_path)
-    project = good(facade, "ui.project.create", title="Backup pilot",
-                   question="Could archived text be recovered?",
-                   study_type="qualitative")
+    project = good(
+        facade,
+        "ui.project.create",
+        title="Backup pilot",
+        question="Could archived text be recovered?",
+        study_type="qualitative",
+    )
     pid = project["project_id"]
-    source = good(facade, "ui.source.add", project_id=pid,
-                  expected_revision=1, title="Synthetic", text="🧠 reproducibility")
+    source = good(
+        facade,
+        "ui.source.add",
+        project_id=pid,
+        expected_revision=1,
+        title="Synthetic",
+        text="🧠 reproducibility",
+    )
     assert source["revision"] == 2
     return facade, pid
 
@@ -41,9 +51,14 @@ def test_backup_verification_and_non_destructive_restore(tmp_path: Path) -> None
     plan = good(facade, "ui.backup.plan", project_id=pid)
     assert plan["revision"] == 2
     assert plan["passwords_included"] is False
-    denied = facade.execute("ui.backup.create", {
-        "project_id": pid, "expected_revision": 2, "approved": True,
-    })
+    denied = facade.execute(
+        "ui.backup.create",
+        {
+            "project_id": pid,
+            "expected_revision": 2,
+            "approved": True,
+        },
+    )
     assert denied["error"]["code"] == "NEEDS_APPROVAL"
     assert not (tmp_path / "backups").exists()
     facade.backup_authorizer = lambda action, value: action == "create" and value == pid
@@ -51,34 +66,49 @@ def test_backup_verification_and_non_destructive_restore(tmp_path: Path) -> None
     archive = tmp_path / "backups" / receipt["backup_id"]
     assert archive.is_file()
     assert zipfile.is_zipfile(archive)
-    assert facade.execute("ui.backup.create", {
-        "project_id": pid, "expected_revision": 2})["error"]["code"] == "CONFLICT"
+    assert (
+        facade.execute("ui.backup.create", {"project_id": pid, "expected_revision": 2})["error"][
+            "code"
+        ]
+        == "CONFLICT"
+    )
     listed = good(facade, "ui.backup.list")["backups"]
     assert len(listed) == 1
     assert listed[0]["integrity"] == "verified"
     inspection = good(facade, "ui.backup.inspect", backup_id=receipt["backup_id"])
     assert inspection["source_count"] == 1
     assert inspection["sha256"] == receipt["sha256"]
-    denied = facade.execute("ui.backup.restore", {
-        "backup_id": receipt["backup_id"], "expected_sha256": receipt["sha256"],
-        "approved": True,
-    })
+    denied = facade.execute(
+        "ui.backup.restore",
+        {
+            "backup_id": receipt["backup_id"],
+            "expected_sha256": receipt["sha256"],
+            "approved": True,
+        },
+    )
     assert denied["error"]["code"] == "NEEDS_APPROVAL"
     facade.backup_authorizer = lambda action, value: (
         action == "restore" and value == receipt["backup_id"]
     )
-    stale = facade.execute("ui.backup.restore", {
-        "backup_id": receipt["backup_id"], "expected_sha256": "0" * 64,
-    })
+    stale = facade.execute(
+        "ui.backup.restore",
+        {
+            "backup_id": receipt["backup_id"],
+            "expected_sha256": "0" * 64,
+        },
+    )
     assert stale["error"]["code"] == "STALE_REVISION"
-    restored = good(facade, "ui.backup.restore",
-                    backup_id=receipt["backup_id"], expected_sha256=receipt["sha256"])
+    restored = good(
+        facade,
+        "ui.backup.restore",
+        backup_id=receipt["backup_id"],
+        expected_sha256=receipt["sha256"],
+    )
     assert restored["restored_project_id"] != pid
     assert restored["preserved_original"] is True
     assert len(facade.store.list_projects()) == 2
     original = good(facade, "ui.project.open", project_id=pid)["project"]
-    copy = good(facade, "ui.project.open",
-                project_id=restored["restored_project_id"])["project"]
+    copy = good(facade, "ui.project.open", project_id=restored["restored_project_id"])["project"]
     assert original["revision"] == 2
     assert original["sources"][0]["text"] == copy["sources"][0]["text"]
     assert original["title"] == "Backup pilot"
@@ -103,10 +133,12 @@ def test_backup_rejects_unexpected_entries(tmp_path: Path, member: str) -> None:
     filename = f"{pid}-2.rwbackup"
     path = manager._path(filename)
     path.parent.mkdir(parents=True, exist_ok=True)
-    data = _make_zip([
-        ("manifest.json", b'{"archive_version":1}'),
-        (member, b"{}"),
-    ])
+    data = _make_zip(
+        [
+            ("manifest.json", b'{"archive_version":1}'),
+            (member, b"{}"),
+        ]
+    )
     path.write_bytes(data)
     with pytest.raises(UIError):
         manager.inspect(filename)

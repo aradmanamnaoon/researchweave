@@ -135,8 +135,7 @@ class SynthesisService:
             if sql.strip():
                 conn.execute(sql)
         columns = {
-            str(row["name"])
-            for row in conn.execute("PRAGMA table_info(synthesis_findings)")
+            str(row["name"]) for row in conn.execute("PRAGMA table_info(synthesis_findings)")
         }
         if "record_id" not in columns:
             conn.execute("ALTER TABLE synthesis_findings ADD COLUMN record_id TEXT")
@@ -146,18 +145,24 @@ class SynthesisService:
             conn.execute("ALTER TABLE synthesis_findings ADD COLUMN uncertainty TEXT")
 
     def _has_table(self, name: str) -> bool:
-        return self.store.conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-        ).fetchone() is not None
+        return (
+            self.store.conn.execute(
+                "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+            ).fetchone()
+            is not None
+        )
 
     @staticmethod
     def bias_templates() -> list[dict[str, Any]]:
         """Describe supported appraisal structures without claiming official certification."""
         return [
-            {"id": template, **BIAS_TEMPLATES[template],
-             "domains": list(ASSESSMENT_DOMAINS[template]),
-             "judgments": sorted(JUDGMENTS),
-             "definitive_judgments_require_verified_anchor": True}
+            {
+                "id": template,
+                **BIAS_TEMPLATES[template],
+                "domains": list(ASSESSMENT_DOMAINS[template]),
+                "judgments": sorted(JUDGMENTS),
+                "definitive_judgments_require_verified_anchor": True,
+            }
             for template in sorted(ASSESSMENT_DOMAINS)
         ]
 
@@ -185,15 +190,15 @@ class SynthesisService:
             )
             uncertainty = answer.get("uncertainty")
             require(
-                uncertainty is None
-                or uncertainty in {"low", "moderate", "high", "unknown"},
+                uncertainty is None or uncertainty in {"low", "moderate", "high", "unknown"},
                 f"Invalid uncertainty for {domain}",
             )
             anchor_id = answer.get("anchor_id")
-            require(anchor_id is None or isinstance(anchor_id, str),
-                    f"Invalid anchor for {domain}")
-            require(answer.get("judgment") == "unclear" or bool(anchor_id),
-                    f"Definitive judgment for {domain} requires a verified source anchor")
+            require(anchor_id is None or isinstance(anchor_id, str), f"Invalid anchor for {domain}")
+            require(
+                answer.get("judgment") == "unclear" or bool(anchor_id),
+                f"Definitive judgment for {domain} requires a verified source anchor",
+            )
             if anchor_id:
                 anchor = self.store.conn.execute(
                     "SELECT a.verified,s.deleted FROM anchors a "
@@ -281,7 +286,8 @@ class SynthesisService:
         require(finding.direction in {"positive", "negative", "null", "mixed"}, "Invalid direction")
         require(
             finding.uncertainty is None
-            or isinstance(finding.uncertainty, str) and len(finding.uncertainty) <= 4000,
+            or isinstance(finding.uncertainty, str)
+            and len(finding.uncertainty) <= 4000,
             "Finding uncertainty must be bounded text",
         )
         finding_id = new_id()
@@ -305,8 +311,7 @@ class SynthesisService:
                 ).fetchone()
                 require(record is not None, "Finding review record not found", "NOT_FOUND")
                 registry = conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' "
-                    "AND name='review_study_reports'"
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_study_reports'"
                 ).fetchone()
                 if registry is not None:
                     linked = conn.execute(
@@ -349,8 +354,13 @@ class SynthesisService:
             expected_revision=expected_revision,
         )
         source_id, study_id = persisted
-        return {"id": finding_id, "source_id": source_id, "record_id": finding.record_id,
-                "study_id": study_id, "revision": revision}
+        return {
+            "id": finding_id,
+            "source_id": source_id,
+            "record_id": finding.record_id,
+            "study_id": study_id,
+            "revision": revision,
+        }
 
     def compare(self, question: str) -> dict[str, Any]:
         require(bool(question.strip()), "Question required")
@@ -468,16 +478,17 @@ class SynthesisService:
         expected_revision: int | None = None,
     ) -> dict[str, Any]:
         require(status in {"open", "addressed"}, "Unknown evidence-gap status")
-        require(priority in {"low", "medium", "high", "critical"},
-                "Unknown evidence-gap priority")
-        require(bool(rationale.strip()) and len(rationale) <= 5000,
-                "Gap update rationale is required")
+        require(priority in {"low", "medium", "high", "critical"}, "Unknown evidence-gap priority")
+        require(
+            bool(rationale.strip()) and len(rationale) <= 5000, "Gap update rationale is required"
+        )
         require(bool(actor.strip()) and len(actor) <= 255, "Gap update actor is required")
         require(
             self._has_table("synthesis_gaps")
             and self.store.conn.execute(
                 "SELECT 1 FROM synthesis_gaps WHERE id=?", (gap_id,)
-            ).fetchone() is not None,
+            ).fetchone()
+            is not None,
             "Evidence gap not found",
             "NOT_FOUND",
         )
@@ -497,9 +508,7 @@ class SynthesisService:
                     now_utc(),
                 ),
             )
-            conn.execute(
-                "UPDATE synthesis_gaps SET status=? WHERE id=?", (status, gap_id)
-            )
+            conn.execute("UPDATE synthesis_gaps SET status=? WHERE id=?", (status, gap_id))
 
         _, revision = self.store.mutate(
             "evidence.synthesis.update_gap",
@@ -525,28 +534,27 @@ class SynthesisService:
             return []
         updates_exist = self._has_table("synthesis_gap_updates")
         output = []
-        for row in self.store.conn.execute(
-            "SELECT * FROM synthesis_gaps ORDER BY created_at,id"
-        ):
+        for row in self.store.conn.execute("SELECT * FROM synthesis_gaps ORDER BY created_at,id"):
             updates = (
                 [
                     dict(item)
                     for item in self.store.conn.execute(
-                        "SELECT * FROM synthesis_gap_updates WHERE gap_id=? "
-                        "ORDER BY rowid",
+                        "SELECT * FROM synthesis_gap_updates WHERE gap_id=? ORDER BY rowid",
                         (row["id"],),
                     )
                 ]
                 if updates_exist
                 else []
             )
-            output.append({
-                **dict(row),
-                "searches": json.loads(row["search_json"]),
-                "updates": updates,
-                "priority": updates[-1]["priority"] if updates else "unprioritized",
-                "interpretation": "Evidence not identified; absence not established",
-            })
+            output.append(
+                {
+                    **dict(row),
+                    "searches": json.loads(row["search_json"]),
+                    "updates": updates,
+                    "priority": updates[-1]["priority"] if updates else "unprioritized",
+                    "interpretation": "Evidence not identified; absence not established",
+                }
+            )
         return output
 
     def compose(
@@ -588,14 +596,24 @@ class SynthesisService:
             comparable: dict[tuple[str, str, str, str, str], set[str]] = {}
             for item in evidence:
                 key = (
-                    str(item["population"]), str(item["outcome"]), str(item["measure"]),
-                    str(item["unit"]), str(item["timepoint"]),
+                    str(item["population"]),
+                    str(item["outcome"]),
+                    str(item["measure"]),
+                    str(item["unit"]),
+                    str(item["timepoint"]),
                 )
                 comparable.setdefault(key, set()).add(str(item["direction"]))
             contradictions = [
-                {"population": key[0], "outcome": key[1], "measure": key[2],
-                 "unit": key[3], "timepoint": key[4], "directions": sorted(directions)}
-                for key, directions in sorted(comparable.items()) if len(directions) > 1
+                {
+                    "population": key[0],
+                    "outcome": key[1],
+                    "measure": key[2],
+                    "unit": key[3],
+                    "timepoint": key[4],
+                    "directions": sorted(directions),
+                }
+                for key, directions in sorted(comparable.items())
+                if len(directions) > 1
             ]
             warnings = []
             if not evidence:

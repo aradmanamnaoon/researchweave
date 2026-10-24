@@ -37,9 +37,10 @@ def test_recovery_snapshot_restore_and_corruption_detection(tmp_path: Path) -> N
     archive = root / ".recovery" / snapshot["snapshot"]
     original = archive.read_bytes()
     replacement = BytesIO()
-    with zipfile.ZipFile(BytesIO(original), "r") as source, zipfile.ZipFile(
-        replacement, "w"
-    ) as target:
+    with (
+        zipfile.ZipFile(BytesIO(original), "r") as source,
+        zipfile.ZipFile(replacement, "w") as target,
+    ):
         for member in source.infolist():
             data = source.read(member.filename)
             if member.filename == "data/project.sqlite":
@@ -135,12 +136,14 @@ def test_library_diagnostics_repair_reports_automatic_and_manual_work(tmp_path: 
 
 def test_data_management_plan_versions_export_and_reopen(tmp_path: Path) -> None:
     root = tmp_path / "project"
-    inventory = [{
-        "id": "dataset-1",
-        "description": "Synthetic observations",
-        "sensitivity": "internal",
-        "location": "project/data",
-    }]
+    inventory = [
+        {
+            "id": "dataset-1",
+            "description": "Synthetic observations",
+            "sensitivity": "internal",
+            "location": "project/data",
+        }
+    ]
     policies = {
         "storage": "Local encrypted workstation",
         "access": "Named project members",
@@ -152,14 +155,20 @@ def test_data_management_plan_versions_export_and_reopen(tmp_path: Path) -> None
     with ProjectStore.create(root, "DMP", "How is data handled?", "exploratory") as store:
         service = DataManagementPlanService(store)
         created = service.create(
-            "Data management plan", inventory, policies,
+            "Data management plan",
+            inventory,
+            policies,
             "Document storage and access choices.",
             ["Confirm repository at publication"],
             "Researcher",
         )
         amended = service.amend(
-            created["plan_id"], inventory, {**policies, "sharing": "Public metadata only"},
-            "Sharing policy clarified.", [], "Researcher"
+            created["plan_id"],
+            inventory,
+            {**policies, "sharing": "Public metadata only"},
+            "Sharing policy clarified.",
+            [],
+            "Researcher",
         )
         assert amended["version"] == 2
         rendered = service.export_markdown(created["plan_id"])

@@ -15,9 +15,12 @@ MAX_BATCH = 500
 
 
 def _exists(store: ProjectStore) -> bool:
-    return store.conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='library_collections'"
-    ).fetchone() is not None
+    return (
+        store.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='library_collections'"
+        ).fetchone()
+        is not None
+    )
 
 
 def _ensure(conn: Any) -> None:
@@ -60,9 +63,15 @@ class CollectionService:
     ) -> dict[str, Any]:
         require(bool(name.strip()) and len(name) <= 200, "Collection name is required")
         if parent_id is not None:
-            require(_exists(self.store) and self.store.conn.execute(
-                "SELECT 1 FROM library_collections WHERE id=?", (parent_id,)
-            ).fetchone() is not None, "Parent collection not found", "NOT_FOUND")
+            require(
+                _exists(self.store)
+                and self.store.conn.execute(
+                    "SELECT 1 FROM library_collections WHERE id=?", (parent_id,)
+                ).fetchone()
+                is not None,
+                "Parent collection not found",
+                "NOT_FOUND",
+            )
         collection_id = new_id()
 
         def persist(conn: Any) -> None:
@@ -85,8 +94,12 @@ class CollectionService:
             persist,
             expected_revision=expected_revision,
         )
-        return {"collection_id": collection_id, "parent_id": parent_id,
-                "name": name.strip(), "revision": revision}
+        return {
+            "collection_id": collection_id,
+            "parent_id": parent_id,
+            "name": name.strip(),
+            "revision": revision,
+        }
 
     def tree(self) -> list[dict[str, Any]]:
         if not _exists(self.store):
@@ -124,9 +137,15 @@ class CollectionService:
     ) -> dict[str, Any]:
         require(0 < len(reference_ids) <= MAX_BATCH, "Membership batch is outside bounds")
         require(len(reference_ids) == len(set(reference_ids)), "Duplicate reference IDs in batch")
-        require(_exists(self.store) and self.store.conn.execute(
-            "SELECT 1 FROM library_collections WHERE id=?", (collection_id,)
-        ).fetchone() is not None, "Collection not found", "NOT_FOUND")
+        require(
+            _exists(self.store)
+            and self.store.conn.execute(
+                "SELECT 1 FROM library_collections WHERE id=?", (collection_id,)
+            ).fetchone()
+            is not None,
+            "Collection not found",
+            "NOT_FOUND",
+        )
         for reference_id in reference_ids:
             require(_reference_exists(self.store, reference_id), "Reference not found", "NOT_FOUND")
 
@@ -144,8 +163,11 @@ class CollectionService:
             persist,
             expected_revision=expected_revision,
         )
-        return {"collection_id": collection_id, "members_requested": len(reference_ids),
-                "revision": revision}
+        return {
+            "collection_id": collection_id,
+            "members_requested": len(reference_ids),
+            "revision": revision,
+        }
 
     def remove_members(
         self,
@@ -171,8 +193,11 @@ class CollectionService:
             persist,
             expected_revision=expected_revision,
         )
-        return {"collection_id": collection_id, "members_requested": len(reference_ids),
-                "revision": revision}
+        return {
+            "collection_id": collection_id,
+            "members_requested": len(reference_ids),
+            "revision": revision,
+        }
 
     def tag(
         self,
@@ -222,8 +247,9 @@ class CollectionService:
             require(_exists(self.store), "No collection metadata exists", "NOT_FOUND")
         require(year_from is None or 0 < year_from <= 9999, "Invalid start year")
         require(year_to is None or 0 < year_to <= 9999, "Invalid end year")
-        require(year_from is None or year_to is None or year_from <= year_to,
-                "Year range is reversed")
+        require(
+            year_from is None or year_to is None or year_from <= year_to, "Year range is reversed"
+        )
         normalized_tag = tag.strip().casefold() if tag is not None else None
         pattern: str | None = None
         if text is not None:
@@ -245,11 +271,17 @@ class CollectionService:
             "OR r.authors_json LIKE ? ESCAPE '\\') "
             "ORDER BY r.year DESC,r.title,r.id LIMIT ?",
             (
-                collection_id, collection_id,
-                normalized_tag, normalized_tag,
-                year_from, year_from,
-                year_to, year_to,
-                pattern, pattern, pattern,
+                collection_id,
+                collection_id,
+                normalized_tag,
+                normalized_tag,
+                year_from,
+                year_from,
+                year_to,
+                year_to,
+                pattern,
+                pattern,
+                pattern,
                 limit,
             ),
         ).fetchall()
@@ -273,8 +305,19 @@ class CollectionService:
         records = self.search(collection_id=collection_id, limit=500)
         output = io.StringIO(newline="")
         writer = csv.DictWriter(
-            output, fieldnames=["id", "canonical_id", "is_alias", "alias_reason", "title",
-                                "authors", "year", "doi", "kind", "status"]
+            output,
+            fieldnames=[
+                "id",
+                "canonical_id",
+                "is_alias",
+                "alias_reason",
+                "title",
+                "authors",
+                "year",
+                "doi",
+                "kind",
+                "status",
+            ],
         )
         writer.writeheader()
         for record in records:

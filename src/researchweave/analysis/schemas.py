@@ -481,9 +481,7 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
         },
         {"how": S, "cardinality": S, "max_expansion": INT},
     ),
-    "dataset.aggregate": _schema(
-        {**IDENTITY, "by": AS, "values": AS, "functions": AS}
-    ),
+    "dataset.aggregate": _schema({**IDENTITY, "by": AS, "values": AS, "functions": AS}),
     "dataset.pivot_longer": _schema(
         {**IDENTITY, "id_columns": AS, "value_columns": AS},
         {"names_to": S, "values_to": S},

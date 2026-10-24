@@ -119,12 +119,14 @@ def capture(
     data_root = output / "synthetic-workspace"
     project_id, project = seed_demo(data_root)
     facade = build_ui_facade(data_root)
-    facade.settings.save(Preferences(
-        theme=cast(Literal["light", "dark", "contrast"], theme),
-        scale=scale,
-        last_project_id=project_id,
-        onboarding_complete=True,
-    ))
+    facade.settings.save(
+        Preferences(
+            theme=cast(Literal["light", "dark", "contrast"], theme),
+            scale=scale,
+            last_project_id=project_id,
+            onboarding_complete=True,
+        )
+    )
     app = QApplication.instance()
     if not isinstance(app, QApplication):
         app = QApplication([])
@@ -174,7 +176,12 @@ def capture_suite(
     output: Path,
     *,
     screens: tuple[str, ...] = (
-        "Dashboard", "Library", "Review", "Statistics", "Manuscript", "Privacy",
+        "Dashboard",
+        "Library",
+        "Review",
+        "Statistics",
+        "Manuscript",
+        "Privacy",
     ),
     themes: tuple[str, ...] = ("light", "dark", "contrast"),
     sizes: tuple[tuple[str, int, int], ...] = (
@@ -204,16 +211,13 @@ def capture_suite(
     manifest: dict[str, object] = {
         "schema_version": 1,
         "status": "prototype",
-        "label": (
-            "Deterministic offscreen screenshot suite using synthetic local-only fixtures."
-        ),
+        "label": ("Deterministic offscreen screenshot suite using synthetic local-only fixtures."),
         "captures": captures,
         "capture_count": len(captures),
         "screens": list(screens),
         "themes": list(themes),
         "sizes": [
-            {"name": name, "width": width, "height": height}
-            for name, width, height in sizes
+            {"name": name, "width": width, "height": height} for name, width, height in sizes
         ],
         "scales": list(scales),
         "network_calls_observed": 0,
@@ -236,11 +240,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--width", type=int, default=1280)
     parser.add_argument("--height", type=int, default=720)
     options = parser.parse_args(argv)
-    print(json.dumps(
-        capture(options.output, theme=options.theme,
-                width=options.width, height=options.height),
-        ensure_ascii=False, indent=2,
-    ))
+    print(
+        json.dumps(
+            capture(
+                options.output, theme=options.theme, width=options.width, height=options.height
+            ),
+            ensure_ascii=False,
+            indent=2,
+        )
+    )
     return 0
 
 

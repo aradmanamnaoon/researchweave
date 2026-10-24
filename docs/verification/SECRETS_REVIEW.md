@@ -1,0 +1,16 @@
+# Tracked secret-scan review
+
+`detect-secrets` was run after integration and its tracked-file candidates were reviewed manually.
+No live credential or private research datum was identified in the flagged tracked files.
+
+| Candidate group | Files / examples | Review result |
+|---|---|---|
+| Safe-character alphabet | `src/researchweave/ai/pdf_ingest.py` | Scanner flags the long alphanumeric allow-list used to validate document IDs. It is code, not secret material. |
+| Redaction/security fixtures | `tests/unit/test_logging.py`, AI/evidence security tests | Deliberately fake values such as synthetic API keys, passwords, basic-auth URLs and recovery tokens exercise rejection/redaction behavior. They are test fixtures only. |
+| Base64 fixture content | evidence tests | Encoded deterministic BibTeX/test payloads; decodes to synthetic publication metadata, not credentials. |
+| Synthetic journey passphrases | `workstreams/v2/ai/run_journeys.py` | Explicitly labeled synthetic recovery passphrases used to exercise encrypted-sync conflict flows. |
+| SHA-256 / manifest values | workstream traces, screenshot and asset manifests | Content hashes expected to have high entropy; no authentication use. |
+
+The machine-readable full scanner output remains in `SECRETS_SCAN.json`; the focused source/test scan is
+in `SECRETS_REVIEW_FOCUSED.json`. Any future candidate outside these documented fixture/hash categories
+must be reviewed before release.

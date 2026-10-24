@@ -22,8 +22,11 @@ def export_provenance(store: ProjectStore) -> dict[str, Any]:
             if sha256(payload) != digest:
                 integrity = "hash_mismatch"
                 attachment_issues.append(
-                    {"source_id": str(source["id"]), "digest": digest,
-                     "code": "ATTACHMENT_HASH_MISMATCH"}
+                    {
+                        "source_id": str(source["id"]),
+                        "digest": digest,
+                        "code": "ATTACHMENT_HASH_MISMATCH",
+                    }
                 )
         except EvidenceError as exc:
             integrity = "invalid"
@@ -42,14 +45,11 @@ def export_provenance(store: ProjectStore) -> dict[str, Any]:
         nodes[anchor["id"]] = {"kind": "anchor", "digest": anchor["body_hash"]}
     edges: list[dict[str, str]] = []
     for note in store.conn.execute("SELECT id,source_id FROM notes"):
-        edges.append({"child": note["id"], "parent": note["source_id"],
-                      "kind": "derived_from"})
+        edges.append({"child": note["id"], "parent": note["source_id"], "kind": "derived_from"})
     for anchor in store.conn.execute("SELECT id,source_id FROM anchors"):
-        edges.append({"child": anchor["id"], "parent": anchor["source_id"],
-                      "kind": "quoted_from"})
+        edges.append({"child": anchor["id"], "parent": anchor["source_id"], "kind": "quoted_from"})
     for edge in store.conn.execute("SELECT child_id,parent_id,kind FROM lineage"):
-        edges.append({"child": edge["child_id"], "parent": edge["parent_id"],
-                      "kind": edge["kind"]})
+        edges.append({"child": edge["child_id"], "parent": edge["parent_id"], "kind": edge["kind"]})
     adjacency: dict[str, list[str]] = defaultdict(list)
     orphans: list[str] = []
     for edge in edges:
@@ -74,9 +74,14 @@ def export_provenance(store: ProjectStore) -> dict[str, Any]:
 
     for node_id in sorted(nodes):
         traverse(node_id)
-    return {"version": 1, "nodes": nodes, "edges": edges,
-            "orphan_edges": orphans, "cycles": sorted(set(cycles)),
-            "attachment_issues": attachment_issues,
-            "attachment_hashes_verified": not attachment_issues,
-            "valid": not orphans and not cycles and not attachment_issues,
-            "project_id": store.info().id}
+    return {
+        "version": 1,
+        "nodes": nodes,
+        "edges": edges,
+        "orphan_edges": orphans,
+        "cycles": sorted(set(cycles)),
+        "attachment_issues": attachment_issues,
+        "attachment_hashes_verified": not attachment_issues,
+        "valid": not orphans and not cycles and not attachment_issues,
+        "project_id": store.info().id,
+    }

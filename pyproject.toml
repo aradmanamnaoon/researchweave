@@ -11,7 +11,7 @@ requires-python = ">=3.12,<3.14"
 license = "GPL-3.0-only"
 dependencies = [
     "PyQt6>=6.8,<6.11",
-    "cryptography>=45,<48",
+    "cryptography>=50,<51",
     "keyring>=25,<27",
     "matplotlib>=3.9,<4",
     "numpy>=2.2,<3",
@@ -28,6 +28,7 @@ dependencies = [
 [project.optional-dependencies]
 dev = ["pytest>=8,<10", "pytest-cov>=6,<8", "ruff>=0.12,<1", "mypy>=1.16,<2", "pre-commit>=4,<5", "pip-audit>=2.9,<3", "PyYAML>=6,<7", "detect-secrets>=1.5,<2"]
 formats = ["odfpy>=1.4,<2", "openpyxl>=3.1,<4", "pyarrow>=18,<24", "pyreadstat>=1.2,<2"]
+release = ["cyclonedx-bom>=7,<8", "pip-licenses>=5,<6", "pyinstaller>=6.11,<7"]
 
 [project.scripts]
 researchweave = "researchweave.app.main:main"
@@ -52,9 +53,21 @@ python_version = "3.12"
 strict = true
 mypy_path = "src"
 
+[[tool.mypy.overrides]]
+module = [
+    "openpyxl.*",
+    "pandas.*",
+    "patsy.*",
+    "pyarrow.*",
+    "reportlab.*",
+    "scipy.*",
+    "statsmodels.*",
+]
+ignore_missing_imports = true
+
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = "--strict-markers"
+addopts = "--strict-markers --import-mode=importlib"
 
 [tool.coverage.run]
 source = ["researchweave"]

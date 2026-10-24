@@ -1,0 +1,21 @@
+{
+  "id": "INT-077",
+  "name": "Repository clean gate",
+  "observed_before_final_rerun": {
+    "pytest": "647 passed, 3 warnings",
+    "mypy": "151 source files clean",
+    "ruff": "pass",
+    "skills": "27 skills validated",
+    "readme_local_links": "pass; 6 image references",
+    "pip_audit": "no known vulnerabilities found after cryptography upgrade to 50.0.2",
+    "cyclonedx_sbom": "generated",
+    "dependency_license_inventory": "generated",
+    "secret_scan": "generated and reviewed for synthetic/hash candidates"
+  },
+  "status": "local verification passed; promotion/release blockers remain",
+  "blockers": [
+    "Linux/macOS release builds are defined but not observed on native runners in this Windows session.",
+    "Some advanced AI facade operations are not yet surfaced as direct desktop controls.",
+    "Original checkout promotion gate is blocked by user-owned untracked prompts/."
+  ]
+}

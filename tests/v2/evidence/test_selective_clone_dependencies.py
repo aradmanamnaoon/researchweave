@@ -118,12 +118,14 @@ def test_clone_collection_review_and_protocol_closes_dependencies(tmp_path: Path
 
     with ProjectStore(tmp_path / "clone") as reopened:
         assert reopened.audit()["ok"]
-        assert reopened.conn.execute("SELECT COUNT(*) FROM clone_origins").fetchone()[0] == receipt[
-            "origin_mappings"
-        ]
-        assert reopened.conn.execute(
-            "SELECT review_id FROM review_records"
-        ).fetchone()[0] == cloned_review_id
+        assert (
+            reopened.conn.execute("SELECT COUNT(*) FROM clone_origins").fetchone()[0]
+            == receipt["origin_mappings"]
+        )
+        assert (
+            reopened.conn.execute("SELECT review_id FROM review_records").fetchone()[0]
+            == cloned_review_id
+        )
 
 
 def test_clone_missing_review_is_rejected_without_destination(tmp_path: Path) -> None:

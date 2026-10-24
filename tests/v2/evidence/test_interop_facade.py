@@ -8,16 +8,18 @@ from researchweave.evidence import build_evidence_facade
 
 
 def _zotero_export() -> bytes:
-    return json.dumps([
-        {
-            "id": "Z1",
-            "type": "article-journal",
-            "title": "Traceable migration record",
-            "author": [{"family": "Doe", "given": "Ada"}],
-            "issued": {"date-parts": [[2024]]},
-        },
-        {"id": "Z2", "type": "article-journal"},
-    ]).encode()
+    return json.dumps(
+        [
+            {
+                "id": "Z1",
+                "type": "article-journal",
+                "title": "Traceable migration record",
+                "author": [{"family": "Doe", "given": "Ada"}],
+                "issued": {"date-parts": [[2024]]},
+            },
+            {"id": "Z2", "type": "article-journal"},
+        ]
+    ).encode()
 
 
 def test_facade_migration_loss_audit_preview_import_reopen_undo(tmp_path: Path) -> None:

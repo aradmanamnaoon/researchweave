@@ -44,8 +44,7 @@ class ClaimSupportService:
         require(bool(actor.strip()) and len(actor) <= 255, "Claim actor is required")
         require(bool(rationale.strip()) and len(rationale) <= 5000, "Claim rationale is required")
         row = self.store.conn.execute(
-            "SELECT * FROM manuscripts WHERE id=? AND section=? "
-            "ORDER BY revision DESC LIMIT 1",
+            "SELECT * FROM manuscripts WHERE id=? AND section=? ORDER BY revision DESC LIMIT 1",
             (manuscript_id, section),
         ).fetchone()
         require(row is not None, "Manuscript section not found", "NOT_FOUND")
@@ -74,7 +73,7 @@ class ClaimSupportService:
             source_text = self.library.source_text(str(anchor["source_id"]))
             require(
                 sha256(source_text.encode()) == anchor["body_hash"]
-                and source_text[anchor["start"]:anchor["end"]] == anchor["quote"],
+                and source_text[anchor["start"] : anchor["end"]] == anchor["quote"],
                 "Claim anchor is stale",
                 "INTEGRITY_FAILURE",
             )
@@ -145,8 +144,7 @@ class ClaimSupportService:
         checked: list[dict[str, Any]] = []
         for claim in claims:
             current = self.store.conn.execute(
-                "SELECT * FROM manuscripts WHERE id=? AND section=? "
-                "ORDER BY revision DESC LIMIT 1",
+                "SELECT * FROM manuscripts WHERE id=? AND section=? ORDER BY revision DESC LIMIT 1",
                 (manuscript_id, claim["section"]),
             ).fetchone()
             if current is None:
@@ -156,7 +154,7 @@ class ClaimSupportService:
             same_revision = current["revision"] == claim["section_revision"]
             span_matches = (
                 claim["statement_end"] <= len(current["body"])
-                and current["body"][claim["statement_start"]:claim["statement_end"]]
+                and current["body"][claim["statement_start"] : claim["statement_end"]]
                 == claim["statement"]
             )
             if not same_revision or not span_matches:
@@ -176,7 +174,7 @@ class ClaimSupportService:
                 source_text = self.library.source_text(str(anchor["source_id"]))
                 if (
                     sha256(source_text.encode()) != anchor["body_hash"]
-                    or source_text[anchor["start"]:anchor["end"]] != anchor["quote"]
+                    or source_text[anchor["start"] : anchor["end"]] != anchor["quote"]
                 ):
                     issues.append({"claim_id": claim["id"], "code": "CLAIM_ANCHOR_STALE"})
                     checked.append({**claim, "status": "stale_anchor"})

@@ -17,28 +17,51 @@ from .reviews import ReviewService
 from .storage import ProjectStore
 
 COUNT_KEYS = (
-    "records_identified", "duplicates_removed", "removed_automation", "removed_other",
-    "records_screened_started", "records_excluded_title", "reports_sought",
-    "reports_not_retrieved", "reports_assessed", "reports_excluded_full_text",
-    "reports_included", "studies_included", "unresolved_title", "unresolved_full_text",
+    "records_identified",
+    "duplicates_removed",
+    "removed_automation",
+    "removed_other",
+    "records_screened_started",
+    "records_excluded_title",
+    "reports_sought",
+    "reports_not_retrieved",
+    "reports_assessed",
+    "reports_excluded_full_text",
+    "reports_included",
+    "studies_included",
+    "unresolved_title",
+    "unresolved_full_text",
     "missing_retrieval_status",
 )
 
 
 def _validate_accounting(accounting: dict[str, Any]) -> None:
     for key in COUNT_KEYS:
-        require(type(accounting.get(key)) is int and accounting[key] >= 0,
-                f"Invalid PRISMA accounting value: {key}", "INTEGRITY_FAILURE")
+        require(
+            type(accounting.get(key)) is int and accounting[key] >= 0,
+            f"Invalid PRISMA accounting value: {key}",
+            "INTEGRITY_FAILURE",
+        )
     identified = accounting["records_identified"]
-    removals = (accounting["duplicates_removed"] + accounting["removed_automation"]
-                + accounting["removed_other"])
-    require(removals <= identified, "PRISMA removals exceed identified records",
-            "INTEGRITY_FAILURE")
-    require(accounting["reports_assessed"] == (
-        accounting["reports_included"] + accounting["reports_excluded_full_text"]
-    ), "PRISMA assessed reports do not reconcile", "INTEGRITY_FAILURE")
-    require(accounting["studies_included"] <= accounting["reports_included"],
-            "Included studies exceed included reports", "INTEGRITY_FAILURE")
+    removals = (
+        accounting["duplicates_removed"]
+        + accounting["removed_automation"]
+        + accounting["removed_other"]
+    )
+    require(
+        removals <= identified, "PRISMA removals exceed identified records", "INTEGRITY_FAILURE"
+    )
+    require(
+        accounting["reports_assessed"]
+        == (accounting["reports_included"] + accounting["reports_excluded_full_text"]),
+        "PRISMA assessed reports do not reconcile",
+        "INTEGRITY_FAILURE",
+    )
+    require(
+        accounting["studies_included"] <= accounting["reports_included"],
+        "Included studies exceed included reports",
+        "INTEGRITY_FAILURE",
+    )
 
 
 class Prisma2020Service:
@@ -51,10 +74,15 @@ class Prisma2020Service:
         accounting = self.review.prisma(review_id)
         _validate_accounting(accounting)
         searches = [
-            {"run_id": row["id"], "provider": row["provider"],
-             "query": row["original_query"], "expected_records": row["expected_records"],
-             "finalized": bool(row["finalized"]), "searched_at": row["searched_at"],
-             "response_sha256": row["response_sha256"]}
+            {
+                "run_id": row["id"],
+                "provider": row["provider"],
+                "query": row["original_query"],
+                "expected_records": row["expected_records"],
+                "finalized": bool(row["finalized"]),
+                "searched_at": row["searched_at"],
+                "response_sha256": row["response_sha256"],
+            }
             for row in self.store.conn.execute(
                 "SELECT * FROM review_search_runs WHERE review_id=? ORDER BY searched_at,id",
                 (review_id,),
@@ -93,26 +121,43 @@ class Prisma2020Service:
             excluded_records.append({"record_id": row["id"], "reason": label})
 
         checklist = [
-            {"item": "identification_sources", "complete": bool(searches)
-             and all(search["finalized"] for search in searches)},
-            {"item": "duplicate_and_other_removals", "complete": (
-                accounting["duplicates_removed"] + accounting["removed_automation"]
-                + accounting["removed_other"] <= accounting["records_identified"])},
-            {"item": "title_abstract_screening_resolved",
-             "complete": accounting["unresolved_title"] == 0},
-            {"item": "retrieval_resolved",
-             "complete": accounting["missing_retrieval_status"] == 0},
-            {"item": "full_text_assessment_resolved",
-             "complete": accounting["unresolved_full_text"] == 0},
-            {"item": "full_text_exclusion_reasons",
-             "complete": accounting["reports_excluded_full_text"] == len(excluded_records)
-             and all(item["reason"] != "UNSPECIFIED_EXCLUSION_REASON"
-                     for item in excluded_records)},
-            {"item": "reports_and_studies_distinguished",
-             "complete": accounting["studies_included"] <= accounting["reports_included"]},
+            {
+                "item": "identification_sources",
+                "complete": bool(searches) and all(search["finalized"] for search in searches),
+            },
+            {
+                "item": "duplicate_and_other_removals",
+                "complete": (
+                    accounting["duplicates_removed"]
+                    + accounting["removed_automation"]
+                    + accounting["removed_other"]
+                    <= accounting["records_identified"]
+                ),
+            },
+            {
+                "item": "title_abstract_screening_resolved",
+                "complete": accounting["unresolved_title"] == 0,
+            },
+            {"item": "retrieval_resolved", "complete": accounting["missing_retrieval_status"] == 0},
+            {
+                "item": "full_text_assessment_resolved",
+                "complete": accounting["unresolved_full_text"] == 0,
+            },
+            {
+                "item": "full_text_exclusion_reasons",
+                "complete": accounting["reports_excluded_full_text"] == len(excluded_records)
+                and all(
+                    item["reason"] != "UNSPECIFIED_EXCLUSION_REASON" for item in excluded_records
+                ),
+            },
+            {
+                "item": "reports_and_studies_distinguished",
+                "complete": accounting["studies_included"] <= accounting["reports_included"],
+            },
         ]
-        ready = bool(accounting["complete_prisma_2020"] and
-                     all(item["complete"] for item in checklist))
+        ready = bool(
+            accounting["complete_prisma_2020"] and all(item["complete"] for item in checklist)
+        )
         return {
             "review_id": review_id,
             "accounting": accounting,
@@ -127,8 +172,7 @@ class Prisma2020Service:
                 "Recorded flow is reconciled; independent PRISMA checklist review "
                 "is still required."
                 if ready
-                else "Recorded PRISMA flow is incomplete or lacks required "
-                "exclusion provenance."
+                else "Recorded PRISMA flow is incomplete or lacks required exclusion provenance."
             ),
         }
 
@@ -149,28 +193,43 @@ class Prisma2020Service:
         ]
         width, box_height, gap = 520, 54, 18
         height = 32 + len(labels) * (box_height + gap) + 54
-        chunks = [f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
-                  f'viewBox="0 0 {width} {height}">',
-                  '<title>PRISMA 2020 recorded flow</title>',
-                  '<desc>Diagnostic flow generated from persisted ResearchWeave '
-                  'review events.</desc>']
+        chunks = [
+            f'<svg xmlns="http://www.w3.org/2000/svg" width="{width}" height="{height}" '
+            f'viewBox="0 0 {width} {height}">',
+            "<title>PRISMA 2020 recorded flow</title>",
+            "<desc>Diagnostic flow generated from persisted ResearchWeave review events.</desc>",
+        ]
         y = 24
         for index, (label, count) in enumerate(labels):
-            chunks.append(f'<rect x="60" y="{y}" width="400" height="{box_height}" '
-                          'rx="6" fill="white" stroke="black"/>')
-            chunks.append(f'<text x="260" y="{y + 32}" text-anchor="middle" '
-                          f'font-family="sans-serif" font-size="14">'
-                          f'{html.escape(label)}: {count}</text>')
+            chunks.append(
+                f'<rect x="60" y="{y}" width="400" height="{box_height}" '
+                'rx="6" fill="white" stroke="black"/>'
+            )
+            chunks.append(
+                f'<text x="260" y="{y + 32}" text-anchor="middle" '
+                f'font-family="sans-serif" font-size="14">'
+                f"{html.escape(label)}: {count}</text>"
+            )
             if index < len(labels) - 1:
-                chunks.append(f'<line x1="260" y1="{y + box_height}" x2="260" '
-                              f'y2="{y + box_height + gap}" stroke="black"/>')
+                chunks.append(
+                    f'<line x1="260" y1="{y + box_height}" x2="260" '
+                    f'y2="{y + box_height + gap}" stroke="black"/>'
+                )
             y += box_height + gap
-        status = "RECONCILED — independent checklist review still required" if report[
-            "publication_ready"] else "INCOMPLETE — reconcile recorded review events"
-        chunks.append(f'<text x="260" y="{height - 20}" text-anchor="middle" '
-                      f'font-family="sans-serif" font-size="12">{html.escape(status)}</text>')
+        status = (
+            "RECONCILED — independent checklist review still required"
+            if report["publication_ready"]
+            else "INCOMPLETE — reconcile recorded review events"
+        )
+        chunks.append(
+            f'<text x="260" y="{height - 20}" text-anchor="middle" '
+            f'font-family="sans-serif" font-size="12">{html.escape(status)}</text>'
+        )
         chunks.append("</svg>")
-        return {"format": "svg", "text": "".join(chunks),
-                "publication_ready": report["publication_ready"],
-                "prisma_2020_compliance_certified": False,
-                "accounting": a}
+        return {
+            "format": "svg",
+            "text": "".join(chunks),
+            "publication_ready": report["publication_ready"],
+            "prisma_2020_compliance_certified": False,
+            "accounting": a,
+        }

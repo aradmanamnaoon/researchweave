@@ -108,9 +108,7 @@ def main() -> None:
         }
 
         manuscript = project_fixture()
-        manuscript.manuscript = "# Methods\n\n" + (
-            "Synthetic reviewed draft sentence. " * 6_000
-        )
+        manuscript.manuscript = "# Methods\n\n" + ("Synthetic reviewed draft sentence. " * 6_000)
         report, seconds, peak = observe(lambda: inspect_submission(manuscript))
         observations["long_manuscript"] = {
             "characters": report["manuscript_characters"],
@@ -120,9 +118,7 @@ def main() -> None:
         }
 
         values = [float(index % 100) for index in range(50_000)]
-        chart, seconds, peak = observe(
-            lambda: histogram(values, column="synthetic", bins=60)
-        )
+        chart, seconds, peak = observe(lambda: histogram(values, column="synthetic", bins=60))
         observations["chart_50000_observations"] = {
             "seconds": seconds,
             "python_peak_bytes": peak,

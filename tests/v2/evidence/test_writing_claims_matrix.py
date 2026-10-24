@@ -28,9 +28,7 @@ def test_manuscript_section_history_diff_and_stale_claim_detection(tmp_path: Pat
         source_text = library.source_text(source["source_id"])
         quote = "improved by 2 points"
         start = source_text.index(quote)
-        anchor = library.add_anchor(
-            source["source_id"], quote, start, start + len(quote)
-        )
+        anchor = library.add_anchor(source["source_id"], quote, start, start + len(quote))
         writing = WritingService(store)
         body1 = "The outcome improved by 2 points."
         writing.save_section("paper", "Results", body1, {})

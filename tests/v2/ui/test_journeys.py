@@ -97,17 +97,19 @@ class DeterministicRegressionFake:
     """Test-only scientific adapter; never used by production app construction."""
 
     def methods(self) -> list[Mapping[str, Any]]:
-        return [{
-            "id": "regression",
-            "label": "Synthetic regression test adapter",
-            "available": True,
-            "arguments": {
-                "dataset_id": {"type": "string"},
-                "outcome": {"type": "string"},
-                "predictor": {"type": "string"},
-            },
-            "test_fake": True,
-        }]
+        return [
+            {
+                "id": "regression",
+                "label": "Synthetic regression test adapter",
+                "available": True,
+                "arguments": {
+                    "dataset_id": {"type": "string"},
+                    "outcome": {"type": "string"},
+                    "predictor": {"type": "string"},
+                },
+                "test_fake": True,
+            }
+        ]
 
     def run(self, method: str, inputs: Mapping[str, Any]) -> Mapping[str, Any]:
         assert method == "regression"
@@ -149,9 +151,7 @@ def test_journey_1_true_beginner(tmp_path: Path) -> None:
         exposure_phenomenon="synthetic reading prompt",
         outcome_target="reported focus",
         question_type="descriptive",
-        editable_question=(
-            "What does a synthetic reading prompt say about reported focus?"
-        ),
+        editable_question=("What does a synthetic reading prompt say about reported focus?"),
     )
     revision = structured["revision"]
     failed = recorder.call(
@@ -202,8 +202,8 @@ def test_journey_1_true_beginner(tmp_path: Path) -> None:
         filename="beginner-journey.md",
     )
     assert written["sha256"] == preview["sha256"]
-    assert Path(written["path"]).read_text(encoding="utf-8").startswith(
-        "# Synthetic beginner journey"
+    assert (
+        Path(written["path"]).read_text(encoding="utf-8").startswith("# Synthetic beginner journey")
     )
     restarted = build_ui_facade(root, export_authorizer=lambda _name: True)
     recorder.facade = restarted
@@ -215,42 +215,46 @@ def test_journey_1_true_beginner(tmp_path: Path) -> None:
     assert recovered["sha256"] == recovery["sha256"]
     assert recovered["conflict"] is False
     trace = _trace_base("1-true-beginner", recorder)
-    trace.update({
-        "project_id": pid,
-        "source_id": source["source_id"],
-        "fixture_values": {
-            "source_text": source_text,
-            "question_type": "descriptive",
-            "provider_required": False,
-            "account_required": False,
-        },
-        "output_values": {
-            "source_sha256": source["content_sha256"],
-            "export_sha256": written["sha256"],
-            "recovery_sha256": recovery["sha256"],
-        },
-        "persistence_restart_state": {
-            "same_project_id": reopened["id"] == pid,
-            "source_count": len(reopened["sources"]),
-            "notebook_preserved": reopened["notebook"].startswith("Summary note:"),
-            "recovery_preview_preserved": recovered["text"].startswith("Unsaved synthetic"),
-        },
-        "failures": [{
-            "operation": "ui.source.add",
-            "code": failed["error"]["code"],
-            "recovery": failed["error"]["recovery"],
-            "write_occurred": False,
-        }],
-        "denial_behavior": None,
-        "screenshots": [
-            f"{SCREENSHOT_ROOT}/researchweave-prototype-dashboard-light-900x620-100.png"
-        ],
-        "limitations": [
-            "All content is synthetic.",
-            "The recovery draft is previewed separately and never overwrites the saved note.",
-            "No scientific validity or research finding is inferred.",
-        ],
-    })
+    trace.update(
+        {
+            "project_id": pid,
+            "source_id": source["source_id"],
+            "fixture_values": {
+                "source_text": source_text,
+                "question_type": "descriptive",
+                "provider_required": False,
+                "account_required": False,
+            },
+            "output_values": {
+                "source_sha256": source["content_sha256"],
+                "export_sha256": written["sha256"],
+                "recovery_sha256": recovery["sha256"],
+            },
+            "persistence_restart_state": {
+                "same_project_id": reopened["id"] == pid,
+                "source_count": len(reopened["sources"]),
+                "notebook_preserved": reopened["notebook"].startswith("Summary note:"),
+                "recovery_preview_preserved": recovered["text"].startswith("Unsaved synthetic"),
+            },
+            "failures": [
+                {
+                    "operation": "ui.source.add",
+                    "code": failed["error"]["code"],
+                    "recovery": failed["error"]["recovery"],
+                    "write_occurred": False,
+                }
+            ],
+            "denial_behavior": None,
+            "screenshots": [
+                f"{SCREENSHOT_ROOT}/researchweave-prototype-dashboard-light-900x620-100.png"
+            ],
+            "limitations": [
+                "All content is synthetic.",
+                "The recovery draft is previewed separately and never overwrites the saved note.",
+                "No scientific validity or research finding is inferred.",
+            ],
+        }
+    )
     _emit("JOURNEY_1_TRUE_BEGINNER.json", trace)
 
 
@@ -356,46 +360,50 @@ def test_journey_2_expert_multitask(tmp_path: Path) -> None:
     assert reopened["evidence"][0]["quote"] == "evidence passage"
     assert presets["presets"][0]["id"] == preset["preset"]["id"]
     trace = _trace_base("2-expert-multitask", recorder)
-    trace.update({
-        "project_ids": [first["project_id"], second["project_id"]],
-        "active_project_id": pid,
-        "source_id": source["source_id"],
-        "dataset_id": dataset["dataset_id"],
-        "analysis_result_id": analysis["result"]["id"],
-        "fixture_values": {
-            "csv_rows": page["rows"],
-            "regression_adapter": "DeterministicRegressionFake",
-            "regression_test_values": {"intercept": 1.0, "slope": 2.0},
-        },
-        "output_values": {
-            "analysis_method": analysis["result"]["method"],
-            "source_sha256": source["content_sha256"],
-            "evidence_integrity": evidence["integrity"]["integrity"],
-            "preset_id": preset["preset"]["id"],
-        },
-        "persistence_restart_state": {
-            "manuscript_preserved": reopened["manuscript"].startswith("Synthetic manuscript"),
-            "evidence_preserved": reopened["evidence"][0]["quote"] == "evidence passage",
-            "analysis_result_preserved": len(results["results"]) == 1,
-            "workspace_preset_preserved": len(presets["presets"]) == 1,
-        },
-        "failures": [],
-        "denial_behavior": None,
-        "screenshots": [
-            f"{SCREENSHOT_ROOT}/researchweave-prototype-statistics-dark-1280x720-100.png",
-            f"{SCREENSHOT_ROOT}/researchweave-prototype-manuscript-dark-1280x720-100.png",
-        ],
-        "limitations": [
-            "Regression is supplied by a deterministic test-only fake adapter.",
-            "The coefficients are synthetic test values and are not a scientific result.",
-            "Production inferential analysis remains an explicit integration dependency.",
-        ],
-    })
+    trace.update(
+        {
+            "project_ids": [first["project_id"], second["project_id"]],
+            "active_project_id": pid,
+            "source_id": source["source_id"],
+            "dataset_id": dataset["dataset_id"],
+            "analysis_result_id": analysis["result"]["id"],
+            "fixture_values": {
+                "csv_rows": page["rows"],
+                "regression_adapter": "DeterministicRegressionFake",
+                "regression_test_values": {"intercept": 1.0, "slope": 2.0},
+            },
+            "output_values": {
+                "analysis_method": analysis["result"]["method"],
+                "source_sha256": source["content_sha256"],
+                "evidence_integrity": evidence["integrity"]["integrity"],
+                "preset_id": preset["preset"]["id"],
+            },
+            "persistence_restart_state": {
+                "manuscript_preserved": reopened["manuscript"].startswith("Synthetic manuscript"),
+                "evidence_preserved": reopened["evidence"][0]["quote"] == "evidence passage",
+                "analysis_result_preserved": len(results["results"]) == 1,
+                "workspace_preset_preserved": len(presets["presets"]) == 1,
+            },
+            "failures": [],
+            "denial_behavior": None,
+            "screenshots": [
+                f"{SCREENSHOT_ROOT}/researchweave-prototype-statistics-dark-1280x720-100.png",
+                f"{SCREENSHOT_ROOT}/researchweave-prototype-manuscript-dark-1280x720-100.png",
+            ],
+            "limitations": [
+                "Regression is supplied by a deterministic test-only fake adapter.",
+                "The coefficients are synthetic test values and are not a scientific result.",
+                "Production inferential analysis remains an explicit integration dependency.",
+            ],
+        }
+    )
     _emit("JOURNEY_2_EXPERT_MULTITASK.json", trace)
 
 
 def test_journey_3_keyboard_only(
-    tmp_path: Path, qt_app: QApplication, monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    qt_app: QApplication,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     root = tmp_path / "journey-3"
     facade = build_ui_facade(root, export_authorizer=lambda _name: True)
@@ -457,9 +465,7 @@ def test_journey_3_keyboard_only(
     cursor.setPosition(len("prefix café"), cursor.MoveMode.KeepAnchor)
     window.reader_text.setTextCursor(cursor)
     assert window.reader_text.textCursor().selectedText() == "café"
-    monkeypatch.setattr(
-        QInputDialog, "getText", lambda *args, **kwargs: ("unicode-code", True)
-    )
+    monkeypatch.setattr(QInputDialog, "getText", lambda *args, **kwargs: ("unicode-code", True))
     window.annotate_selection()
     annotations = facade.execute("ui.qual.list", {"project_id": pid})["data"]["annotations"]
     assert annotations[0]["quote"] == "café"
@@ -641,41 +647,43 @@ def test_journey_4_unauthorized_ai_action(tmp_path: Path) -> None:
     assert timeline["events"][0]["event"] == "denied"
     assert not forbidden.exists()
     trace = _trace_base("4-unauthorized-ai-action", recorder)
-    trace.update({
-        "project_id": pid,
-        "fixture_values": {
-            "proposed_file": "forbidden.txt",
-            "provider": "manual",
-            "destructive_effect": True,
-        },
-        "output_values": {
-            "denial_event": denied["action"]["event"],
-            "timeline_events": [item["event"] for item in timeline["events"]],
-        },
-        "persistence_restart_state": {
-            "saved_notebook": facade.store.open(pid).notebook,
-        },
-        "failures": [
-            {"case": "mismatched approval", "code": mismatch["error"]["code"]},
-            {"case": "malformed action", "code": malformed["error"]["code"]},
-            {"case": "stale approval", "code": stale["error"]["code"]},
-        ],
-        "denial_behavior": {
-            "zero_write": not forbidden.exists(),
-            "zero_network": True,
-            "readable_reason": denied["action"]["message"],
-            "audit_timeline_event": timeline["events"][0]["event"],
-        },
-        "screenshots": [
-            f"{SCREENSHOT_ROOT}/researchweave-prototype-privacy-dark-900x620-100.png"
-        ],
-        "limitations": [
-            (
-                "This journey validates the local proposal/approval boundary; "
-                "no external AI provider runs."
-            )
-        ],
-    })
+    trace.update(
+        {
+            "project_id": pid,
+            "fixture_values": {
+                "proposed_file": "forbidden.txt",
+                "provider": "manual",
+                "destructive_effect": True,
+            },
+            "output_values": {
+                "denial_event": denied["action"]["event"],
+                "timeline_events": [item["event"] for item in timeline["events"]],
+            },
+            "persistence_restart_state": {
+                "saved_notebook": facade.store.open(pid).notebook,
+            },
+            "failures": [
+                {"case": "mismatched approval", "code": mismatch["error"]["code"]},
+                {"case": "malformed action", "code": malformed["error"]["code"]},
+                {"case": "stale approval", "code": stale["error"]["code"]},
+            ],
+            "denial_behavior": {
+                "zero_write": not forbidden.exists(),
+                "zero_network": True,
+                "readable_reason": denied["action"]["message"],
+                "audit_timeline_event": timeline["events"][0]["event"],
+            },
+            "screenshots": [
+                f"{SCREENSHOT_ROOT}/researchweave-prototype-privacy-dark-900x620-100.png"
+            ],
+            "limitations": [
+                (
+                    "This journey validates the local proposal/approval boundary; "
+                    "no external AI provider runs."
+                )
+            ],
+        }
+    )
     _emit("JOURNEY_4_UNAUTHORIZED_AI_ACTION.json", trace)
 
 
@@ -749,48 +757,51 @@ def test_journey_5_theme_recovery(tmp_path: Path, qt_app: QApplication) -> None:
     assert fallback["scale"] == 1.0
     assert intact["notebook"] == "User data that must survive settings corruption."
     trace = _trace_base("5-theme-recovery", recorder)
-    trace.update({
-        "project_id": pid,
-        "fixture_values": {
-            "theme_sequence": ["dark", "light", "contrast"],
-            "scale": 1.5,
-            "saved_window": [1180, 700],
-            "sidebar_width": 260,
-        },
-        "output_values": {
-            "final_saved_preferences": prefs["preferences"],
-            "preset_id": preset["preset"]["id"],
-            "corrupt_settings_fallback_theme": fallback["theme"],
-            "corrupt_settings_fallback_scale": fallback["scale"],
-        },
-        "persistence_restart_state": {
-            "layout_preferences_restored": (
-                persisted["window_width"] == 1180
-                and persisted["window_height"] == 700
-                and persisted["sidebar_width"] == 260
-            ),
-            "preset_restored": len(restored_presets["presets"]) == 1,
-            "user_data_intact_after_corrupt_settings": intact["notebook"] == (
-                "User data that must survive settings corruption."
-            ),
-            "project_revision": note["revision"],
-        },
-        "failures": [{
-            "case": "corrupt preferences JSON",
-            "fallback_applied": fallback["theme"] == "light" and fallback["scale"] == 1.0,
-            "project_data_preserved": True,
-        }],
-        "denial_behavior": None,
-        "screenshots": [
-            f"{SCREENSHOT_ROOT}/researchweave-prototype-dashboard-dark-1280x720-100.png",
-            f"{SCREENSHOT_ROOT}/researchweave-prototype-dashboard-light-1280x720-100.png",
-            f"{SCREENSHOT_ROOT}/researchweave-prototype-dashboard-contrast-1280x720-200.png",
-        ],
-        "limitations": [
-            "Offscreen Qt validates application state, not native monitor placement.",
-            "Corrupt preference fallback is isolated from project storage.",
-        ],
-    })
+    trace.update(
+        {
+            "project_id": pid,
+            "fixture_values": {
+                "theme_sequence": ["dark", "light", "contrast"],
+                "scale": 1.5,
+                "saved_window": [1180, 700],
+                "sidebar_width": 260,
+            },
+            "output_values": {
+                "final_saved_preferences": prefs["preferences"],
+                "preset_id": preset["preset"]["id"],
+                "corrupt_settings_fallback_theme": fallback["theme"],
+                "corrupt_settings_fallback_scale": fallback["scale"],
+            },
+            "persistence_restart_state": {
+                "layout_preferences_restored": (
+                    persisted["window_width"] == 1180
+                    and persisted["window_height"] == 700
+                    and persisted["sidebar_width"] == 260
+                ),
+                "preset_restored": len(restored_presets["presets"]) == 1,
+                "user_data_intact_after_corrupt_settings": intact["notebook"]
+                == ("User data that must survive settings corruption."),
+                "project_revision": note["revision"],
+            },
+            "failures": [
+                {
+                    "case": "corrupt preferences JSON",
+                    "fallback_applied": fallback["theme"] == "light" and fallback["scale"] == 1.0,
+                    "project_data_preserved": True,
+                }
+            ],
+            "denial_behavior": None,
+            "screenshots": [
+                f"{SCREENSHOT_ROOT}/researchweave-prototype-dashboard-dark-1280x720-100.png",
+                f"{SCREENSHOT_ROOT}/researchweave-prototype-dashboard-light-1280x720-100.png",
+                f"{SCREENSHOT_ROOT}/researchweave-prototype-dashboard-contrast-1280x720-200.png",
+            ],
+            "limitations": [
+                "Offscreen Qt validates application state, not native monitor placement.",
+                "Corrupt preference fallback is isolated from project storage.",
+            ],
+        }
+    )
     _emit("JOURNEY_5_THEME_RECOVERY.json", trace)
 
 

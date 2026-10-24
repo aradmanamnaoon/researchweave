@@ -28,8 +28,7 @@ def create_minimal_pdf(path: Path, *, pages: int = 1) -> None:
         b"<< /Type /Page /Parent 2 0 R /MediaBox [0 0 300 200] "
         b"/Resources << /Font << /F1 4 0 R >> >> /Contents 5 0 R >>",
         b"<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>",
-        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n"
-        + stream + b"\nendstream",
+        b"<< /Length " + str(len(stream)).encode() + b" >>\nstream\n" + stream + b"\nendstream",
     ]
     result = bytearray(b"%PDF-1.4\n%\xe2\xe3\xcf\xd3\n")
     offsets = [0]
@@ -45,7 +44,8 @@ def create_minimal_pdf(path: Path, *, pages: int = 1) -> None:
         result.extend(f"{offset:010d} 00000 n \n".encode())
     result.extend(
         b"trailer\n<< /Size 6 /Root 1 0 R >>\nstartxref\n"
-        + str(xref_position).encode() + b"\n%%EOF\n"
+        + str(xref_position).encode()
+        + b"\n%%EOF\n"
     )
     path.write_bytes(result)
 

@@ -90,8 +90,10 @@ def _plot_bar(dataset: Dataset, x: str, y: str | None, ax: Any) -> dict[str, Any
         require(bool(labels), "No nonmissing bar categories")
         ax.bar(labels, values)
         return {
-            "labels": labels, "values": values,
-            "summary": "count", "n_complete": int(sum(values)),
+            "labels": labels,
+            "values": values,
+            "summary": "count",
+            "n_complete": int(sum(values)),
         }
     require(y in dataset.columns and y != x, "Unknown bar outcome")
     for row in dataset.records:
@@ -393,8 +395,10 @@ def render_plot(
         elif kind == "bar" and y is None:
             default_y = "Count"
         ax.set_ylabel(
-            y_label or (
-                default_y if y is None or kind in {"residual", "qq"}
+            y_label
+            or (
+                default_y
+                if y is None or kind in {"residual", "qq"}
                 else _variable_label(dataset, y)
             )
         )

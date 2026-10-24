@@ -8,8 +8,9 @@ from PyQt6.QtCore import QAbstractTableModel, QModelIndex, Qt
 class ResearchTableModel(QAbstractTableModel):
     """Never allocates a QWidget/item for individual data cells."""
 
-    def __init__(self, columns: list[str] | None = None,
-                 rows: list[list[str]] | None = None) -> None:
+    def __init__(
+        self, columns: list[str] | None = None, rows: list[list[str]] | None = None
+    ) -> None:
         super().__init__()
         self.columns = list(columns or [])
         self.rows = list(rows or [])
@@ -23,8 +24,11 @@ class ResearchTableModel(QAbstractTableModel):
     def data(self, index: QModelIndex, role: int = Qt.ItemDataRole.DisplayRole) -> object:
         if not index.isValid():
             return None
-        if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.ToolTipRole,
-                    Qt.ItemDataRole.AccessibleTextRole):
+        if role in (
+            Qt.ItemDataRole.DisplayRole,
+            Qt.ItemDataRole.ToolTipRole,
+            Qt.ItemDataRole.AccessibleTextRole,
+        ):
             return str(self.rows[index.row()][index.column()])
         if role == Qt.ItemDataRole.TextAlignmentRole:
             value = self.rows[index.row()][index.column()]
@@ -35,11 +39,15 @@ class ResearchTableModel(QAbstractTableModel):
             return int(Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter)
         return None
 
-    def headerData(self, section: int, orientation: Qt.Orientation,
-                   role: int = Qt.ItemDataRole.DisplayRole) -> object:
+    def headerData(
+        self, section: int, orientation: Qt.Orientation, role: int = Qt.ItemDataRole.DisplayRole
+    ) -> object:
         if role in (Qt.ItemDataRole.DisplayRole, Qt.ItemDataRole.AccessibleTextRole):
-            return (self.columns[section] if orientation == Qt.Orientation.Horizontal
-                    else str(section + 1))
+            return (
+                self.columns[section]
+                if orientation == Qt.Orientation.Horizontal
+                else str(section + 1)
+            )
         return None
 
     def set_records(self, columns: list[str], rows: list[list[str]]) -> None:

@@ -44,8 +44,7 @@ def test_public_facade_exposes_portability_monitoring_and_management(tmp_path: P
         project_id=project_id,
         format="bibtex",
         data_base64=_encoded(
-            "@article{x,title={Traceable Trial},author={Doe, Ada},"
-            "year={2024},doi={10.1000/trace}}"
+            "@article{x,title={Traceable Trial},author={Doe, Ada},year={2024},doi={10.1000/trace}}"
         ),
     )
     reference_id = imported["references"][0]["id"]
@@ -56,9 +55,7 @@ def test_public_facade_exposes_portability_monitoring_and_management(tmp_path: P
     assert synced["unchanged"] == 2
     assert _call(facade, "library.diagnostics", project_id=project_id)["read_only"]
 
-    collection = _call(
-        facade, "library.collection_create", project_id=project_id, name="Included"
-    )
+    collection = _call(facade, "library.collection_create", project_id=project_id, name="Included")
     _call(
         facade,
         "library.collection_add",
@@ -111,12 +108,14 @@ def test_public_facade_exposes_portability_monitoring_and_management(tmp_path: P
         "data_management.create",
         project_id=project_id,
         title="DMP",
-        inventory=[{
-            "id": "source-1",
-            "description": "Synthetic evidence",
-            "sensitivity": "internal",
-            "location": "project objects",
-        }],
+        inventory=[
+            {
+                "id": "source-1",
+                "description": "Synthetic evidence",
+                "sensitivity": "internal",
+                "location": "project objects",
+            }
+        ],
         policies={
             "storage": "local",
             "access": "project owner",
@@ -137,9 +136,7 @@ def test_public_facade_exposes_portability_monitoring_and_management(tmp_path: P
     )
     assert "Data inventory" in rendered["text"]
 
-    recovery = _call(
-        facade, "project.recovery_snapshot", project_id=project_id, label="checkpoint"
-    )
+    recovery = _call(facade, "project.recovery_snapshot", project_id=project_id, label="checkpoint")
     snapshots = _call(facade, "project.recovery_list", project_id=project_id)
     assert snapshots["snapshots"][0]["snapshot"] == recovery["snapshot"]
 
@@ -158,9 +155,7 @@ def test_public_facade_exposes_portability_monitoring_and_management(tmp_path: P
         source_ids=[source["source_id"]],
         reference_ids=[reference_id],
     )
-    clone_open = _call(
-        facade, "project.open", project_id=clone["destination_project_id"]
-    )
+    clone_open = _call(facade, "project.open", project_id=clone["destination_project_id"])
     assert clone_open["id"] == clone["destination_project_id"]
 
     encrypted = _call(

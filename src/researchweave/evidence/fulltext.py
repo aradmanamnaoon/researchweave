@@ -58,8 +58,11 @@ class FullText:
         require(data.get("extraction_version") == VERSION, "Unsupported extraction version")
         pages = tuple(TextPage(**page) for page in data["pages"])
         require(len(pages) <= MAX_PAGES, "Too many document pages", "RESOURCE_LIMIT")
-        require(all(page.sha256 == _digest(page.text.encode("utf-8")) for page in pages),
-                "Page hash mismatch", "INTEGRITY_ERROR")
+        require(
+            all(page.sha256 == _digest(page.text.encode("utf-8")) for page in pages),
+            "Page hash mismatch",
+            "INTEGRITY_ERROR",
+        )
         require(all(page.number == n for n, page in enumerate(pages, 1)), "Invalid page numbering")
         return cls(data["media_type"], data["source_sha256"], pages)
 
@@ -90,14 +93,29 @@ def _digest(value: bytes) -> str:
     return sha256(value).hexdigest()
 
 
-def _page(number: int, text: str, *, status: str = "text", rotation: int = 0,
-          label: str | None = None, scan_evidence: str = "not_applicable",
-          section_kind: str | None = None, heading: str | None = None) -> TextPage:
+def _page(
+    number: int,
+    text: str,
+    *,
+    status: str = "text",
+    rotation: int = 0,
+    label: str | None = None,
+    scan_evidence: str = "not_applicable",
+    section_kind: str | None = None,
+    heading: str | None = None,
+) -> TextPage:
     require(len(text) <= MAX_SECTION_CHARS, "Extracted section too large", "RESOURCE_LIMIT")
     require(rotation in (0, 90, 180, 270), "Invalid PDF page rotation")
-    require(scan_evidence in {
-        "not_applicable", "image_detected", "no_image_detected", "unknown_no_text",
-    }, "Invalid scan evidence classification")
+    require(
+        scan_evidence
+        in {
+            "not_applicable",
+            "image_detected",
+            "no_image_detected",
+            "unknown_no_text",
+        },
+        "Invalid scan evidence classification",
+    )
     require(section_kind is None or len(section_kind) <= 200, "Section kind is too long")
     require(heading is None or len(heading) <= 2000, "Section heading is too long")
     return TextPage(
@@ -137,52 +155,86 @@ def _validated_zip(data: bytes) -> dict[str, bytes]:
                 path = PurePosixPath(name)
                 require(name not in names, "Duplicate archive filename", "UNSAFE_DOCUMENT")
                 names.add(name)
-                require(not name.startswith(("/", "\\")) and "\\" not in name
-                        and ".." not in path.parts and ":" not in name and "\x00" not in name,
-                        "Unsafe archive path", "UNSAFE_DOCUMENT")
-                require((item.external_attr >> 16) & 0o170000 != 0o120000,
-                        "Archive symlink prohibited", "UNSAFE_DOCUMENT")
-                require(not (item.flag_bits & 1), "Encrypted archive unsupported",
-                        "UNSUPPORTED_FORMAT")
+                require(
+                    not name.startswith(("/", "\\"))
+                    and "\\" not in name
+                    and ".." not in path.parts
+                    and ":" not in name
+                    and "\x00" not in name,
+                    "Unsafe archive path",
+                    "UNSAFE_DOCUMENT",
+                )
+                require(
+                    (item.external_attr >> 16) & 0o170000 != 0o120000,
+                    "Archive symlink prohibited",
+                    "UNSAFE_DOCUMENT",
+                )
+                require(
+                    not (item.flag_bits & 1), "Encrypted archive unsupported", "UNSUPPORTED_FORMAT"
+                )
                 total += item.file_size
-                require(total <= MAX_UNCOMPRESSED_BYTES, "Archive expands beyond limit",
-                        "RESOURCE_LIMIT")
+                require(
+                    total <= MAX_UNCOMPRESSED_BYTES,
+                    "Archive expands beyond limit",
+                    "RESOURCE_LIMIT",
+                )
                 if item.is_dir():
                     continue
                 with archive.open(item) as source:
                     value = source.read(item.file_size + 1)
-                require(len(value) == item.file_size, "Archive entry size mismatch",
-                        "UNSAFE_DOCUMENT")
+                require(
+                    len(value) == item.file_size, "Archive entry size mismatch", "UNSAFE_DOCUMENT"
+                )
                 output[name] = value
             return output
     except (zipfile.BadZipFile, EOFError, RuntimeError, OSError, ValueError) as exc:
-        raise EvidenceError("INVALID_DOCUMENT", "Invalid or unsafe ZIP document",
-                            "Use a valid unencrypted DOCX/EPUB file.") from exc
+        raise EvidenceError(
+            "INVALID_DOCUMENT",
+            "Invalid or unsafe ZIP document",
+            "Use a valid unencrypted DOCX/EPUB file.",
+        ) from exc
 
 
 def _xml(data: bytes) -> ET.Element:
     require(len(data) <= MAX_UNCOMPRESSED_BYTES, "XML section too large", "RESOURCE_LIMIT")
-    require(b"<!DOCTYPE" not in data.upper() and b"<!ENTITY" not in data.upper(),
-            "Document entities prohibited", "UNSAFE_DOCUMENT")
+    require(
+        b"<!DOCTYPE" not in data.upper() and b"<!ENTITY" not in data.upper(),
+        "Document entities prohibited",
+        "UNSAFE_DOCUMENT",
+    )
     try:
         return ET.fromstring(data)  # noqa: S314 - bounded bytes; DTD/entities rejected above
     except ET.ParseError as exc:
-        raise EvidenceError("INVALID_DOCUMENT", "Malformed document XML",
-                            "Repair or re-export the document.") from exc
+        raise EvidenceError(
+            "INVALID_DOCUMENT", "Malformed document XML", "Repair or re-export the document."
+        ) from exc
 
 
 def _docx(data: bytes) -> tuple[TextPage, ...]:
     files = _validated_zip(data)
-    require("word/document.xml" in files and "[Content_Types].xml" in files,
-            "Missing DOCX document content", "INVALID_DOCUMENT")
-    require(not any("vbaProject" in name or name.lower().endswith((".bin", ".exe", ".js"))
-                    for name in files), "Executable content in DOCX", "UNSAFE_DOCUMENT")
+    require(
+        "word/document.xml" in files and "[Content_Types].xml" in files,
+        "Missing DOCX document content",
+        "INVALID_DOCUMENT",
+    )
+    require(
+        not any(
+            "vbaProject" in name or name.lower().endswith((".bin", ".exe", ".js")) for name in files
+        ),
+        "Executable content in DOCX",
+        "UNSAFE_DOCUMENT",
+    )
     # External relationships are never resolved; reject references that would require fetching.
     for name, content in files.items():
         if name.endswith(".rels"):
             root = _xml(content)
-            require(not any(el.attrib.get("TargetMode", "").lower() == "external"
-                            for el in root.iter()), "External DOCX relationship", "UNSAFE_DOCUMENT")
+            require(
+                not any(
+                    el.attrib.get("TargetMode", "").lower() == "external" for el in root.iter()
+                ),
+                "External DOCX relationship",
+                "UNSAFE_DOCUMENT",
+            )
     root = _xml(files["word/document.xml"])
     ns = "{http://schemas.openxmlformats.org/wordprocessingml/2006/main}"
     sections: list[TextPage] = []
@@ -249,8 +301,11 @@ def _epub(data: bytes) -> tuple[TextPage, ...]:
     files = _validated_zip(data)
     require(files.get("mimetype") == b"application/epub+zip", "Invalid EPUB mimetype")
     container = _xml(files.get("META-INF/container.xml", b""))
-    rootfiles = [el.attrib["full-path"] for el in container.iter()
-                 if el.tag.endswith("}rootfile") and "full-path" in el.attrib]
+    rootfiles = [
+        el.attrib["full-path"]
+        for el in container.iter()
+        if el.tag.endswith("}rootfile") and "full-path" in el.attrib
+    ]
     require(len(rootfiles) == 1, "EPUB must contain one package")
     package_path = rootfiles[0]
     require(package_path in files, "Missing EPUB package")
@@ -269,17 +324,24 @@ def _epub(data: bytes) -> tuple[TextPage, ...]:
         require(item_id in manifest, "Missing EPUB spine entry", "INVALID_DOCUMENT")
         href = manifest[item_id].split("#", 1)[0]
         path = posixpath.normpath(posixpath.join(posixpath.dirname(package_path), href))
-        require(path in files and not path.startswith("../"), "Unsafe EPUB spine path",
-                "UNSAFE_DOCUMENT")
+        require(
+            path in files and not path.startswith("../"),
+            "Unsafe EPUB spine path",
+            "UNSAFE_DOCUMENT",
+        )
         raw = files[path]
-        require(b"<!DOCTYPE" not in raw.upper() and b"<!ENTITY" not in raw.upper(),
-                "EPUB document entities prohibited", "UNSAFE_DOCUMENT")
+        require(
+            b"<!DOCTYPE" not in raw.upper() and b"<!ENTITY" not in raw.upper(),
+            "EPUB document entities prohibited",
+            "UNSAFE_DOCUMENT",
+        )
         parser = _HTMLText()
         try:
             parser.feed(raw.decode("utf-8-sig"))
         except (UnicodeError, ValueError) as exc:
-            raise EvidenceError("INVALID_DOCUMENT", "Invalid EPUB text encoding",
-                                "Re-export EPUB as UTF-8.") from exc
+            raise EvidenceError(
+                "INVALID_DOCUMENT", "Invalid EPUB text encoding", "Re-export EPUB as UTF-8."
+            ) from exc
         pages.append(
             _page(
                 len(pages) + 1,
@@ -299,12 +361,18 @@ def _pdf(data: bytes, reader_factory: Any = None) -> tuple[TextPage, ...]:
         try:
             reader_factory = importlib.import_module("pypdf").PdfReader
         except ImportError as exc:
-            raise EvidenceError("MISSING_DEPENDENCY", "PDF text parser is not installed",
-                                "Install the optional pypdf package to extract PDF text.") from exc
+            raise EvidenceError(
+                "MISSING_DEPENDENCY",
+                "PDF text parser is not installed",
+                "Install the optional pypdf package to extract PDF text.",
+            ) from exc
     try:
         reader = reader_factory(BytesIO(data))
-        require(not bool(getattr(reader, "is_encrypted", False)),
-                "Encrypted PDF unsupported", "UNSUPPORTED_FORMAT")
+        require(
+            not bool(getattr(reader, "is_encrypted", False)),
+            "Encrypted PDF unsupported",
+            "UNSUPPORTED_FORMAT",
+        )
         require(len(reader.pages) <= MAX_PAGES, "Too many PDF pages", "RESOURCE_LIMIT")
         pages: list[TextPage] = []
         for index, pdf_page in enumerate(reader.pages, 1):
@@ -316,20 +384,29 @@ def _pdf(data: bytes, reader_factory: Any = None) -> tuple[TextPage, ...]:
             else:
                 scan_evidence = _pdf_scan_evidence(pdf_page)
                 status = "empty" if scan_evidence == "no_image_detected" else "needs_ocr"
-            pages.append(_page(index, extracted, status=status, rotation=rotation,
-                               scan_evidence=scan_evidence))
+            pages.append(
+                _page(
+                    index, extracted, status=status, rotation=rotation, scan_evidence=scan_evidence
+                )
+            )
         return tuple(pages)
     except EvidenceError:
         raise
     except Exception as exc:
-        raise EvidenceError("INVALID_DOCUMENT", "PDF parser could not extract pages",
-                            "Verify the PDF, or use an alternate text source.") from exc
+        raise EvidenceError(
+            "INVALID_DOCUMENT",
+            "PDF parser could not extract pages",
+            "Verify the PDF, or use an alternate text source.",
+        ) from exc
 
 
 def import_document(data: bytes, media_type: str, *, pdf_reader_factory: Any = None) -> FullText:
     """Read a source entirely offline. Inject a PDF reader factory for deterministic tests."""
-    require(isinstance(data, bytes) and 0 < len(data) <= MAX_INPUT_BYTES,
-            "Invalid or oversized source bytes", "RESOURCE_LIMIT")
+    require(
+        isinstance(data, bytes) and 0 < len(data) <= MAX_INPUT_BYTES,
+        "Invalid or oversized source bytes",
+        "RESOURCE_LIMIT",
+    )
     if media_type == "application/pdf":
         pages = _pdf(data, pdf_reader_factory)
     elif media_type == "application/vnd.openxmlformats-officedocument.wordprocessingml.document":
@@ -340,52 +417,90 @@ def import_document(data: bytes, media_type: str, *, pdf_reader_factory: Any = N
         try:
             text = data.decode("utf-8-sig")
         except UnicodeError as exc:
-            raise EvidenceError("INVALID_DOCUMENT", "Expected UTF-8 text",
-                                "Convert source to UTF-8.") from exc
+            raise EvidenceError(
+                "INVALID_DOCUMENT", "Expected UTF-8 text", "Convert source to UTF-8."
+            ) from exc
         pages = (_page(1, text),)
     else:
-        raise EvidenceError("UNSUPPORTED_FORMAT", "Unsupported source media type",
-                            "Use PDF, DOCX, EPUB, or UTF-8 text.")
+        raise EvidenceError(
+            "UNSUPPORTED_FORMAT",
+            "Unsupported source media type",
+            "Use PDF, DOCX, EPUB, or UTF-8 text.",
+        )
     return FullText(media_type, _digest(data), pages)
 
 
-def verify_quote(document: FullText, page_number: int, start: int, end: int,
-                 quote: str, *, source_sha256: str | None = None) -> dict[str, Any]:
+def verify_quote(
+    document: FullText,
+    page_number: int,
+    start: int,
+    end: int,
+    quote: str,
+    *,
+    source_sha256: str | None = None,
+) -> dict[str, Any]:
     """Exact quote verification; normalization differences are diagnostic only."""
     require(type(page_number) is int and 1 <= page_number <= len(document.pages), "Invalid page")
     page = document.pages[page_number - 1]
-    require(type(start) is int and type(end) is int and 0 <= start < end <= len(page.text),
-            "Invalid quote offsets")
+    require(
+        type(start) is int and type(end) is int and 0 <= start < end <= len(page.text),
+        "Invalid quote offsets",
+    )
     require(isinstance(quote, str) and 0 < len(quote) <= 20_000, "Invalid quote")
     candidate = page.text[start:end]
     match = candidate == quote
     current = source_sha256 is None or source_sha256 == document.source_sha256
-    return {"verified": match and current, "exact_match": match, "source_current": current,
-            "page_sha256": page.sha256, "source_sha256": document.source_sha256,
-            "reason": "verified" if match and current else
-            "source_revision_mismatch" if not current else
-            "unicode_or_punctuation_difference" if unicodedata.normalize("NFC", candidate) ==
-            unicodedata.normalize("NFC", quote) else "quote_mismatch"}
+    return {
+        "verified": match and current,
+        "exact_match": match,
+        "source_current": current,
+        "page_sha256": page.sha256,
+        "source_sha256": document.source_sha256,
+        "reason": "verified"
+        if match and current
+        else "source_revision_mismatch"
+        if not current
+        else "unicode_or_punctuation_difference"
+        if unicodedata.normalize("NFC", candidate) == unicodedata.normalize("NFC", quote)
+        else "quote_mismatch",
+    }
 
 
-def create_highlight(document: FullText, page_number: int, start: int, end: int,
-                     quote: str) -> Highlight:
+def create_highlight(
+    document: FullText, page_number: int, start: int, end: int, quote: str
+) -> Highlight:
     result = verify_quote(document, page_number, start, end, quote)
     require(result["verified"], "Highlight requires an exact source quote", "UNVERIFIED_QUOTE")
     page = document.pages[page_number - 1]
-    return Highlight(document.source_sha256, page_number, page.sha256, start, end, quote,
-                     page.text[max(0, start - 48):start], page.text[end:end + 48])
+    return Highlight(
+        document.source_sha256,
+        page_number,
+        page.sha256,
+        start,
+        end,
+        quote,
+        page.text[max(0, start - 48) : start],
+        page.text[end : end + 48],
+    )
 
 
 def relocate_highlight(highlight: Highlight, updated: FullText) -> dict[str, Any]:
     """Require human review unless a single exact, context-consistent span exists."""
-    if (highlight.source_sha256 == updated.source_sha256 and
-            1 <= highlight.page_number <= len(updated.pages)):
+    if highlight.source_sha256 == updated.source_sha256 and 1 <= highlight.page_number <= len(
+        updated.pages
+    ):
         page = updated.pages[highlight.page_number - 1]
-        if (page.sha256 == highlight.page_sha256 and
-                page.text[highlight.start:highlight.end] == highlight.quote):
-            return {"status": "unchanged", "verified": True, "page": highlight.page_number,
-                    "start": highlight.start, "end": highlight.end}
+        if (
+            page.sha256 == highlight.page_sha256
+            and page.text[highlight.start : highlight.end] == highlight.quote
+        ):
+            return {
+                "status": "unchanged",
+                "verified": True,
+                "page": highlight.page_number,
+                "start": highlight.start,
+                "end": highlight.end,
+            }
     matches: list[tuple[int, int, int]] = []
     for page in updated.pages:
         cursor = 0
@@ -400,8 +515,13 @@ def relocate_highlight(highlight: Highlight, updated: FullText) -> dict[str, Any
     if len(matches) == 1:
         p, s, e = matches[0]
         page = updated.pages[p - 1]
-        if (page.text[max(0, s - len(highlight.prefix)):s] == highlight.prefix and
-                page.text[e:e + len(highlight.suffix)] == highlight.suffix):
+        if (
+            page.text[max(0, s - len(highlight.prefix)) : s] == highlight.prefix
+            and page.text[e : e + len(highlight.suffix)] == highlight.suffix
+        ):
             return {"status": "relocated", "verified": True, "page": p, "start": s, "end": e}
-    return {"status": "ambiguous" if matches else "missing", "verified": False,
-            "matches": matches[:10]}
+    return {
+        "status": "ambiguous" if matches else "missing",
+        "verified": False,
+        "matches": matches[:10],
+    }

@@ -20,12 +20,20 @@ def _finding(
     body = library.source_text(source["source_id"])
     start = body.index(quote)
     anchor = library.add_anchor(source["source_id"], quote, start, start + len(quote))
-    return SynthesisService(store).add_finding(Finding(
-        question="Effect?", population="Adults", outcome="Outcome",
-        measure="mean difference", unit="points", timepoint="8 weeks",
-        direction=direction, statement=f"Human-coded {direction} finding",
-        anchor_id=anchor["anchor_id"], record_id=record_id,
-    ))["id"]
+    return SynthesisService(store).add_finding(
+        Finding(
+            question="Effect?",
+            population="Adults",
+            outcome="Outcome",
+            measure="mean difference",
+            unit="points",
+            timepoint="8 weeks",
+            direction=direction,
+            statement=f"Human-coded {direction} finding",
+            anchor_id=anchor["anchor_id"],
+            record_id=record_id,
+        )
+    )["id"]
 
 
 def test_composer_flags_comparable_contradictions_without_inventing_certainty(
@@ -37,11 +45,16 @@ def test_composer_flags_comparable_contradictions_without_inventing_certainty(
         positive = _finding(store, b"Outcome increased.", "increased", "positive")
         negative = _finding(store, b"Outcome decreased.", "decreased", "negative")
         service = SynthesisService(store)
-        outline = service.compose("Synthesis", [{
-            "heading": "Comparable evidence",
-            "narrative": "Human-written cautious interpretation.",
-            "finding_ids": [positive, negative],
-        }])
+        outline = service.compose(
+            "Synthesis",
+            [
+                {
+                    "heading": "Comparable evidence",
+                    "narrative": "Human-written cautious interpretation.",
+                    "finding_ids": [positive, negative],
+                }
+            ],
+        )
         section = outline["sections"][0]
         assert outline["unresolved_contradictions"] == 1
         assert section["contradictions"][0]["directions"] == ["negative", "positive"]
@@ -56,9 +69,10 @@ def test_composer_marks_unsupported_section_explicitly(tmp_path: Path) -> None:
     with ProjectStore.create(
         tmp_path / "project", "Synthesis", "Question", "systematic_review"
     ) as store:
-        outline = SynthesisService(store).compose("Synthesis", [{
-            "heading": "Interpretation", "narrative": "No finding cited.", "finding_ids": []
-        }])
+        outline = SynthesisService(store).compose(
+            "Synthesis",
+            [{"heading": "Interpretation", "narrative": "No finding cited.", "finding_ids": []}],
+        )
         assert outline["unsupported_sections"] == 1
         assert outline["sections"][0]["warnings"] == ["UNSUPPORTED_NARRATIVE_NO_FINDINGS"]
 

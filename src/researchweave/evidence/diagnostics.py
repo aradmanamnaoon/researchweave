@@ -11,16 +11,18 @@ from .storage import ProjectStore
 
 
 def _has_table(store: ProjectStore, name: str) -> bool:
-    return store.conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
-    ).fetchone() is not None
+    return (
+        store.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=?", (name,)
+        ).fetchone()
+        is not None
+    )
 
 
 def referenced_object_digests(store: ProjectStore) -> set[str]:
     """Return durable CAS digests referenced by all currently known evidence tables."""
     referenced = {
-        str(row["digest"])
-        for row in store.conn.execute("SELECT DISTINCT digest FROM sources")
+        str(row["digest"]) for row in store.conn.execute("SELECT DISTINCT digest FROM sources")
     }
     if _has_table(store, "interop_batches"):
         referenced.update(
@@ -60,8 +62,7 @@ def library_diagnostics(store: ProjectStore) -> dict[str, Any]:
     """Inspect corruption, duplicates, missing metadata, attachments and index state."""
     integrity = store.audit()
     references = [
-        reference_from_row(row)
-        for row in store.conn.execute("SELECT * FROM reference ORDER BY id")
+        reference_from_row(row) for row in store.conn.execute("SELECT * FROM reference ORDER BY id")
     ]
     duplicate_pairs: dict[tuple[str, str], dict[str, Any]] = {}
     for reference in references:
@@ -89,9 +90,7 @@ def library_diagnostics(store: ProjectStore) -> dict[str, Any]:
             incomplete.append({"reference_id": reference.id, "missing": missing})
         if reference.source_format not in {"bibtex", "ris", "csl-json", "endnote-xml", "manual"}:
             unsupported_formats[reference.source_format] += 1
-    object_rows = {
-        str(row["digest"]) for row in store.conn.execute("SELECT digest FROM objects")
-    }
+    object_rows = {str(row["digest"]) for row in store.conn.execute("SELECT digest FROM objects")}
     referenced = referenced_object_digests(store)
     orphan_objects = sorted(object_rows - referenced)
     disk_objects, unsafe_object_paths = _object_files(store)
@@ -108,9 +107,7 @@ def library_diagnostics(store: ProjectStore) -> dict[str, Any]:
     if orphan_objects:
         issues.append({"code": "ORPHAN_OBJECTS", "count": len(orphan_objects)})
     if unindexed_object_files:
-        issues.append(
-            {"code": "UNINDEXED_OBJECT_FILES", "count": len(unindexed_object_files)}
-        )
+        issues.append({"code": "UNINDEXED_OBJECT_FILES", "count": len(unindexed_object_files)})
     if unsafe_object_paths:
         issues.append({"code": "UNSAFE_OBJECT_PATHS", "count": len(unsafe_object_paths)})
     if missing_source_objects:
@@ -184,9 +181,7 @@ def repair_library_diagnostics(
         "before_issue_codes": sorted(
             str(issue.get("code", "UNKNOWN")) for issue in before["issues"]
         ),
-        "after_issue_codes": sorted(
-            str(issue.get("code", "UNKNOWN")) for issue in after["issues"]
-        ),
+        "after_issue_codes": sorted(str(issue.get("code", "UNKNOWN")) for issue in after["issues"]),
         "remaining_issues": after["issues"],
         "ok": after["ok"],
         "network_queries": 0,

@@ -177,9 +177,7 @@ def create_project(
     destination = destination.absolute()
     require(destination.parent.is_dir(), "Project parent directory must exist")
     require(not destination.exists(), "Project destination already exists", "CONFLICT")
-    staging_parent = Path(
-        tempfile.mkdtemp(prefix=".rw-project-", dir=destination.parent)
-    )
+    staging_parent = Path(tempfile.mkdtemp(prefix=".rw-project-", dir=destination.parent))
     staging_project = staging_parent / "project"
     try:
         with ProjectStore.create(

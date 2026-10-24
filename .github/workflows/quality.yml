@@ -18,14 +18,14 @@ jobs:
         with:
           enable-cache: true
       - name: Install locked dependencies
-        run: uv sync --locked --extra dev
+        run: uv sync --locked --extra dev --extra formats
       - name: Lint
-        run: uv run --extra dev python scripts/tasks.py lint
+        run: uv run --extra dev --extra formats python scripts/tasks.py lint
       - name: Type check
-        run: uv run --extra dev python scripts/tasks.py types
+        run: uv run --extra dev --extra formats python scripts/tasks.py types
       - name: Validate skills
-        run: uv run --extra dev python scripts/tasks.py skills
+        run: uv run --extra dev --extra formats python scripts/tasks.py skills
       - name: Test
         env:
           QT_QPA_PLATFORM: offscreen
-        run: uv run --extra dev python scripts/tasks.py test
+        run: uv run --extra dev --extra formats python scripts/tasks.py test

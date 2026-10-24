@@ -119,3 +119,89 @@ files or private working-tree data.
 Phase 07/08: exercise cross-domain vertical journeys through the integrated services, run scientific
 oracles and failure injection, then consolidate obsolete placeholder package paths only when their
 replacement is covered by tests.
+
+## Phase 07/08 — cross-domain and repository-wide validation
+
+- Shared integration tests now cover UI, analysis and AI domain routing through the same command bus.
+  The focused integration suite currently has **6 passing tests**.
+- AI cross-domain coverage verifies restricted-project remote egress is denied, local retrieval ingest
+  requires approval, a durable agent plan executes a local evidence query, and all operations appear in
+  the shared audit store.
+- Full merged repository collection was repaired with pytest importlib mode because isolated workers had
+  duplicate test basenames. The resulting integrated run completed **647 tests passed, 3 warnings** on
+  Windows CPython 3.12.9. The warnings are two statsmodels seasonal-start warnings and the intentional
+  duplicate-ZIP fixture warning.
+- Strict first-party mypy passes **151 source files**. Missing-type exceptions are restricted to named
+  third-party scientific/document libraries without complete `py.typed`/stub coverage.
+- Repository-wide Ruff passes after integration/release tooling changes.
+- The locally observed desktop startup test passes with the integrated V2 window and no provider keys.
+
+## Phase 09/10/11 — metrics, screenshots and release engineering
+
+- Added an AST/tokenize source counter. Current observed report:
+  - AI: 6,163 substantive lines
+  - analysis: 11,579
+  - app: 407
+  - core: 366
+  - evidence: 16,536
+  - UI: 12,610
+  - package root: 3
+  - **total: 47,664 substantive first-party Python SLOC across 151 files**
+- Counter scope excludes tests, fixtures, generated/vendor files, blanks, comment-only lines and
+  module/class/function docstrings. `cloc` and `tokei` were not installed locally, so no second counter
+  result is claimed.
+- Canonical `ruff format .` was applied after merge integration because the repository lint task requires
+  format conformance. The full test suite is rerun after this formatting-only normalization before commit.
+- Added reproducible integrated screenshot capture from a deterministic synthetic project. Six current
+  screenshots cover Dashboard, Statistics and Review in light/dark themes. Native Windows recapture was
+  required because Qt offscreen mode exposed no system font families and rendered tofu glyphs. The final
+  checked-in screenshots were visually inspected and are readable. SHA-256 metadata is in
+  `assets/screenshots/manifest.json`.
+- Added PyInstaller portable-build definitions for Windows/Linux/macOS and a three-OS GitHub Actions
+  build matrix. Only the Windows build is locally observed in this session.
+- Windows portable build completed successfully and produced
+  `dist/ResearchWeave-windows-x86_64.zip` (not tracked) with SHA-256
+  `F264A3F89D6C5F613FC6272A2FD0C25899108EBF08A7222C1454E85B8BE1FFEC` after the
+  cryptography security upgrade. Final observed ZIP size: 170,145,206 bytes.
+- The packaged executable remained alive for four seconds in an offscreen smoke process and was then
+  terminated by the harness. A separate clean-extraction smoke test passed both `portable_startup` and
+  `user_data_retention`: deleting the extracted portable package did not delete a simulated user-profile
+  sentinel.
+- Generated reproducible release evidence:
+  - `docs/verification/SBOM.cdx.json` — CycloneDX environment SBOM.
+  - `docs/verification/DEPENDENCY_LICENSES.json` — machine-readable pip-licenses inventory.
+  - `docs/verification/SECRETS_SCAN.json` — detect-secrets scan output. Reported candidates are hashes,
+    cache tags and synthetic/test credential fixtures; no private research dataset path was found in the
+    tracked-file audit. A release reviewer should continue treating any new secret finding as blocking.
+- An initial connected `pip-audit --local` found seven advisories in `cryptography 47.0.0`. The runtime
+  constraint was upgraded to `cryptography>=50,<51`, `uv.lock` resolved 50.0.2, focused crypto/archive
+  tests passed **19/19**, and a repeat `pip-audit --local` reported **no known vulnerabilities**. The
+  Windows portable package was rebuilt and re-smoke-tested after this upgrade.
+- `detect-secrets` candidates in tracked files were manually reviewed. They are deterministic hashes,
+  safe-character alphabets, deliberately fake/redaction-test credentials, and synthetic recovery
+  passphrases. Review details are recorded in `docs/verification/SECRETS_REVIEW.md`.
+
+## Phase 12 — public docs and support truthfulness
+
+- Replaced bootstrap README claims with observed V2 behavior, actual screenshots, architecture, first-run
+  commands, Windows packaging evidence, source metrics, privacy/security evidence and explicit blockers.
+- Added `docs/INTEGRATIONS.md`, `docs/INSTALL.md`, `CITATION.cff`, expanded changelog and dependency-license
+  documentation. README local-link validation currently passes with **6 local image references**.
+- Advanced AI backend operations are verified through the common bus, but the desktop Provider/Agent
+  screens do not yet surface the entire AI facade. Remote sync also requires an injected live transport.
+  These remain product-completeness gaps and are documented as limited/experimental rather than complete.
+
+## Current release blockers
+
+1. Linux and macOS portable-build workflows are defined but not observed on their native runners in this
+   local Windows session.
+2. Advanced AI facade operations are not all wired to end-user desktop controls.
+3. The original repository checkout still contains untracked `prompts/`; Gate C forbids stashing,
+   cleaning, deleting or overwriting that material, so fast-forward promotion to original `main` is
+   blocked until the user-owned working tree is clean without data loss.
+
+## Current next phase
+
+Run the final full suite/static/release checks after the documentation and packaging changes, save compact
+INT-073/074/075/077 traces, commit the validated release-engineering slice, then perform the final Gate A/B/C
+audit without pushing or deleting original/worker data.

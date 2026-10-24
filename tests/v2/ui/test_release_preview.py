@@ -15,11 +15,14 @@ from researchweave.ui.release import inspect_submission
 
 def setup_project(tmp_path: Path):
     facade = build_ui_facade(tmp_path)
-    created = facade.execute("ui.project.create", {
-        "title": "Publication example",
-        "question": "How does a method work?",
-        "study_type": "literature",
-    })
+    created = facade.execute(
+        "ui.project.create",
+        {
+            "title": "Publication example",
+            "question": "How does a method work?",
+            "study_type": "literature",
+        },
+    )
     assert created["status"] == "ok", created
     return facade, created["data"]["project_id"]
 
@@ -44,10 +47,14 @@ def test_submission_gates_block_empty_and_placeholders(tmp_path: Path) -> None:
 
 def test_submission_preview_persists_no_mutations(tmp_path: Path) -> None:
     facade, pid = setup_project(tmp_path)
-    saved = facade.execute("ui.manuscript.save", {
-        "project_id": pid, "expected_revision": 1,
-        "manuscript": "# Introduction\n\nDraft text with no source claims.",
-    })
+    saved = facade.execute(
+        "ui.manuscript.save",
+        {
+            "project_id": pid,
+            "expected_revision": 1,
+            "manuscript": "# Introduction\n\nDraft text with no source claims.",
+        },
+    )
     assert saved["status"] == "ok", saved
     before = facade.store.open(pid)
     report = facade.execute("ui.release.preview", {"project_id": pid})

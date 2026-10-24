@@ -109,8 +109,10 @@ class ResearchQuestionService:
         expected_revision: int | None = None,
     ) -> dict[str, Any]:
         require(bool(author.strip()) and len(author) <= 255, "Question author is required")
-        require(bool(rationale.strip()) and len(rationale) <= 5000,
-                "Question amendment rationale is required")
+        require(
+            bool(rationale.strip()) and len(rationale) <= 5000,
+            "Question amendment rationale is required",
+        )
         feedback = question_feedback(question, framework, fields)
         require(feedback["ready_to_record"], "Structured research question is incomplete")
         prior = self.latest(question_id)

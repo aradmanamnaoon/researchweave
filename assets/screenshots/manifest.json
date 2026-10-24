@@ -1,0 +1,61 @@
+{
+  "capture_mode": "native",
+  "records": [
+    {
+      "actual_integrated_app": true,
+      "bytes": 80254,
+      "fixture": "deterministic synthetic local project",
+      "path": "assets/screenshots/researchweave-dashboard-light.png",
+      "screen": "Dashboard",
+      "sha256": "d1f8c11162cbde376bda6c83d1f28c23fdd17035efce38e080f55982ac0e13df",
+      "theme": "light"
+    },
+    {
+      "actual_integrated_app": true,
+      "bytes": 68264,
+      "fixture": "deterministic synthetic local project",
+      "path": "assets/screenshots/researchweave-statistics-light.png",
+      "screen": "Statistics",
+      "sha256": "06102b7a89f53ec0f92c05fef00bf627d76c30fc2731ae1b19a644614e6c5981",
+      "theme": "light"
+    },
+    {
+      "actual_integrated_app": true,
+      "bytes": 79577,
+      "fixture": "deterministic synthetic local project",
+      "path": "assets/screenshots/researchweave-review-light.png",
+      "screen": "Review",
+      "sha256": "936c637eab24439e57ba1294368869cd2116af72486a03c1642590305d66f147",
+      "theme": "light"
+    },
+    {
+      "actual_integrated_app": true,
+      "bytes": 80134,
+      "fixture": "deterministic synthetic local project",
+      "path": "assets/screenshots/researchweave-dashboard-dark.png",
+      "screen": "Dashboard",
+      "sha256": "80e9b04823939472b6c8472f10d31a09d8302d2523e6df91d39a0983b2e82ca3",
+      "theme": "dark"
+    },
+    {
+      "actual_integrated_app": true,
+      "bytes": 68900,
+      "fixture": "deterministic synthetic local project",
+      "path": "assets/screenshots/researchweave-statistics-dark.png",
+      "screen": "Statistics",
+      "sha256": "bf58cb8385f9f6014ca9a408a60e2255827bbcaf5a4732cda8592f280e52f359",
+      "theme": "dark"
+    },
+    {
+      "actual_integrated_app": true,
+      "bytes": 79748,
+      "fixture": "deterministic synthetic local project",
+      "path": "assets/screenshots/researchweave-review-dark.png",
+      "screen": "Review",
+      "sha256": "350ebc07288f2e1aaaa4b86213079a5bbabd7c70743480641cf7cbabbce40789",
+      "theme": "dark"
+    }
+  ],
+  "schema_version": 1,
+  "source": "scripts/capture_screenshots.py"
+}

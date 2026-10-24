@@ -21,9 +21,15 @@ class WritingService:
         self.store = store
         self.library = LibraryService(store)
 
-    def save_section(self, manuscript_id: str, section: str, body: str,
-                     citations: Mapping[str, str], *,
-                     expected_revision: int | None = None) -> dict[str, Any]:
+    def save_section(
+        self,
+        manuscript_id: str,
+        section: str,
+        body: str,
+        citations: Mapping[str, str],
+        *,
+        expected_revision: int | None = None,
+    ) -> dict[str, Any]:
         require(bool(manuscript_id.strip()), "Manuscript ID required")
         require(bool(section.strip()) and len(section) <= 255, "Section name required")
         require(len(body) <= 500_000, "Section exceeds limit", "RESOURCE_LIMIT")
@@ -35,20 +41,40 @@ class WritingService:
             self.library.get_reference(identifier)
 
         def insert(conn: Any) -> int:
-            row = conn.execute("SELECT COALESCE(MAX(revision),0) FROM manuscripts "
-                               "WHERE id=? AND section=?", (manuscript_id, section)).fetchone()
+            row = conn.execute(
+                "SELECT COALESCE(MAX(revision),0) FROM manuscripts WHERE id=? AND section=?",
+                (manuscript_id, section),
+            ).fetchone()
             revision = int(row[0]) + 1
-            conn.execute("INSERT INTO manuscripts VALUES (?,?,?,?,?,?)",
-                         (manuscript_id, section, revision, body,
-                          canonical_json(dict(citations)), now_utc()))
+            conn.execute(
+                "INSERT INTO manuscripts VALUES (?,?,?,?,?,?)",
+                (
+                    manuscript_id,
+                    section,
+                    revision,
+                    body,
+                    canonical_json(dict(citations)),
+                    now_utc(),
+                ),
+            )
             return revision
 
         section_revision, project_revision = self.store.mutate(
-            "writing.section_save", {"manuscript_id": manuscript_id, "section": section,
-                                     "body_sha256": sha256(body.encode())}, insert,
-            expected_revision=expected_revision)
-        return {"manuscript_id": manuscript_id, "section": section,
-                "section_revision": section_revision, "project_revision": project_revision}
+            "writing.section_save",
+            {
+                "manuscript_id": manuscript_id,
+                "section": section,
+                "body_sha256": sha256(body.encode()),
+            },
+            insert,
+            expected_revision=expected_revision,
+        )
+        return {
+            "manuscript_id": manuscript_id,
+            "section": section,
+            "section_revision": section_revision,
+            "project_revision": project_revision,
+        }
 
     def sections(self, manuscript_id: str) -> list[dict[str, Any]]:
         rows = self.store.conn.execute(
@@ -56,10 +82,17 @@ class WritingService:
             "(SELECT section,MAX(revision) AS last_revision FROM manuscripts WHERE id=? "
             "GROUP BY section) latest ON s.section=latest.section AND "
             "s.revision=latest.last_revision WHERE s.id=? ORDER BY s.section",
-            (manuscript_id, manuscript_id)).fetchall()
-        return [{"section": row["section"], "revision": row["revision"],
-                 "body": row["body"], "citations": json.loads(row["citations_json"])}
-                for row in rows]
+            (manuscript_id, manuscript_id),
+        ).fetchall()
+        return [
+            {
+                "section": row["section"],
+                "revision": row["revision"],
+                "body": row["body"],
+                "citations": json.loads(row["citations_json"]),
+            }
+            for row in rows
+        ]
 
     def section_history(self, manuscript_id: str, section: str) -> list[dict[str, Any]]:
         require(bool(section.strip()), "Section name required")
@@ -87,13 +120,12 @@ class WritingService:
         to_revision: int,
     ) -> dict[str, Any]:
         require(
-            type(from_revision) is int and type(to_revision) is int
+            type(from_revision) is int
+            and type(to_revision) is int
             and 0 < from_revision < to_revision,
             "Manuscript diff requires ordered positive revisions",
         )
-        history = {
-            row["revision"]: row for row in self.section_history(manuscript_id, section)
-        }
+        history = {row["revision"]: row for row in self.section_history(manuscript_id, section)}
         require(
             from_revision in history and to_revision in history,
             "Manuscript section revision not found",
@@ -145,11 +177,10 @@ class WritingService:
     ) -> dict[str, Any]:
         """Restore an earlier section by appending a new immutable revision."""
         require(source_revision > 0, "Restore source revision must be positive")
-        require(bool(actor.strip()) and bool(rationale.strip()),
-                "Restore requires actor and rationale")
-        history = {
-            row["revision"]: row for row in self.section_history(manuscript_id, section)
-        }
+        require(
+            bool(actor.strip()) and bool(rationale.strip()), "Restore requires actor and rationale"
+        )
+        history = {row["revision"]: row for row in self.section_history(manuscript_id, section)}
         require(source_revision in history, "Restore source revision not found", "NOT_FOUND")
         source = history[source_revision]
 
@@ -231,8 +262,10 @@ class WritingService:
             "UNSUPPORTED_FORMAT",
         )
         require(0 < len(data) <= 32 * 1024 * 1024, "Invalid figure size", "RESOURCE_LIMIT")
-        require(bool(actor.strip()) and bool(rationale.strip()),
-                "Figure save requires actor and rationale")
+        require(
+            bool(actor.strip()) and bool(rationale.strip()),
+            "Figure save requires actor and rationale",
+        )
         identifier = figure_id or str(new_id())
         digest = self.store.put_object(data)
 
@@ -250,8 +283,11 @@ class WritingService:
                     (identifier,),
                 ).fetchone()
                 require(previous is not None, "Figure not found", "NOT_FOUND")
-                require(previous["manuscript_id"] == manuscript_id,
-                        "Figure belongs to another manuscript", "CONFLICT")
+                require(
+                    previous["manuscript_id"] == manuscript_id,
+                    "Figure belongs to another manuscript",
+                    "CONFLICT",
+                )
             conn.execute(
                 "INSERT INTO manuscript_figures VALUES (?,?,?,?,?,?,?,?,?,?,?)",
                 (
@@ -298,8 +334,10 @@ class WritingService:
         *,
         expected_revision: int | None = None,
     ) -> dict[str, Any]:
-        require(bool(actor.strip()) and bool(rationale.strip()),
-                "Figure removal requires actor and rationale")
+        require(
+            bool(actor.strip()) and bool(rationale.strip()),
+            "Figure removal requires actor and rationale",
+        )
 
         def persist(conn: Any) -> int:
             self._figure_table(conn)
@@ -371,20 +409,35 @@ class WritingService:
             mappings = section["citations"]
             for key in found:
                 if key not in mappings:
-                    problems.append({"section": section["section"], "code": "UNMAPPED_CITATION",
-                                     "key": key})
+                    problems.append(
+                        {"section": section["section"], "code": "UNMAPPED_CITATION", "key": key}
+                    )
                     continue
                 used_references.add(mappings[key])
                 reference = self.library.get_reference(mappings[key])
                 if reference.metadata_status != "verified":
-                    problems.append({"section": section["section"],
-                                     "code": "REFERENCE_IDENTITY_UNVERIFIED", "key": key})
+                    problems.append(
+                        {
+                            "section": section["section"],
+                            "code": "REFERENCE_IDENTITY_UNVERIFIED",
+                            "key": key,
+                        }
+                    )
             for unused in sorted(set(mappings) - found):
-                problems.append({"section": section["section"],
-                                 "code": "UNUSED_REFERENCE_MAPPING", "key": unused})
-        return {"manuscript_id": manuscript_id, "section_count": len(sections),
-                "used_reference_count": len(used_references), "issues": problems,
-                "scientific_claims_verified": False}
+                problems.append(
+                    {
+                        "section": section["section"],
+                        "code": "UNUSED_REFERENCE_MAPPING",
+                        "key": unused,
+                    }
+                )
+        return {
+            "manuscript_id": manuscript_id,
+            "section_count": len(sections),
+            "used_reference_count": len(used_references),
+            "issues": problems,
+            "scientific_claims_verified": False,
+        }
 
     def render_markdown(self, manuscript_id: str) -> str:
         sections = self.sections(manuscript_id)
@@ -399,7 +452,9 @@ class WritingService:
             record = self.library.get_reference(ref_id)
             authors = ", ".join(record.authors) or "[author unavailable]"
             year = str(record.year) if record.year is not None else "[year unavailable]"
-            lines.append(f"- [{key}] {authors} ({year}). {record.title}. "
-                         f"DOI: {record.doi or '[not provided]'} "
-                         f"[identity: {record.metadata_status}]")
+            lines.append(
+                f"- [{key}] {authors} ({year}). {record.title}. "
+                f"DOI: {record.doi or '[not provided]'} "
+                f"[identity: {record.metadata_status}]"
+            )
         return "\n".join(lines) + "\n"

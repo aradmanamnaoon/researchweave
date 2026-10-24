@@ -1,0 +1,16 @@
+{
+  "id": "INT-075",
+  "name": "Screenshot reproducibility",
+  "command": "uv run --extra dev --extra formats --extra release python scripts/capture_screenshots.py",
+  "fixture": "deterministic synthetic local project; no human research data",
+  "manifest": "assets/screenshots/manifest.json",
+  "observed": {
+    "actual_integrated_app": true,
+    "capture_mode": "native",
+    "screens": ["Dashboard", "Statistics", "Review"],
+    "themes": ["light", "dark"],
+    "count": 6,
+    "visual_inspection": "readable"
+  },
+  "status": "native verified on Windows"
+}

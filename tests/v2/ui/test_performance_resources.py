@@ -180,9 +180,7 @@ def test_job_cancellation_reaches_terminal_cancelled_state() -> None:
     assert started.wait(0.5)
     manager.cancel("cancel-me")
     loop = QEventLoop()
-    manager.changed.connect(
-        lambda _key, state: loop.quit() if state == "cancelled" else None
-    )
+    manager.changed.connect(lambda _key, state: loop.quit() if state == "cancelled" else None)
     QTimer.singleShot(1500, loop.quit)
     loop.exec()
     assert manager.jobs["cancel-me"].state == "cancelled"

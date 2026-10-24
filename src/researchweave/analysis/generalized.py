@@ -356,9 +356,7 @@ def estimated_negative_binomial_regression(
         details={
             "coefficients": dict(zip(names, coefficient_values.tolist(), strict=True)),
             "rate_ratios": dict(zip(names, np.exp(coefficient_values).tolist(), strict=True)),
-            "confidence_intervals": dict(
-                zip(names, coefficient_intervals.tolist(), strict=True)
-            ),
+            "confidence_intervals": dict(zip(names, coefficient_intervals.tolist(), strict=True)),
             "rate_ratio_confidence_intervals": dict(
                 zip(names, np.exp(coefficient_intervals).tolist(), strict=True)
             ),

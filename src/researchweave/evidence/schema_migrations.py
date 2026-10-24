@@ -70,9 +70,7 @@ def inspect_schema(root: Path) -> dict[str, Any]:
             integrity = str(connection.execute("PRAGMA integrity_check").fetchone()[0])
             tables = {
                 str(row[0])
-                for row in connection.execute(
-                    "SELECT name FROM sqlite_master WHERE type='table'"
-                )
+                for row in connection.execute("SELECT name FROM sqlite_master WHERE type='table'")
             }
         except sqlite3.DatabaseError as exc:
             raise EvidenceError(

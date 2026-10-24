@@ -13,9 +13,12 @@ _ALLOWED_SENSITIVITY = {"public", "internal", "confidential", "restricted"}
 
 
 def _table_exists(store: ProjectStore) -> bool:
-    return store.conn.execute(
-        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='data_management_plans'"
-    ).fetchone() is not None
+    return (
+        store.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='data_management_plans'"
+        ).fetchone()
+        is not None
+    )
 
 
 def _ensure_table(conn: Any) -> None:
@@ -40,23 +43,31 @@ class DataManagementPlanService:
         for item in inventory:
             require(isinstance(item, dict), "Each inventory item must be an object")
             item_id = item.get("id")
-            require(isinstance(item_id, str) and bool(item_id.strip()) and item_id not in ids,
-                    "Inventory IDs must be unique non-empty strings")
+            require(
+                isinstance(item_id, str) and bool(item_id.strip()) and item_id not in ids,
+                "Inventory IDs must be unique non-empty strings",
+            )
             ids.add(cast(str, item_id))
-            require(isinstance(item.get("description"), str) and bool(item["description"].strip()),
-                    "Inventory item description is required")
+            require(
+                isinstance(item.get("description"), str) and bool(item["description"].strip()),
+                "Inventory item description is required",
+            )
             sensitivity = item.get("sensitivity")
             require(sensitivity in _ALLOWED_SENSITIVITY, "Unknown data sensitivity")
-            require(isinstance(item.get("location"), str) and bool(item["location"].strip()),
-                    "Inventory item storage location is required")
+            require(
+                isinstance(item.get("location"), str) and bool(item["location"].strip()),
+                "Inventory item storage location is required",
+            )
 
     @staticmethod
     def _validate_policies(policies: dict[str, Any]) -> None:
         required = {"storage", "access", "retention", "preservation", "sharing", "privacy"}
         require(set(policies) >= required, "Data-management policies are incomplete")
         for key in required:
-            require(isinstance(policies[key], str) and bool(policies[key].strip()),
-                    f"Policy {key} must contain text")
+            require(
+                isinstance(policies[key], str) and bool(policies[key].strip()),
+                f"Policy {key} must contain text",
+            )
 
     def create(
         self,
@@ -72,9 +83,11 @@ class DataManagementPlanService:
         require(bool(title.strip()) and len(title) <= 300, "Plan title is required")
         require(bool(author.strip()) and len(author) <= 200, "Plan author is required")
         require(bool(rationale.strip()) and len(rationale) <= 20_000, "Plan rationale is required")
-        require(len(unresolved) <= 100 and all(isinstance(item, str) and item.strip()
-                                               for item in unresolved),
-                "Unresolved questions must be non-empty strings")
+        require(
+            len(unresolved) <= 100
+            and all(isinstance(item, str) and item.strip() for item in unresolved),
+            "Unresolved questions must be non-empty strings",
+        )
         self._validate_inventory(inventory)
         self._validate_policies(policies)
         plan_id = new_id()
@@ -92,9 +105,18 @@ class DataManagementPlanService:
             _ensure_table(conn)
             conn.execute(
                 "INSERT INTO data_management_plans VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (plan_id, 1, document["title"], canonical_json(inventory),
-                 canonical_json(policies), document["rationale"], canonical_json(unresolved),
-                 document["author"], now_utc(), digest),
+                (
+                    plan_id,
+                    1,
+                    document["title"],
+                    canonical_json(inventory),
+                    canonical_json(policies),
+                    document["rationale"],
+                    canonical_json(unresolved),
+                    document["author"],
+                    now_utc(),
+                    digest,
+                ),
             )
 
         _, revision = self.store.mutate(
@@ -103,8 +125,13 @@ class DataManagementPlanService:
             persist,
             expected_revision=expected_revision,
         )
-        return {"plan_id": plan_id, "version": 1, "content_sha256": digest,
-                "revision": revision, "legal_compliance_verified": False}
+        return {
+            "plan_id": plan_id,
+            "version": 1,
+            "content_sha256": digest,
+            "revision": revision,
+            "legal_compliance_verified": False,
+        }
 
     def amend(
         self,
@@ -123,15 +150,18 @@ class DataManagementPlanService:
             (plan_id,),
         ).fetchone()
         if previous is None:
-            raise EvidenceError("NOT_FOUND", "Data-management plan not found",
-                                "Choose an existing plan.")
+            raise EvidenceError(
+                "NOT_FOUND", "Data-management plan not found", "Choose an existing plan."
+            )
         self._validate_inventory(inventory)
         self._validate_policies(policies)
         require(bool(rationale.strip()), "Amendment rationale is required")
         require(bool(author.strip()), "Amendment author is required")
-        require(len(unresolved) <= 100 and all(isinstance(item, str) and item.strip()
-                                               for item in unresolved),
-                "Unresolved questions must be non-empty strings")
+        require(
+            len(unresolved) <= 100
+            and all(isinstance(item, str) and item.strip() for item in unresolved),
+            "Unresolved questions must be non-empty strings",
+        )
         version = int(previous["version"]) + 1
         document = {
             "title": previous["title"],
@@ -146,9 +176,18 @@ class DataManagementPlanService:
         def persist(conn: Any) -> None:
             conn.execute(
                 "INSERT INTO data_management_plans VALUES (?,?,?,?,?,?,?,?,?,?)",
-                (plan_id, version, document["title"], canonical_json(inventory),
-                 canonical_json(policies), document["rationale"], canonical_json(unresolved),
-                 document["author"], now_utc(), digest),
+                (
+                    plan_id,
+                    version,
+                    document["title"],
+                    canonical_json(inventory),
+                    canonical_json(policies),
+                    document["rationale"],
+                    canonical_json(unresolved),
+                    document["author"],
+                    now_utc(),
+                    digest,
+                ),
             )
 
         _, revision = self.store.mutate(
@@ -157,8 +196,13 @@ class DataManagementPlanService:
             persist,
             expected_revision=expected_revision,
         )
-        return {"plan_id": plan_id, "version": version, "content_sha256": digest,
-                "revision": revision, "legal_compliance_verified": False}
+        return {
+            "plan_id": plan_id,
+            "version": version,
+            "content_sha256": digest,
+            "revision": revision,
+            "legal_compliance_verified": False,
+        }
 
     def history(self, plan_id: str) -> list[dict[str, Any]]:
         if not _table_exists(self.store):
@@ -186,8 +230,10 @@ class DataManagementPlanService:
     def export_markdown(self, plan_id: str, version: int | None = None) -> str:
         history = self.history(plan_id)
         require(bool(history), "Data-management plan not found", "NOT_FOUND")
-        selected = history[-1] if version is None else next(
-            (item for item in history if item["version"] == version), None
+        selected = (
+            history[-1]
+            if version is None
+            else next((item for item in history if item["version"] == version), None)
         )
         if selected is None:
             raise EvidenceError(
@@ -214,8 +260,9 @@ class DataManagementPlanService:
         lines.extend(["", "## Policies", ""])
         for name, value in sorted(selected["policies"].items()):
             lines.append(f"- **{name}**: {value}")
-        lines.extend(["", "## Rationale", "", selected["rationale"], "",
-                      "## Unresolved questions", ""])
+        lines.extend(
+            ["", "## Rationale", "", selected["rationale"], "", "## Unresolved questions", ""]
+        )
         lines.extend(f"- {item}" for item in selected["unresolved"])
         if not selected["unresolved"]:
             lines.append("- None recorded.")

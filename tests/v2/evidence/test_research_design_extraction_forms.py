@@ -64,9 +64,9 @@ def _review_record(store: ProjectStore) -> str:
     imported = LibraryService(store).import_bibliography(
         b"@article{x,title={Synthetic trial},author={Doe, Ada},year={2024}}", "bibtex"
     )
-    return ReviewService(store).register(
-        "review-1", imported["references"][0]["id"], "study-1"
-    )["record_id"]
+    return ReviewService(store).register("review-1", imported["references"][0]["id"], "study-1")[
+        "record_id"
+    ]
 
 
 def test_extraction_form_revision_migrates_prior_values_and_preserves_history(
@@ -128,9 +128,7 @@ def test_extraction_form_revision_rejects_unmapped_required_field(tmp_path: Path
     ) as store:
         record_id = _review_record(store)
         service = ExtractionFormService(store)
-        form = service.create(
-            "Form", [FieldDefinition("value", "number")], "Reviewer"
-        )
+        form = service.create("Form", [FieldDefinition("value", "number")], "Reviewer")
         service.record(
             form["form_id"],
             record_id,

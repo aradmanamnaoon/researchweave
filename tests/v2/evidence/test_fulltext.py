@@ -32,8 +32,8 @@ def docx(*, external: bool = False) -> bytes:
         "word/document.xml": (
             '<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">'
             '<w:body><w:p><w:pPr><w:pStyle w:val="Heading1"/></w:pPr>'
-            '<w:r><w:t>Evidence</w:t></w:r></w:p>'
-            '<w:p><w:r><w:t>\u0645\u062a\u0646</w:t></w:r></w:p></w:body></w:document>'
+            "<w:r><w:t>Evidence</w:t></w:r></w:p>"
+            "<w:p><w:r><w:t>\u0645\u062a\u0646</w:t></w:r></w:p></w:body></w:document>"
         ).encode(),
     }
     if external:
@@ -45,22 +45,24 @@ def docx(*, external: bool = False) -> bytes:
 
 
 def epub() -> bytes:
-    return archive({
-        "mimetype": b"application/epub+zip",
-        "META-INF/container.xml": (
-            b'<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
-            b'<rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>'
-        ),
-        "OPS/book.opf": (
-            b'<package xmlns="http://www.idpf.org/2007/opf"><manifest>'
-            b'<item id="c1" href="chapter.xhtml" media-type="application/xhtml+xml"/>'
-            b'</manifest><spine><itemref idref="c1"/></spine></package>'
-        ),
-        "OPS/chapter.xhtml": (
-            b'<html><body><h1>Chapter heading</h1><p>Chapter one</p>'
-            b'<script>evil()</script></body></html>'
-        ),
-    })
+    return archive(
+        {
+            "mimetype": b"application/epub+zip",
+            "META-INF/container.xml": (
+                b'<container xmlns="urn:oasis:names:tc:opendocument:xmlns:container">'
+                b'<rootfiles><rootfile full-path="OPS/book.opf"/></rootfiles></container>'
+            ),
+            "OPS/book.opf": (
+                b'<package xmlns="http://www.idpf.org/2007/opf"><manifest>'
+                b'<item id="c1" href="chapter.xhtml" media-type="application/xhtml+xml"/>'
+                b'</manifest><spine><itemref idref="c1"/></spine></package>'
+            ),
+            "OPS/chapter.xhtml": (
+                b"<html><body><h1>Chapter heading</h1><p>Chapter one</p>"
+                b"<script>evil()</script></body></html>"
+            ),
+        }
+    )
 
 
 def test_pdf_rotated_and_scan_pages_have_no_fake_ocr() -> None:
@@ -159,13 +161,16 @@ def test_document_section_metadata_persists_after_reopen(tmp_path: Path) -> None
 
 def test_reject_external_relationships_and_archive_traversal() -> None:
     with pytest.raises(EvidenceError) as exc:
-        import_document(docx(external=True),
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        import_document(
+            docx(external=True),
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+        )
     assert exc.value.code == "UNSAFE_DOCUMENT"
     malicious = archive({"../escape": b"x", "word/document.xml": b"y"})
     with pytest.raises(EvidenceError) as exc:
-        import_document(malicious,
-                        "application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        import_document(
+            malicious, "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        )
     assert exc.value.code == "UNSAFE_DOCUMENT"
 
 

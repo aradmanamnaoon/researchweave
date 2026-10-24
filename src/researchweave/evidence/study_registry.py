@@ -93,14 +93,14 @@ class StudyRegistryService:
             relationship in {"primary", "secondary", "protocol", "correction", "other"},
             "Unknown study-report relationship",
         )
-        require(bool(rationale.strip()) and len(rationale) <= 5000,
-                "Study/report linkage rationale is required")
+        require(
+            bool(rationale.strip()) and len(rationale) <= 5000,
+            "Study/report linkage rationale is required",
+        )
 
         def persist(conn: Any) -> str:
             self._tables(conn)
-            study = conn.execute(
-                "SELECT * FROM review_studies WHERE id=?", (study_id,)
-            ).fetchone()
+            study = conn.execute("SELECT * FROM review_studies WHERE id=?", (study_id,)).fetchone()
             require(study is not None, "Review study not found", "NOT_FOUND")
             record = conn.execute(
                 "SELECT * FROM review_records WHERE id=?", (record_id,)
@@ -154,15 +154,17 @@ class StudyRegistryService:
         *,
         expected_revision: int | None = None,
     ) -> dict[str, Any]:
-        require(bool(rationale.strip()) and len(rationale) <= 5000,
-                "Detachment rationale is required")
+        require(
+            bool(rationale.strip()) and len(rationale) <= 5000, "Detachment rationale is required"
+        )
 
         def persist(conn: Any) -> None:
             require(
                 conn.execute(
                     "SELECT 1 FROM review_study_reports WHERE study_id=? AND record_id=?",
                     (study_id, record_id),
-                ).fetchone() is not None,
+                ).fetchone()
+                is not None,
                 "Study/report linkage not found",
                 "NOT_FOUND",
             )
@@ -233,8 +235,7 @@ class StudyRegistryService:
         """Report imported review records lacking an explicit study assignment."""
         assigned = set()
         table = self.store.conn.execute(
-            "SELECT 1 FROM sqlite_master WHERE type='table' "
-            "AND name='review_study_reports'"
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name='review_study_reports'"
         ).fetchone()
         if table is not None:
             assigned = {
@@ -249,8 +250,7 @@ class StudyRegistryService:
         records = [
             dict(row)
             for row in self.store.conn.execute(
-                "SELECT id,reference_id,study_id FROM review_records "
-                "WHERE review_id=? ORDER BY id",
+                "SELECT id,reference_id,study_id FROM review_records WHERE review_id=? ORDER BY id",
                 (review_id,),
             )
         ]

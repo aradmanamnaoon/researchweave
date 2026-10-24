@@ -68,38 +68,73 @@ EN: Final[dict[str, str]] = {
 SCREEN_KEYS: Final[dict[str, str]] = {
     value: f"screen.{value.lower().replace(' ', '_')}"
     for value in (
-        "Welcome", "Dashboard", "Question", "Search", "Protocol", "Library", "Reader",
-        "PDF Reader", "Evidence", "Review", "PRISMA", "Extraction", "Data View",
-        "Variable View", "Statistics", "Analysis Results", "Qualitative", "Codebook",
-        "Mixed Methods", "Manuscript", "References", "Notebook", "Publishing", "Agent",
-        "Providers", "Privacy", "Integrations", "Exports", "Backups", "Recovery",
-        "Diagnostics", "Jobs", "Notifications", "Tutorials", "Guidance", "Shortcuts",
-        "Preferences", "Activity", "About",
+        "Welcome",
+        "Dashboard",
+        "Question",
+        "Search",
+        "Protocol",
+        "Library",
+        "Reader",
+        "PDF Reader",
+        "Evidence",
+        "Review",
+        "PRISMA",
+        "Extraction",
+        "Data View",
+        "Variable View",
+        "Statistics",
+        "Analysis Results",
+        "Qualitative",
+        "Codebook",
+        "Mixed Methods",
+        "Manuscript",
+        "References",
+        "Notebook",
+        "Publishing",
+        "Agent",
+        "Providers",
+        "Privacy",
+        "Integrations",
+        "Exports",
+        "Backups",
+        "Recovery",
+        "Diagnostics",
+        "Jobs",
+        "Notifications",
+        "Tutorials",
+        "Guidance",
+        "Shortcuts",
+        "Preferences",
+        "Activity",
+        "About",
     )
 }
 
 
 def normalize_locale(value: str) -> str:
     if not isinstance(value, str) or len(value) > 40:
-        raise UIError("INVALID_INPUT", "Locale identifier is invalid.",
-                      "Use a language tag such as en, en-US or fa-IR.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Locale identifier is invalid.",
+            "Use a language tag such as en, en-US or fa-IR.",
+        )
     cleaned = value.strip().replace("_", "-")
     if not cleaned:
         return "en"
     parts = cleaned.split("-")
     if not all(part.isalnum() and 1 <= len(part) <= 8 for part in parts):
-        raise UIError("INVALID_INPUT", "Locale identifier is invalid.",
-                      "Use a language tag such as en, en-US or fa-IR.")
+        raise UIError(
+            "INVALID_INPUT",
+            "Locale identifier is invalid.",
+            "Use a language tag such as en, en-US or fa-IR.",
+        )
     language = parts[0].lower()
     tail = [part.upper() if len(part) == 2 else part.title() for part in parts[1:]]
     return "-".join([language, *tail])
 
 
 def _placeholders(template: str) -> set[str]:
-    return {
-        field_name for _, field_name, _, _ in Formatter().parse(template)
-        if field_name
-    }
+    return {field_name for _, field_name, _, _ in Formatter().parse(template) if field_name}
 
 
 @dataclass(frozen=True)
@@ -129,8 +164,11 @@ class Localizer:
     def translate(self, key: str, **values: object) -> str:
         template = EN.get(key)
         if template is None:
-            raise UIError("NOT_FOUND", f"Translation key {key!r} is not defined.",
-                          "Use an existing interface translation key.")
+            raise UIError(
+                "NOT_FOUND",
+                f"Translation key {key!r} is not defined.",
+                "Use an existing interface translation key.",
+            )
         expected = _placeholders(template)
         supplied = set(values)
         if supplied != expected:
@@ -143,8 +181,11 @@ class Localizer:
 
     def plural(self, base_key: str, count: int) -> str:
         if isinstance(count, bool) or not isinstance(count, int) or count < 0:
-            raise UIError("INVALID_INPUT", "Plural count must be a nonnegative integer.",
-                          "Provide a measured item count.")
+            raise UIError(
+                "INVALID_INPUT",
+                "Plural count must be a nonnegative integer.",
+                "Provide a measured item count.",
+            )
         suffix = "one" if count == 1 else "other"
         return self.translate(f"{base_key}.{suffix}", count=count)
 
@@ -160,9 +201,7 @@ class Localizer:
 
 
 def validate_catalog() -> dict[str, object]:
-    missing_screen_keys = [
-        screen for screen, key in SCREEN_KEYS.items() if key not in EN
-    ]
+    missing_screen_keys = [screen for screen, key in SCREEN_KEYS.items() if key not in EN]
     return {
         "english_keys": len(EN),
         "screens": len(SCREEN_KEYS),
