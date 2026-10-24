@@ -1,21 +1,34 @@
 {
   "id": "INT-077",
   "name": "Repository clean gate",
-  "observed_before_final_rerun": {
-    "pytest": "647 passed, 3 warnings",
-    "mypy": "151 source files clean",
-    "ruff": "pass",
+  "observed_integration_branch": {
+    "pytest": "701 passed, 10 skipped, 3 warnings",
+    "ruff": "check pass; 382 files formatted",
+    "mypy": "152 source files clean",
+    "compileall": "pass",
     "skills": "27 skills validated",
     "readme_local_links": "pass; 6 image references",
-    "pip_audit": "no known vulnerabilities found after cryptography upgrade to 50.0.2",
-    "cyclonedx_sbom": "generated",
-    "dependency_license_inventory": "generated",
-    "secret_scan": "generated and reviewed for synthetic/hash candidates"
+    "source_metrics": "152 Python source files; 48439 substantive SLOC",
+    "pip_audit": "no known vulnerabilities found; local researchweave package not on PyPI",
+    "windows_zip_sha256": "01233AF9A980126865000EC73057AD01993F2D827D84B06A5ED1AF1E073ADCE2",
+    "windows_zip_bytes": 170160288,
+    "portable_startup": "pass",
+    "portable_user_data_retention": "pass"
   },
-  "status": "local verification passed; promotion/release blockers remain",
-  "blockers": [
-    "Linux/macOS release builds are defined but not observed on native runners in this Windows session.",
-    "Some advanced AI facade operations are not yet surfaced as direct desktop controls.",
-    "Original checkout promotion gate is blocked by user-owned untracked prompts/."
+  "promotion_precheck": {
+    "main_is_ancestor": true,
+    "original_tracked_changes": false,
+    "untracked_direct_or_prefix_collisions": 0,
+    "preserve": [
+      "prompts/",
+      "researchweave-pre-v2.bundle",
+      "legacy-tracked-files.pre-v2.txt"
+    ]
+  },
+  "status": "integration branch verified locally; original-root promotion/post-promotion audit pending",
+  "external_limitations": [
+    "Linux/macOS native release builds are not observed on native runners.",
+    "Native installer uninstall/reinstall is not observed.",
+    "Live provider/service scenarios listed in the integration ledger remain unobserved."
   ]
 }

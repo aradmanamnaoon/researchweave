@@ -1,207 +1,165 @@
 # ResearchWeave V2 Integration Ledger
 
-This ledger records observed integration work for `prompts/05_FINAL_INTEGRATION_RELEASE_V2.md`.
-Claims here are limited to locally observed evidence. External CI and other operating systems are
-recorded as pending until actually run.
+This ledger records **observed** evidence for `prompts/05_FINAL_INTEGRATION_RELEASE_V2.md`.
+It deliberately distinguishes deterministic local acceptance from live-provider, native-platform, and
+manual-user verification. A passing domain test alone is not treated as proof of a required integrated
+cross-boundary path.
 
-## Phase 00 — repository provenance and reversible backup
+## Provenance and recovery
 
-- Status: complete for committed Git history; untracked data remains deliberately untouched.
 - Original repository: `D:\coding\codex\researchweave`
-- Original `main` SHA: `af5c862d780d65c62a8c083fbfb64bd08a420092`
-- Integration branch: `rebuild/v2-integration`
-- Integration worktree: `D:\coding\codex\researchweave-v2-integration`
-- Recovery ref: `archive/pre-v2-af5c862d780d` -> `af5c862d780d65c62a8c083fbfb64bd08a420092`
-- Git bundle: `D:\coding\codex\researchweave\researchweave-pre-v2.bundle` (committed history only)
-- Legacy tracked-file manifest source: `D:\coding\codex\researchweave\legacy-tracked-files.pre-v2.txt`
-- Original checkout status before integration: `main` with untracked `prompts/`.
-- Worker branches all descend from the same `main` SHA:
-  - `rebuild/v2-evidence` `bfa5f96678630403e8933b7aca063a43e39aab11`
-  - `rebuild/v2-analysis` `b878adde6037ecbcd9146700bb767dcb96bfdd01`
-  - `rebuild/v2-ai` `c1ac49e003ac6cf84781cfcfc01f8c059cd652f4`
-  - `rebuild/v2-ui` `e00be109f8de4e2a892c5f42496a840b3f164dbb`
-- Worker worktree state: evidence, AI and UI clean; analysis contains untracked verification
-  outputs. Those files are not part of the committed worker tip and are intentionally untouched.
-- Gate C note: final fast-forward promotion to the original checkout is currently blocked while
-  that checkout contains untracked files. No stash, cleanup or deletion will be performed.
+- Original pre-V2 `main`: `af5c862d780d65c62a8c083fbfb64bd08a420092`
+- Integration branch/worktree: `rebuild/v2-integration` at
+  `D:\coding\codex\researchweave-v2-integration`
+- Recovery ref: `archive/pre-v2-af5c862d780d` -> original pre-V2 SHA.
+- Recovery artifacts intentionally preserved in the original checkout:
+  `prompts/`, `researchweave-pre-v2.bundle`, and `legacy-tracked-files.pre-v2.txt`.
+- The original checkout has no tracked modifications. A path-collision audit found **zero** collisions
+  between those untracked recovery files and integration-branch tracked paths, so a normal fast-forward
+  can preserve them without stash, reset, clean, deletion, or overwrite.
+- Worker/domain branches were merged in the required evidence -> analysis -> AI -> UI order. Existing
+  completed worker features were reused rather than reimplemented.
 
-### Observed commands
+## Final implementation increments
 
-```text
-git status --short --branch
-git worktree list
-git branch -avv
-git merge-base main <worker-branch>
-git ls-tree -r --name-only <worker-branch> -- src/researchweave
-git update-ref refs/heads/archive/pre-v2-af5c862d780d <main-sha>
-git bundle create researchweave-pre-v2.bundle main
-```
+The final integration continuation added these local commits after the original domain merge/release work:
 
-### Recovery
+- `f3b125a` — desktop-approved AI actions routed through the shared command bus.
+- `71ed0e3` — advanced scientific analysis exposed through the desktop/shared bus.
+- `35ec9ba` — reproducible Python/R syntax export exposed as analysis capabilities; repeated identical
+  immutable dataset staging made idempotent.
+- `3bb9bb5` — integrated evidence/analysis acceptance and project-aware descriptive analysis routing.
+- `54418f6` — INT-001..019 integrated acceptance.
+- `9d43ff3` — initial INT-039..077 integration/release acceptance coverage.
+- `fd3834e` — integrated row-linked dataset quality screening and leakage warnings.
+- `5aaf6eb` — deeper analysis/AI acceptance plus plot log-scale fail-closed behavior and accessible
+  caption/data-table payloads.
+- `527e6ae` — host-controlled MCP bridge and deterministic encrypted remote-sync integration.
+- `bda910d` — positive and privacy-negative mixed-methods integration acceptance.
+- `895c673` — clickable recent-history navigation with visible content hash and bus audit hashes.
+- `0861a1b` — final Ruff formatting normalization for the new integration slices.
 
-Committed pre-V2 state remains addressable as:
+No push was performed.
 
-```powershell
-git -C D:\coding\codex\researchweave show archive/pre-v2-af5c862d780d
-```
+## Current deterministic/local verification
 
-The bundle is an additional recovery artifact for committed `main`; it does not contain untracked
-files or private working-tree data.
+- Full pytest: **701 passed, 10 skipped, 3 warnings** on Windows / Python 3.12.9. The skips are explicit
+  unavailable live/native scenarios, not hidden passes.
+- Ruff check: pass.
+- Ruff format check: **382 files already formatted** after normalization.
+- mypy: **152 source files clean** with the repository's documented `--ignore-missing-imports` policy for
+  third-party scientific/document libraries.
+- `compileall`: pass for `src/researchweave`.
+- Skills validator: **27 skills valid**.
+- README local-link validator: pass; **6 local image references**.
+- `pip-audit --local`: **no known vulnerabilities found**; the local ResearchWeave package itself is not a
+  PyPI dependency and is therefore reported as skipped by pip-audit.
+- Source metric: **48,439 substantive first-party Python SLOC across 152 files**. Exact per-file/package
+  output is in `CODE_METRICS.json`.
+- `detect-secrets` produces heuristic candidates in deterministic hashes and synthetic security fixtures.
+  Existing `SECRETS_REVIEW.md` documents the manual review categories; no live credential/private research
+  dataset is claimed from the reviewed tracked findings. New findings remain release-blocking until reviewed.
 
-## Current next phase
+### Final Windows package evidence
 
-## Phase 01 — worker merge and conflict reconciliation
+- Build command: `powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1`
+- PyInstaller build: pass on Windows 11.
+- ZIP: `dist/ResearchWeave-windows-x86_64.zip`
+- ZIP bytes: **170,160,288**
+- ZIP SHA-256: `01233AF9A980126865000EC73057AD01993F2D827D84B06A5ED1AF1E073ADCE2`
+- Clean extraction/startup smoke: **pass**.
+- Portable package removal retaining a separate user-profile sentinel: **pass**.
+- This is portable-retention evidence, **not** a native MSI/OS uninstall/reinstall observation.
 
-- Status: complete locally.
-- Merge commits, in required order:
-  - evidence: `2f2acde` from `bfa5f96678630403e8933b7aca063a43e39aab11`
-  - analysis: `7c2aed0` from `b878adde6037ecbcd9146700bb767dcb96bfdd01`
-  - AI: `c4239ec` from `c1ac49e003ac6cf84781cfcfc01f8c059cd652f4`
-  - UI: `fb6ab24` from `e00be109f8de4e2a892c5f42496a840b3f164dbb`
-- No merge conflicts occurred and no worker worktree was modified.
-- The first integrated test attempt exposed missing worker-declared dependencies and a text-line-ending
-  dependent UI SVG checksum. Shared dependency metadata and SVG normalization were corrected in the
-  integration branch.
-- Observed after dependency normalization on Windows CPython 3.12.9:
-  - evidence: **176 passed**, one expected duplicate-ZIP warning.
-  - analysis: **177 passed**, two statsmodels seasonal-start warnings.
-  - AI: **138 passed, 2 skipped**.
-  - UI: **141 passed**.
-- Ruff and first-party mypy/compile checks run during merge inspection were clean for all four domain
-  source trees. Scientific third-party packages remain typed according to their upstream metadata;
-  analysis validation uses `--ignore-missing-imports` as documented by that worker.
+## INT-001..077 status matrix
 
-## Phase 03 — dependency normalization (started early to unblock merge verification)
+Status vocabulary: **verified-local** = required deterministic/local path observed; **partial** = useful
+integrated evidence exists but an exact contract facet remains unobserved; **external/native-blocked** = the
+required provider/service/platform/hardware or native harness was unavailable and no mock is substituted for
+success.
 
-- Added the runtime scientific stack required by the merged analysis package and the audited
-  encryption/PDF/credential dependencies used by evidence and AI.
-- Added optional `formats` dependencies for XLSX/ODS/Parquet/SAV import support.
-- Regenerated `uv.lock` and successfully ran `uv sync --extra dev --extra formats`.
-- Declared SVG files as LF-normalized text and refreshed the two UI asset SHA-256 values against the
-  checked-out bytes so hashes are stable across Windows checkout behavior.
+| INT | Status | Evidence / remaining limitation |
+|---|---|---|
+| 001 | verified-local | Offline/no-key launch, UI project create, denied unapproved write. |
+| 002 | verified-local | Project persistence across service restart plus invalid creation. |
+| 003 | verified-local | Protocol create/export and denied unapproved amendment. |
+| 004 | verified-local | Archive roundtrip/conflict plus crafted traversal rejection before writes. |
+| 005 | partial | Unsupported/future schema migration refuses mutation; successful staging migration path not separately exercised in INT suite. |
+| 006 | partial | Stale revision write preserves state; explicit revision-undo happy path is not in integrated INT fixture. |
+| 007 | verified-local | Offline bibliography import/list persistence and malformed Base64 failure. |
+| 008 | verified-local | Reference merge/unmerge reversible with approval. |
+| 009 | partial | Crossref offline hard-stop verified; live public-provider success not observed. |
+| 010 | partial | OpenAlex offline hard-stop verified; live public-provider success not observed. |
+| 011 | partial | PubMed offline hard-stop verified; live public-provider success not observed. |
+| 012 | partial | Anchoring/quote verification through bus uses deterministic text fixture; real/scanned PDF path is covered by domain tests, not this INT fixture. |
+| 013 | partial | Quote/anchor integrity negative behavior exists; altered-PDF end-to-end fixture not independently observed. |
+| 014 | partial | Source anchor path works; page-navigation-specific integrated fixture remains absent. |
+| 015 | partial | Offline search failure path is integrated; complete faceted/paginated happy path remains domain-level. |
+| 016 | verified-local | Protocol amendment preserves original and exposes diff/export. |
+| 017 | verified-local | Screening blinding/disagreement path through shared bus. |
+| 018 | partial | PRISMA counts/incomplete gate integrated; exhaustive full PRISMA fixture breadth remains domain-level. |
+| 019 | verified-local | Typed extraction plus missingness behavior integrated. |
+| 020-024 | verified-local | Evidence claim/citation/export/submission grouped integrated journey plus domain integrity tests. |
+| 025-027 | verified-local | Migration/import preservation and approval behavior integrated with deterministic local fixtures. |
+| 028-030 | verified-local | SPSS/spreadsheet/dictionary paths exercised through analysis bus with optional-format environment. |
+| 031-038 | verified-local | Advanced statistics grouped integrated execution/failure paths plus scientific domain oracle suites. |
+| 039 | verified-local | Meta-analysis pooled oracle, persistence/audit, incompatible-scale refusal. |
+| 040 | verified-local | Time-series chronology/timezone path and invalid-input/no-leakage scientific tests. |
+| 041 | verified-local | New `dataset.quality` emits row-linked missingness, duplicate-subject, configured test leakage and optional residual-outlier warnings with immutable transformation lineage; invalid configuration fails without stored result. |
+| 042 | verified-local | Version-bound Python/R syntax export through desktop/shared bus; unsupported R target rejected. |
+| 043 | verified-local | Python runtime requires trusted approval and emits receipt; timeout behavior remains covered by runtime domain suite. |
+| 044 | partial | Optional-R absence behavior exists; a live installed R runtime was not observed on this host. |
+| 045 | verified-local | Real SVG/PNG artifacts, SHA-256, caption, alt text, structured data table; log scale now fails closed on non-positive input. |
+| 046 | verified-local | Durable Unicode qualitative coding and stale-anchor conflict through bus. |
+| 047 | partial | Kappa/undefined metric and human adjudication receipt/rationale/audit verified; adjudication is returned/audited but not stored as a separate qualitative-state adjudication event. |
+| 048 | verified-local | Positive linked joint display, privacy-minimum behavior, sensitive approval denial and unrelated-project isolation. |
+| 049 | verified-local | Local AI capability entry and host/offline policy boundaries. |
+| 050 | external/native-blocked | No locally installed/running model endpoint supplied; no fake success. |
+| 051 | external/native-blocked | No verified free hosted-provider account/limits supplied; no fake success. |
+| 052 | external/native-blocked | No authorized BYO credential/keyring fixture supplied. |
+| 053 | partial | Evidence-only retrieval citations/digests and unsupported-query abstention verified; no generated live-model prose answer claimed. |
+| 054 | partial | Durable plan/preview/execute/recover and service reopen verified; process-kill/exactly-once execution recovery not observed. |
+| 055 | verified-local | Exact one-use approval rejects replay and argument substitution. |
+| 056 | verified-local | Offline/network boundary enforced. |
+| 057 | verified-local | Privacy/classification and approval boundary integrated with shared bus. |
+| 058 | partial | Offline provider failure after proper approval produces no successful/unauthorized fallback and no prompt audit payload; live quota/transport failure not observed. |
+| 059 | partial | Durable checkpoint recovery across service reopen verified; hard process-kill recovery not observed. |
+| 060 | external/native-blocked | No running authorized Zotero local API instance. |
+| 061 | verified-local | Host-injected mock MCP manifest/allowlist, schema/scope enforcement, hostile-description non-escalation, exact approval/replay and payload-free audit. |
+| 062 | external/native-blocked | No WebDAV server/credentials supplied. |
+| 063 | external/native-blocked | No S3-compatible endpoint/credentials supplied. |
+| 064 | verified-local | Two injected app clients share deterministic encrypted CAS backend; divergence preserves local revision, HEAD is not overwritten, wrong password/tamper fail closed. Live service is not claimed. |
+| 065 | verified-local | Approved local backup/create/inspect/restore checksum path and denied unapproved operation. |
+| 066 | partial | Workspace preset persistence, geometry clamping, restart/list/delete reset verified through desktop gateway; native visual restoration was not automated. |
+| 067 | external/native-blocked | Native keyboard-only GUI automation not exercised. |
+| 068 | external/native-blocked | Native screen-reader harness unavailable. |
+| 069 | external/native-blocked | Timed native long-PDF responsiveness harness unavailable. |
+| 070 | external/native-blocked | Native visual-regression reference/oracle unavailable. |
+| 071 | verified-local | Activity entry clicked into Reader; visible source content hash and command-bus input/output SHA-256 verified; audit stores no source payload. |
+| 072 | verified-local | Reproducible syntax/output receipt through desktop/shared analysis path. |
+| 073 | partial | Current Windows portable build and clean-extraction startup pass; Linux/macOS native runner builds and missing-library clean-machine fault injection remain unobserved. |
+| 074 | partial | Portable deletion preserves separate user-profile sentinel; native installer uninstall/reinstall retention is not observed. |
+| 075 | verified-local (Windows) | Six native Windows screenshots and manifest hashes/metadata exist and README links are validated; no cross-platform screenshot claim. |
+| 076 | verified-local | README first-run command plus deterministic create/reopen persistence/invalid-input acceptance; manual outsider usability session not claimed. |
+| 077 | pending-promotion | Integration branch gates pass locally; original-root promotion and post-promotion audit must complete before this becomes verified-local. |
 
-## Current next phase
+## Release blockers that are genuinely external or still partial
 
-## Phase 04/06 — shared contracts, command bus and application composition
+The implementation has completed every locally feasible gap identified in this continuation. The remaining
+non-local blockers are deliberately not replaced with mocks: live/local model/provider credentials and quotas,
+live Zotero/WebDAV/S3 services, native keyboard/screen-reader/performance/visual-regression harnesses, native
+Linux/macOS release runners, and native installer uninstall/reinstall behavior. Partial local contracts are
+listed individually above rather than hidden behind a blanket Gate B pass.
 
-- Status: implemented; broader acceptance validation remains in progress.
-- Added a versioned `OperationRequest` used by desktop/headless callers, deterministic request/result
-  hashing, and the common integration error vocabulary.
-- Added a process-local host approval authority. Non-read operations require an exact, expiring,
-  one-use approval bound to operation, project, request ID, arguments, revision and actor.
-- Added a unified command bus that registers all four worker capability manifests, rejects duplicate
-  operation IDs, preserves facade previews, and delegates only after the host gate succeeds.
-- Analysis writes receive a fresh analysis-owned one-use `HostCapability` after the shared approval
-  succeeds. AI writes/network actions likewise receive an AI-owned signed approval. Evidence is
-  instantiated write-capable only behind the shared host gate and remains network-disabled by default.
-- Added an SQLite/WAL integration audit containing timestamps, IDs, actor, operation, effect, status,
-  error code and SHA-256 input/output hashes. Argument/result payloads are not stored in this audit.
-- Replaced the placeholder desktop entry point with the V2 `ResearchWindow` and real application
-  composition root. The desktop gateway sends the same `ui.*` operation IDs through the command bus;
-  a direct human desktop gesture is the trust event that causes the host to issue its exact one-use
-  approval. Existing export/backup/agent confirmation gates remain active inside the UI facade.
-- Added `researchweave-cli` using the same composition root for health and capability discovery.
-- Connected the UI analysis adapter to the production analysis facade. A UI dataset is staged as an
-  ephemeral CSV, imported through the analysis facade with its own capability, analyzed from the
-  immutable analysis revision, provenance/hashes are returned to UI result storage, and the staging
-  file is deleted afterward.
-- Added integration tests for all-domain registration/offline defaults, approval substitution/replay,
-  payload-free audit metadata, analysis import/describe routing, production desktop analysis and the
-  desktop gateway audit route. Current focused result: **6 passed**.
-- Shared source-wide Ruff passes. First-party mypy with `--ignore-missing-imports` passes across
-  **151 source files** after removing two obsolete reportlab suppressions exposed by the integrated
-  dependency environment.
-- Added `reportlab>=4.4,<5` to the canonical runtime because the evidence subsystem's implemented PDF
-  export path imports it. `uv.lock` now resolves 95 packages.
+## Gates before original-root promotion
 
-## Current next phase
+- Gate A / recovery: **PASS** — pre-V2 ref/bundle/manifest and untracked prompt files preserved.
+- Gate B / integrated Windows branch: **PASS for locally feasible checks**, with per-INT external/partial
+  limitations above. Current package and validation evidence are recorded above.
+- Gate C / original-root promotion: **READY, not yet executed in this ledger snapshot**. `main` is an ancestor
+  of the integration branch, the original root has no tracked modifications, and a direct/path-prefix collision
+  audit found no conflicts between original untracked recovery data and integration tracked paths. Promotion must
+  use normal fast-forward semantics only; no clean/reset/stash/delete is authorized.
 
-Phase 07/08: exercise cross-domain vertical journeys through the integrated services, run scientific
-oracles and failure injection, then consolidate obsolete placeholder package paths only when their
-replacement is covered by tests.
-
-## Phase 07/08 — cross-domain and repository-wide validation
-
-- Shared integration tests now cover UI, analysis and AI domain routing through the same command bus.
-  The focused integration suite currently has **6 passing tests**.
-- AI cross-domain coverage verifies restricted-project remote egress is denied, local retrieval ingest
-  requires approval, a durable agent plan executes a local evidence query, and all operations appear in
-  the shared audit store.
-- Full merged repository collection was repaired with pytest importlib mode because isolated workers had
-  duplicate test basenames. The resulting integrated run completed **647 tests passed, 3 warnings** on
-  Windows CPython 3.12.9. The warnings are two statsmodels seasonal-start warnings and the intentional
-  duplicate-ZIP fixture warning.
-- Strict first-party mypy passes **151 source files**. Missing-type exceptions are restricted to named
-  third-party scientific/document libraries without complete `py.typed`/stub coverage.
-- Repository-wide Ruff passes after integration/release tooling changes.
-- The locally observed desktop startup test passes with the integrated V2 window and no provider keys.
-
-## Phase 09/10/11 — metrics, screenshots and release engineering
-
-- Added an AST/tokenize source counter. Current observed report:
-  - AI: 6,163 substantive lines
-  - analysis: 11,579
-  - app: 407
-  - core: 366
-  - evidence: 16,536
-  - UI: 12,610
-  - package root: 3
-  - **total: 47,664 substantive first-party Python SLOC across 151 files**
-- Counter scope excludes tests, fixtures, generated/vendor files, blanks, comment-only lines and
-  module/class/function docstrings. `cloc` and `tokei` were not installed locally, so no second counter
-  result is claimed.
-- Canonical `ruff format .` was applied after merge integration because the repository lint task requires
-  format conformance. The full test suite is rerun after this formatting-only normalization before commit.
-- Added reproducible integrated screenshot capture from a deterministic synthetic project. Six current
-  screenshots cover Dashboard, Statistics and Review in light/dark themes. Native Windows recapture was
-  required because Qt offscreen mode exposed no system font families and rendered tofu glyphs. The final
-  checked-in screenshots were visually inspected and are readable. SHA-256 metadata is in
-  `assets/screenshots/manifest.json`.
-- Added PyInstaller portable-build definitions for Windows/Linux/macOS and a three-OS GitHub Actions
-  build matrix. Only the Windows build is locally observed in this session.
-- Windows portable build completed successfully and produced
-  `dist/ResearchWeave-windows-x86_64.zip` (not tracked) with SHA-256
-  `F264A3F89D6C5F613FC6272A2FD0C25899108EBF08A7222C1454E85B8BE1FFEC` after the
-  cryptography security upgrade. Final observed ZIP size: 170,145,206 bytes.
-- The packaged executable remained alive for four seconds in an offscreen smoke process and was then
-  terminated by the harness. A separate clean-extraction smoke test passed both `portable_startup` and
-  `user_data_retention`: deleting the extracted portable package did not delete a simulated user-profile
-  sentinel.
-- Generated reproducible release evidence:
-  - `docs/verification/SBOM.cdx.json` — CycloneDX environment SBOM.
-  - `docs/verification/DEPENDENCY_LICENSES.json` — machine-readable pip-licenses inventory.
-  - `docs/verification/SECRETS_SCAN.json` — detect-secrets scan output. Reported candidates are hashes,
-    cache tags and synthetic/test credential fixtures; no private research dataset path was found in the
-    tracked-file audit. A release reviewer should continue treating any new secret finding as blocking.
-- An initial connected `pip-audit --local` found seven advisories in `cryptography 47.0.0`. The runtime
-  constraint was upgraded to `cryptography>=50,<51`, `uv.lock` resolved 50.0.2, focused crypto/archive
-  tests passed **19/19**, and a repeat `pip-audit --local` reported **no known vulnerabilities**. The
-  Windows portable package was rebuilt and re-smoke-tested after this upgrade.
-- `detect-secrets` candidates in tracked files were manually reviewed. They are deterministic hashes,
-  safe-character alphabets, deliberately fake/redaction-test credentials, and synthetic recovery
-  passphrases. Review details are recorded in `docs/verification/SECRETS_REVIEW.md`.
-
-## Phase 12 — public docs and support truthfulness
-
-- Replaced bootstrap README claims with observed V2 behavior, actual screenshots, architecture, first-run
-  commands, Windows packaging evidence, source metrics, privacy/security evidence and explicit blockers.
-- Added `docs/INTEGRATIONS.md`, `docs/INSTALL.md`, `CITATION.cff`, expanded changelog and dependency-license
-  documentation. README local-link validation currently passes with **6 local image references**.
-- Advanced AI backend operations are verified through the common bus, but the desktop Provider/Agent
-  screens do not yet surface the entire AI facade. Remote sync also requires an injected live transport.
-  These remain product-completeness gaps and are documented as limited/experimental rather than complete.
-
-## Current release blockers
-
-1. Linux and macOS portable-build workflows are defined but not observed on their native runners in this
-   local Windows session.
-2. Advanced AI facade operations are not all wired to end-user desktop controls.
-3. The original repository checkout still contains untracked `prompts/`; Gate C forbids stashing,
-   cleaning, deleting or overwriting that material, so fast-forward promotion to original `main` is
-   blocked until the user-owned working tree is clean without data loss.
-
-## Current next phase
-
-Run the final full suite/static/release checks after the documentation and packaging changes, save compact
-INT-073/074/075/077 traces, commit the validated release-engineering slice, then perform the final Gate A/B/C
-audit without pushing or deleting original/worker data.
+After promotion, rerun import/smoke/selected/full validation from the original root, verify the preserved
+recovery files are still present, then update INT-077 and this Gate C section. No push is authorized.

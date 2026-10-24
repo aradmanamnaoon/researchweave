@@ -7,13 +7,14 @@
     "portable_startup": "pass",
     "python_interpreter_invoked_by_user": false,
     "package_format": "PyInstaller portable ZIP",
-    "zip_sha256": "F264A3F89D6C5F613FC6272A2FD0C25899108EBF08A7222C1454E85B8BE1FFEC",
-    "zip_bytes": 170145206,
+    "zip_sha256": "01233AF9A980126865000EC73057AD01993F2D827D84B06A5ED1AF1E073ADCE2",
+    "zip_bytes": 170160288,
     "cryptography_version": "50.0.2"
   },
-  "status": "native verified on Windows",
+  "status": "portable build/startup verified on Windows",
   "limitations": [
     "Unsigned package; SmartScreen reputation warnings are possible.",
-    "Linux/macOS builds are defined but not locally observed in this session."
+    "Linux/macOS builds are defined but not locally observed in this session.",
+    "Clean-machine missing-library fault injection was not observed."
   ]
 }
