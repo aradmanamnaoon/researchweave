@@ -9,8 +9,10 @@ from pathlib import Path
 from typing import Any
 
 from researchweave.ai import build_ai_facade
+from researchweave.ai.external_connectors import MCPBridge
 from researchweave.ai.facade import AIFacade
 from researchweave.ai.policy import ApprovalIssuer, EgressPolicy
+from researchweave.ai.remote_sync import EncryptedRemoteSync
 from researchweave.analysis import build_analysis_facade
 from researchweave.analysis.facade import AnalysisFacade
 from researchweave.core import (
@@ -99,7 +101,12 @@ class AppServices:
         self.audit.close()
 
 
-def build_services(data_root: Path) -> AppServices:
+def build_services(
+    data_root: Path,
+    *,
+    remote_sync: EncryptedRemoteSync | None = None,
+    mcp_bridge: MCPBridge | None = None,
+) -> AppServices:
     """Construct all production domains with offline-safe defaults and one command bus."""
 
     paths = AppPaths.create(data_root)
@@ -117,7 +124,10 @@ def build_services(data_root: Path) -> AppServices:
         execution_root=paths.execution,
     )
     ai_issuer = ApprovalIssuer(secrets.token_bytes(32))
-    ai = build_ai_facade(paths.ai, policy=EgressPolicy(offline=True), issuer=ai_issuer)
+    ai = build_ai_facade(
+        paths.ai, policy=EgressPolicy(offline=True), issuer=ai_issuer,
+        remote_sync=remote_sync, mcp_bridge=mcp_bridge,
+    )
     ui = build_ui_facade(paths.ui)
 
     bus = CommandBus(authority, audit)

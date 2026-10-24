@@ -12,7 +12,7 @@ from .agent_runtime_v2 import (
 )
 from .agents import AgentRuntime, Capability
 from .errors import AIError
-from .external_connectors import ConnectorRegistry
+from .external_connectors import ConnectorRegistry, MCPBridge
 from .grounding import GroundingVerifier
 from .ollama import OllamaAdapter, OllamaMessage, OllamaOptions
 from .orchestration import LongTaskOrchestrator
@@ -45,6 +45,7 @@ class AIFacade:
         advanced_providers: ProviderCatalog | None = None,
         connectors: ConnectorRegistry | None = None,
         remote_sync: EncryptedRemoteSync | None = None,
+        mcp_bridge: MCPBridge | None = None,
     ) -> None:
         if not storage.is_dir():
             raise AIError("NOT_FOUND", "An existing host-controlled storage directory is required")
@@ -55,6 +56,7 @@ class AIFacade:
         self.advanced_providers = advanced_providers or ProviderCatalog()
         self.connectors = connectors or ConnectorRegistry()
         self.remote_sync = remote_sync
+        self.mcp_bridge = mcp_bridge
         self.retrieval = EvidenceIndex(storage / "evidence.sqlite")
         self.grounding = GroundingVerifier(self.retrieval)
         self.citations = CitationEnforcer(self.retrieval)
@@ -160,6 +162,12 @@ class AIFacade:
             entry("prompt.add", "local-write", True),
             entry("prompt.render", "read", True),
             entry("connector.list", "read", True),
+            entry("mcp.inspect", "read", True, configured=self.mcp_bridge is not None),
+            entry(
+                "mcp.invoke", "local-write", True,
+                arguments=("tool", "arguments", "granted_scopes"),
+                configured=self.mcp_bridge is not None,
+            ),
             entry(
                 "sync.push",
                 "external-network",
@@ -399,6 +407,25 @@ class AIFacade:
                 )
             elif operation == "connector.list":
                 result = [vars(item) for item in self.connectors.list()]
+            elif operation == "mcp.inspect":
+                if self.mcp_bridge is None:
+                    raise AIError("NOT_FOUND", "MCP bridge is not configured")
+                result = [
+                    {
+                        "name": tool.name,
+                        "effect": tool.effect,
+                        "required_scope": tool.required_scope,
+                        "input_schema": dict(tool.input_schema),
+                    }
+                    for tool in self.mcp_bridge.inspect()
+                ]
+            elif operation == "mcp.invoke":
+                if self.mcp_bridge is None:
+                    raise AIError("NOT_FOUND", "MCP bridge is not configured")
+                result = self.mcp_bridge.invoke(
+                    args["tool"], args["arguments"],
+                    granted_scopes=args["granted_scopes"],
+                )
             elif operation == "sync.push":
                 if self.remote_sync is None:
                     raise AIError("NOT_FOUND", "Remote sync is not configured")
@@ -477,6 +504,7 @@ def build_ai_facade(
     advanced_providers: ProviderCatalog | None = None,
     connectors: ConnectorRegistry | None = None,
     remote_sync: EncryptedRemoteSync | None = None,
+    mcp_bridge: MCPBridge | None = None,
 ) -> AIFacade:
     return AIFacade(
         storage,
@@ -487,4 +515,5 @@ def build_ai_facade(
         advanced_providers,
         connectors,
         remote_sync,
+        mcp_bridge,
     )
