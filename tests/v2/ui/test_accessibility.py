@@ -14,10 +14,11 @@ from PyQt6.QtWidgets import QApplication
 from researchweave.ui import build_ui_facade, build_ui_shell
 from researchweave.ui.accessibility import (
     check_theme_contrast,
+    contrast_audit,
     contrast_ratio,
     inspect_widgets,
 )
-from researchweave.ui.design import apply_theme
+from researchweave.ui.design import THEMES, apply_theme
 
 
 def test_contrast_reference_values() -> None:
@@ -29,6 +30,10 @@ def test_contrast_reference_values() -> None:
 
 def test_default_palette_minimums() -> None:
     assert check_theme_contrast() == []
+    for palette in THEMES.values():
+        audits = contrast_audit(palette)
+        assert audits["primary-text-on-accent"] >= 4.5
+        assert audits["primary-text-on-hover"] >= 4.5
 
 
 def test_scaled_accessibility_inspection(tmp_path: Path) -> None:

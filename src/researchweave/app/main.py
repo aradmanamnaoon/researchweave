@@ -20,7 +20,12 @@ def create_window(config: AppConfig, *, services: AppServices | None = None) -> 
     integrated = services or build_services(config.data_directory)
     gateway = DesktopCommandGateway(integrated.ui, integrated.bus)
     window = build_ui_shell(fake_services=cast(UIFacade, gateway))
-    window.setWindowTitle(config.application_title)
+    window.base_window_title = config.application_title
+    project_title = getattr(window, "project_title", "")
+    if project_title:
+        window.setWindowTitle(f"{config.application_title} · {project_title}")
+    else:
+        window.setWindowTitle(config.application_title)
     return window
 
 

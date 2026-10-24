@@ -56,6 +56,8 @@ def contrast_audit(colors: Colors) -> dict[str, float]:
         "muted-on-surface": round(contrast_ratio(colors.muted, colors.surface), 3),
         "focus-on-window": round(contrast_ratio(colors.focus, colors.background), 3),
         "focus-on-surface": round(contrast_ratio(colors.focus, colors.surface), 3),
+        "primary-text-on-accent": round(contrast_ratio(colors.primary_text, colors.accent), 3),
+        "primary-text-on-hover": round(contrast_ratio(colors.primary_text, colors.focus), 3),
     }
 
 
@@ -65,7 +67,7 @@ def check_theme_contrast(*, normal_threshold: float = 4.5) -> list[str]:
     for theme_name, palette in THEMES.items():
         audits = contrast_audit(palette)
         for role, ratio in audits.items():
-            if role.startswith(("body", "muted")) and ratio < normal_threshold:
+            if role.startswith(("body", "muted", "primary-text")) and ratio < normal_threshold:
                 issues.append(f"{theme_name}/{role}: {ratio:.2f}:1")
     return issues
 

@@ -1,5 +1,6 @@
 """Validated, portable application configuration."""
 
+import os
 from pathlib import Path
 
 from platformdirs import user_data_dir
@@ -17,5 +18,8 @@ class AppConfig(BaseModel):
 
 
 def load_config() -> AppConfig:
-    """Load offline defaults without reading private configuration files."""
-    return AppConfig()
+    """Load offline defaults with an explicit local data-directory override."""
+    data_directory = os.environ.get("RESEARCHWEAVE_DATA_DIR", "").strip()
+    if not data_directory:
+        return AppConfig()
+    return AppConfig(data_directory=Path(data_directory).expanduser())

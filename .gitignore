@@ -38,4 +38,8 @@ workspace-data/
 private/
 downloads/
 .tmp-external-audit/
+.local-audit/
+/prompts/
+/researchweave-pre-v2.bundle
+/legacy-tracked-files.pre-v2.txt
 output/

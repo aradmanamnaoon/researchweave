@@ -3,56 +3,56 @@
   "records": [
     {
       "actual_integrated_app": true,
-      "bytes": 80254,
+      "bytes": 75850,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-dashboard-light.png",
       "screen": "Dashboard",
-      "sha256": "d1f8c11162cbde376bda6c83d1f28c23fdd17035efce38e080f55982ac0e13df",
+      "sha256": "ea39bd25df9e16b95c06730c64368ad6197750ed1fcc8ef7d73e7a1cc4e25c45",
       "theme": "light"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 68264,
+      "bytes": 66912,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-statistics-light.png",
       "screen": "Statistics",
-      "sha256": "06102b7a89f53ec0f92c05fef00bf627d76c30fc2731ae1b19a644614e6c5981",
+      "sha256": "cb77381ce8b8fc6d2eb65acab4167265d881d027e3d3406f61239b18dc16c350",
       "theme": "light"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 79577,
+      "bytes": 83929,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-review-light.png",
       "screen": "Review",
-      "sha256": "936c637eab24439e57ba1294368869cd2116af72486a03c1642590305d66f147",
+      "sha256": "4a60a448016dec6d215de67f4a3b28dada1697cb1640196935f84b02a218bb27",
       "theme": "light"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 80134,
+      "bytes": 78664,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-dashboard-dark.png",
       "screen": "Dashboard",
-      "sha256": "80e9b04823939472b6c8472f10d31a09d8302d2523e6df91d39a0983b2e82ca3",
+      "sha256": "26cf3defeae609dc9c91238e5b794e0d8d8728c20ff830ce29db95b63dd8c83f",
       "theme": "dark"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 68900,
+      "bytes": 67322,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-statistics-dark.png",
       "screen": "Statistics",
-      "sha256": "bf58cb8385f9f6014ca9a408a60e2255827bbcaf5a4732cda8592f280e52f359",
+      "sha256": "e59ed3133bccd5835d797e8b3c3e3b56add1d8083971751d568bb744a9327d85",
       "theme": "dark"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 79748,
+      "bytes": 84496,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-review-dark.png",
       "screen": "Review",
-      "sha256": "350ebc07288f2e1aaaa4b86213079a5bbabd7c70743480641cf7cbabbce40789",
+      "sha256": "be1a25b9c2ecc6e1bc7d388faba5604ea23662ab756bece405ef8a72def2773f",
       "theme": "dark"
     }
   ],

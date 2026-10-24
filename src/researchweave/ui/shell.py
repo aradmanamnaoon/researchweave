@@ -17,6 +17,7 @@ from PyQt6.QtWidgets import (
     QDialogButtonBox,
     QFileDialog,
     QFormLayout,
+    QFrame,
     QHBoxLayout,
     QInputDialog,
     QLabel,
@@ -31,6 +32,8 @@ from PyQt6.QtWidgets import (
     QSplitter,
     QStackedWidget,
     QTableView,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
@@ -47,6 +50,31 @@ from .text_offsets import codepoint_range_to_qt, qt_range_to_codepoints
 from .visualization import Bin, ChartSpec, HistogramWidget
 
 SCREENS = WORKSPACE_SCREENS
+
+NAVIGATION_GROUPS: tuple[tuple[str, tuple[str, ...]], ...] = (
+    ("Start", ("Welcome", "Dashboard", "Question", "Search", "Protocol")),
+    ("Evidence", ("Library", "Reader", "PDF Reader", "Evidence", "Review", "PRISMA", "Extraction")),
+    (
+        "Analyze",
+        (
+            "Data View",
+            "Variable View",
+            "Statistics",
+            "Analysis Results",
+            "Qualitative",
+            "Codebook",
+            "Mixed Methods",
+        ),
+    ),
+    ("Write", ("Manuscript", "References", "Notebook", "Publishing")),
+    ("Assist", ("Agent", "Providers", "Privacy", "Integrations")),
+    (
+        "Project",
+        ("Exports", "Backups", "Recovery", "Diagnostics", "Jobs", "Notifications", "Activity"),
+    ),
+    ("Learn & settings", ("Tutorials", "Guidance", "Shortcuts", "Preferences", "About")),
+)
+NAV_GROUP_BY_SCREEN = {screen: group for group, screens in NAVIGATION_GROUPS for screen in screens}
 
 
 def button(text: str, callback: Callable[..., Any], *, primary: bool = False) -> QPushButton:
@@ -136,6 +164,7 @@ class ResearchWindow(QMainWindow):
         self.revision = 0
         self.current_source_id = ""
         self.current_dataset_id = ""
+        self.project_title = ""
         self._editor_loading = False
         self._screen_focus: dict[str, QWidget] = {}
         self.protocol_fields: dict[str, QPlainTextEdit] = {}
@@ -147,6 +176,7 @@ class ResearchWindow(QMainWindow):
         self.jobs.changed.connect(lambda _key, _state: self._refresh_dashboard_if_visible())
         self.jobs.progress.connect(lambda _key, _value: self._refresh_dashboard_if_visible())
         self.setWindowTitle("ResearchWeave · Local research desktop")
+        self.base_window_title = "ResearchWeave"
         self.setMinimumSize(760, 490)
         self.resize(max(760, self.prefs.window_width), max(490, self.prefs.window_height))
         self._build()
@@ -178,14 +208,22 @@ class ResearchWindow(QMainWindow):
     def _build(self) -> None:
         root = QWidget()
         row = QHBoxLayout(root)
-        row.setContentsMargins(12, 12, 12, 8)
+        row.setContentsMargins(14, 14, 14, 8)
+        row.setSpacing(12)
         self.splitter = QSplitter(Qt.Orientation.Horizontal)
         row.addWidget(self.splitter)
         self.setCentralWidget(root)
         sidebar = QWidget()
+        sidebar.setObjectName("sidebar")
         side = QVBoxLayout(sidebar)
-        side.addWidget(heading("researchweave"))
-        side.addWidget(QLabel("Private by default · local workspace"))
+        side.setContentsMargins(14, 16, 14, 14)
+        side.setSpacing(8)
+        brand = QLabel("researchweave")
+        brand.setObjectName("brandTitle")
+        side.addWidget(brand)
+        brand_context = QLabel("LOCAL RESEARCH WORKSPACE")
+        brand_context.setObjectName("eyebrow")
+        side.addWidget(brand_context)
         self.project_search = QLineEdit()
         self.project_search.setPlaceholderText("Find local projects")
         named(self.project_search, "Search recent local projects")
@@ -196,22 +234,63 @@ class ResearchWindow(QMainWindow):
         self.project_picker.currentIndexChanged.connect(self._selected_project)
         side.addWidget(self.project_picker)
         side.addWidget(button("＋ New project", self.create_project, primary=True))
-        self.nav = QListWidget()
-        named(self.nav, "Workspace navigation", "Use up and down arrows to select a screen")
-        self.nav.addItems(SCREENS)
-        self.nav.currentTextChanged.connect(self.navigate)
+        self.nav = QTreeWidget()
+        self.nav.setObjectName("workspaceNav")
+        self.nav.setHeaderHidden(True)
+        self.nav.setIndentation(14)
+        self.nav.setRootIsDecorated(False)
+        named(
+            self.nav,
+            "Workspace navigation",
+            "Use arrow keys to move through grouped research workspaces and Enter to activate.",
+        )
+        self._nav_items: dict[str, QTreeWidgetItem] = {}
+        for group_name, screens in NAVIGATION_GROUPS:
+            group_item = QTreeWidgetItem([group_name])
+            group_item.setExpanded(True)
+            self.nav.addTopLevelItem(group_item)
+            for screen in screens:
+                item = QTreeWidgetItem([screen])
+                item.setData(0, Qt.ItemDataRole.UserRole, screen)
+                group_item.addChild(item)
+                self._nav_items[screen] = item
+        self.nav.currentItemChanged.connect(
+            lambda current, _previous: (
+                self.navigate(str(current.data(0, Qt.ItemDataRole.UserRole)))
+                if current is not None and current.data(0, Qt.ItemDataRole.UserRole)
+                else None
+            )
+        )
+        self.nav.itemClicked.connect(self._toggle_navigation_group)
         side.addWidget(self.nav)
-        side.addWidget(button("⌘  Commands · Ctrl+K", self.show_palette))
+        palette_button = button("Commands  ·  Ctrl+K", self.show_palette)
+        palette_button.setObjectName("quiet")
+        side.addWidget(palette_button)
         self.splitter.addWidget(sidebar)
         center = QWidget()
         center_layout = QVBoxLayout(center)
+        center_layout.setContentsMargins(0, 2, 0, 0)
+        center_layout.setSpacing(10)
+        header = QHBoxLayout()
+        header.setSpacing(16)
+        header_titles = QVBoxLayout()
+        header_titles.setSpacing(1)
+        self.page_context = QLabel("START")
+        self.page_context.setObjectName("eyebrow")
         self.page_heading = heading("Dashboard")
-        center_layout.addWidget(self.page_heading)
+        header_titles.addWidget(self.page_context)
+        header_titles.addWidget(self.page_heading)
+        header.addLayout(header_titles, 1)
+        self.project_context = QLabel("No project selected · local only")
+        self.project_context.setObjectName("projectContext")
+        self.project_context.setAccessibleName("Current project and privacy status")
+        header.addWidget(self.project_context, 0, Qt.AlignmentFlag.AlignVCenter)
+        center_layout.addLayout(header)
         self.pages = QStackedWidget()
         self.pages.setAccessibleName("Active research workspace")
         center_layout.addWidget(self.pages)
         self.splitter.addWidget(center)
-        self.splitter.setSizes([self.prefs.sidebar_width, 930])
+        self.splitter.setSizes([max(236, self.prefs.sidebar_width), 930])
         self._build_pages()
         self._set_status("Ready")
         self._shortcut("Ctrl+K", self.show_palette)
@@ -237,17 +316,21 @@ class ResearchWindow(QMainWindow):
         layout = QVBoxLayout(page)
         layout.setContentsMargins(20, 20, 20, 20)
         layout.setSpacing(12)
+        intro = QHBoxLayout()
+        intro.setSpacing(12)
         summary = QLabel(explanation)
         summary.setWordWrap(True)
-        summary.setObjectName("muted")
-        layout.addWidget(summary)
+        summary.setObjectName("pageLead")
+        intro.addWidget(summary, 1)
         if name not in ("Guidance", "Shortcuts"):
-            layout.addWidget(
-                button(
-                    "Help for this screen",
-                    lambda _checked=False, screen=name: self.open_context_help(screen),
-                )
+            help_button = button(
+                "Help",
+                lambda _checked=False, screen=name: self.open_context_help(screen),
             )
+            help_button.setObjectName("quiet")
+            help_button.setToolTip(f"Open contextual help for {name}")
+            intro.addWidget(help_button, 0, Qt.AlignmentFlag.AlignTop)
+        layout.addLayout(intro)
         self.pages.addWidget(page)
         page.setAccessibleName(f"{name} workspace")
         return layout
@@ -263,28 +346,61 @@ class ResearchWindow(QMainWindow):
             "screen/capture evidence → write notes → preview export."
         )
         self.welcome_status.setWordWrap(True)
-        layout.addWidget(self.welcome_status)
-        layout.addWidget(button("Create my first project", self.create_project, primary=True))
-        layout.addWidget(button("Open synthetic local demo", self.create_local_demo))
-        layout.addWidget(
-            button("Show research-question tutorial", lambda: self.navigate("Question"))
+        self.welcome_status.setObjectName("pageLead")
+        hero = QFrame()
+        hero.setObjectName("heroSurface")
+        hero_layout = QHBoxLayout(hero)
+        hero_layout.setContentsMargins(20, 20, 20, 20)
+        hero_layout.setSpacing(22)
+        hero_copy = QVBoxLayout()
+        hero_copy.setSpacing(10)
+        hero_title = QLabel("Build a research trail you can inspect and reproduce.")
+        hero_title.setObjectName("sectionTitle")
+        hero_title.setWordWrap(True)
+        hero_copy.addWidget(hero_title)
+        hero_copy.addWidget(self.welcome_status)
+        welcome_actions = QHBoxLayout()
+        welcome_actions.addWidget(button("Create project", self.create_project, primary=True))
+        welcome_actions.addWidget(button("Explore synthetic demo", self.create_local_demo))
+        welcome_actions.addStretch(1)
+        hero_copy.addLayout(welcome_actions)
+        welcome_secondary = QHBoxLayout()
+        welcome_secondary.addWidget(
+            button("Research-question guide", lambda: self.navigate("Question"))
         )
-        layout.addWidget(button("Finish first-run guide", self.finish_onboarding))
+        finish_button = button("Finish onboarding", self.finish_onboarding)
+        finish_button.setObjectName("quiet")
+        welcome_secondary.addWidget(finish_button)
+        welcome_secondary.addStretch(1)
+        hero_copy.addLayout(welcome_secondary)
         self.welcome_privacy = QLabel(
             "No provider is required. Demo content is synthetic and is not a research finding."
         )
         self.welcome_privacy.setWordWrap(True)
-        layout.addWidget(self.welcome_privacy)
+        self.welcome_privacy.setObjectName("muted")
+        hero_copy.addWidget(self.welcome_privacy)
+        hero_layout.addLayout(hero_copy, 1)
+        layout.addWidget(hero)
         layout.addStretch()
 
         layout = self._page("Dashboard", "Start with a research question. Your work stays local.")
+        dashboard_surface = QFrame()
+        dashboard_surface.setObjectName("surface")
+        dashboard_layout = QVBoxLayout(dashboard_surface)
+        dashboard_layout.setContentsMargins(16, 14, 16, 14)
         self.dashboard = QLabel("Choose a project or create a new one.")
         self.dashboard.setWordWrap(True)
-        layout.addWidget(self.dashboard)
-        layout.addWidget(button("Refresh dashboard", self.refresh_dashboard))
-        layout.addWidget(button("Create research project", self.create_project, primary=True))
-        layout.addWidget(button("Add a source", self.import_source))
-        layout.addWidget(button("Build a research protocol", lambda: self.navigate("Protocol")))
+        dashboard_layout.addWidget(self.dashboard)
+        refresh_dashboard = button("Refresh", self.refresh_dashboard)
+        refresh_dashboard.setObjectName("quiet")
+        dashboard_layout.addWidget(refresh_dashboard, 0, Qt.AlignmentFlag.AlignLeft)
+        layout.addWidget(dashboard_surface)
+        dashboard_actions = QHBoxLayout()
+        dashboard_actions.addWidget(button("New project", self.create_project, primary=True))
+        dashboard_actions.addWidget(button("Add source", self.import_source))
+        dashboard_actions.addWidget(button("Research protocol", lambda: self.navigate("Protocol")))
+        dashboard_actions.addStretch(1)
+        layout.addLayout(dashboard_actions)
         self.tutorial = QLabel("First steps: create project → add source → notes → export")
         layout.addWidget(self.tutorial)
         layout.addStretch()
@@ -1400,6 +1516,13 @@ class ResearchWindow(QMainWindow):
             self.revision = payload["revision"]
         return cast(dict[str, Any], payload)
 
+    def _toggle_navigation_group(self, item: QTreeWidgetItem, _column: int) -> None:
+        """Make category headings themselves usable expansion targets."""
+        if item.data(0, Qt.ItemDataRole.UserRole):
+            return
+        if item.childCount():
+            item.setExpanded(not item.isExpanded())
+
     def navigate(self, name: str) -> None:
         if name not in SCREENS:
             return
@@ -1415,8 +1538,13 @@ class ResearchWindow(QMainWindow):
         index = SCREENS.index(name)
         self.pages.setCurrentIndex(index)
         self.page_heading.setText(name)
-        if self.nav.currentRow() != index:
-            self.nav.setCurrentRow(index)
+        self.page_context.setText(NAV_GROUP_BY_SCREEN.get(name, "WORKSPACE").upper())
+        nav_item = self._nav_items.get(name)
+        if nav_item is not None and self.nav.currentItem() is not nav_item:
+            parent = nav_item.parent()
+            if parent is not None:
+                parent.setExpanded(True)
+            self.nav.setCurrentItem(nav_item)
         if name == "Library":
             self.search_sources()
         elif name == "Question":
@@ -1911,6 +2039,9 @@ class ResearchWindow(QMainWindow):
         self.jobs.invalidate()
         project = response["project"]
         self.project_id = project["id"]
+        self.project_title = project["title"]
+        self.project_context.setText(f"{self.project_title} · local only")
+        self.setWindowTitle(f"{self.base_window_title} · {self.project_title}")
         self.revision = project["revision"]
         self.current_source_id = ""
         self.current_dataset_id = ""
