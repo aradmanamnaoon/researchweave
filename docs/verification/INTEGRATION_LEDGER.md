@@ -38,6 +38,8 @@ The final integration continuation added these local commits after the original 
 - `bda910d` — positive and privacy-negative mixed-methods integration acceptance.
 - `895c673` — clickable recent-history navigation with visible content hash and bus audit hashes.
 - `0861a1b` — final Ruff formatting normalization for the new integration slices.
+- `99722f0` — canonicalized UI asset integrity hashes so the tracked manifest is stable on the Windows
+  checkout used for the final full-suite run.
 
 No push was performed.
 
@@ -56,17 +58,19 @@ No push was performed.
   PyPI dependency and is therefore reported as skipped by pip-audit.
 - Source metric: **48,439 substantive first-party Python SLOC across 152 files**. Exact per-file/package
   output is in `CODE_METRICS.json`.
-- `detect-secrets` produces heuristic candidates in deterministic hashes and synthetic security fixtures.
-  Existing `SECRETS_REVIEW.md` documents the manual review categories; no live credential/private research
-  dataset is claimed from the reviewed tracked findings. New findings remain release-blocking until reviewed.
+- A fresh focused `detect-secrets` scan over `src` + `tests` reports **10 findings in 8 files**. The only new
+  integration finding is the explicitly synthetic password/wrong-password fixture in `test_int_064_sync.py`.
+  The full tracked scan reports **119 findings in 26 files**, dominated by deterministic hashes/manifests and
+  the focused scan's own hashed metadata. `SECRETS_REVIEW.md` records the reviewed categories; no live
+  credential/private research datum was identified. New findings remain release-blocking until reviewed.
 
 ### Final Windows package evidence
 
 - Build command: `powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1`
 - PyInstaller build: pass on Windows 11.
 - ZIP: `dist/ResearchWeave-windows-x86_64.zip`
-- ZIP bytes: **170,160,288**
-- ZIP SHA-256: `01233AF9A980126865000EC73057AD01993F2D827D84B06A5ED1AF1E073ADCE2`
+- ZIP bytes: **170,161,649**
+- ZIP SHA-256: `953E2B5CF005FAB23B3F3DE890EAED5A1DF1579F550B6127C7AF995F527C28CE`
 - Clean extraction/startup smoke: **pass**.
 - Portable package removal retaining a separate user-profile sentinel: **pass**.
 - This is portable-retention evidence, **not** a native MSI/OS uninstall/reinstall observation.

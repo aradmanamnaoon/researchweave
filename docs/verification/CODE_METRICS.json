@@ -1,4 +1,4 @@
-﻿{
+{
   "method": "AST/tokenize count of physical lines containing executable/declarative Python tokens; blank lines, comment-only lines, module/class/function docstrings, tests, fixtures, vendored and generated files are excluded by scope.",
   "per_file": {
     "src/researchweave/__init__.py": 1,

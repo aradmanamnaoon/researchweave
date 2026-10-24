@@ -7,8 +7,8 @@
     "portable_startup": "pass",
     "python_interpreter_invoked_by_user": false,
     "package_format": "PyInstaller portable ZIP",
-    "zip_sha256": "01233AF9A980126865000EC73057AD01993F2D827D84B06A5ED1AF1E073ADCE2",
-    "zip_bytes": 170160288,
+    "zip_sha256": "953E2B5CF005FAB23B3F3DE890EAED5A1DF1579F550B6127C7AF995F527C28CE",
+    "zip_bytes": 170161649,
     "cryptography_version": "50.0.2"
   },
   "status": "portable build/startup verified on Windows",

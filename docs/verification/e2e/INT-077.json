@@ -10,8 +10,8 @@
     "readme_local_links": "pass; 6 image references",
     "source_metrics": "152 Python source files; 48439 substantive SLOC",
     "pip_audit": "no known vulnerabilities found; local researchweave package not on PyPI",
-    "windows_zip_sha256": "01233AF9A980126865000EC73057AD01993F2D827D84B06A5ED1AF1E073ADCE2",
-    "windows_zip_bytes": 170160288,
+    "windows_zip_sha256": "953E2B5CF005FAB23B3F3DE890EAED5A1DF1579F550B6127C7AF995F527C28CE",
+    "windows_zip_bytes": 170161649,
     "portable_startup": "pass",
     "portable_user_data_retention": "pass"
   },
