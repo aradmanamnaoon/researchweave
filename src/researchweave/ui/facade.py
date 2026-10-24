@@ -1822,7 +1822,21 @@ class UIFacade:
                         "This scientific method is unavailable in the UI-only workstream.",
                         "Connect the typed analysis adapter during final integration.",
                     )
-                raw_result = self.analysis_backend.run(method, inputs)
+                run_for_project = getattr(self.analysis_backend, "run_for_project", None)
+                try:
+                    if callable(run_for_project):
+                        raw_result = run_for_project(method, inputs, project_id=project.id)
+                    else:
+                        raw_result = self.analysis_backend.run(method, inputs)
+                except ValueError as exc:
+                    raise UIError(
+                        "INVALID_INPUT",
+                        str(exc),
+                        (
+                            "Review the selected method, variables, assumptions and "
+                            "operation arguments."
+                        ),
+                    ) from exc
             result = store_analysis_result(project, raw_result)
             return {"result": result}
 

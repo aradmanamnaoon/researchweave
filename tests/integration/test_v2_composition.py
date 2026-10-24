@@ -3,6 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 from uuid import UUID, uuid4
 
+import pytest
+
 from researchweave.app.composition import build_services
 from researchweave.app.desktop_gateway import DesktopCommandGateway
 from researchweave.core import OperationRequest
@@ -323,5 +325,62 @@ def test_desktop_agent_approval_executes_exact_ai_operation(tmp_path: Path) -> N
         audit_operations = [event["operation"] for event in services.audit.events()]
         assert "ui.agent.action.execute" in audit_operations
         assert "retrieval.ingest" in audit_operations
+    finally:
+        services.close()
+
+
+def test_desktop_advanced_analysis_routes_meta_oracle_through_shared_bus(tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    try:
+        gateway = DesktopCommandGateway(services.ui, services.bus)
+        created = gateway.execute(
+            "ui.project.create",
+            {
+                "title": "Integrated meta-analysis",
+                "question": "Can advanced scientific methods run from the desktop?",
+                "study_type": "quantitative",
+            },
+        )["data"]
+        project_id = str(created["project_id"])
+        methods = gateway.execute("ui.analysis.methods", {"project_id": project_id})["data"]
+        meta = next(item for item in methods["methods"] if item["id"] == "analysis.statistics.meta")
+        assert meta["available"] is True
+        assert meta["arguments_schema"]["required"] == ["studies"]
+
+        studies = [
+            {"id": "a", "estimate": 2.0, "se": 1.0, "scale": "mean_difference"},
+            {"id": "b", "estimate": 4.0, "se": 1.0, "scale": "mean_difference"},
+        ]
+        result = gateway.execute(
+            "ui.analysis.run",
+            {
+                "project_id": project_id,
+                "expected_revision": created["revision"],
+                "method": "analysis.statistics.meta",
+                "inputs": {"studies": studies},
+            },
+        )
+        assert result["status"] == "ok", result
+        record = result["data"]["result"]
+        assert record["method"] == "statistics.meta"
+        assert record["estimates"]["estimate"] == 3.0
+        assert record["estimates"]["standard_error"] == pytest.approx(2**-0.5)
+        assert record["provenance"]["request_id"]
+        assert "statistics.meta" in [event["operation"] for event in services.audit.events()]
+
+        incompatible = [studies[0], {**studies[1], "scale": "log_or"}]
+        failed = gateway.execute(
+            "ui.analysis.run",
+            {
+                "project_id": project_id,
+                "expected_revision": result["data"]["revision"],
+                "method": "analysis.statistics.meta",
+                "inputs": {"studies": incompatible},
+            },
+        )
+        assert failed["status"] == "failed"
+        assert failed["error"]["code"] == "INVALID_INPUT"
+        persisted = services.ui.store.open(project_id)
+        assert len(persisted.analysis_results) == 1
     finally:
         services.close()

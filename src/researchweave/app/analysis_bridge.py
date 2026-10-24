@@ -7,9 +7,10 @@ import hashlib
 from collections.abc import Mapping
 from pathlib import Path
 from typing import Any
-from uuid import uuid4
+from uuid import UUID, uuid4
 
 from researchweave.analysis.facade import AnalysisFacade
+from researchweave.core import CommandBus, OperationRequest
 from researchweave.ui.facade import UIFacade
 
 
@@ -18,13 +19,20 @@ class ProductionAnalysisBackend:
 
     METHOD = "analysis.statistics.describe"
 
-    def __init__(self, ui: UIFacade, analysis: AnalysisFacade, import_root: Path) -> None:
+    def __init__(
+        self,
+        ui: UIFacade,
+        analysis: AnalysisFacade,
+        import_root: Path,
+        bus: CommandBus,
+    ) -> None:
         self._ui = ui
         self._analysis = analysis
         self._import_root = import_root.resolve()
+        self._bus = bus
 
     def methods(self) -> list[Mapping[str, Any]]:
-        return [
+        methods: list[Mapping[str, Any]] = [
             {
                 "id": self.METHOD,
                 "label": "Production descriptive statistics",
@@ -39,6 +47,28 @@ class ProductionAnalysisBackend:
                 ),
             }
         ]
+        for capability in self._bus.capabilities():
+            if capability.get("domain") != "analysis":
+                continue
+            operation = str(capability.get("operation", ""))
+            if not operation or operation == "statistics.describe":
+                continue
+            methods.append(
+                {
+                    "id": f"analysis.{operation}",
+                    "label": f"Advanced · {operation}",
+                    "available": True,
+                    "arguments_schema": dict(capability.get("arguments_schema", {})),
+                    "effect": capability.get("effect", "read"),
+                    "offline": bool(capability.get("offline", True)),
+                    "note": (
+                        "Runs the production scientific operation through the shared command bus. "
+                        "Advanced arguments are explicit JSON and remain subject to the "
+                        "operation schema."
+                    ),
+                }
+            )
+        return methods
 
     def _dataset(self, dataset_id: str) -> tuple[str, list[str], list[list[str]], str]:
         for project in self._ui.store.list_projects():
@@ -57,9 +87,122 @@ class ProductionAnalysisBackend:
             writer.writerows(rows)
         return filename, hashlib.sha256(path.read_bytes()).hexdigest()
 
+    def _import_ui_dataset(
+        self,
+        dataset_id: str,
+        project_id: UUID,
+    ) -> tuple[dict[str, Any], str] | None:
+        try:
+            _project_id, columns, rows, _origin = self._dataset(dataset_id)
+        except ValueError:
+            return None
+        filename, staged_hash = self._stage_csv(columns, rows)
+        staged_path = self._import_root / filename
+        import_request = OperationRequest(
+            operation="dataset.import",
+            project_id=project_id,
+            arguments={"filename": filename},
+            actor="desktop-user",
+        )
+        try:
+            imported = self._bus.dispatch(
+                import_request,
+                approval=self._bus.issue_approval(import_request),
+            )
+        finally:
+            staged_path.unlink(missing_ok=True)
+        if imported.get("status") != "ok":
+            raise ValueError("Scientific dataset import failed")
+        return dict(imported["data"]), staged_hash
+
+    def _run_advanced(
+        self,
+        method: str,
+        inputs: Mapping[str, Any],
+        project_id: str,
+    ) -> Mapping[str, Any]:
+        operation = method.removeprefix("analysis.")
+        capability = next(
+            (
+                item
+                for item in self._bus.capabilities()
+                if item.get("domain") == "analysis" and item.get("operation") == operation
+            ),
+            None,
+        )
+        if capability is None or method == operation:
+            raise ValueError("Unsupported integrated analysis method")
+        try:
+            scope = UUID(project_id)
+        except ValueError as exc:
+            raise ValueError("Desktop project identifier is not a UUID") from exc
+        prepared = dict(inputs)
+        staged_hash = ""
+        dataset_id = prepared.get("dataset_id")
+        if isinstance(dataset_id, str) and dataset_id:
+            imported = self._import_ui_dataset(dataset_id, scope)
+            if imported is not None:
+                imported_data, staged_hash = imported
+                prepared["dataset_id"] = imported_data["dataset_id"]
+                prepared["revision"] = imported_data["revision"]
+        operation_request = OperationRequest(
+            operation=operation,
+            project_id=scope,
+            arguments=prepared,
+            actor="desktop-user",
+        )
+        effect = self._bus.effect_for(operation)
+        approval = None
+        if effect != "read":
+            approval = self._bus.issue_approval(operation_request)
+        response = self._bus.dispatch(operation_request, approval=approval)
+        if response.get("status") != "ok":
+            error = response.get("error")
+            if isinstance(error, Mapping):
+                message = str(error.get("message", "Scientific analysis failed"))
+                code = str(error.get("code", "ANALYSIS_ERROR"))
+                raise ValueError(f"{code}: {message}")
+            raise ValueError("Scientific analysis failed")
+        data = dict(response.get("data", {}))
+        warnings = [str(item) for item in response.get("warnings", [])]
+        assumptions = data.pop("assumptions", [])
+        if not isinstance(assumptions, list):
+            assumptions = [str(assumptions)]
+        return {
+            "method": operation,
+            "method_version": str(capability.get("version", "researchweave-analysis-v2")),
+            "inputs": dict(inputs),
+            "assumptions": [str(item) for item in assumptions],
+            "warnings": warnings,
+            "estimates": data,
+            "uncertainty": {},
+            "diagnostics": {
+                "effect": effect,
+                "artifacts": list(response.get("artifacts", [])),
+                "impact": dict(response.get("impact", {})),
+            },
+            "provenance": {
+                "request_id": response.get("request_id"),
+                "events": list(response.get("provenance", [])),
+                "staged_csv_sha256": staged_hash or None,
+                "resolved_arguments": prepared,
+            },
+        }
+
+    def run_for_project(
+        self,
+        method: str,
+        inputs: Mapping[str, Any],
+        *,
+        project_id: str,
+    ) -> Mapping[str, Any]:
+        if method != self.METHOD:
+            return self._run_advanced(method, inputs, project_id)
+        return self.run(method, inputs)
+
     def run(self, method: str, inputs: Mapping[str, Any]) -> Mapping[str, Any]:
         if method != self.METHOD:
-            raise ValueError("Unsupported integrated analysis method")
+            raise ValueError("Advanced analysis requires desktop project context")
         dataset_id = str(inputs.get("dataset_id", ""))
         column = str(inputs.get("column", ""))
         project_id, columns, rows, origin = self._dataset(dataset_id)

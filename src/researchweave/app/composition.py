@@ -119,7 +119,6 @@ def build_services(data_root: Path) -> AppServices:
     ai_issuer = ApprovalIssuer(secrets.token_bytes(32))
     ai = build_ai_facade(paths.ai, policy=EgressPolicy(offline=True), issuer=ai_issuer)
     ui = build_ui_facade(paths.ui)
-    ui.analysis_backend = ProductionAnalysisBackend(ui, analysis, paths.imports)
 
     bus = CommandBus(authority, audit)
     bus.register(DomainBinding("evidence", evidence))
@@ -153,5 +152,6 @@ def build_services(data_root: Path) -> AppServices:
 
     bus.register(DomainBinding("ai", ai, executor=ai_execute))
     bus.register(DomainBinding("ui", ui))
+    ui.analysis_backend = ProductionAnalysisBackend(ui, analysis, paths.imports, bus)
     ui.ai_backend = ProductionAIBackend(bus)
     return AppServices(paths, evidence, analysis, ai, ui, bus, audit, authority, ai_issuer)

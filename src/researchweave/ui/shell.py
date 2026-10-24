@@ -773,7 +773,16 @@ class ResearchWindow(QMainWindow):
         layout.addWidget(self.stats_result)
         self.analysis_method = QComboBox()
         named(self.analysis_method, "Scientific analysis method")
+        self.analysis_method.currentIndexChanged.connect(self.prepare_analysis_arguments)
         layout.addWidget(self.analysis_method)
+        self.analysis_arguments = QPlainTextEdit()
+        self.analysis_arguments.setPlaceholderText(
+            "Advanced methods: enter operation arguments as a JSON object. "
+            "Current dataset and variable are inserted when the selected schema supports them."
+        )
+        self.analysis_arguments.setMaximumHeight(120)
+        named(self.analysis_arguments, "Advanced scientific analysis JSON arguments")
+        layout.addWidget(self.analysis_arguments)
         layout.addWidget(button("Run selected analysis", self.run_analysis))
 
         layout = self._page(
@@ -2802,6 +2811,26 @@ class ResearchWindow(QMainWindow):
                 if not method.get("available", False):
                     label += " · unavailable"
                 self.analysis_method.addItem(label, method)
+            self.prepare_analysis_arguments()
+
+    def prepare_analysis_arguments(self) -> None:
+        method = self.analysis_method.currentData()
+        if not isinstance(method, dict):
+            return
+        if method.get("id") in {"descriptive", "analysis.statistics.describe"}:
+            self.analysis_arguments.setPlainText("{}")
+            self.analysis_arguments.setEnabled(False)
+            return
+        self.analysis_arguments.setEnabled(True)
+        schema = method.get("arguments_schema", {})
+        properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+        defaults: dict[str, object] = {}
+        if isinstance(properties, dict):
+            if "dataset_id" in properties and self.current_dataset_id:
+                defaults["dataset_id"] = self.current_dataset_id
+            if "column" in properties and self.variable_picker.currentText():
+                defaults["column"] = self.variable_picker.currentText()
+        self.analysis_arguments.setPlainText(json.dumps(defaults, indent=2))
 
     def load_data_page(self) -> None:
         if not self.current_dataset_id:
@@ -3120,16 +3149,32 @@ class ResearchWindow(QMainWindow):
                 "No statistical result was fabricated."
             )
             return
-        if not self.current_dataset_id or not self.variable_picker.currentText():
+        method_id = str(method.get("id", ""))
+        if method_id in {"descriptive", "analysis.statistics.describe"} and (
+            not self.current_dataset_id or not self.variable_picker.currentText()
+        ):
             self._set_status("Choose a dataset and variable.")
             return
-        response = self._call(
-            "ui.analysis.run",
-            method=method["id"],
-            inputs={
+        if method_id in {"descriptive", "analysis.statistics.describe"}:
+            inputs: dict[str, object] = {
                 "dataset_id": self.current_dataset_id,
                 "column": self.variable_picker.currentText(),
-            },
+            }
+        else:
+            raw_arguments = self.analysis_arguments.toPlainText().strip() or "{}"
+            try:
+                parsed_arguments = json.loads(raw_arguments)
+            except json.JSONDecodeError:
+                self._set_status("Advanced analysis arguments must be valid JSON.")
+                return
+            if not isinstance(parsed_arguments, dict):
+                self._set_status("Advanced analysis arguments must be a JSON object.")
+                return
+            inputs = parsed_arguments
+        response = self._call(
+            "ui.analysis.run",
+            method=method_id,
+            inputs=inputs,
         )
         if response is not None:
             self.refresh_analysis_results()
