@@ -110,7 +110,7 @@ jobs:
       - name: Verify Linux release files
         run: |
           set -euo pipefail
-          VERSION=$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
+          VERSION=$(uv run --no-sync python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
           for path in \
             "dist/ResearchWeave-v$VERSION-linux-x86_64.AppImage" \
             "dist/ResearchWeave-v$VERSION-linux-amd64.deb" \
