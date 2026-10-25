@@ -63,6 +63,43 @@ def test_project_decoder_rejects_schema_shape_identifier_and_resource_limits() -
     assert_error(lambda: decode_project(malformed), "INTEGRITY_FAILURE")
     bad_id = {"schema_version": 1, "project": {**asdict(project), "id": "../escape"}}
     assert_error(lambda: decode_project(bad_id), "INTEGRITY_FAILURE")
+    source_dataset = Dataset(id=new_id(), name="Source", columns=["x"], rows=[["1"]])
+    derived_dataset = Dataset(
+        id=new_id(),
+        name="Derived",
+        columns=["x"],
+        rows=[["1"]],
+        parent_dataset_id=source_dataset.id,
+        analysis_dataset_id="a" * 24,
+        analysis_revision="b" * 64,
+    )
+    lineage_project = {
+        **asdict(project),
+        "datasets": [asdict(source_dataset), asdict(derived_dataset)],
+    }
+    assert len(decode_project({"schema_version": 1, "project": lineage_project}).datasets) == 2
+    broken_parent = {
+        **lineage_project,
+        "datasets": [
+            asdict(source_dataset),
+            {**asdict(derived_dataset), "parent_dataset_id": new_id()},
+        ],
+    }
+    assert_error(
+        lambda: decode_project({"schema_version": 1, "project": broken_parent}),
+        "INTEGRITY_FAILURE",
+    )
+    broken_analysis = {
+        **lineage_project,
+        "datasets": [
+            asdict(source_dataset),
+            {**asdict(derived_dataset), "analysis_revision": "not-a-revision"},
+        ],
+    }
+    assert_error(
+        lambda: decode_project({"schema_version": 1, "project": broken_analysis}),
+        "INTEGRITY_FAILURE",
+    )
     huge_source = Source(
         id=new_id(),
         title="Huge",

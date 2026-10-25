@@ -114,6 +114,9 @@ class Dataset:
     columns: list[str]
     rows: list[list[str]]
     origin: str = "Synthetic example"
+    parent_dataset_id: str = ""
+    analysis_dataset_id: str = ""
+    analysis_revision: str = ""
 
 
 @dataclass

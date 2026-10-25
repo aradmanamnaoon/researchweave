@@ -124,6 +124,29 @@ def surface(
     return frame, layout
 
 
+def _comma_values(text: str) -> list[str]:
+    return [value.strip() for value in text.split(",") if value.strip()]
+
+
+def _recode_mapping(text: str) -> dict[str, str]:
+    mapping: dict[str, str] = {}
+    for line_number, raw_line in enumerate(text.splitlines(), start=1):
+        line = raw_line.strip()
+        if not line:
+            continue
+        if "=>" not in line:
+            raise ValueError(f"Recode line {line_number} must use 'old => new'.")
+        old, new = (part.strip() for part in line.split("=>", 1))
+        if not old or not new:
+            raise ValueError(f"Recode line {line_number} needs both old and new values.")
+        if old in mapping:
+            raise ValueError(f"Recode value '{old}' is listed more than once.")
+        mapping[old] = new
+    if not mapping:
+        raise ValueError("Add at least one recode mapping before creating a derived dataset.")
+    return mapping
+
+
 def metric_card(label: str, value: str = "—", detail: str = "") -> tuple[QFrame, QLabel, QLabel]:
     """Create a compact dashboard metric card with accessible text labels."""
 
@@ -983,7 +1006,7 @@ class ResearchWindow(QMainWindow):
         data_actions = QHBoxLayout()
         data_actions.addWidget(button("Import CSV text", self.import_csv, primary=True))
         self.data_mode = QLabel(
-            "Read-only preview · edits are disabled until provenance-preserving editing exists."
+            "Read-only grid · transformations create a new immutable dataset and retain the source."
         )
         self.data_mode.setWordWrap(True)
         self.data_mode.setObjectName("muted")
@@ -1008,6 +1031,126 @@ class ResearchWindow(QMainWindow):
         data_controls.addWidget(button("Apply data view", self.apply_data_view))
         data_toolbar_layout.addLayout(data_controls)
         layout.addWidget(data_toolbar)
+
+        transform_surface, transform_layout = surface(
+            "Create derived dataset",
+            "Use bounded SPSS-style transformations backed by immutable analysis revisions. "
+            "The source dataset is never edited in place.",
+        )
+        transform_header = QFormLayout()
+        self.data_transform_kind = QComboBox()
+        self.data_transform_kind.addItem("Select cases", "select")
+        self.data_transform_kind.addItem("Recode values", "recode")
+        self.data_transform_kind.addItem("Compute numeric variable", "derive")
+        self.data_transform_kind.addItem("Set user-missing codes", "user_missing")
+        named(self.data_transform_kind, "Data transformation type")
+        self.data_transform_name = QLineEdit()
+        self.data_transform_name.setPlaceholderText("Optional derived dataset name")
+        named(self.data_transform_name, "Derived dataset name")
+        transform_header.addRow("Transformation", self.data_transform_kind)
+        transform_header.addRow("Derived dataset name", self.data_transform_name)
+        transform_layout.addLayout(transform_header)
+
+        self.data_transform_stack = QStackedWidget()
+        named(self.data_transform_stack, "Data transformation settings")
+
+        select_page = QWidget()
+        select_form = QFormLayout(select_page)
+        self.data_select_column = QComboBox()
+        named(self.data_select_column, "Select cases variable")
+        self.data_select_values = QLineEdit()
+        self.data_select_values.setPlaceholderText("A, B, control")
+        named(self.data_select_values, "Allowed case values")
+        self.data_select_null = QCheckBox("Also keep blank / null cases")
+        named(self.data_select_null, "Include null cases")
+        select_form.addRow("Variable", self.data_select_column)
+        select_form.addRow("Keep exact values", self.data_select_values)
+        select_form.addRow("", self.data_select_null)
+        self.data_transform_stack.addWidget(select_page)
+
+        recode_page = QWidget()
+        recode_form = QFormLayout(recode_page)
+        self.data_recode_column = QComboBox()
+        named(self.data_recode_column, "Recode variable")
+        self.data_recode_mapping = QPlainTextEdit()
+        self.data_recode_mapping.setPlaceholderText("A => treatment\nB => control")
+        self.data_recode_mapping.setMaximumHeight(88)
+        named(self.data_recode_mapping, "Recode value mappings")
+        recode_form.addRow("Variable", self.data_recode_column)
+        recode_form.addRow("Old => new, one per line", self.data_recode_mapping)
+        self.data_transform_stack.addWidget(recode_page)
+
+        derive_page = QWidget()
+        derive_form = QFormLayout(derive_page)
+        self.data_derive_source = QComboBox()
+        named(self.data_derive_source, "Compute source variable")
+        self.data_derive_operation = QComboBox()
+        for label, operation_value in (
+            ("Add", "add"),
+            ("Subtract", "subtract"),
+            ("Multiply", "multiply"),
+            ("Divide", "divide"),
+        ):
+            self.data_derive_operation.addItem(label, operation_value)
+        named(self.data_derive_operation, "Compute arithmetic operation")
+        self.data_derive_operand_column = QComboBox()
+        self.data_derive_operand_column.addItem("Use constant", "")
+        named(self.data_derive_operand_column, "Compute operand variable")
+        self.data_derive_constant = QLineEdit()
+        self.data_derive_constant.setPlaceholderText("e.g. 2.0")
+        named(self.data_derive_constant, "Compute constant operand")
+        self.data_derive_column = QLineEdit()
+        self.data_derive_column.setPlaceholderText("new_variable")
+        named(self.data_derive_column, "Computed variable name")
+        derive_form.addRow("Source variable", self.data_derive_source)
+        derive_form.addRow("Operation", self.data_derive_operation)
+        derive_form.addRow("Operand variable", self.data_derive_operand_column)
+        derive_form.addRow("Constant when no operand variable", self.data_derive_constant)
+        derive_form.addRow("New variable", self.data_derive_column)
+        self.data_transform_stack.addWidget(derive_page)
+
+        missing_page = QWidget()
+        missing_form = QFormLayout(missing_page)
+        self.data_missing_column = QComboBox()
+        named(self.data_missing_column, "User-missing variable")
+        self.data_missing_values = QLineEdit()
+        self.data_missing_values.setPlaceholderText("-9, 99, refused · leave blank to clear")
+        named(self.data_missing_values, "User-missing codes")
+        missing_form.addRow("Variable", self.data_missing_column)
+        missing_form.addRow("Missing codes", self.data_missing_values)
+        self.data_transform_stack.addWidget(missing_page)
+
+        transform_layout.addWidget(self.data_transform_stack)
+        self.data_transform_preview = QLabel(
+            "Select cases creates a new dataset containing only explicitly matched rows."
+        )
+        self.data_transform_preview.setWordWrap(True)
+        self.data_transform_preview.setObjectName("muted")
+        named(self.data_transform_preview, "Data transformation preview")
+        transform_layout.addWidget(self.data_transform_preview)
+        self.data_transform_apply = button(
+            "Create derived dataset", self.create_data_transform, primary=True
+        )
+        transform_layout.addWidget(self.data_transform_apply)
+        layout.addWidget(transform_surface)
+
+        self.data_transform_kind.currentIndexChanged.connect(self._data_transform_kind_changed)
+        self.data_select_column.currentIndexChanged.connect(self._update_data_transform_preview)
+        self.data_select_values.textChanged.connect(self._update_data_transform_preview)
+        self.data_select_null.stateChanged.connect(self._update_data_transform_preview)
+        self.data_recode_column.currentIndexChanged.connect(self._update_data_transform_preview)
+        self.data_recode_mapping.textChanged.connect(self._update_data_transform_preview)
+        self.data_derive_source.currentIndexChanged.connect(self._update_data_transform_preview)
+        self.data_derive_operation.currentIndexChanged.connect(self._update_data_transform_preview)
+        self.data_derive_operand_column.currentIndexChanged.connect(
+            self._update_data_transform_preview
+        )
+        self.data_derive_constant.textChanged.connect(self._update_data_transform_preview)
+        self.data_derive_column.textChanged.connect(self._update_data_transform_preview)
+        self.data_missing_column.currentIndexChanged.connect(self._update_data_transform_preview)
+        self.data_missing_values.textChanged.connect(self._update_data_transform_preview)
+        self._data_transform_kind_changed(self.data_transform_kind.currentIndex())
+
         data_surface, data_surface_layout = surface("Data preview")
         self.data_table = QTableView()
         self.data_table.setAlternatingRowColors(True)
@@ -1932,6 +2075,7 @@ class ResearchWindow(QMainWindow):
             "ui.screening.vote",
             "ui.screening.adjudicate",
             "ui.dataset.import",
+            "ui.dataset.transform",
             "ui.manuscript.save",
             "ui.manuscript.sections.update",
             "ui.notebook.save",
@@ -3421,6 +3565,17 @@ class ResearchWindow(QMainWindow):
         self.data_sort.blockSignals(True)
         self.data_sort.clear()
         self.data_sort.addItem("No sort", "")
+        for selector in (
+            self.data_select_column,
+            self.data_recode_column,
+            self.data_derive_source,
+            self.data_missing_column,
+        ):
+            selector.blockSignals(True)
+            selector.clear()
+        self.data_derive_operand_column.blockSignals(True)
+        self.data_derive_operand_column.clear()
+        self.data_derive_operand_column.addItem("Use constant", "")
         self.load_data_page()
         self.variable_list.clear()
         self.variable_picker.clear()
@@ -3428,6 +3583,11 @@ class ResearchWindow(QMainWindow):
         if response is not None:
             for variable in response["variables"]:
                 self.data_sort.addItem(variable["name"], variable["name"])
+                self.data_select_column.addItem(variable["name"], variable["name"])
+                self.data_recode_column.addItem(variable["name"], variable["name"])
+                self.data_derive_source.addItem(variable["name"], variable["name"])
+                self.data_derive_operand_column.addItem(variable["name"], variable["name"])
+                self.data_missing_column.addItem(variable["name"], variable["name"])
                 item = QListWidgetItem(
                     f"{variable['name']} · {variable['inferred_type']} · "
                     f"missing {variable['missing_n']} / {response['total_rows']}"
@@ -3439,6 +3599,15 @@ class ResearchWindow(QMainWindow):
                 self.auto_group.addItem(variable["name"], variable["name"])
                 self.auto_paired.addItem(variable["name"], variable["name"])
         self.data_sort.blockSignals(False)
+        for selector in (
+            self.data_select_column,
+            self.data_recode_column,
+            self.data_derive_source,
+            self.data_missing_column,
+            self.data_derive_operand_column,
+        ):
+            selector.blockSignals(False)
+        self._update_data_transform_preview()
         methods = self._call("ui.analysis.methods")
         if methods is not None:
             self.analysis_method.clear()
@@ -3601,6 +3770,131 @@ class ResearchWindow(QMainWindow):
             pass
         self.analysis_arguments.setPlainText(json.dumps(preview, indent=2))
 
+    def _data_transform_kind_changed(self, index: int) -> None:
+        self.data_transform_stack.setCurrentIndex(max(0, index))
+        current = self.data_transform_stack.currentWidget()
+        if current is not None:
+            self.data_transform_stack.setFixedHeight(max(96, current.sizeHint().height() + 6))
+        self._update_data_transform_preview()
+
+    def _update_data_transform_preview(self, *_args: object) -> None:
+        if not hasattr(self, "data_transform_preview"):
+            return
+        kind = str(self.data_transform_kind.currentData() or "select")
+        source_name = self.dataset_picker.currentText() or "current dataset"
+        if kind == "select":
+            values = _comma_values(self.data_select_values.text())
+            null_note = " plus blank/null rows" if self.data_select_null.isChecked() else ""
+            selected_variable = self.data_select_column.currentText() or "the selected variable"
+            detail = (
+                f"Keep rows where {selected_variable} "
+                f"matches {len(values)} explicit value(s){null_note}."
+            )
+        elif kind == "recode":
+            mappings = sum(
+                1 for line in self.data_recode_mapping.toPlainText().splitlines() if line.strip()
+            )
+            detail = (
+                f"Recode {mappings} explicit value mapping(s) in "
+                f"{self.data_recode_column.currentText() or 'the selected variable'}."
+            )
+        elif kind == "derive":
+            operation = self.data_derive_operation.currentText().lower()
+            operand_column = str(self.data_derive_operand_column.currentData() or "")
+            operand = operand_column or self.data_derive_constant.text().strip() or "a constant"
+            target = self.data_derive_column.text().strip() or "new_variable"
+            source_variable = self.data_derive_source.currentText() or "a source variable"
+            detail = f"Compute {target} from {source_variable} using {operation} with {operand}."
+        else:
+            values = _comma_values(self.data_missing_values.text())
+            missing_variable = self.data_missing_column.currentText() or "the selected variable"
+            detail = (
+                f"Set {len(values)} user-missing code(s) for "
+                f"{missing_variable}; raw values remain unchanged."
+            )
+        self.data_transform_preview.setText(
+            f"{detail} '{source_name}' stays unchanged; success creates a new immutable "
+            "dataset revision."
+        )
+
+    def create_data_transform(self) -> None:
+        if not self.current_dataset_id:
+            self._set_status("Import or select a dataset first.")
+            return
+        kind = str(self.data_transform_kind.currentData() or "select")
+        default_labels = {
+            "select": "selected cases",
+            "recode": "recoded",
+            "derive": "computed variable",
+            "user_missing": "missing codes",
+        }
+        source_name = self.dataset_picker.currentText() or "Dataset"
+        name = self.data_transform_name.text().strip() or f"{source_name} · {default_labels[kind]}"
+        values: dict[str, Any] = {
+            "dataset_id": self.current_dataset_id,
+            "name": name,
+            "kind": kind,
+        }
+        try:
+            if kind == "select":
+                allowed = _comma_values(self.data_select_values.text())
+                if not allowed:
+                    raise ValueError("Select cases needs at least one exact value to keep.")
+                values.update(
+                    {
+                        "column": str(self.data_select_column.currentData() or ""),
+                        "allowed": allowed,
+                        "include_null": self.data_select_null.isChecked(),
+                    }
+                )
+            elif kind == "recode":
+                values.update(
+                    {
+                        "column": str(self.data_recode_column.currentData() or ""),
+                        "mapping": _recode_mapping(self.data_recode_mapping.toPlainText()),
+                    }
+                )
+            elif kind == "derive":
+                operand_column = str(self.data_derive_operand_column.currentData() or "")
+                values.update(
+                    {
+                        "column": self.data_derive_column.text().strip(),
+                        "source": str(self.data_derive_source.currentData() or ""),
+                        "arithmetic": str(self.data_derive_operation.currentData() or ""),
+                        "operand_column": operand_column,
+                    }
+                )
+                if not values["column"]:
+                    raise ValueError("Enter a name for the computed variable.")
+                if not operand_column:
+                    try:
+                        values["operand"] = float(self.data_derive_constant.text().strip())
+                    except ValueError as exc:
+                        raise ValueError(
+                            "Enter a numeric constant or choose an operand variable."
+                        ) from exc
+            else:
+                values.update(
+                    {
+                        "column": str(self.data_missing_column.currentData() or ""),
+                        "missing_values": _comma_values(self.data_missing_values.text()),
+                    }
+                )
+        except ValueError as exc:
+            self._set_status(str(exc))
+            return
+        result = self._call("ui.dataset.transform", **values)
+        if result is None:
+            return
+        self.current_dataset_id = result["dataset_id"]
+        self.data_transform_name.clear()
+        self.refresh_datasets()
+        revision = str(result.get("analysis_revision", ""))
+        lineage = f" · analysis {revision[:12]}" if revision else ""
+        self._set_status(
+            f"Created immutable derived dataset '{name}'{lineage}; source dataset retained."
+        )
+
     def load_data_page(self) -> None:
         if not self.current_dataset_id:
             self.data_model.set_records([], [])
@@ -3618,6 +3912,20 @@ class ResearchWindow(QMainWindow):
             return
         self.data_total = response["total"]
         self.data_model.set_records(response["columns"], response["rows"])
+        analysis_revision = str(response.get("analysis_revision", ""))
+        parent_dataset_id = str(response.get("parent_dataset_id", ""))
+        if analysis_revision:
+            parent_note = f" · parent {parent_dataset_id[:8]}" if parent_dataset_id else ""
+            self.data_mode.setText(
+                f"Immutable derived dataset · analysis revision {analysis_revision[:12]}"
+                f"{parent_note}. "
+                "Create another derived dataset to transform it further."
+            )
+        else:
+            self.data_mode.setText(
+                "Read-only grid · transformations create a new immutable dataset and retain "
+                "the source."
+            )
         beginning = self.data_offset + 1 if self.data_total else 0
         last = min(self.data_offset + len(response["rows"]), self.data_total)
         filter_note = (
@@ -3627,7 +3935,7 @@ class ResearchWindow(QMainWindow):
         )
         self.data_page_status.setText(
             f"Rows {beginning}–{last} of {self.data_total}{filter_note} · read-only · "
-            "synthetic or imported data"
+            f"{response['origin']}"
         )
 
     def apply_data_view(self) -> None:

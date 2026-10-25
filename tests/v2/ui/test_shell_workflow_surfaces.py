@@ -12,6 +12,7 @@ os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QComboBox, QInputDialog, QMessageBox
 
+from researchweave.app.composition import build_services
 from researchweave.ui import build_ui_facade, build_ui_shell
 
 
@@ -56,6 +57,68 @@ def shell_fixture(tmp_path: Path):
     shell = build_ui_shell(fake_services=facade)
     shell.open_project(pid)
     return facade, shell, pid, source, dataset
+
+
+def test_data_view_creates_immutable_derived_dataset(qt_app: QApplication, tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    try:
+        created = services.ui.execute(
+            "ui.project.create",
+            {
+                "title": "Synthetic Data View transform",
+                "question": "Can the visible grid create an immutable derived dataset?",
+                "study_type": "quantitative",
+            },
+        )["data"]
+        pid = created["project_id"]
+        imported = services.ui.execute(
+            "ui.dataset.import",
+            {
+                "project_id": pid,
+                "expected_revision": created["revision"],
+                "name": "Synthetic scores",
+                "csv_text": "score,pre,group\n2,1,A\n4,3,A\n5,2,B\n",
+            },
+        )["data"]
+        shell = build_ui_shell(fake_services=services.ui)
+        shell.open_project(pid)
+        shell.navigate("Data View")
+        assert shell.dataset_picker.count() == 1
+        assert shell.current_dataset_id == imported["dataset_id"]
+        assert "source" in shell.data_mode.text().lower()
+
+        kind_index = shell.data_transform_kind.findData("derive")
+        shell.data_transform_kind.setCurrentIndex(kind_index)
+        shell.data_derive_source.setCurrentIndex(shell.data_derive_source.findData("score"))
+        shell.data_derive_operation.setCurrentIndex(
+            shell.data_derive_operation.findData("subtract")
+        )
+        shell.data_derive_operand_column.setCurrentIndex(
+            shell.data_derive_operand_column.findData("pre")
+        )
+        shell.data_derive_column.setText("change")
+        shell.data_transform_name.setText("Synthetic change score")
+        shell.data_transform_apply.click()
+        qt_app.processEvents()
+
+        assert shell.dataset_picker.count() == 2
+        assert shell.dataset_picker.currentText() == "Synthetic change score"
+        assert shell.current_dataset_id != imported["dataset_id"]
+        assert shell.data_model.columns == ["score", "pre", "group", "change"]
+        assert [row[-1] for row in shell.data_model.rows] == ["1.0", "1.0", "3.0"]
+        assert "analysis revision" in shell.data_mode.text().lower()
+        flags = shell.data_model.flags(shell.data_model.index(0, 0))
+        assert not flags & Qt.ItemFlag.ItemIsEditable
+
+        datasets = services.ui.execute("ui.dataset.list", {"project_id": pid})["data"]["datasets"]
+        original = next(item for item in datasets if item["id"] == imported["dataset_id"])
+        derived = next(item for item in datasets if item["id"] == shell.current_dataset_id)
+        assert original["parent_dataset_id"] == ""
+        assert derived["parent_dataset_id"] == original["id"]
+        assert len(derived["analysis_revision"]) == 64
+        shell.close()
+    finally:
+        services.close()
 
 
 def test_guided_frequency_analysis_hides_host_fields_and_dispatches(

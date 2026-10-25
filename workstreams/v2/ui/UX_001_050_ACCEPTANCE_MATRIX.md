@@ -261,18 +261,18 @@ Current conservative implementation status at validating source commit `80ec481`
 - **Requirement summary:** Large table, explicit read-only/edit mode, sorting/filtering/missing values, safe CSV import/export and provenance.
 - **Safety/correctness invariant:** No uncontrolled editing or spreadsheet-formula injection.
 - **Status:** `complete`
-- **Production modules:** `models.py`, `facade.py`, `shell.py`
-- **Facade operations:** `ui.dataset.import/list/page/variables`
+- **Production modules:** `models.py`, `facade.py`, `shell.py`, `app/analysis_bridge.py`, `analysis/transformations.py`, `analysis/data_ops.py`
+- **Facade operations:** `ui.dataset.import/list/page/variables/transform`; scientific writes reuse `dataset.transform/select/user_missing` through the shared command bus.
 - **Actual Qt screen/widget:** `Data View`.
-- **Success path:** 10k rows page safely with filter/sort and explicit read-only mode.
-- **Failure/denial path:** Malformed/huge CSV and invalid sort reject; exported formulas are neutralized.
-- **Accessibility behavior:** Virtual table headers and named paging/filter controls.
-- **Persistence/restart requirement:** Datasets and origin metadata persist.
-- **Existing tests:** `test_paging_review.py`, `test_performance_resources.py`, `test_security_resources.py`.
-- **Missing tests:** None while provenance-preserving editing is intentionally unsupported.
-- **Remaining implementation work:** None independently feasible without a provenance-preserving edit model.
-- **Latest validating commit SHA:** `80ec481`
-- **Limitation/blocker:** Cell editing is deliberately disabled rather than implemented unsafely.
+- **Success path:** 10k rows page safely with filter/sort and explicit read-only cells. Bounded select-cases, value-recode, arithmetic-derived-variable, and user-missing-code workflows create a separate derived UI dataset backed by an immutable scientific revision; the source remains unchanged.
+- **Failure/denial path:** Malformed/huge CSV, invalid sort, invalid transform inputs, stale project revisions, cross-project dataset references and unapproved host writes reject. Derived-project lineage is validated on reopen; exported formulas are neutralized.
+- **Accessibility behavior:** Virtual table headers plus named paging/filter/transformation controls and a plain-language transformation preview.
+- **Persistence/restart requirement:** Source and derived datasets, parent identity, scientific revision anchor, origin and variable metadata persist across restart.
+- **Existing tests:** `test_paging_review.py`, `test_shell_workflow_surfaces.py`, `test_security_resources.py`, `test_v2_composition.py`, `test_performance_resources.py`.
+- **Missing tests:** Native human mouse/keyboard usability and assistive-technology validation remain external/manual acceptance work.
+- **Remaining implementation work:** Direct mutable cell editing remains intentionally unsupported. More complex expression builders should only be added with equally bounded declarative schemas and lineage tests.
+- **Latest validation:** current local checkpoint; self-referential commit SHA intentionally omitted.
+- **Limitation/blocker:** Transformations are immutable derived-dataset operations, not an SPSS-compatible arbitrary expression language or in-place spreadsheet editor. Cross-store creation can leave an unattached immutable analysis revision if the UI project changes concurrently before its final CAS save; it cannot silently overwrite the source project dataset.
 
 ## UX-017 â€” Variables
 - **Requirement summary:** Editable type/role/units/levels/missing codes/description with validation and provenance.

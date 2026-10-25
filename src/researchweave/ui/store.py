@@ -84,6 +84,44 @@ def decode_project(raw: dict[str, Any]) -> Project:
             "This project exceeds UI preview limits.",
             "Reduce records before opening it.",
         )
+    dataset_ids = {dataset.id for dataset in project.datasets}
+    for dataset in project.datasets:
+        if dataset.parent_dataset_id:
+            if (
+                not VALID_ID.fullmatch(dataset.parent_dataset_id)
+                or dataset.parent_dataset_id not in dataset_ids
+                or dataset.parent_dataset_id == dataset.id
+            ):
+                raise UIError(
+                    "INTEGRITY_FAILURE",
+                    "Dataset lineage references an invalid parent.",
+                    "Restore a known-good project copy before using this derived dataset.",
+                )
+        analysis_id = dataset.analysis_dataset_id
+        analysis_revision = dataset.analysis_revision
+        if bool(analysis_id) != bool(analysis_revision):
+            raise UIError(
+                "INTEGRITY_FAILURE",
+                "Dataset scientific lineage is incomplete.",
+                "Restore a known-good project copy before using this derived dataset.",
+            )
+        if analysis_id and (
+            len(analysis_id) != 24 or any(char not in "0123456789abcdef" for char in analysis_id)
+        ):
+            raise UIError(
+                "INTEGRITY_FAILURE",
+                "Dataset scientific identifier is invalid.",
+                "Restore a known-good project copy before using this derived dataset.",
+            )
+        if analysis_revision and (
+            len(analysis_revision) != 64
+            or any(char not in "0123456789abcdef" for char in analysis_revision)
+        ):
+            raise UIError(
+                "INTEGRITY_FAILURE",
+                "Dataset scientific revision is invalid.",
+                "Restore a known-good project copy before using this derived dataset.",
+            )
     for source in project.sources:
         if len(source.text) > MAX_SOURCE_CHARS:
             raise UIError(

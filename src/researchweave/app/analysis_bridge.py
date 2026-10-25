@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import csv
 import hashlib
+import math
 from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
 
+from researchweave.analysis.errors import AnalysisError
 from researchweave.analysis.facade import AnalysisFacade
 from researchweave.core import CommandBus, OperationRequest
 from researchweave.ui.facade import UIFacade
@@ -108,15 +110,29 @@ class ProductionAnalysisBackend:
             )
         return methods
 
-    def _dataset(self, dataset_id: str) -> tuple[str, list[str], list[list[str]], str]:
-        for project in self._ui.store.list_projects():
+    def _dataset(
+        self, dataset_id: str, project_id: UUID | str | None = None
+    ) -> tuple[str, list[str], list[list[str]], str]:
+        projects = (
+            [self._ui.store.open(str(project_id))]
+            if project_id is not None
+            else self._ui.store.list_projects()
+        )
+        for project in projects:
             for dataset in project.datasets:
                 if dataset.id == dataset_id:
                     return project.id, list(dataset.columns), list(dataset.rows), dataset.origin
         raise ValueError("UI dataset was not found")
 
-    def _variable_metadata(self, dataset_id: str) -> list[dict[str, Any]]:
-        for project in self._ui.store.list_projects():
+    def _variable_metadata(
+        self, dataset_id: str, project_id: UUID | str | None = None
+    ) -> list[dict[str, Any]]:
+        projects = (
+            [self._ui.store.open(str(project_id))]
+            if project_id is not None
+            else self._ui.store.list_projects()
+        )
+        for project in projects:
             if any(dataset.id == dataset_id for dataset in project.datasets):
                 return [
                     dict(record)
@@ -135,13 +151,83 @@ class ProductionAnalysisBackend:
             writer.writerows(rows)
         return filename, hashlib.sha256(path.read_bytes()).hexdigest()
 
+    @staticmethod
+    def _metadata_updates(record: Mapping[str, Any]) -> dict[str, Any]:
+        dtype_map = {
+            "numeric": "number",
+            "categorical": "text",
+            "boolean": "boolean",
+            "date": "date",
+            "text": "text",
+        }
+        variable_type = str(record.get("type", "text"))
+        updates: dict[str, Any] = {
+            "dtype": dtype_map.get(variable_type, "text"),
+            "units": str(record.get("units", "")),
+            "missing_values": [str(value) for value in record.get("missing_codes", [])],
+        }
+        if variable_type == "categorical":
+            updates["scale"] = "nominal"
+            updates["category_order"] = [str(value) for value in record.get("levels", [])]
+        description = str(record.get("description", "")).strip()
+        if description:
+            updates["label"] = description
+        return updates
+
+    def _apply_ui_variable_metadata(
+        self,
+        ui_dataset_id: str,
+        analysis_dataset_id: str,
+        revision: str,
+        project_id: UUID,
+    ) -> str:
+        current_revision = revision
+        for record in self._variable_metadata(ui_dataset_id, project_id):
+            variable = str(record.get("variable", ""))
+            current = self._analysis.store.load(analysis_dataset_id, current_revision)
+            analysis_variable = next(
+                (candidate for candidate in current.variables if candidate.name == variable), None
+            )
+            if analysis_variable is None:
+                raise ValueError(f"Scientific variable metadata target was not found: {variable}")
+            updates = self._metadata_updates(record)
+            matches = True
+            for key, expected in updates.items():
+                actual = getattr(analysis_variable, key)
+                if isinstance(actual, tuple):
+                    expected = tuple(expected)
+                if actual != expected:
+                    matches = False
+                    break
+            if matches:
+                continue
+            metadata_request = OperationRequest(
+                operation="dataset.variable",
+                project_id=project_id,
+                arguments={
+                    "dataset_id": analysis_dataset_id,
+                    "revision": current_revision,
+                    "column": variable,
+                    "updates": updates,
+                },
+                actor="desktop-user",
+            )
+            metadata_result = self._bus.dispatch(
+                metadata_request,
+                approval=self._bus.issue_approval(metadata_request),
+            )
+            if metadata_result.get("status") != "ok":
+                raise ValueError(f"Scientific variable metadata import failed for {variable}")
+            current_revision = str(metadata_result["data"]["revision"])
+        return current_revision
+
     def _import_ui_dataset(
         self,
         dataset_id: str,
         project_id: UUID,
     ) -> tuple[dict[str, Any], str] | None:
         try:
-            _project_id, columns, rows, _origin = self._dataset(dataset_id)
+            _project_id, columns, rows, _origin = self._dataset(dataset_id, project_id)
         except ValueError:
             return None
         filename, staged_hash = self._stage_csv(columns, rows)
@@ -162,46 +248,238 @@ class ProductionAnalysisBackend:
         if imported.get("status") != "ok":
             raise ValueError("Scientific dataset import failed")
         imported_data = dict(imported["data"])
-        dtype_map = {
-            "numeric": "number",
-            "categorical": "text",
-            "boolean": "boolean",
-            "date": "date",
-            "text": "text",
-        }
-        for record in self._variable_metadata(dataset_id):
-            variable = str(record.get("variable", ""))
-            variable_type = str(record.get("type", "text"))
-            updates: dict[str, Any] = {
-                "dtype": dtype_map.get(variable_type, "text"),
-                "units": str(record.get("units", "")),
-                "missing_values": [str(value) for value in record.get("missing_codes", [])],
-            }
-            if variable_type == "categorical":
-                updates["scale"] = "nominal"
-                updates["category_order"] = [str(value) for value in record.get("levels", [])]
-            description = str(record.get("description", "")).strip()
-            if description:
-                updates["label"] = description
-            metadata_request = OperationRequest(
-                operation="dataset.variable",
-                project_id=project_id,
-                arguments={
-                    "dataset_id": imported_data["dataset_id"],
-                    "revision": imported_data["revision"],
-                    "column": variable,
-                    "updates": updates,
-                },
-                actor="desktop-user",
-            )
-            metadata_result = self._bus.dispatch(
-                metadata_request,
-                approval=self._bus.issue_approval(metadata_request),
-            )
-            if metadata_result.get("status") != "ok":
-                raise ValueError(f"Scientific variable metadata import failed for {variable}")
-            imported_data["revision"] = metadata_result["data"]["revision"]
+        imported_data["revision"] = self._apply_ui_variable_metadata(
+            dataset_id,
+            str(imported_data["dataset_id"]),
+            str(imported_data["revision"]),
+            project_id,
+        )
         return imported_data, staged_hash
+
+    def transform_for_project(
+        self,
+        dataset_id: str,
+        kind: str,
+        options: Mapping[str, Any],
+        *,
+        project_id: str,
+    ) -> Mapping[str, Any]:
+        """Create one immutable scientific revision for a scoped desktop dataset."""
+
+        try:
+            scope = UUID(project_id)
+        except ValueError as exc:
+            raise ValueError("Desktop project identifier is not a UUID") from exc
+        # Resolve against the requested project before staging any local scientific write.
+        project = self._ui.store.open(str(scope))
+        ui_dataset = next((item for item in project.datasets if item.id == dataset_id), None)
+        if ui_dataset is None:
+            raise ValueError("UI dataset was not found in this project")
+        if ui_dataset.analysis_dataset_id and ui_dataset.analysis_revision:
+            try:
+                anchored = self._analysis.store.load(
+                    ui_dataset.analysis_dataset_id, ui_dataset.analysis_revision
+                )
+            except AnalysisError as exc:
+                raise ValueError("Anchored scientific dataset revision is unavailable") from exc
+            projected_rows = [
+                ["" if row[column] is None else str(row[column]) for column in anchored.columns]
+                for row in anchored.records
+            ]
+            if list(anchored.columns) != ui_dataset.columns or projected_rows != ui_dataset.rows:
+                raise ValueError(
+                    "Derived dataset projection does not match its anchored scientific revision"
+                )
+            current_revision = self._apply_ui_variable_metadata(
+                dataset_id,
+                anchored.dataset_id,
+                anchored.revision,
+                scope,
+            )
+            imported_data = {
+                "dataset_id": anchored.dataset_id,
+                "revision": current_revision,
+            }
+            base_dataset = self._analysis.store.load(anchored.dataset_id, current_revision)
+            staged_hash: str | None = None
+        else:
+            imported = self._import_ui_dataset(dataset_id, scope)
+            if imported is None:
+                raise ValueError("UI dataset was not found in this project")
+            imported_data, staged_hash = imported
+            base_dataset = self._analysis.store.load(
+                str(imported_data["dataset_id"]), str(imported_data["revision"])
+            )
+        arguments: dict[str, Any] = {
+            "dataset_id": imported_data["dataset_id"],
+            "revision": imported_data["revision"],
+        }
+        if kind == "select":
+            column = str(options.get("column", ""))
+            variable = next(
+                (candidate for candidate in base_dataset.variables if candidate.name == column),
+                None,
+            )
+            if variable is None:
+                raise ValueError("Selection variable was not found in the scientific dataset")
+            requested_allowed = list(options.get("allowed", []))
+            observed = [row[column] for row in base_dataset.records if row.get(column) is not None]
+            allowed: list[Any] = []
+            for requested in requested_allowed:
+                requested_text = str(requested).strip()
+                exact = next(
+                    (value for value in observed if str(value) == requested_text),
+                    None,
+                )
+                if exact is not None:
+                    allowed.append(exact)
+                    continue
+                if variable.dtype == "number":
+                    try:
+                        numeric = float(requested_text)
+                    except (TypeError, ValueError, OverflowError) as exc:
+                        raise ValueError(
+                            "Numeric case-selection values must be finite numbers"
+                        ) from exc
+                    if not math.isfinite(numeric):
+                        raise ValueError("Numeric case-selection values must be finite numbers")
+                    equivalent = next(
+                        (
+                            value
+                            for value in observed
+                            if isinstance(value, (int, float))
+                            and not isinstance(value, bool)
+                            and float(value) == numeric
+                        ),
+                        numeric,
+                    )
+                    allowed.append(equivalent)
+                    continue
+                if variable.dtype == "boolean":
+                    boolean_values = {"true": True, "false": False}
+                    try:
+                        allowed.append(boolean_values[requested_text.casefold()])
+                    except KeyError as exc:
+                        raise ValueError(
+                            "Boolean case-selection values must be true or false"
+                        ) from exc
+                    continue
+                allowed.append(requested)
+            arguments.update(
+                {
+                    "column": column,
+                    "allowed": allowed,
+                    "include_null": bool(options.get("include_null", False)),
+                }
+            )
+            operation = "dataset.select"
+        elif kind == "recode":
+            column = str(options.get("column", ""))
+            variable = next(
+                (candidate for candidate in base_dataset.variables if candidate.name == column),
+                None,
+            )
+            if variable is None:
+                raise ValueError("Recode variable was not found in the scientific dataset")
+            mapping = dict(options.get("mapping", {}))
+            if variable.dtype == "number":
+                try:
+                    numeric_mapping: dict[str, float] = {}
+                    for old, new in mapping.items():
+                        old_number = float(old)
+                        new_number = float(new)
+                        if not math.isfinite(old_number) or not math.isfinite(new_number):
+                            raise ValueError
+                        numeric_mapping[str(old_number)] = new_number
+                        if old_number.is_integer():
+                            numeric_mapping[str(int(old_number))] = new_number
+                    mapping = numeric_mapping
+                except (TypeError, ValueError, OverflowError) as exc:
+                    raise ValueError(
+                        "Numeric recode mappings must use finite numeric values"
+                    ) from exc
+            elif variable.dtype == "boolean":
+                boolean_values = {"true": True, "false": False}
+                try:
+                    mapping = {
+                        str(boolean_values[str(old).strip().casefold()]): boolean_values[
+                            str(new).strip().casefold()
+                        ]
+                        for old, new in mapping.items()
+                    }
+                except KeyError as exc:
+                    raise ValueError("Boolean recode mappings must use true or false") from exc
+            arguments["spec"] = {
+                "type": "recode",
+                "column": column,
+                "mapping": mapping,
+            }
+            operation = "dataset.transform"
+        elif kind == "derive":
+            spec: dict[str, Any] = {
+                "type": "derive",
+                "column": options.get("column"),
+                "source": options.get("source"),
+                "operation": options.get("operation"),
+            }
+            operand_column = options.get("operand_column")
+            if isinstance(operand_column, str) and operand_column:
+                spec["operand_column"] = operand_column
+            else:
+                spec["operand"] = options.get("operand")
+            arguments["spec"] = spec
+            operation = "dataset.transform"
+        elif kind == "user_missing":
+            arguments.update(
+                {
+                    "column": options.get("column"),
+                    "missing_values": list(options.get("missing_values", [])),
+                }
+            )
+            operation = "dataset.user_missing"
+        else:
+            raise ValueError("Unsupported Data View transformation")
+
+        request = OperationRequest(
+            operation=operation,
+            project_id=scope,
+            arguments=arguments,
+            actor="desktop-user",
+        )
+        response = self._bus.dispatch(request, approval=self._bus.issue_approval(request))
+        if response.get("status") != "ok":
+            error = response.get("error")
+            if isinstance(error, Mapping):
+                code = str(error.get("code", "ANALYSIS_ERROR"))
+                message = str(error.get("message", "Dataset transformation failed"))
+                raise ValueError(f"{code}: {message}")
+            raise ValueError("Dataset transformation failed")
+        data = dict(response.get("data", {}))
+        analysis_dataset_id = str(data.get("dataset_id", ""))
+        analysis_revision = str(data.get("revision", ""))
+        updated = self._analysis.store.load(analysis_dataset_id, analysis_revision)
+        if updated.parent_revision != imported_data["revision"]:
+            raise ValueError(
+                "Transformed dataset lineage did not match the imported parent revision"
+            )
+        rows = [
+            ["" if row[column] is None else str(row[column]) for column in updated.columns]
+            for row in updated.records
+        ]
+        return {
+            "columns": list(updated.columns),
+            "rows": rows,
+            "variables": [variable.__dict__ for variable in updated.variables],
+            "analysis_dataset_id": updated.dataset_id,
+            "analysis_revision": updated.revision,
+            "analysis_parent_revision": updated.parent_revision,
+            "analysis_operation": dict(updated.operation),
+            "staged_csv_sha256": staged_hash,
+            "analysis_source_sha256": updated.source_hash,
+            "request_id": response.get("request_id"),
+            "provenance": list(response.get("provenance", [])),
+            "impact": dict(response.get("impact", {})),
+        }
 
     def _run_advanced(
         self,
@@ -230,17 +508,18 @@ class ProductionAnalysisBackend:
         dataset_id = prepared.get("dataset_id")
         if isinstance(dataset_id, str) and dataset_id:
             imported = self._import_ui_dataset(dataset_id, scope)
-            if imported is not None:
-                imported_data, staged_hash = imported
-                analysis_source_hash = str(imported_data.get("source_hash", ""))
-                prepared["dataset_id"] = imported_data["dataset_id"]
-                prepared["revision"] = imported_data["revision"]
-                nested = prepared.get("arguments")
-                if operation in {"syntax.python", "syntax.r"} and isinstance(nested, Mapping):
-                    target_arguments = dict(nested)
-                    target_arguments["dataset_id"] = imported_data["dataset_id"]
-                    target_arguments["revision"] = imported_data["revision"]
-                    prepared["arguments"] = target_arguments
+            if imported is None:
+                raise ValueError("UI dataset was not found in this project")
+            imported_data, staged_hash = imported
+            analysis_source_hash = str(imported_data.get("source_hash", ""))
+            prepared["dataset_id"] = imported_data["dataset_id"]
+            prepared["revision"] = imported_data["revision"]
+            nested = prepared.get("arguments")
+            if operation in {"syntax.python", "syntax.r"} and isinstance(nested, Mapping):
+                target_arguments = dict(nested)
+                target_arguments["dataset_id"] = imported_data["dataset_id"]
+                target_arguments["revision"] = imported_data["revision"]
+                prepared["arguments"] = target_arguments
         operation_request = OperationRequest(
             operation=operation,
             project_id=scope,
@@ -315,7 +594,7 @@ class ProductionAnalysisBackend:
             return self._run_advanced(method, inputs, project_id)
         dataset_id = str(inputs.get("dataset_id", ""))
         column = str(inputs.get("column", ""))
-        ui_project_id, _columns, _rows, origin = self._dataset(dataset_id)
+        ui_project_id, _columns, _rows, origin = self._dataset(dataset_id, project_id)
         try:
             scope = UUID(project_id)
         except ValueError as exc:

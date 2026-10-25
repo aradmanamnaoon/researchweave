@@ -6,6 +6,7 @@ import csv
 import hashlib
 import io
 import json
+import math
 import os
 import re
 import statistics
@@ -273,6 +274,7 @@ class UIFacade:
             "ui.qual.annotation.update": ("Edit a saved evidence code or memo", Effect.WRITE),
             "ui.qual.list": ("Inspect coded evidence", Effect.READ),
             "ui.dataset.import": ("Import bounded CSV text", Effect.WRITE),
+            "ui.dataset.transform": ("Create an immutable derived dataset", Effect.WRITE),
             "ui.dataset.describe": ("Summarize numeric values", Effect.READ),
             "ui.dataset.list": ("Show project data tables", Effect.READ),
             "ui.dataset.page": ("Read bounded dataset page", Effect.READ),
@@ -443,6 +445,26 @@ class UIFacade:
         schemas["ui.dataset.import"] |= {
             "name": string,
             "csv_text": {"type": "string", "maxLength": MAX_CSV_CHARS},
+        }
+        schemas["ui.dataset.transform"] |= {
+            "dataset_id": string,
+            "name": string,
+            "kind": {
+                "type": "string",
+                "enum": ["select", "recode", "derive", "user_missing"],
+            },
+            "column": string,
+            "allowed": {"type": "array", "items": string, "maxItems": 1000},
+            "include_null": {"type": "boolean"},
+            "mapping": {"type": "object"},
+            "source": string,
+            "arithmetic": {
+                "type": "string",
+                "enum": ["add", "subtract", "multiply", "divide"],
+            },
+            "operand": {"type": "number"},
+            "operand_column": string,
+            "missing_values": {"type": "array", "items": string, "maxItems": 1000},
         }
         schemas["ui.extraction.schema.update"] |= {
             "title": string,
@@ -1569,7 +1591,13 @@ class UIFacade:
                 raise UIError(
                     "RESOURCE_LIMIT", "Too many datasets.", "Move some data to another project."
                 )
-            dataset = Dataset(id=new_id(), name=name, columns=headers, rows=rows)
+            dataset = Dataset(
+                id=new_id(),
+                name=name,
+                columns=headers,
+                rows=rows,
+                origin="Imported CSV text",
+            )
             project.datasets.append(dataset)
             return {
                 "dataset_id": dataset.id,
@@ -1579,6 +1607,275 @@ class UIFacade:
             }
 
         return self._mutate(args, "ui.dataset.import", update)
+
+    def _do_ui_dataset_transform(self, args: Mapping[str, Any]) -> dict[str, Any]:
+        if self.analysis_backend is None:
+            raise UIError(
+                "DEPENDENCY_MISSING",
+                "Dataset transformations require the integrated scientific backend.",
+                "Open the integrated ResearchWeave desktop application and try again.",
+            )
+        transform_for_project = getattr(self.analysis_backend, "transform_for_project", None)
+        if not callable(transform_for_project):
+            raise UIError(
+                "DEPENDENCY_MISSING",
+                "The active scientific backend does not expose immutable dataset transforms.",
+                "Use a production analysis adapter that supports Data View transformations.",
+            )
+        dataset_id = _string(args, "dataset_id", 36)
+        name = _string(args, "name", MAX_TITLE)
+        kind = _string(args, "kind", 40)
+        if kind not in {"select", "recode", "derive", "user_missing"}:
+            raise UIError(
+                "INVALID_INPUT",
+                "Unknown Data View transformation.",
+                "Choose select cases, recode values, compute variable, or user-missing codes.",
+            )
+
+        def text_values(key: str, *, allow_empty: bool = False) -> list[str]:
+            raw = args.get(key)
+            if not isinstance(raw, list) or len(raw) > 1000:
+                raise UIError(
+                    "INVALID_INPUT",
+                    f"'{key}' must be a bounded list of text values.",
+                    "Review the transformation values and try again.",
+                )
+            values = []
+            for value in raw:
+                if not isinstance(value, str) or len(value) > 1000:
+                    raise UIError(
+                        "INVALID_INPUT",
+                        f"'{key}' contains an invalid value.",
+                        "Use text values under 1,000 characters each.",
+                    )
+                clean = value.strip()
+                if clean or allow_empty:
+                    values.append(clean)
+            return values
+
+        options: dict[str, Any]
+        if kind == "select":
+            allowed = text_values("allowed")
+            if not allowed:
+                raise UIError(
+                    "INVALID_INPUT",
+                    "Select cases needs at least one allowed value.",
+                    "Enter one or more exact values to retain.",
+                )
+            options = {
+                "column": _string(args, "column", 200),
+                "allowed": allowed,
+                "include_null": bool(args.get("include_null", False)),
+            }
+        elif kind == "recode":
+            raw_mapping = args.get("mapping")
+            if not isinstance(raw_mapping, Mapping) or not 1 <= len(raw_mapping) <= 500:
+                raise UIError(
+                    "INVALID_INPUT",
+                    "Recode needs between 1 and 500 explicit value mappings.",
+                    "Enter one old-to-new mapping per line.",
+                )
+            mapping: dict[str, str] = {}
+            for old, new in raw_mapping.items():
+                if (
+                    not isinstance(old, str)
+                    or not isinstance(new, str)
+                    or not old.strip()
+                    or not new.strip()
+                    or len(old) > 1000
+                    or len(new) > 1000
+                ):
+                    raise UIError(
+                        "INVALID_INPUT",
+                        "Recode mappings must use nonempty bounded text values.",
+                        "Correct the old and new values and try again.",
+                    )
+                mapping[old.strip()] = new.strip()
+            options = {"column": _string(args, "column", 200), "mapping": mapping}
+        elif kind == "derive":
+            column = _string(args, "column", 200)
+            source = _string(args, "source", 200)
+            operation = _string(args, "arithmetic", 20)
+            if not column.isidentifier():
+                raise UIError(
+                    "INVALID_INPUT",
+                    "Computed variable names must be identifier-like text.",
+                    "Use letters, numbers and underscores without spaces, starting with a letter.",
+                )
+            if operation not in {"add", "subtract", "multiply", "divide"}:
+                raise UIError(
+                    "INVALID_INPUT",
+                    "Unknown compute operation.",
+                    "Choose add, subtract, multiply or divide.",
+                )
+            operand_column_raw = args.get("operand_column")
+            operand_column = (
+                operand_column_raw.strip() if isinstance(operand_column_raw, str) else ""
+            )
+            options = {"column": column, "source": source, "operation": operation}
+            if operand_column:
+                options["operand_column"] = operand_column
+            else:
+                operand = args.get("operand")
+                if isinstance(operand, bool) or not isinstance(operand, (int, float)):
+                    raise UIError(
+                        "INVALID_INPUT",
+                        "Computed variables need a finite constant or another variable.",
+                        "Enter a numeric constant or choose an operand variable.",
+                    )
+                numeric_operand = float(operand)
+                if not math.isfinite(numeric_operand):
+                    raise UIError(
+                        "INVALID_INPUT",
+                        "Computed variable constants must be finite numbers.",
+                        "Enter a finite numeric constant.",
+                    )
+                options["operand"] = numeric_operand
+        else:
+            missing_values = text_values("missing_values", allow_empty=False)
+            if len(set(missing_values)) != len(missing_values):
+                raise UIError(
+                    "INVALID_INPUT",
+                    "User-missing codes must be unique.",
+                    "Remove duplicate codes and try again.",
+                )
+            options = {
+                "column": _string(args, "column", 200),
+                "missing_values": missing_values,
+            }
+
+        def update(project: Project) -> dict[str, Any]:
+            source_dataset = _dataset(project, dataset_id)
+            if len(project.datasets) >= 100:
+                raise UIError(
+                    "RESOURCE_LIMIT",
+                    "Too many datasets.",
+                    "Move some data to another project before creating a derived dataset.",
+                )
+            if (
+                options.get("column")
+                and kind != "derive"
+                and options["column"] not in source_dataset.columns
+            ):
+                raise UIError(
+                    "INVALID_INPUT",
+                    "Transformation variable was not found in the selected dataset.",
+                    "Choose one of the current dataset columns.",
+                )
+            if kind == "derive":
+                if options["source"] not in source_dataset.columns:
+                    raise UIError(
+                        "INVALID_INPUT",
+                        "Compute source variable was not found in the selected dataset.",
+                        "Choose one of the current dataset columns.",
+                    )
+                operand_column = options.get("operand_column")
+                if operand_column and operand_column not in source_dataset.columns:
+                    raise UIError(
+                        "INVALID_INPUT",
+                        "Compute operand variable was not found in the selected dataset.",
+                        "Choose one of the current dataset columns.",
+                    )
+                if options["column"] in source_dataset.columns:
+                    raise UIError(
+                        "CONFLICT",
+                        "Computed variables must use a new column name.",
+                        "Choose a name that is not already in the dataset.",
+                    )
+            try:
+                transformed = dict(
+                    transform_for_project(
+                        dataset_id,
+                        kind,
+                        options,
+                        project_id=project.id,
+                    )
+                )
+            except ValueError as exc:
+                raise UIError(
+                    "INVALID_INPUT",
+                    str(exc),
+                    "Review the transformation settings and source data, then try again.",
+                ) from exc
+            columns = transformed.get("columns")
+            rows = transformed.get("rows")
+            variables = transformed.get("variables")
+            if (
+                not isinstance(columns, list)
+                or not columns
+                or not all(isinstance(item, str) for item in columns)
+                or not isinstance(rows, list)
+                or any(not isinstance(row, list) or len(row) != len(columns) for row in rows)
+                or not isinstance(variables, list)
+            ):
+                raise UIError(
+                    "INTEGRITY_FAILURE",
+                    "Scientific transformation returned an invalid dataset projection.",
+                    "Keep the original dataset and inspect the local analysis diagnostics.",
+                )
+            derived_id = new_id()
+            analysis_dataset_id = str(transformed.get("analysis_dataset_id", ""))
+            analysis_revision = str(transformed.get("analysis_revision", ""))
+            derived = Dataset(
+                id=derived_id,
+                name=name,
+                columns=list(columns),
+                rows=[[str(cell) for cell in row] for row in rows],
+                origin=f"Derived from {source_dataset.name} via {kind.replace('_', ' ')}",
+                parent_dataset_id=source_dataset.id,
+                analysis_dataset_id=analysis_dataset_id,
+                analysis_revision=analysis_revision,
+            )
+            project.datasets.append(derived)
+
+            source_metadata = {
+                str(record.get("variable", "")): dict(record)
+                for record in project.variable_metadata.values()
+                if record.get("dataset_id") == source_dataset.id
+            }
+            dtype_map = {
+                "number": "numeric",
+                "boolean": "boolean",
+                "date": "date",
+                "text": "text",
+            }
+            for variable in variables:
+                if not isinstance(variable, Mapping):
+                    continue
+                variable_name = str(variable.get("name", ""))
+                if variable_name not in derived.columns:
+                    continue
+                prior = source_metadata.get(variable_name, {})
+                project.variable_metadata[f"{derived_id}:{variable_name}"] = {
+                    "dataset_id": derived_id,
+                    "variable": variable_name,
+                    "type": prior.get("type", dtype_map.get(str(variable.get("dtype")), "text")),
+                    "role": prior.get("role", "other"),
+                    "units": str(variable.get("units", prior.get("units", ""))),
+                    "levels": list(variable.get("category_order", prior.get("levels", []))),
+                    "missing_codes": list(
+                        variable.get("missing_values", prior.get("missing_codes", []))
+                    ),
+                    "description": str(variable.get("label", prior.get("description", ""))),
+                    "provenance": f"analysis revision {analysis_revision}",
+                    "updated_at": utc_now(),
+                }
+            return {
+                "dataset_id": derived.id,
+                "parent_dataset_id": source_dataset.id,
+                "rows": len(derived.rows),
+                "columns": len(derived.columns),
+                "analysis_dataset_id": analysis_dataset_id,
+                "analysis_revision": analysis_revision,
+                "analysis_parent_revision": transformed.get("analysis_parent_revision"),
+                "analysis_operation": transformed.get("analysis_operation", {}),
+                "analysis_request_id": transformed.get("request_id"),
+                "warning": (
+                    "Original dataset retained; transformations create immutable derived datasets."
+                ),
+            }
+
+        return self._mutate(args, "ui.dataset.transform", update)
 
     def _do_ui_dataset_list(self, args: Mapping[str, Any]) -> dict[str, Any]:
         project = _required_project(args, self.store)
@@ -1590,6 +1887,9 @@ class UIFacade:
                     "rows": len(item.rows),
                     "columns": item.columns,
                     "origin": item.origin,
+                    "parent_dataset_id": item.parent_dataset_id,
+                    "analysis_dataset_id": item.analysis_dataset_id,
+                    "analysis_revision": item.analysis_revision,
                 }
                 for item in project.datasets
             ]
@@ -1629,6 +1929,9 @@ class UIFacade:
             "sort_desc": sort_desc,
             "read_only": True,
             "origin": dataset.origin,
+            "parent_dataset_id": dataset.parent_dataset_id,
+            "analysis_dataset_id": dataset.analysis_dataset_id,
+            "analysis_revision": dataset.analysis_revision,
             "revision": project.revision,
         }
 

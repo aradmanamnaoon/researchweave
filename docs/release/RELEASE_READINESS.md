@@ -100,14 +100,15 @@ interoperability and research-duration evidence are listed under limitations rat
 - `ruff format --check .`: **408 files already formatted**.
 - `ruff check .`: **pass**.
 - `mypy src`: **161 source files, 0 issues**.
-- `pytest -q`: **812 passed, 10 skipped, 3 warnings** after the statistics/R, provider-agent,
-  Anthropic-streaming and durable qualitative-adjudication checkpoints.
+- `pytest -q`: **814 passed, 10 skipped, 3 warnings** after the statistics/R, provider-agent,
+  Anthropic-streaming, durable qualitative-adjudication and immutable Data View transformation
+  checkpoints.
 - `git diff --check`: **pass**; Windows reports expected LF→CRLF normalization warnings on several modified text files.
 - skills validator: **27 repository skills valid**.
 - broader mission capability inventory: **67 no-login/no-key capabilities observed as available
   during the mission**; mission-only UI automation packages were removed by the final locked sync; see
   [`../DEVELOPER_CAPABILITIES.md`](../DEVELOPER_CAPABILITIES.md).
-- current source metric: **54,804 substantive Python SLOC across 161 files**.
+- current source metric: **55,706 substantive Python SLOC across 161 files**.
 - `pip-audit --local`: **no known vulnerabilities**; local `researchweave` package is skipped
   because it is not a PyPI distribution.
 - final post-build filesystem disposition audit: **27,211 files** = 616 `KEEP_PUBLIC`, 7,025
@@ -154,6 +155,8 @@ keeps its local-first workflow usable without accounts, API keys, network access
 AI model configuration now lives in Providers and project-scoped assistance is embedded in Agent,
 with real streaming and explicit approval boundaries for non-read tools. The Windows release path,
 screenshots, test suite, dependency audit, and native desktop workflows have been revalidated locally.
+Data View cells remain read-only, while bounded select/recode/compute/user-missing actions now create
+separate derived datasets anchored to immutable scientific revisions rather than editing source rows.
 
 ## Troubleshooting quick reference
 

@@ -180,6 +180,257 @@ def test_desktop_analysis_bridge_runs_production_scientific_code(tmp_path: Path)
         services.close()
 
 
+def test_data_view_transform_preserves_source_lineage_and_project_scope(tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    derived_id = ""
+    project_id: UUID | None = None
+    try:
+        scope = uuid4()
+        created = approved(
+            services,
+            request(
+                "ui.project.create",
+                scope,
+                {
+                    "title": "Immutable data transforms",
+                    "question": "Can transformations retain their source?",
+                    "study_type": "quantitative",
+                },
+            ),
+        )["data"]
+        project_id = UUID(created["project_id"])
+        imported = approved(
+            services,
+            request(
+                "ui.dataset.import",
+                project_id,
+                {
+                    "project_id": str(project_id),
+                    "expected_revision": created["revision"],
+                    "name": "Synthetic transform source",
+                    "csv_text": "score,group\n1,A\n-9,A\n3,B\n4,B\n",
+                },
+            ),
+        )["data"]
+
+        transform_request = request(
+            "ui.dataset.transform",
+            project_id,
+            {
+                "project_id": str(project_id),
+                "expected_revision": imported["revision"],
+                "dataset_id": imported["dataset_id"],
+                "name": "Synthetic selected cases",
+                "kind": "select",
+                "column": "group",
+                "allowed": ["A"],
+                "include_null": False,
+            },
+        )
+        denied = services.bus.dispatch(transform_request)
+        assert denied["error"]["code"] == "NEEDS_APPROVAL"
+        transformed = approved(services, transform_request)
+        assert transformed["status"] == "ok", transformed
+        transformed_data = transformed["data"]
+        derived_id = transformed_data["dataset_id"]
+        assert transformed_data["parent_dataset_id"] == imported["dataset_id"]
+        assert len(transformed_data["analysis_revision"]) == 64
+        assert transformed_data["analysis_operation"] == {
+            "type": "case_selection",
+            "column": "group",
+            "allowed": ["A"],
+            "include_null": False,
+            "excluded": 2,
+        }
+
+        original_page = services.bus.dispatch(
+            request(
+                "ui.dataset.page",
+                project_id,
+                {"project_id": str(project_id), "dataset_id": imported["dataset_id"]},
+            )
+        )["data"]
+        derived_page = services.bus.dispatch(
+            request(
+                "ui.dataset.page",
+                project_id,
+                {"project_id": str(project_id), "dataset_id": derived_id},
+            )
+        )["data"]
+        assert original_page["rows"] == [["1", "A"], ["-9", "A"], ["3", "B"], ["4", "B"]]
+        assert derived_page["rows"] == [["1", "A"], ["-9", "A"]]
+        assert derived_page["parent_dataset_id"] == imported["dataset_id"]
+        assert derived_page["analysis_revision"] == transformed_data["analysis_revision"]
+
+        stale = approved(
+            services,
+            request(
+                "ui.dataset.transform",
+                project_id,
+                {
+                    "project_id": str(project_id),
+                    "expected_revision": imported["revision"],
+                    "dataset_id": imported["dataset_id"],
+                    "name": "Stale transform",
+                    "kind": "recode",
+                    "column": "group",
+                    "mapping": {"A": "alpha"},
+                },
+            ),
+        )
+        assert stale["error"]["code"] == "STALE_REVISION"
+
+        chained = approved(
+            services,
+            request(
+                "ui.dataset.transform",
+                project_id,
+                {
+                    "project_id": str(project_id),
+                    "expected_revision": transformed_data["revision"],
+                    "dataset_id": derived_id,
+                    "name": "Synthetic chained recode",
+                    "kind": "recode",
+                    "column": "group",
+                    "mapping": {"A": "alpha"},
+                },
+            ),
+        )
+        assert chained["status"] == "ok", chained
+        chained_data = chained["data"]
+        assert chained_data["parent_dataset_id"] == derived_id
+        assert chained_data["analysis_parent_revision"] == transformed_data["analysis_revision"]
+
+        numeric_selected = approved(
+            services,
+            request(
+                "ui.dataset.transform",
+                project_id,
+                {
+                    "project_id": str(project_id),
+                    "expected_revision": chained_data["revision"],
+                    "dataset_id": imported["dataset_id"],
+                    "name": "Synthetic numeric selection",
+                    "kind": "select",
+                    "column": "score",
+                    "allowed": ["1"],
+                    "include_null": False,
+                },
+            ),
+        )
+        assert numeric_selected["status"] == "ok", numeric_selected
+        numeric_selected_data = numeric_selected["data"]
+        numeric_selected_page = services.bus.dispatch(
+            request(
+                "ui.dataset.page",
+                project_id,
+                {
+                    "project_id": str(project_id),
+                    "dataset_id": numeric_selected_data["dataset_id"],
+                },
+            )
+        )["data"]
+        assert numeric_selected_page["rows"] == [["1", "A"]]
+        assert numeric_selected_data["analysis_operation"]["allowed"] == ["1"]
+
+        numeric_recoded = approved(
+            services,
+            request(
+                "ui.dataset.transform",
+                project_id,
+                {
+                    "project_id": str(project_id),
+                    "expected_revision": numeric_selected_data["revision"],
+                    "dataset_id": imported["dataset_id"],
+                    "name": "Synthetic numeric recode",
+                    "kind": "recode",
+                    "column": "score",
+                    "mapping": {"1": "2"},
+                },
+            ),
+        )
+        assert numeric_recoded["status"] == "ok", numeric_recoded
+        numeric_recoded_data = numeric_recoded["data"]
+        numeric_recoded_page = services.bus.dispatch(
+            request(
+                "ui.dataset.page",
+                project_id,
+                {
+                    "project_id": str(project_id),
+                    "dataset_id": numeric_recoded_data["dataset_id"],
+                },
+            )
+        )["data"]
+        assert numeric_recoded_page["rows"][0] == ["2", "A"]
+
+        missing = approved(
+            services,
+            request(
+                "ui.dataset.transform",
+                project_id,
+                {
+                    "project_id": str(project_id),
+                    "expected_revision": numeric_recoded_data["revision"],
+                    "dataset_id": imported["dataset_id"],
+                    "name": "Synthetic missing metadata",
+                    "kind": "user_missing",
+                    "column": "score",
+                    "missing_values": ["-9"],
+                },
+            ),
+        )
+        assert missing["status"] == "ok", missing
+        missing_id = missing["data"]["dataset_id"]
+        metadata = services.bus.dispatch(
+            request(
+                "ui.variable.metadata",
+                project_id,
+                {"project_id": str(project_id), "dataset_id": missing_id},
+            )
+        )["data"]["records"]
+        score_metadata = next(item for item in metadata if item["variable"] == "score")
+        assert score_metadata["missing_codes"] == ["-9"]
+
+        second = approved(
+            services,
+            request(
+                "ui.project.create",
+                uuid4(),
+                {
+                    "title": "Other project",
+                    "question": "Should another project see the first dataset?",
+                    "study_type": "quantitative",
+                },
+            ),
+        )["data"]
+        backend = services.ui.analysis_backend
+        assert backend is not None
+        with pytest.raises(ValueError, match="UI dataset was not found"):
+            backend.run_for_project(  # type: ignore[attr-defined]
+                "analysis.statistics.frequency",
+                {"dataset_id": imported["dataset_id"], "column": "group"},
+                project_id=second["project_id"],
+            )
+    finally:
+        services.close()
+
+    assert project_id is not None
+    reopened = build_services(tmp_path)
+    try:
+        page = reopened.bus.dispatch(
+            request(
+                "ui.dataset.page",
+                project_id,
+                {"project_id": str(project_id), "dataset_id": derived_id},
+            )
+        )
+        assert page["status"] == "ok", page
+        assert page["data"]["rows"] == [["1", "A"], ["-9", "A"]]
+        assert len(page["data"]["analysis_revision"]) == 64
+    finally:
+        reopened.close()
+
+
 def test_desktop_automatic_analysis_uses_declared_variable_metadata(tmp_path: Path) -> None:
     services = build_services(tmp_path)
     try:

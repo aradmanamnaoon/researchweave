@@ -78,7 +78,7 @@
     "src/researchweave/app/__init__.py": 0,
     "src/researchweave/app/agent_tools.py": 280,
     "src/researchweave/app/ai_bridge.py": 238,
-    "src/researchweave/app/analysis_bridge.py": 457,
+    "src/researchweave/app/analysis_bridge.py": 729,
     "src/researchweave/app/cli.py": 25,
     "src/researchweave/app/composition.py": 149,
     "src/researchweave/app/config.py": 14,
@@ -139,12 +139,12 @@
     "src/researchweave/ui/analysis_compatibility.py": 242,
     "src/researchweave/ui/analysis_forms.py": 185,
     "src/researchweave/ui/assets.py": 5,
-    "src/researchweave/ui/contracts.py": 164,
+    "src/researchweave/ui/contracts.py": 167,
     "src/researchweave/ui/demo.py": 232,
     "src/researchweave/ui/design.py": 177,
     "src/researchweave/ui/diagnostics.py": 379,
     "src/researchweave/ui/evidence.py": 241,
-    "src/researchweave/ui/facade.py": 2668,
+    "src/researchweave/ui/facade.py": 2965,
     "src/researchweave/ui/i18n.py": 182,
     "src/researchweave/ui/jobs.py": 172,
     "src/researchweave/ui/models.py": 45,
@@ -156,9 +156,9 @@
     "src/researchweave/ui/result_presentation.py": 273,
     "src/researchweave/ui/screening.py": 253,
     "src/researchweave/ui/search.py": 207,
-    "src/researchweave/ui/shell.py": 5497,
+    "src/researchweave/ui/shell.py": 5789,
     "src/researchweave/ui/snapshots.py": 353,
-    "src/researchweave/ui/store.py": 297,
+    "src/researchweave/ui/store.py": 335,
     "src/researchweave/ui/text_offsets.py": 64,
     "src/researchweave/ui/visualization.py": 461,
     "src/researchweave/ui/workflows.py": 1190
@@ -166,13 +166,13 @@
   "per_package": {
     "ai": 8796,
     "analysis": 12737,
-    "app": 1292,
+    "app": 1564,
     "core": 366,
     "evidence": 16536,
     "package-root": 3,
-    "ui": 15074
+    "ui": 15704
   },
   "python_files": 161,
   "source_root": "D:\\coding\\codex\\researchweave\\src\\researchweave",
-  "total_substantive_sloc": 54804
+  "total_substantive_sloc": 55706
 }
