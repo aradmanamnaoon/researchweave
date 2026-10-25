@@ -9,7 +9,6 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtTest import QSignalSpy
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from researchweave.ui import build_ui_facade, build_ui_shell
@@ -28,7 +27,8 @@ def test_worker_signal_and_duplicate_guard(qt_app) -> None:
     manager = JobManager(max_workers=1)
     start = Event()
     release = Event()
-    result_spy = QSignalSpy(manager.result)
+    results = []
+    manager.result.connect(lambda *args: results.append(args))
 
     def work(stop):
         start.set()
@@ -38,35 +38,38 @@ def test_worker_signal_and_duplicate_guard(qt_app) -> None:
     assert manager.submit("demo", work) is True
     assert manager.submit("demo", work) is False
     release.set()
-    assert result_spy.wait(2_000)
-    assert len(result_spy) == 1
-    assert list(result_spy[0]) == ["demo", {"completed": True}]
+    assert manager.pool.waitForDone(2_000)
+    qt_app.processEvents()
+    assert results == [("demo", {"completed": True})]
     assert manager.jobs["demo"].state == "completed"
 
 
 def test_worker_error_translation(qt_app) -> None:
     manager = JobManager(max_workers=1)
-    error_spy = QSignalSpy(manager.error)
+    errors = []
+    manager.error.connect(lambda *args: errors.append(args))
 
     def failure(stop):
         raise RuntimeError("private credential should never surface")
 
     assert manager.submit("failure", failure)
-    assert error_spy.wait(2_000)
-    assert len(error_spy) == 1
-    assert "private credential" not in str(error_spy[0])
+    assert manager.pool.waitForDone(2_000)
+    qt_app.processEvents()
+    assert len(errors) == 1
+    assert "private credential" not in str(errors[0])
     assert manager.jobs["failure"].state == "failed"
-    retry_spy = QSignalSpy(manager.error)
     assert manager.retry("failure") is True
-    assert retry_spy.wait(2_000)
-    assert len(retry_spy) == 1
+    assert manager.pool.waitForDone(2_000)
+    qt_app.processEvents()
+    assert len(errors) == 2
 
 
 def test_progress_is_bounded_and_terminal_completion_is_100(qt_app) -> None:
     manager = JobManager(max_workers=1)
     release = Event()
     progress = []
-    result_spy = QSignalSpy(manager.result)
+    results = []
+    manager.result.connect(lambda *args: results.append(args))
     manager.progress.connect(lambda key, value: progress.append((key, value)))
 
     def work(stop):
@@ -78,7 +81,9 @@ def test_progress_is_bounded_and_terminal_completion_is_100(qt_app) -> None:
     assert manager.set_progress("progress", 55)
     assert manager.set_progress("progress", 500)
     release.set()
-    assert result_spy.wait(2_000)
+    assert manager.pool.waitForDone(2_000)
+    qt_app.processEvents()
+    assert results == [("progress", "done")]
     assert ("progress", 0) in progress
     assert ("progress", 55) in progress
     assert progress[-1] == ("progress", 100)
@@ -89,7 +94,8 @@ def test_progress_is_bounded_and_terminal_completion_is_100(qt_app) -> None:
 def test_streaming_worker_delivers_chunks_on_current_generation(qt_app) -> None:
     manager = JobManager(max_workers=1)
     chunks = []
-    result_spy = QSignalSpy(manager.result)
+    results = []
+    manager.result.connect(lambda *args: results.append(args))
     manager.chunk.connect(lambda key, value: chunks.append((key, value)))
 
     def work(stop, emit):
@@ -98,8 +104,9 @@ def test_streaming_worker_delivers_chunks_on_current_generation(qt_app) -> None:
         return "alpha beta"
 
     assert manager.submit_stream("assistant", work)
-    assert result_spy.wait(2_000)
-    assert [list(row) for row in result_spy] == [["assistant", "alpha beta"]]
+    assert manager.pool.waitForDone(2_000)
+    qt_app.processEvents()
+    assert results == [("assistant", "alpha beta")]
     assert chunks == [("assistant", "alpha"), ("assistant", " beta")]
 
 
