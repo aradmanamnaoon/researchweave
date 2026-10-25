@@ -930,9 +930,7 @@ class AnalysisFacade:
                         if arguments.get("outcome_type") is not None
                         else None
                     ),
-                    group=(
-                        str(arguments["group"]) if arguments.get("group") is not None else None
-                    ),
+                    group=(str(arguments["group"]) if arguments.get("group") is not None else None),
                     levels=tuple(str(value) for value in arguments.get("levels", [])),
                     predictors=tuple(str(value) for value in arguments.get("predictors", [])),
                     items=tuple(str(value) for value in arguments.get("items", [])),
@@ -1072,8 +1070,7 @@ class AnalysisFacade:
                                 **automatic_plan.manifest,
                                 "execution_sha256": digest(execution_payload),
                                 "successful_operations": sum(
-                                    entry["status"] == "ok"
-                                    for entry in [*diagnostics, *executions]
+                                    entry["status"] == "ok" for entry in [*diagnostics, *executions]
                                 ),
                                 "failed_operations": len(failures),
                             },

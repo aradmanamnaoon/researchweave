@@ -10,50 +10,54 @@ from typing import Any, Literal
 
 FieldKind = Literal["string", "integer", "number", "boolean", "string-array", "json"]
 
-_VARIABLE_NAMES = frozenset({
-    "cluster",
-    "cluster_group",
-    "column",
-    "dependent",
-    "duration",
-    "event",
-    "factor",
-    "first",
-    "group",
-    "id_column",
-    "independent",
-    "offset",
-    "outcome",
-    "paired_with",
-    "second",
-    "split_column",
-    "strata",
-    "stratum",
-    "subject",
-    "subject_id",
-    "time",
-    "time_column",
-    "value_column",
-    "variable",
-    "weight",
-    "weights",
-    "within",
-    "x",
-    "y",
-})
-_VARIABLE_LISTS = frozenset({
-    "columns",
-    "covariates",
-    "dependent_variables",
-    "factors",
-    "group_columns",
-    "independent_variables",
-    "items",
-    "outcomes",
-    "predictors",
-    "reverse",
-    "variables",
-})
+_VARIABLE_NAMES = frozenset(
+    {
+        "cluster",
+        "cluster_group",
+        "column",
+        "dependent",
+        "duration",
+        "event",
+        "factor",
+        "first",
+        "group",
+        "id_column",
+        "independent",
+        "offset",
+        "outcome",
+        "paired_with",
+        "second",
+        "split_column",
+        "strata",
+        "stratum",
+        "subject",
+        "subject_id",
+        "time",
+        "time_column",
+        "value_column",
+        "variable",
+        "weight",
+        "weights",
+        "within",
+        "x",
+        "y",
+    }
+)
+_VARIABLE_LISTS = frozenset(
+    {
+        "columns",
+        "covariates",
+        "dependent_variables",
+        "factors",
+        "group_columns",
+        "independent_variables",
+        "items",
+        "outcomes",
+        "predictors",
+        "reverse",
+        "variables",
+    }
+)
 
 
 @dataclass(frozen=True)
@@ -73,8 +77,7 @@ def _unwrap(raw: Mapping[str, Any]) -> tuple[Mapping[str, Any], bool]:
     if not isinstance(choices, list):
         return raw, False
     non_null = [
-        part for part in choices
-        if isinstance(part, Mapping) and part.get("type") != "null"
+        part for part in choices if isinstance(part, Mapping) and part.get("type") != "null"
     ]
     nullable = len(non_null) != len(choices)
     if len(non_null) == 1 and nullable:
@@ -110,11 +113,18 @@ def build_field_specs(schema: Mapping[str, Any]) -> tuple[FieldSpec, ...]:
         variable = (kind == "string" and name in _VARIABLE_NAMES) or (
             kind == "string-array" and name in _VARIABLE_LISTS
         )
-        result.append(FieldSpec(
-            name=name, kind=kind, required=name in required, nullable=nullable,
-            variable=variable, choices=choices, schema=raw,
-            description=str(raw.get("description", "")),
-        ))
+        result.append(
+            FieldSpec(
+                name=name,
+                kind=kind,
+                required=name in required,
+                nullable=nullable,
+                variable=variable,
+                choices=choices,
+                schema=raw,
+                description=str(raw.get("description", "")),
+            )
+        )
     return tuple(result)
 
 
@@ -142,9 +152,12 @@ def _parse_field(spec: FieldSpec, text: str) -> Any:
             value = json.loads(text)
     except (ValueError, json.JSONDecodeError) as exc:
         expected = {
-            "integer": "a whole number", "number": "a finite number",
-            "boolean": "true or false", "string-array": "comma-separated names",
-            "json": "valid JSON", "string": "text",
+            "integer": "a whole number",
+            "number": "a finite number",
+            "boolean": "true or false",
+            "string-array": "comma-separated names",
+            "json": "valid JSON",
+            "string": "text",
         }[spec.kind]
         raise ValueError(f"{spec.name}: enter {expected} ({exc}).") from exc
     inner, _ = _unwrap(spec.schema)
@@ -167,7 +180,8 @@ def _parse_field(spec: FieldSpec, text: str) -> Any:
 
 
 def parse_form_values(
-    specs: Sequence[FieldSpec], values: Mapping[str, str | None],
+    specs: Sequence[FieldSpec],
+    values: Mapping[str, str | None],
 ) -> dict[str, Any]:
     """Parse visible fields only; omit empty optional inputs and host identity."""
     result: dict[str, Any] = {}

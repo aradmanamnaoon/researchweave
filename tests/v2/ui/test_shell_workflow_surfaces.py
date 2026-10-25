@@ -65,20 +65,22 @@ def test_guided_frequency_analysis_hides_host_fields_and_dispatches(
 
     class GuidedBackend:
         def methods(self) -> list[dict[str, object]]:
-            return [{
-                "id": "analysis.statistics.frequency",
-                "label": "Frequency",
-                "available": True,
-                "arguments_schema": {
-                    "type": "object",
-                    "properties": {
-                        "dataset_id": {"type": "string"},
-                        "revision": {"type": "string"},
-                        "column": {"type": "string"},
+            return [
+                {
+                    "id": "analysis.statistics.frequency",
+                    "label": "Frequency",
+                    "available": True,
+                    "arguments_schema": {
+                        "type": "object",
+                        "properties": {
+                            "dataset_id": {"type": "string"},
+                            "revision": {"type": "string"},
+                            "column": {"type": "string"},
+                        },
+                        "required": ["dataset_id", "revision", "column"],
                     },
-                    "required": ["dataset_id", "revision", "column"],
-                },
-            }]
+                }
+            ]
 
         def run_for_project(
             self, method: str, inputs: object, *, project_id: str
@@ -87,16 +89,22 @@ def test_guided_frequency_analysis_hides_host_fields_and_dispatches(
             assert project_id == pid
             assert inputs == {"dataset_id": dataset["dataset_id"], "column": "group"}
             return {
-                "method": "frequency", "method_version": "test-v1",
+                "method": "frequency",
+                "method_version": "test-v1",
                 "inputs": {"dataset_id": dataset["dataset_id"], "column": "group"},
-                "assumptions": [], "warnings": [], "estimates": {"n": 3},
-                "uncertainty": {}, "diagnostics": {}, "provenance": {"source": "synthetic"},
+                "assumptions": [],
+                "warnings": [],
+                "estimates": {"n": 3},
+                "uncertainty": {},
+                "diagnostics": {},
+                "provenance": {"source": "synthetic"},
             }
 
     facade.analysis_backend = GuidedBackend()  # type: ignore[assignment]
     shell.refresh_datasets()
     index = next(
-        i for i in range(shell.analysis_method.count())
+        i
+        for i in range(shell.analysis_method.count())
         if shell.analysis_method.itemData(i)["id"] == "analysis.statistics.frequency"
     )
     shell.analysis_method.setCurrentIndex(index)
@@ -212,11 +220,14 @@ def test_analysis_prisma_tutorial_and_notification_surfaces(
     assert "Provenance:" in detail
     assert "Reproducibility" in detail
     assert shell.analysis_result_model.rowCount() >= 1
-    assert shell.analysis_result_model.headerData(
-        0,
-        Qt.Orientation.Horizontal,
-        Qt.ItemDataRole.DisplayRole,
-    ) == "Section"
+    assert (
+        shell.analysis_result_model.headerData(
+            0,
+            Qt.Orientation.Horizontal,
+            Qt.ItemDataRole.DisplayRole,
+        )
+        == "Section"
+    )
 
     shell.navigate("PRISMA")
     shell.prisma_fields["records_identified"].setText("9")

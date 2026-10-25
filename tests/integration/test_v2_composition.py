@@ -283,14 +283,13 @@ def test_desktop_automatic_analysis_uses_declared_variable_metadata(tmp_path: Pa
         assert estimates["report"]["selected_methods"] == ["statistics.test"]
         assert estimates["execution_manifest"]["failed_operations"] == 0, estimates["failures"]
         assert estimates["executions"][0]["status"] == "ok"
-        profiles = {
-            profile["name"]: profile for profile in estimates["plan"]["profiles"]
-        }
+        profiles = {profile["name"]: profile for profile in estimates["plan"]["profiles"]}
         assert profiles["score"]["declared_dtype"] == "number"
         assert profiles["group"]["declared_dtype"] == "text"
-        assert record["provenance"]["staged_csv_sha256"] == record["provenance"][
-            "analysis_source_sha256"
-        ]
+        assert (
+            record["provenance"]["staged_csv_sha256"]
+            == record["provenance"]["analysis_source_sha256"]
+        )
     finally:
         services.close()
 

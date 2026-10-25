@@ -587,10 +587,8 @@ def test_dashboard_surfaces_retained_job_state(tmp_path: Path) -> None:
     app.processEvents()
 
     assert shell.jobs.submit("dashboard-job", lambda _stop: "done")
-    for _ in range(100):
-        app.processEvents()
-        if shell.jobs.jobs["dashboard-job"].state == "completed":
-            break
+    assert shell.jobs.pool.waitForDone(2_000)
+    app.processEvents()
     shell.navigate("Dashboard")
     shell.refresh_dashboard()
     assert "dashboard-job: completed (100%)" in shell.dashboard.text()

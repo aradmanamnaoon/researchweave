@@ -9,7 +9,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtCore import QEventLoop, QTimer
+from PyQt6.QtTest import QSignalSpy
 from PyQt6.QtWidgets import QApplication, QMessageBox
 
 from researchweave.ui import build_ui_facade, build_ui_shell
@@ -24,25 +24,11 @@ def qt_app():
     yield app
 
 
-def wait_for(signal, *, timeout_ms: int = 2000):
-    loop = QEventLoop()
-    events = []
-
-    def collect(*args):
-        events.append(args)
-        loop.quit()
-
-    signal.connect(collect)
-    QTimer.singleShot(timeout_ms, loop.quit)
-    loop.exec()
-    signal.disconnect(collect)
-    return events
-
-
 def test_worker_signal_and_duplicate_guard(qt_app) -> None:
     manager = JobManager(max_workers=1)
     start = Event()
     release = Event()
+    result_spy = QSignalSpy(manager.result)
 
     def work(stop):
         start.set()
@@ -52,32 +38,35 @@ def test_worker_signal_and_duplicate_guard(qt_app) -> None:
     assert manager.submit("demo", work) is True
     assert manager.submit("demo", work) is False
     release.set()
-    events = wait_for(manager.result)
-    assert len(events) == 1
-    assert events[0] == ("demo", {"completed": True})
+    assert result_spy.wait(2_000)
+    assert len(result_spy) == 1
+    assert list(result_spy[0]) == ["demo", {"completed": True}]
     assert manager.jobs["demo"].state == "completed"
 
 
 def test_worker_error_translation(qt_app) -> None:
     manager = JobManager(max_workers=1)
+    error_spy = QSignalSpy(manager.error)
 
     def failure(stop):
         raise RuntimeError("private credential should never surface")
 
     assert manager.submit("failure", failure)
-    events = wait_for(manager.error)
-    assert len(events) == 1
-    assert "private credential" not in str(events)
+    assert error_spy.wait(2_000)
+    assert len(error_spy) == 1
+    assert "private credential" not in str(error_spy[0])
     assert manager.jobs["failure"].state == "failed"
+    retry_spy = QSignalSpy(manager.error)
     assert manager.retry("failure") is True
-    retry_events = wait_for(manager.error)
-    assert len(retry_events) == 1
+    assert retry_spy.wait(2_000)
+    assert len(retry_spy) == 1
 
 
 def test_progress_is_bounded_and_terminal_completion_is_100(qt_app) -> None:
     manager = JobManager(max_workers=1)
     release = Event()
     progress = []
+    result_spy = QSignalSpy(manager.result)
     manager.progress.connect(lambda key, value: progress.append((key, value)))
 
     def work(stop):
@@ -89,7 +78,7 @@ def test_progress_is_bounded_and_terminal_completion_is_100(qt_app) -> None:
     assert manager.set_progress("progress", 55)
     assert manager.set_progress("progress", 500)
     release.set()
-    assert wait_for(manager.result)
+    assert result_spy.wait(2_000)
     assert ("progress", 0) in progress
     assert ("progress", 55) in progress
     assert progress[-1] == ("progress", 100)
@@ -100,6 +89,7 @@ def test_progress_is_bounded_and_terminal_completion_is_100(qt_app) -> None:
 def test_streaming_worker_delivers_chunks_on_current_generation(qt_app) -> None:
     manager = JobManager(max_workers=1)
     chunks = []
+    result_spy = QSignalSpy(manager.result)
     manager.chunk.connect(lambda key, value: chunks.append((key, value)))
 
     def work(stop, emit):
@@ -108,8 +98,8 @@ def test_streaming_worker_delivers_chunks_on_current_generation(qt_app) -> None:
         return "alpha beta"
 
     assert manager.submit_stream("assistant", work)
-    events = wait_for(manager.result)
-    assert events == [("assistant", "alpha beta")]
+    assert result_spy.wait(2_000)
+    assert [list(row) for row in result_spy] == [["assistant", "alpha beta"]]
     assert chunks == [("assistant", "alpha"), ("assistant", " beta")]
 
 
@@ -128,9 +118,8 @@ def test_old_generation_result_does_not_overwrite(qt_app) -> None:
     manager.submit("old", slow)
     manager.invalidate()
     release.set()
-    loop = QEventLoop()
-    QTimer.singleShot(80, loop.quit)
-    loop.exec()
+    assert manager.pool.waitForDone(2_000)
+    qt_app.processEvents()
     assert delivered == []
 
 
