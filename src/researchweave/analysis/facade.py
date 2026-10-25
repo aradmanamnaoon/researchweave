@@ -27,6 +27,7 @@ from .advanced_statistics import (
     wilcoxon_paired,
 )
 from .authorization import CapabilityIssuer, HostCapability, HostPaths
+from .automatic import AnalysisRequest, plan_automatic_analysis
 from .coding_review import adjudicate_disagreements, propose_relocation
 from .data_ops import (
     aggregate_groups,
@@ -188,6 +189,8 @@ class AnalysisFacade:
             "statistics.analytic_weighted_mean": "read",
             "statistics.available_case": "read",
             "statistics.recommend": "read",
+            "statistics.auto_plan": "read",
+            "statistics.auto_analyze": "read",
             "statistics.effect_independent": "read",
             "statistics.effect_paired": "read",
             "statistics.effect_rank": "read",
@@ -915,7 +918,168 @@ class AnalysisFacade:
                 data["receipt"] = receipt
         else:
             obj = self._dataset(arguments)
-            if operation == "statistics.describe":
+            if operation in {"statistics.auto_plan", "statistics.auto_analyze"}:
+                request = AnalysisRequest(
+                    mode=cast(Any, str(arguments["mode"])),
+                    design=cast(Any, str(arguments["design"])),
+                    outcome=(
+                        str(arguments["outcome"]) if arguments.get("outcome") is not None else None
+                    ),
+                    outcome_type=(
+                        cast(Any, str(arguments["outcome_type"]))
+                        if arguments.get("outcome_type") is not None
+                        else None
+                    ),
+                    group=(
+                        str(arguments["group"]) if arguments.get("group") is not None else None
+                    ),
+                    levels=tuple(str(value) for value in arguments.get("levels", [])),
+                    predictors=tuple(str(value) for value in arguments.get("predictors", [])),
+                    items=tuple(str(value) for value in arguments.get("items", [])),
+                    paired_with=(
+                        str(arguments["paired_with"])
+                        if arguments.get("paired_with") is not None
+                        else None
+                    ),
+                    variables=tuple(str(value) for value in arguments.get("variables", [])),
+                    seed=int(arguments.get("seed", 0)),
+                    max_operations=int(arguments.get("max_operations", 24)),
+                )
+                automatic_plan = plan_automatic_analysis(obj, request)
+                data = {"plan": automatic_plan.as_json()}
+                if operation == "statistics.auto_analyze":
+                    identity = {"dataset_id": obj.dataset_id, "revision": obj.revision}
+                    diagnostics: list[dict[str, Any]] = []
+                    diagnostic_requests: list[tuple[str, dict[str, Any], str]] = [
+                        (
+                            "dataset.missingness",
+                            dict(identity),
+                            "Inspect missingness before selecting or interpreting procedures.",
+                        ),
+                        (
+                            "dataset.quality",
+                            {
+                                **identity,
+                                **(
+                                    {
+                                        "outcome": request.outcome,
+                                        "predictors": list(request.predictors),
+                                    }
+                                    if request.outcome and request.predictors
+                                    else {}
+                                ),
+                            },
+                            (
+                                "Run deterministic data-quality checks before inferential "
+                                "interpretation."
+                            ),
+                        ),
+                    ]
+                    for index, (child_operation, child_arguments, reason) in enumerate(
+                        diagnostic_requests
+                    ):
+                        child = self.execute(
+                            child_operation,
+                            child_arguments,
+                            {"request_id": f"{request_id}:auto-diagnostic-{index + 1}"},
+                        )
+                        diagnostics.append(
+                            {
+                                "operation": child_operation,
+                                "reason": reason,
+                                "status": child.get("status"),
+                                "data": child.get("data", {}),
+                                "error": child.get("error"),
+                            }
+                        )
+
+                    executions: list[dict[str, Any]] = []
+                    for index, step in enumerate(automatic_plan.steps):
+                        child = self.execute(
+                            step.operation,
+                            step.arguments,
+                            {"request_id": f"{request_id}:auto-step-{index + 1}"},
+                        )
+                        executions.append(
+                            {
+                                "operation": step.operation,
+                                "reason": step.reason,
+                                "exclusions": list(step.exclusions),
+                                "status": child.get("status"),
+                                "data": child.get("data", {}),
+                                "error": child.get("error"),
+                            }
+                        )
+                    failures = [
+                        {
+                            "operation": entry["operation"],
+                            "error": entry["error"],
+                        }
+                        for entry in [*diagnostics, *executions]
+                        if entry["status"] != "ok"
+                    ]
+                    execution_payload = [
+                        {
+                            "operation": entry["operation"],
+                            "status": entry["status"],
+                            "data": entry["data"],
+                            "error": entry["error"],
+                        }
+                        for entry in [*diagnostics, *executions]
+                    ]
+                    exclusions = []
+                    if request.design == "descriptive":
+                        exclusions.append(
+                            "Inferential procedures were not selected because no inferential "
+                            "study design was declared."
+                        )
+                    if request.mode == "compare-groups":
+                        exclusions.append(
+                            "Alternative tests were not selected from observed p-values or effect "
+                            "sizes; the declared design determines the primary procedure."
+                        )
+                    if request.mode == "predict-outcome":
+                        exclusions.append(
+                            "Other model families were excluded by the declared outcome type."
+                        )
+                    data.update(
+                        {
+                            "diagnostics": diagnostics,
+                            "executions": executions,
+                            "failures": failures,
+                            "report": {
+                                "mode": request.mode,
+                                "design": request.design,
+                                "dataset_id": obj.dataset_id,
+                                "dataset_revision": obj.revision,
+                                "selected_methods": [
+                                    step.operation for step in automatic_plan.steps
+                                ],
+                                "excluded_methods": exclusions,
+                                "selection_rule": (
+                                    "Methods are chosen only from explicit design/variable roles "
+                                    "and predeclared deterministic rules. Observed significance "
+                                    "never changes method selection."
+                                ),
+                                "multiple_testing_note": (
+                                    "Treat automatically generated exploratory analyses as "
+                                    "exploratory; prespecify confirmatory families and correction "
+                                    "rules before confirmatory inference."
+                                ),
+                                "warnings": list(automatic_plan.warnings),
+                            },
+                            "execution_manifest": {
+                                **automatic_plan.manifest,
+                                "execution_sha256": digest(execution_payload),
+                                "successful_operations": sum(
+                                    entry["status"] == "ok"
+                                    for entry in [*diagnostics, *executions]
+                                ),
+                                "failed_operations": len(failures),
+                            },
+                        }
+                    )
+            elif operation == "statistics.describe":
                 data = describe(obj, str(arguments["column"]))
             elif operation == "statistics.frequency":
                 data = frequency_table(obj, str(arguments["column"]))

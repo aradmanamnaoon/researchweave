@@ -180,6 +180,121 @@ def test_desktop_analysis_bridge_runs_production_scientific_code(tmp_path: Path)
         services.close()
 
 
+def test_desktop_automatic_analysis_uses_declared_variable_metadata(tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    try:
+        scope = uuid4()
+        created = approved(
+            services,
+            request(
+                "ui.project.create",
+                scope,
+                {
+                    "title": "Automatic analysis",
+                    "question": "Do the synthetic groups differ?",
+                    "study_type": "quantitative",
+                },
+            ),
+        )["data"]
+        project_id = UUID(created["project_id"])
+        imported = approved(
+            services,
+            request(
+                "ui.dataset.import",
+                project_id,
+                {
+                    "project_id": str(project_id),
+                    "expected_revision": created["revision"],
+                    "name": "Synthetic groups",
+                    "csv_text": "score,group\n1,A\n2,A\n3,A\n7,B\n8,B\n9,B\n",
+                },
+            ),
+        )["data"]
+        revision = imported["revision"]
+        for variable, metadata in (
+            (
+                "score",
+                {
+                    "type": "numeric",
+                    "role": "outcome",
+                    "units": "points",
+                    "levels": [],
+                    "missing_codes": [],
+                    "description": "Synthetic score",
+                },
+            ),
+            (
+                "group",
+                {
+                    "type": "categorical",
+                    "role": "group",
+                    "units": "",
+                    "levels": ["A", "B"],
+                    "missing_codes": [],
+                    "description": "Synthetic group",
+                },
+            ),
+        ):
+            updated = approved(
+                services,
+                request(
+                    "ui.variable.metadata.update",
+                    project_id,
+                    {
+                        "project_id": str(project_id),
+                        "expected_revision": revision,
+                        "dataset_id": imported["dataset_id"],
+                        "variable": variable,
+                        "metadata": metadata,
+                    },
+                ),
+            )
+            revision = updated["data"]["revision"]
+
+        methods = services.bus.dispatch(
+            request("ui.analysis.methods", project_id, {"project_id": str(project_id)})
+        )
+        assert "analysis.statistics.auto_analyze" in {
+            item["id"] for item in methods["data"]["methods"]
+        }
+
+        run_request = request(
+            "ui.analysis.run",
+            project_id,
+            {
+                "project_id": str(project_id),
+                "expected_revision": revision,
+                "method": "analysis.statistics.auto_analyze",
+                "inputs": {
+                    "dataset_id": imported["dataset_id"],
+                    "mode": "compare-groups",
+                    "design": "independent",
+                    "outcome": "score",
+                    "outcome_type": "continuous",
+                    "group": "group",
+                    "levels": ["A", "B"],
+                },
+            },
+        )
+        result = approved(services, run_request)
+        assert result["status"] == "ok", result
+        record = result["data"]["result"]
+        estimates = record["estimates"]
+        assert estimates["report"]["selected_methods"] == ["statistics.test"]
+        assert estimates["execution_manifest"]["failed_operations"] == 0, estimates["failures"]
+        assert estimates["executions"][0]["status"] == "ok"
+        profiles = {
+            profile["name"]: profile for profile in estimates["plan"]["profiles"]
+        }
+        assert profiles["score"]["declared_dtype"] == "number"
+        assert profiles["group"]["declared_dtype"] == "text"
+        assert record["provenance"]["staged_csv_sha256"] == record["provenance"][
+            "analysis_source_sha256"
+        ]
+    finally:
+        services.close()
+
+
 def test_desktop_gateway_routes_human_mutations_through_shared_audit(tmp_path: Path) -> None:
     services = build_services(tmp_path)
     try:

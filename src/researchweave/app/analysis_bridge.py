@@ -77,6 +77,16 @@ class ProductionAnalysisBackend:
                     return project.id, list(dataset.columns), list(dataset.rows), dataset.origin
         raise ValueError("UI dataset was not found")
 
+    def _variable_metadata(self, dataset_id: str) -> list[dict[str, Any]]:
+        for project in self._ui.store.list_projects():
+            if any(dataset.id == dataset_id for dataset in project.datasets):
+                return [
+                    dict(record)
+                    for record in project.variable_metadata.values()
+                    if record.get("dataset_id") == dataset_id
+                ]
+        return []
+
     def _stage_csv(self, columns: list[str], rows: list[list[str]]) -> tuple[str, str]:
         self._import_root.mkdir(parents=True, exist_ok=True)
         filename = f"ui-analysis-{uuid4()}.csv"
@@ -113,7 +123,47 @@ class ProductionAnalysisBackend:
             staged_path.unlink(missing_ok=True)
         if imported.get("status") != "ok":
             raise ValueError("Scientific dataset import failed")
-        return dict(imported["data"]), staged_hash
+        imported_data = dict(imported["data"])
+        dtype_map = {
+            "numeric": "number",
+            "categorical": "text",
+            "boolean": "boolean",
+            "date": "date",
+            "text": "text",
+        }
+        for record in self._variable_metadata(dataset_id):
+            variable = str(record.get("variable", ""))
+            variable_type = str(record.get("type", "text"))
+            updates: dict[str, Any] = {
+                "dtype": dtype_map.get(variable_type, "text"),
+                "units": str(record.get("units", "")),
+                "missing_values": [str(value) for value in record.get("missing_codes", [])],
+            }
+            if variable_type == "categorical":
+                updates["scale"] = "nominal"
+                updates["category_order"] = [str(value) for value in record.get("levels", [])]
+            description = str(record.get("description", "")).strip()
+            if description:
+                updates["label"] = description
+            metadata_request = OperationRequest(
+                operation="dataset.variable",
+                project_id=project_id,
+                arguments={
+                    "dataset_id": imported_data["dataset_id"],
+                    "revision": imported_data["revision"],
+                    "column": variable,
+                    "updates": updates,
+                },
+                actor="desktop-user",
+            )
+            metadata_result = self._bus.dispatch(
+                metadata_request,
+                approval=self._bus.issue_approval(metadata_request),
+            )
+            if metadata_result.get("status") != "ok":
+                raise ValueError(f"Scientific variable metadata import failed for {variable}")
+            imported_data["revision"] = metadata_result["data"]["revision"]
+        return imported_data, staged_hash
 
     def _run_advanced(
         self,
@@ -138,11 +188,13 @@ class ProductionAnalysisBackend:
             raise ValueError("Desktop project identifier is not a UUID") from exc
         prepared = dict(inputs)
         staged_hash = ""
+        analysis_source_hash = ""
         dataset_id = prepared.get("dataset_id")
         if isinstance(dataset_id, str) and dataset_id:
             imported = self._import_ui_dataset(dataset_id, scope)
             if imported is not None:
                 imported_data, staged_hash = imported
+                analysis_source_hash = str(imported_data.get("source_hash", ""))
                 prepared["dataset_id"] = imported_data["dataset_id"]
                 prepared["revision"] = imported_data["revision"]
                 nested = prepared.get("arguments")
@@ -191,6 +243,7 @@ class ProductionAnalysisBackend:
                 "request_id": response.get("request_id"),
                 "events": list(response.get("provenance", [])),
                 "staged_csv_sha256": staged_hash or None,
+                "analysis_source_sha256": analysis_source_hash or None,
                 "resolved_arguments": prepared,
             },
         }

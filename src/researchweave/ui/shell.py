@@ -1071,6 +1071,80 @@ class ResearchWindow(QMainWindow):
         summary_actions.addWidget(button("Compute summary", self.run_summary, primary=True))
         summary_layout.addLayout(summary_actions)
         layout.addWidget(summary_surface)
+        automatic_surface, automatic_layout = surface(
+            "Automatic statistical analysis",
+            "Run a deterministic, offline analysis workflow. ResearchWeave uses only explicit "
+            "design and variable roles for inferential choices; it never asks an LLM to compute "
+            "or select statistical results.",
+            kind="toolbarSurface",
+        )
+        automatic_form = QFormLayout()
+        self.auto_mode = QComboBox()
+        for label, mode_value in (
+            ("Explore my data", "explore"),
+            ("Compare groups", "compare-groups"),
+            ("Study relationships", "relationships"),
+            ("Analyze a questionnaire", "questionnaire"),
+            ("Predict an outcome", "predict-outcome"),
+            ("Comprehensive exploratory analysis", "comprehensive"),
+        ):
+            self.auto_mode.addItem(label, mode_value)
+        self.auto_design = QComboBox()
+        for label, design_value in (
+            ("Descriptive / no inferential design", "descriptive"),
+            ("Independent groups", "independent"),
+            ("Paired observations", "paired"),
+            ("Observational model", "observational"),
+            ("Repeated measures · requires more design metadata", "repeated"),
+            ("Complex survey · requires more design metadata", "survey"),
+        ):
+            self.auto_design.addItem(label, design_value)
+        self.auto_outcome = QComboBox()
+        self.auto_group = QComboBox()
+        self.auto_paired = QComboBox()
+        self.auto_outcome_type = QComboBox()
+        for label, outcome_value in (
+            ("Continuous", "continuous"),
+            ("Binary", "binary"),
+            ("Count", "count"),
+            ("Categorical", "categorical"),
+            ("Ordinal", "ordinal"),
+        ):
+            self.auto_outcome_type.addItem(label, outcome_value)
+        self.auto_levels = QLineEdit()
+        self.auto_levels.setPlaceholderText("Group levels, e.g. control, treatment")
+        self.auto_predictors = QLineEdit()
+        self.auto_predictors.setPlaceholderText("Predictors, comma-separated")
+        self.auto_variables = QLineEdit()
+        self.auto_variables.setPlaceholderText("Variables for exploration/relationships")
+        self.auto_items = QLineEdit()
+        self.auto_items.setPlaceholderText("Questionnaire items, comma-separated")
+        for label, widget in (
+            ("Goal", self.auto_mode),
+            ("Study design", self.auto_design),
+            ("Outcome", self.auto_outcome),
+            ("Outcome type", self.auto_outcome_type),
+            ("Group", self.auto_group),
+            ("Comparison levels", self.auto_levels),
+            ("Paired variable", self.auto_paired),
+            ("Predictors", self.auto_predictors),
+            ("Variables", self.auto_variables),
+            ("Questionnaire items", self.auto_items),
+        ):
+            named(widget, f"Automatic analysis {label.lower()}")
+            automatic_form.addRow(label, widget)
+        automatic_layout.addLayout(automatic_form)
+        self.auto_analysis_status = QLabel(
+            "Exploratory modes can run with no inferential design. Group comparisons, paired "
+            "tests and prediction require the corresponding explicit design information."
+        )
+        self.auto_analysis_status.setWordWrap(True)
+        self.auto_analysis_status.setObjectName("pageLead")
+        automatic_layout.addWidget(self.auto_analysis_status)
+        automatic_layout.addWidget(
+            button("Run automatic analysis", self.run_automatic_analysis, primary=True)
+        )
+        layout.addWidget(automatic_surface)
         plot_surface, plot_surface_layout = surface(
             "Plot builder",
             "Configure a reproducible plot, preview file receipts, and write only after explicit "
@@ -3250,6 +3324,9 @@ class ResearchWindow(QMainWindow):
         datasets = response["datasets"]
         self.variable_list.clear()
         self.variable_picker.clear()
+        for selector in (self.auto_outcome, self.auto_group, self.auto_paired):
+            selector.clear()
+            selector.addItem("Not set", "")
         self.dataset_picker.blockSignals(True)
         self.dataset_picker.clear()
         if not datasets:
@@ -3287,6 +3364,9 @@ class ResearchWindow(QMainWindow):
                 item.setData(Qt.ItemDataRole.UserRole, variable["name"])
                 self.variable_list.addItem(item)
                 self.variable_picker.addItem(variable["name"])
+                self.auto_outcome.addItem(variable["name"], variable["name"])
+                self.auto_group.addItem(variable["name"], variable["name"])
+                self.auto_paired.addItem(variable["name"], variable["name"])
         self.data_sort.blockSignals(False)
         methods = self._call("ui.analysis.methods")
         if methods is not None:
@@ -3664,6 +3744,66 @@ class ResearchWindow(QMainWindow):
         if response is not None:
             self.refresh_analysis_results()
             self.navigate("Analysis Results")
+
+    def run_automatic_analysis(self) -> None:
+        if not self.current_dataset_id:
+            self._set_status("Choose a dataset before running automatic analysis.")
+            return
+        mode = str(self.auto_mode.currentData())
+        design = str(self.auto_design.currentData())
+        inputs: dict[str, object] = {
+            "dataset_id": self.current_dataset_id,
+            "mode": mode,
+            "design": design,
+        }
+        outcome = str(self.auto_outcome.currentData() or "")
+        group = str(self.auto_group.currentData() or "")
+        paired_with = str(self.auto_paired.currentData() or "")
+        if outcome:
+            inputs["outcome"] = outcome
+            inputs["outcome_type"] = str(self.auto_outcome_type.currentData())
+        if group:
+            inputs["group"] = group
+        if paired_with:
+            inputs["paired_with"] = paired_with
+        levels = self._comma_values(self.auto_levels.text())
+        predictors = self._comma_values(self.auto_predictors.text())
+        variables = self._comma_values(self.auto_variables.text())
+        items = self._comma_values(self.auto_items.text())
+        if levels:
+            inputs["levels"] = levels
+        if predictors:
+            inputs["predictors"] = predictors
+        if variables:
+            inputs["variables"] = variables
+        if items:
+            inputs["items"] = items
+        response = self._call(
+            "ui.analysis.run",
+            method="analysis.statistics.auto_analyze",
+            inputs=inputs,
+        )
+        if response is None:
+            return
+        result = response.get("result", {})
+        estimates = result.get("estimates", {}) if isinstance(result, dict) else {}
+        report = estimates.get("report", {}) if isinstance(estimates, dict) else {}
+        manifest = (
+            estimates.get("execution_manifest", {}) if isinstance(estimates, dict) else {}
+        )
+        selected = report.get("selected_methods", []) if isinstance(report, dict) else []
+        failures = estimates.get("failures", []) if isinstance(estimates, dict) else []
+        self.stats_result.setPlainText(
+            "Automatic analysis completed without an LLM.\n"
+            f"Mode: {mode} · Design: {design}\n"
+            f"Selected procedures: {', '.join(str(value) for value in selected) or 'none'}\n"
+            f"Successful operations: {manifest.get('successful_operations', '—')} · "
+            f"Failed operations: {manifest.get('failed_operations', len(failures))}\n"
+            "Open Analysis Results to inspect numerical outputs, selection rules, warnings and "
+            "the reproducibility manifest."
+        )
+        self.refresh_analysis_results()
+        self.navigate("Analysis Results")
 
     def refresh_analysis_results(self) -> None:
         self.analysis_results_list.clear()
