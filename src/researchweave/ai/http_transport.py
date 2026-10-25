@@ -13,6 +13,8 @@ import ipaddress
 import socket
 import ssl
 from collections.abc import Iterator, Mapping
+from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
 from typing import Protocol
 from urllib.parse import urlsplit
 
@@ -135,6 +137,31 @@ class PinnedHTTPTransport:
         self.max_request_bytes = max_request_bytes
 
     @staticmethod
+    def _retry_after(response: HTTPReply) -> float | None:
+        getter = getattr(response, "getheader", None)
+        raw = getter("Retry-After") if callable(getter) else None
+        if raw is not None and not isinstance(raw, str):
+            return None
+        if raw is None:
+            return None
+        value = raw.strip()
+        if not value:
+            return None
+        try:
+            seconds = float(value)
+        except ValueError:
+            try:
+                target = parsedate_to_datetime(value)
+            except (TypeError, ValueError, OverflowError):
+                return None
+            if target.tzinfo is None:
+                target = target.replace(tzinfo=UTC)
+            seconds = (target.astimezone(UTC) - datetime.now(UTC)).total_seconds()
+        if seconds < 0:
+            return 0.0
+        return min(seconds, 86_400.0)
+
+    @staticmethod
     def _address_set(hostname: str, addresses: list[str], local: bool) -> str:
         if not addresses or len(addresses) > 32:
             raise AIError("PROVIDER_UNAVAILABLE", "Provider DNS response is missing or excessive")
@@ -209,7 +236,17 @@ class PinnedHTTPTransport:
             if status in {401, 403}:
                 raise AIError("PERMISSION_DENIED", f"Provider HTTP {status}")
             if status == 429:
-                raise AIError("RATE_LIMITED", "Provider rate limit reached")
+                raise AIError(
+                    "RATE_LIMITED",
+                    "Provider rate limit reached",
+                    retry_after_seconds=self._retry_after(response),
+                )
+            if status == 503:
+                raise AIError(
+                    "SERVICE_UNAVAILABLE",
+                    "Provider service unavailable",
+                    retry_after_seconds=self._retry_after(response),
+                )
             if not 200 <= status < 300:
                 raise AIError("PROVIDER_UNAVAILABLE", f"Provider HTTP {status}")
             contents = response.read(self.max_response_bytes + 1)
@@ -290,7 +327,17 @@ class PinnedHTTPTransport:
             if status in {401, 403}:
                 raise AIError("PERMISSION_DENIED", f"Provider HTTP {status}")
             if status == 429:
-                raise AIError("RATE_LIMITED", "Provider rate limit reached")
+                raise AIError(
+                    "RATE_LIMITED",
+                    "Provider rate limit reached",
+                    retry_after_seconds=self._retry_after(response),
+                )
+            if status == 503:
+                raise AIError(
+                    "SERVICE_UNAVAILABLE",
+                    "Provider service unavailable",
+                    retry_after_seconds=self._retry_after(response),
+                )
             if not 200 <= status < 300:
                 raise AIError("PROVIDER_UNAVAILABLE", f"Provider HTTP {status}")
             while True:

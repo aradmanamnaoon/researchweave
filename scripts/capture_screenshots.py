@@ -78,10 +78,11 @@ def seed(gateway: DesktopCommandGateway) -> tuple[str, int]:
         {
             "project_id": project_id,
             "expected_revision": metadata["revision"],
-            "method": "descriptive",
+            "method": "analysis.statistics.test",
             "inputs": {
                 "dataset_id": dataset["dataset_id"],
-                "column": "score",
+                "outcome": "score",
+                "options": {"group": "group", "groups": ["A", "B"]},
             },
         },
     )["data"]
@@ -97,6 +98,15 @@ def capture(root: Path, output: Path, theme: str, screen: str) -> dict[str, obje
             project_id = projects[0].id
         else:
             project_id, _ = seed(gateway)
+            services.ai.usage.record(
+                project_id=project_id,
+                provider_id="synthetic-local",
+                model="fixture-model",
+                status="ok",
+                input_tokens=128,
+                output_tokens=48,
+                latency_ms=42,
+            )
         preferences = Preferences(
             theme=theme,  # type: ignore[arg-type]
             last_project_id=project_id,

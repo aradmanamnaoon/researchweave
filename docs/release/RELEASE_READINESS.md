@@ -2,9 +2,10 @@
 
 This document began as the local pre-publication readiness snapshot for ResearchWeave `v0.1.0` and
 retains that observed evidence. The `v0.1.0` tag and GitHub release were subsequently published on
-2026-10-24 with the Windows ZIP whose hash is recorded below. The current local checkout contains
-post-release AI hardening after that tag; this continuation intentionally stops before another push,
-tag, package upload, or remote release.
+2026-10-24 with the Windows ZIP whose hash is recorded below. The current checkout is based on the
+published `v0.1.2` commit and contains additional local statistics, R-syntax, provider-reliability and
+Agent observability hardening; this continuation intentionally stops before another push, tag, package
+upload, or remote release.
 
 ## Repository map and UI-core guardrails
 
@@ -41,6 +42,15 @@ uses the existing Agent and Providers pages instead of replacing that shell.
   preserves native assistant/tool call identities, treats evidence/tool output as untrusted data,
   removes failed-turn prompts before safe retry, and journals approved writes to prevent ambiguous
   automatic replay after interruption.
+- Non-streaming provider calls now retry only typed 429/503 failures with bounded exponential jitter and
+  bounded `Retry-After` support. Streaming stays single-attempt, and retry-before-tool tests prove a host
+  tool is not duplicated when the model request is retried.
+- The production assistant now records payload-free provider usage diagnostics (logical model-call status,
+  reported token counts, latency and error codes) and Agent/Providers surface the project summary. Internal
+  transient retry attempts remain folded into one logical call. Monetary cost is explicitly unknown until a
+  provenance-aware price source is configured.
+- Agent exposes inline cancellation using the existing supervised Qt job manager and reports the terminal
+  cancelled state in place; it does not create a second orchestration path.
 
 ## Manual/native QA ledger
 
@@ -60,6 +70,8 @@ Observed on Windows using the real PyQt6 application window and an isolated temp
 | Restart restores assistant history | Pass; prompt visible in Agent transcript |
 | Switch Providers to manual mode | Pass; active model becomes `None` |
 | Agent Send disabled with no active model | Pass |
+| Agent/Providers usage telemetry visible without storing prompt/response bodies | Pass; deterministic local usage fixture rendered in native light/dark screenshots |
+| Agent inline Cancel control | Pass in Qt interaction test; terminal `cancelled` state restores controls |
 
 No API key was used and no local model was downloaded for this validation.
 
@@ -77,16 +89,16 @@ interoperability and research-duration evidence are listed under limitations rat
 
 ## Automated validation
 
-- `ruff format --check .`: **395 files already formatted**.
+- `ruff format --check .`: **408 files already formatted**.
 - `ruff check .`: **pass**.
-- `mypy src`: **156 source files, 0 issues**.
-- `pytest -q`: **735 passed, 10 skipped, 3 warnings** after post-release AI hardening.
-- `git diff --check`: **pass**; existing Windows LF→CRLF warning for `tests/ui/test_smoke.py` only.
+- `mypy src`: **161 source files, 0 issues**.
+- `pytest -q`: **800 passed, 10 skipped, 3 warnings** after the statistics/R and provider-agent hardening checkpoints.
+- `git diff --check`: **pass**; Windows reports expected LF→CRLF normalization warnings on several modified text files.
 - skills validator: **27 repository skills valid**.
 - broader mission capability inventory: **67 no-login/no-key capabilities observed as available
   during the mission**; mission-only UI automation packages were removed by the final locked sync; see
   [`../DEVELOPER_CAPABILITIES.md`](../DEVELOPER_CAPABILITIES.md).
-- current source metric: **51,478 substantive Python SLOC across 156 files**.
+- current source metric: **54,355 substantive Python SLOC across 161 files**.
 - `pip-audit --local`: **no known vulnerabilities**; local `researchweave` package is skipped
   because it is not a PyPI distribution.
 - final post-build filesystem disposition audit: **27,211 files** = 616 `KEEP_PUBLIC`, 7,025
@@ -170,6 +182,6 @@ uv run --extra dev --extra formats python scripts/tasks.py readme
 ```
 
 At the time the original readiness snapshot was written, no `git push`, remote tag, GitHub release,
-or package publication had yet been performed. `v0.1.0` was later published on 2026-10-24. The
-post-release local hardening recorded in this document is intentionally left unpushed and untagged by
-the current continuation.
+or package publication had yet been performed. `v0.1.0` was later published on 2026-10-24, and the
+current branch now tracks published `v0.1.2`. The additional local hardening recorded in this document
+is intentionally left unpushed and untagged by the current continuation.

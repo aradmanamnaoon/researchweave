@@ -209,6 +209,17 @@ def test_analysis_prisma_tutorial_and_notification_surfaces(
     shell.navigate("Statistics")
     shell.current_dataset_id = dataset["dataset_id"]
     shell.refresh_datasets()
+    assert shell.analysis_compatibility_model.rowCount() >= 10
+    assert (
+        shell.analysis_compatibility_model.headerData(
+            0,
+            Qt.Orientation.Horizontal,
+            Qt.ItemDataRole.DisplayRole,
+        )
+        == "Procedure family"
+    )
+    assert "Reproducibility:" in shell.analysis_compatibility_detail.text()
+    assert "Limits:" in shell.analysis_compatibility_detail.text()
     shell.variable_picker.setCurrentText("score")
     shell.analysis_method.setCurrentIndex(0)
     shell.run_analysis()

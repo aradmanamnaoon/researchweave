@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import time
 from collections.abc import Callable, Mapping
 from pathlib import Path
 from typing import Any
@@ -23,6 +24,12 @@ class FakeAIBackend:
         self.messages: list[dict[str, Any]] = []
         self.pending: dict[str, Any] | None = None
         self.side_effects: list[tuple[str, dict[str, Any]]] = []
+        self.usage = {
+            "project_id": "",
+            "providers": {},
+            "contains_payloads": False,
+            "contains_credentials": False,
+        }
 
     def capabilities(self) -> list[Mapping[str, Any]]:
         return []
@@ -75,11 +82,15 @@ class FakeAIBackend:
             ]
         }
 
+    def usage_summary(self, project_id: str) -> Mapping[str, Any]:
+        return {**self.usage, "project_id": project_id}
+
     def assistant_history(self, project_id: str, conversation_id: str) -> Mapping[str, Any]:
         return {
             "conversation_id": conversation_id,
             "messages": list(self.messages),
             "pending_tool": dict(self.pending) if self.pending is not None else None,
+            "usage": self.usage_summary(project_id),
         }
 
     def assistant_send(
@@ -100,6 +111,23 @@ class FakeAIBackend:
             on_delta("Stream")
             on_delta("ed")
         self.messages.append({"role": "assistant", "content": "Streamed", "metadata": {}})
+        self.usage = {
+            "project_id": project_id,
+            "providers": {
+                "local": {
+                    "requests": 1,
+                    "failed": 0,
+                    "cancelled": 0,
+                    "input_tokens": 12,
+                    "output_tokens": 4,
+                    "tokens_known": True,
+                    "mean_latency_ms": 25.0,
+                    "errors": {},
+                }
+            },
+            "contains_payloads": False,
+            "contains_credentials": False,
+        }
         return {
             "conversation_id": self.conversation_id,
             "profile_id": self.active_profile,
@@ -116,6 +144,7 @@ class FakeAIBackend:
                 }
             ],
             "pending_tool": None,
+            "usage": self.usage_summary(project_id),
         }
 
     def assistant_approve(
@@ -153,6 +182,7 @@ class FakeAIBackend:
             "iterations": 1,
             "tool_events": [],
             "pending_tool": None,
+            "usage": self.usage_summary(project_id),
         }
 
     def assistant_deny(self, project_id: str, conversation_id: str) -> Mapping[str, Any]:
@@ -238,6 +268,7 @@ def test_provider_form_persists_real_model_profile_without_secret_material(
     assert provider["endpoint"] == "http://127.0.0.1:1234/v1"
     assert provider["credential_env"] == "LOCAL_MODEL_TOKEN"
     assert "secret" not in shell.provider_status.toPlainText().lower()
+    assert "Model usage: no calls recorded" in shell.provider_usage_status.text()
     assert shell.assistant_send_button.isEnabled()
     shell.close()
 
@@ -308,7 +339,80 @@ def test_assistant_streams_inside_agent_page_and_reports_tool_use(
     assert "You\nFind the relevant evidence" in transcript
     assert "Assistant\nStreamed" in transcript
     assert "tools used: retrieval.query" in shell.assistant_tool_status.text()
+    assert "1 logical model call" in shell.assistant_usage_status.text()
+    assert "12 input + 4 output tokens" in shell.assistant_usage_status.text()
     assert shell.assistant_conversation_id == backend.conversation_id
+    assert shell.assistant_send_button.isEnabled()
+    shell.close()
+
+
+def test_agent_page_cancel_button_cancels_running_assistant_job(
+    qt_app: QApplication,
+    tmp_path: Path,
+) -> None:
+    class CancelledRequest(Exception):
+        code = "CANCELLED"
+
+    class CancellableBackend(FakeAIBackend):
+        def assistant_send(
+            self,
+            project_id: str,
+            prompt: str,
+            *,
+            conversation_id: str | None = None,
+            profile_id: str | None = None,
+            offline: bool,
+            egress_acknowledged: bool,
+            on_delta: Callable[[str], None] | None = None,
+            is_cancelled: Callable[[], bool] | None = None,
+        ) -> Mapping[str, Any]:
+            deadline = time.monotonic() + 1.0
+            while time.monotonic() < deadline:
+                if is_cancelled is not None and is_cancelled():
+                    raise CancelledRequest("synthetic cancellation")
+                time.sleep(0.005)
+            raise AssertionError("assistant cancellation signal was not observed")
+
+    backend = CancellableBackend(active_profile="local")
+    backend.profiles["local"] = {
+        "identifier": "local",
+        "kind": "openai-compatible",
+        "endpoint": "http://127.0.0.1:1234/v1",
+        "model": "fixture",
+        "local": True,
+        "credential_env": None,
+        "tool_calling": True,
+        "enabled": True,
+    }
+    facade = build_ui_facade(tmp_path, ai_backend=backend)
+    project_id = _create_project(facade)
+    shell = build_ui_shell(fake_services=facade)
+    shell.open_project(project_id)
+    shell.assistant_prompt.setPlainText("Cancel this synthetic request")
+
+    loop = QEventLoop()
+    states: list[str] = []
+
+    def collect_state(task_id: str, state: str) -> None:
+        if task_id != "assistant":
+            return
+        states.append(state)
+        if state == "cancelled":
+            loop.quit()
+
+    shell.jobs.changed.connect(collect_state)
+    try:
+        shell.send_assistant()
+        assert shell.assistant_cancel_button.isEnabled()
+        shell.cancel_assistant()
+        QTimer.singleShot(2_000, loop.quit)
+        loop.exec()
+    finally:
+        shell.jobs.changed.disconnect(collect_state)
+    qt_app.processEvents()
+    assert "cancelled" in states
+    assert "cancelled" in shell.assistant_tool_status.text().lower()
+    assert not shell.assistant_cancel_button.isEnabled()
     assert shell.assistant_send_button.isEnabled()
     shell.close()
 

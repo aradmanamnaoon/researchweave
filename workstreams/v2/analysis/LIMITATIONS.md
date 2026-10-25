@@ -4,7 +4,7 @@ ResearchWeave V2 Scientific Analysis is a substantial headless analysis service,
 
 ## External/runtime limits
 
-- `Rscript` is not installed on the observed Windows host. The R adapter detects this and returns the feature-specific `DEPENDENCY_MISSING` path without disabling Python analysis. Native R numerical parity, Unicode execution and R timeout behavior therefore remain externally blocked on this machine.
+- `Rscript` is not installed on the observed Windows host. The R adapter detects this and returns the feature-specific `DEPENDENCY_MISSING` path without disabling Python analysis. ResearchWeave now exports revision-bound base-R syntax for descriptives, t tests, Pearson/Spearman/Kendall correlation, one-way ANOVA and ordinary least squares, but those scripts cannot be executed or numerically cross-validated on this machine. Robust/clustered OLS and other unmapped R procedures remain explicitly unsupported by the mapped exporter; arbitrary user-authored R still requires the approval-gated runtime.
 - Configured strict mypy reaches third-party packages that do not provide installed stubs or `py.typed` metadata here (SciPy, statsmodels, pandas, PyArrow, OpenPyXL and Patsy). With those imports treated as externally untyped, all 37 first-party analysis modules pass mypy with zero errors. This is not reported as a fully green configured strict-mypy run.
 - ODS support remains optional and depends on the installed ODF reader stack. Optional readers fail explicitly rather than silently changing format semantics.
 

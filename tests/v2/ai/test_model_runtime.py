@@ -32,6 +32,19 @@ class FakeStreamingTransport(FakeTransport):
         yield from self.chunks
 
 
+class SequenceTransport(FakeTransport):
+    def __init__(self, responses: list[Mapping[str, object] | AIError]) -> None:
+        super().__init__({})
+        self.responses = responses
+
+    def send(self, url: str, headers: Mapping[str, str], payload: bytes, timeout: float) -> bytes:
+        self.requests.append((url, headers, payload, timeout))
+        response = self.responses.pop(0)
+        if isinstance(response, AIError):
+            raise response
+        return json.dumps(response).encode()
+
+
 def test_model_config_persists_active_profile_without_secret_material(tmp_path: Path) -> None:
     path = tmp_path / "model-providers.json"
     store = ModelConfigStore(path)
@@ -180,3 +193,85 @@ def test_runtime_streams_real_sse_deltas_to_callback(tmp_path: Path) -> None:
     assert deltas == ["alpha ", "beta"]
     assert result.text == "alpha beta"
     assert result.usage.total_tokens == 4
+
+
+def test_runtime_retries_retryable_non_streaming_calls_with_bounded_delay(tmp_path: Path) -> None:
+    store = ModelConfigStore(tmp_path / "models.json")
+    store.upsert(
+        ModelProfile(
+            "local",
+            "openai-compatible",
+            "http://127.0.0.1:1234/v1",
+            "fixture",
+            local=True,
+        ),
+        activate=True,
+    )
+    transport = SequenceTransport(
+        [
+            AIError("RATE_LIMITED", "synthetic 429", retry_after_seconds=9.0),
+            {
+                "choices": [{"message": {"content": "recovered"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+            },
+        ]
+    )
+    sleeps: list[float] = []
+    runtime = ConfiguredModelRuntime(
+        store,
+        EgressPolicy(),
+        transport=transport,
+        retry_max_seconds=1.0,
+        sleep=sleeps.append,
+        jitter=lambda: 0.5,
+    )
+    result = runtime.complete([ProviderMessage("user", "hello")])
+    assert result.text == "recovered"
+    assert sleeps == [1.0]
+    assert len(transport.requests) == 2
+
+
+def test_runtime_retry_exhaustion_and_nonretryable_errors_do_not_loop(tmp_path: Path) -> None:
+    store = ModelConfigStore(tmp_path / "models.json")
+    store.upsert(
+        ModelProfile(
+            "local",
+            "openai-compatible",
+            "http://127.0.0.1:1234/v1",
+            "fixture",
+            local=True,
+        ),
+        activate=True,
+    )
+    retrying = SequenceTransport(
+        [
+            AIError("SERVICE_UNAVAILABLE", "synthetic 503"),
+            AIError("SERVICE_UNAVAILABLE", "synthetic 503"),
+            AIError("SERVICE_UNAVAILABLE", "synthetic 503"),
+        ]
+    )
+    sleeps: list[float] = []
+    runtime = ConfiguredModelRuntime(
+        store,
+        EgressPolicy(),
+        transport=retrying,
+        sleep=sleeps.append,
+        jitter=lambda: 0.5,
+    )
+    with pytest.raises(AIError) as exhausted:
+        runtime.complete([ProviderMessage("user", "hello")])
+    assert exhausted.value.code == "SERVICE_UNAVAILABLE"
+    assert sleeps == [0.25, 0.5]
+    assert len(retrying.requests) == 3
+
+    denied = SequenceTransport([AIError("PERMISSION_DENIED", "synthetic 401")])
+    denied_runtime = ConfiguredModelRuntime(
+        store,
+        EgressPolicy(),
+        transport=denied,
+        sleep=lambda _seconds: pytest.fail("non-retryable errors must not sleep"),
+    )
+    with pytest.raises(AIError) as error:
+        denied_runtime.complete([ProviderMessage("user", "hello")])
+    assert error.value.code == "PERMISSION_DENIED"
+    assert len(denied.requests) == 1

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import logging
 from collections.abc import Callable, Mapping
 from dataclasses import asdict
 from datetime import UTC, datetime, timedelta
@@ -18,7 +19,7 @@ from .conversations import ConversationStore
 from .errors import AIError
 from .external_connectors import ConnectorRegistry, MCPBridge
 from .grounding import GroundingVerifier
-from .interactive_agent import ModelAgentLoop
+from .interactive_agent import ModelAgentLoop, ProviderCallEvent
 from .model_runtime import ConfiguredModelRuntime, ModelConfigStore, ModelProfile
 from .ollama import OllamaAdapter, OllamaMessage, OllamaOptions
 from .orchestration import LongTaskOrchestrator
@@ -39,6 +40,8 @@ from .retrieval_security import (
     PrivacyClassifier,
 )
 from .usage_privacy import PrivacyEgressEngine, UsageDiagnostics
+
+logger = logging.getLogger(__name__)
 
 
 class AIFacade:
@@ -214,7 +217,23 @@ class AIFacade:
             "iterations": result.iterations,
             "tool_events": [asdict(event) for event in result.events],
             "pending_tool": pending,
+            "usage": self.usage.summary(project_id),
         }
+
+    def _record_provider_call(self, project_id: str, event: ProviderCallEvent) -> None:
+        try:
+            self.usage.record(
+                project_id=project_id,
+                provider_id=event.provider,
+                model=event.model,
+                status=event.status,
+                latency_ms=event.latency_ms,
+                input_tokens=event.input_tokens,
+                output_tokens=event.output_tokens,
+                error_code=event.error_code,
+            )
+        except Exception:
+            logger.warning("Unable to persist provider usage diagnostics", exc_info=True)
 
     def assistant_history(self, project_id: str, conversation_id: str) -> Mapping[str, Any]:
         return {
@@ -223,6 +242,7 @@ class AIFacade:
                 asdict(item) for item in self.conversations.history(project_id, conversation_id)
             ],
             "pending_tool": self.conversations.pending_tool(project_id, conversation_id),
+            "usage": self.usage.summary(project_id),
         }
 
     def assistant_chat(
@@ -260,6 +280,7 @@ class AIFacade:
                 max_tokens=max_tokens,
                 on_delta=on_delta,
                 is_cancelled=is_cancelled,
+                on_provider_call=lambda event: self._record_provider_call(project_id, event),
             )
         except Exception:
             self.conversations.remove_message(project_id, conversation_id, user_message.sequence)
@@ -341,6 +362,7 @@ class AIFacade:
             max_tokens=max_tokens,
             on_delta=on_delta,
             is_cancelled=is_cancelled,
+            on_provider_call=lambda event: self._record_provider_call(project_id, event),
         )
         return self._assistant_result(project_id, conversation_id, profile_id, result)
 

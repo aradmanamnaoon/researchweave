@@ -129,6 +129,87 @@ def test_native_tool_call_executes_read_tool_then_continues(tmp_path: Path) -> N
     tools.close()
 
 
+def test_retryable_provider_failure_retries_before_tool_execution_without_duplication(
+    tmp_path: Path,
+) -> None:
+    observed: list[str] = []
+    tools = DurableAgentRuntime(tmp_path / "agent.sqlite")
+    tools.register_tool(
+        ToolContract(
+            "read.echo",
+            "read",
+            lambda args: observed.append(str(args["value"])) or {"echo": args["value"]},
+            True,
+            True,
+            frozenset({"value"}),
+            description="Echo a synthetic value.",
+            argument_schema={
+                "type": "object",
+                "properties": {"value": {"type": "string", "maxLength": 50}},
+                "required": ["value"],
+                "additionalProperties": False,
+            },
+        )
+    )
+
+    class RetryOnceTransport(QueueTransport):
+        def __init__(self, responses: list[Mapping[str, object]]) -> None:
+            super().__init__(responses)
+            self.failed = False
+
+        def send(
+            self, url: str, headers: Mapping[str, str], payload: bytes, timeout: float
+        ) -> bytes:
+            self.payloads.append(json.loads(payload))
+            if not self.failed:
+                self.failed = True
+                raise AIError("RATE_LIMITED", "synthetic 429", retry_after_seconds=0)
+            return self.responses.pop(0)
+
+    transport = RetryOnceTransport(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call-1",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "read_echo",
+                                        "arguments": '{"value":"alpha"}',
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {"prompt_tokens": 2, "completion_tokens": 1, "total_tokens": 3},
+            },
+            {
+                "choices": [{"message": {"content": "Finished"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+            },
+        ]
+    )
+    runtime = _model_runtime(tmp_path, transport, tool_calling=True)
+    events = []
+    result = ModelAgentLoop(runtime, tools).run(
+        "project",
+        [ProviderMessage("user", "echo alpha")],
+        on_provider_call=events.append,
+    )
+    assert result.text == "Finished"
+    assert observed == ["alpha"]
+    assert len(transport.payloads) == 3
+    assert len(events) == 2
+    assert all(event.status == "ok" for event in events)
+    tools.close()
+
+
 def test_native_tool_loop_rejects_multiple_calls_before_any_execution(tmp_path: Path) -> None:
     observed: list[str] = []
     tools = DurableAgentRuntime(tmp_path / "agent.sqlite")
@@ -440,8 +521,17 @@ def test_cancellation_after_provider_prevents_tool_execution(tmp_path: Path, nat
     transport = CancelAfterResponse([response])
     tools = _read_tools(tmp_path)
     loop = ModelAgentLoop(_model_runtime(tmp_path, transport, tool_calling=native), tools)
+    provider_events = []
     with pytest.raises(AIError) as error:
-        loop.run("project", [ProviderMessage("user", "echo")], is_cancelled=lambda: cancelled[0])
+        loop.run(
+            "project",
+            [ProviderMessage("user", "echo")],
+            is_cancelled=lambda: cancelled[0],
+            on_provider_call=provider_events.append,
+        )
     assert error.value.code == "CANCELLED"
     assert len(transport.payloads) == 1
+    assert len(provider_events) == 1
+    assert provider_events[0].status == "cancelled"
+    assert provider_events[0].error_code == "CANCELLED"
     tools.close()

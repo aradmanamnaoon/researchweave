@@ -8,7 +8,17 @@ therefore still require opt-in interoperability verification before production e
 Anthropic-native streaming is not implemented; the generic bounded SSE assembler currently
 targets OpenAI-compatible event shape. Gemini capability/quota discovery is not live-probed.
 The model chooser uses privacy/offline/local preference and does not claim to predict model
-quality or provider monetary cost.
+quality or provider monetary cost. Non-streaming model calls now use bounded retries for typed
+HTTP 429/503 failures, honor bounded `Retry-After` hints, and never switch providers implicitly.
+Streaming calls remain single-attempt so partial output cannot be replayed silently, and an
+already-blocking socket request cannot yet be interrupted mid-read by the Qt cancel signal.
+
+Provider usage diagnostics are now populated by the real assistant loop and persist only provider/model
+identity, logical model-call status, token counts when reported, latency and error codes. Prompts,
+responses and credentials are not stored in the usage database. Transport-level transient retry attempts
+are folded into the surrounding logical call rather than counted as separate requests. Monetary cost
+remains explicitly unknown because ResearchWeave does not yet ship a versioned provider/model price
+catalog or user-configured price table.
 
 The statistics copilot plans operations against declared capabilities and explains failures;
 it does not replace the separate statistical-analysis engine. Research personas are bounded
@@ -33,5 +43,7 @@ PDF ingestion is text-layer only; scanned PDFs need OCR elsewhere. Retrieval cit
 that a quotation still exists in the indexed source at the recorded digest, not that the
 source itself is true.
 
-The final desktop UI, accessibility behavior and end-user account setup are outside this
-worktree's source ownership. All five acceptance journeys are headless synthetic workflows.
+The integrated desktop now exposes provider configuration, assistant usage telemetry, exact tool
+approvals and inline assistant cancellation. Native Windows screenshots and offscreen interaction tests
+exercise these surfaces, but NVDA/VoiceOver/Orca behavior, live hosted-account setup and multi-OS native
+accessibility still require external/manual validation.

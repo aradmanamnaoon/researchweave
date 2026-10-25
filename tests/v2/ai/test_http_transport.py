@@ -19,19 +19,23 @@ class FakeResolver:
 
 
 class FakeHTTPResponse:
-    def __init__(self, status: int, data: bytes):
+    def __init__(self, status: int, data: bytes, headers: dict[str, str] | None = None):
         self.status = status
         self.data = data
+        self.headers = headers or {}
 
     def read(self, size: int) -> bytes:
         chunk = self.data[:size]
         self.data = self.data[size:]
         return chunk
 
+    def getheader(self, name: str, default: str | None = None) -> str | None:
+        return self.headers.get(name, default)
+
 
 class FakeConnection:
-    def __init__(self, status: int, data: bytes):
-        self.response = FakeHTTPResponse(status, data)
+    def __init__(self, status: int, data: bytes, headers: dict[str, str] | None = None):
+        self.response = FakeHTTPResponse(status, data, headers)
         self.calls: list[tuple[str, str, bytes | None, object]] = []
         self.closed = False
 
@@ -46,13 +50,19 @@ class FakeConnection:
 
 
 class FakeConnectionFactory:
-    def __init__(self, status: int = 200, data: bytes = b"ok"):
+    def __init__(
+        self,
+        status: int = 200,
+        data: bytes = b"ok",
+        headers: dict[str, str] | None = None,
+    ):
         self.connections = []
         self.status = status
         self.data = data
+        self.headers = headers
 
     def create(self, hostname, pinned_ip, port, *, tls, timeout):
-        connection = FakeConnection(self.status, self.data)
+        connection = FakeConnection(self.status, self.data, self.headers)
         self.connections.append((hostname, pinned_ip, port, tls, timeout, connection))
         return connection
 
@@ -110,7 +120,7 @@ def test_http_local_loopback_and_local_resolution_guard():
         (301, "PERMISSION_DENIED"),
         (401, "PERMISSION_DENIED"),
         (429, "RATE_LIMITED"),
-        (503, "PROVIDER_UNAVAILABLE"),
+        (503, "SERVICE_UNAVAILABLE"),
     ],
 )
 def test_denied_http_status_is_typed_and_connection_is_closed(status, code):
@@ -120,6 +130,15 @@ def test_denied_http_status_is_typed_and_connection_is_closed(status, code):
         transport.send("https://example.org/v1", {}, b"{}", 5)
     assert error.value.code == code
     assert factory.connections[0][-1].closed is True
+
+
+def test_retry_after_header_is_preserved_for_retryable_status():
+    factory = FakeConnectionFactory(status=429, headers={"Retry-After": "2.5"})
+    transport = PinnedHTTPTransport(FakeResolver(["8.8.8.8"]), factory)
+    with pytest.raises(AIError) as error:
+        transport.send("https://example.org/v1", {}, b"{}", 5)
+    assert error.value.code == "RATE_LIMITED"
+    assert error.value.retry_after_seconds == pytest.approx(2.5)
 
 
 def test_bounded_provider_reply_and_request_header_injection_blocked():

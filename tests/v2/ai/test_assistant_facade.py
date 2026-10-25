@@ -124,6 +124,10 @@ def test_assistant_chat_streams_persists_read_tool_and_reuses_conversation(tmp_p
         "user",
         "assistant",
     ]
+    usage = facade.usage.summary("project")
+    assert usage["providers"]["local"]["requests"] == 3
+    assert usage["providers"]["local"]["tokens_known"] is False
+    assert follow_up["usage"] == usage
     facade.close()
 
 
@@ -294,6 +298,51 @@ def test_assistant_chat_cancellation_removes_unfinished_user_message(tmp_path: P
     facade.close()
 
 
+def test_assistant_chat_records_completed_provider_call_as_cancelled(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    facade = build_ai_facade(storage, policy=EgressPolicy())
+    _activate_local_profile(facade)
+    cancelled = [False]
+
+    class CancelAfterResponse(QueueTransport):
+        def send(
+            self, url: str, headers: Mapping[str, str], payload: bytes, timeout: float
+        ) -> bytes:
+            response = super().send(url, headers, payload, timeout)
+            cancelled[0] = True
+            return response
+
+    transport = CancelAfterResponse(
+        [
+            {
+                "choices": [{"message": {"content": "Too late"}, "finish_reason": "stop"}],
+                "usage": {"prompt_tokens": 5, "completion_tokens": 2, "total_tokens": 7},
+            }
+        ]
+    )
+    facade.model_runtime.transport = transport
+    conversation_id = facade.conversations.create("project", title="Cancelled after response")
+
+    with pytest.raises(AIError) as error:
+        facade.assistant_chat(
+            "project",
+            "Cancel while the provider is running",
+            conversation_id=conversation_id,
+            is_cancelled=lambda: cancelled[0],
+        )
+
+    assert error.value.code == "CANCELLED"
+    usage = facade.usage.summary("project")["providers"]["local"]
+    assert usage["requests"] == 1
+    assert usage["cancelled"] == 1
+    assert usage["failed"] == 0
+    assert usage["input_tokens"] == 5
+    assert usage["output_tokens"] == 2
+    assert usage["errors"] == {"CANCELLED": 1}
+    assert facade.conversations.history("project", conversation_id) == []
+    facade.close()
+
+
 def test_assistant_approval_cancellation_preserves_pending_write(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     issuer = ApprovalIssuer(b"assistant-facade-cancel-test-key-0001")
@@ -391,6 +440,10 @@ def test_failed_provider_request_does_not_duplicate_retry_prompt(tmp_path: Path)
     history = facade.conversations.history("project", conversation_id)
     assert [item.role for item in history] == ["user", "assistant"]
     assert [item.content for item in history].count("Retry me") == 1
+    usage = facade.usage.summary("project")["providers"]["local"]
+    assert usage["requests"] == 2
+    assert usage["failed"] == 1
+    assert usage["errors"] == {"PROVIDER_UNAVAILABLE": 1}
     facade.close()
 
 

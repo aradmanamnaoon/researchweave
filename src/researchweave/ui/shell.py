@@ -21,6 +21,7 @@ from PyQt6.QtWidgets import (
     QFormLayout,
     QFrame,
     QHBoxLayout,
+    QHeaderView,
     QInputDialog,
     QLabel,
     QLineEdit,
@@ -40,6 +41,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .analysis_compatibility import COMPATIBILITY_COLUMNS, build_compatibility_rows
 from .analysis_forms import FieldSpec, build_field_specs, parse_form_values
 from .assets import asset_path
 from .contracts import Preferences, UIError
@@ -1217,6 +1219,42 @@ class ResearchWindow(QMainWindow):
         result_surface_layout.addWidget(self.analysis_arguments)
         result_surface_layout.addWidget(button("Run selected analysis", self.run_analysis))
         layout.addWidget(result_surface)
+        compatibility_surface, compatibility_layout = surface(
+            "SPSS-style procedure coverage",
+            "Coverage describes current ResearchWeave workflows, not IBM SPSS equivalence. "
+            "Python replay is broad; mapped base-R syntax covers descriptives, t tests, "
+            "correlation, one-way ANOVA and ordinary least squares. Other R workflows use "
+            "the optional local Rscript runtime and remain explicitly marked as unmapped.",
+        )
+        self.analysis_compatibility_model = ResearchTableModel(COMPATIBILITY_COLUMNS, [])
+        self.analysis_compatibility_table = QTableView()
+        self.analysis_compatibility_table.setModel(self.analysis_compatibility_model)
+        self.analysis_compatibility_table.setAlternatingRowColors(True)
+        self.analysis_compatibility_table.setSortingEnabled(False)
+        self.analysis_compatibility_table.setMaximumHeight(270)
+        self.analysis_compatibility_table.setColumnHidden(3, True)
+        self.analysis_compatibility_table.setColumnHidden(4, True)
+        compatibility_header = self.analysis_compatibility_table.horizontalHeader()
+        if compatibility_header is not None:
+            compatibility_header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+            compatibility_header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+            compatibility_header.setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
+        self.analysis_compatibility_table.setHorizontalScrollBarPolicy(
+            Qt.ScrollBarPolicy.ScrollBarAlwaysOff
+        )
+        named(self.analysis_compatibility_table, "Statistical procedure compatibility matrix")
+        selection_model = self.analysis_compatibility_table.selectionModel()
+        if selection_model is not None:
+            selection_model.currentChanged.connect(self.inspect_analysis_compatibility)
+        compatibility_layout.addWidget(self.analysis_compatibility_table)
+        self.analysis_compatibility_detail = QLabel(
+            "Select a procedure family to inspect backend/reproducibility support and limits."
+        )
+        self.analysis_compatibility_detail.setWordWrap(True)
+        self.analysis_compatibility_detail.setObjectName("pageLead")
+        named(self.analysis_compatibility_detail, "Selected statistical procedure compatibility")
+        compatibility_layout.addWidget(self.analysis_compatibility_detail)
+        layout.addWidget(compatibility_surface)
 
         layout = self._page(
             "Analysis Results",
@@ -1456,6 +1494,8 @@ class ResearchWindow(QMainWindow):
             "Send to selected model", self.send_assistant, primary=True
         )
         assistant_actions.addWidget(self.assistant_send_button)
+        self.assistant_cancel_button = button("Cancel request", self.cancel_assistant)
+        assistant_actions.addWidget(self.assistant_cancel_button)
         assistant_actions.addStretch()
         assistant_layout.addLayout(assistant_actions)
         self.assistant_tool_status = QLabel(
@@ -1464,6 +1504,10 @@ class ResearchWindow(QMainWindow):
         self.assistant_tool_status.setWordWrap(True)
         named(self.assistant_tool_status, "Assistant model and tool activity status")
         assistant_layout.addWidget(self.assistant_tool_status)
+        self.assistant_usage_status = QLabel("Model usage: no calls recorded for this project.")
+        self.assistant_usage_status.setWordWrap(True)
+        named(self.assistant_usage_status, "Assistant provider usage summary")
+        assistant_layout.addWidget(self.assistant_usage_status)
         self.assistant_pending = QPlainTextEdit()
         self.assistant_pending.setReadOnly(True)
         self.assistant_pending.setMaximumHeight(120)
@@ -1574,6 +1618,10 @@ class ResearchWindow(QMainWindow):
         provider_form.addRow("", self.provider_egress)
         layout.addLayout(provider_form)
         layout.addWidget(button("Save provider configuration", self.save_provider, primary=True))
+        self.provider_usage_status = QLabel("Model usage: no calls recorded for this project.")
+        self.provider_usage_status.setWordWrap(True)
+        named(self.provider_usage_status, "Provider usage and cost summary")
+        layout.addWidget(self.provider_usage_status)
         self.provider_status = QPlainTextEdit()
         self.provider_status.setReadOnly(True)
         named(self.provider_status, "Provider availability and egress status")
@@ -3399,7 +3447,29 @@ class ResearchWindow(QMainWindow):
                 if not method.get("available", False):
                     label += " · unavailable"
                 self.analysis_method.addItem(label, method)
+            self.analysis_compatibility_model.set_records(
+                COMPATIBILITY_COLUMNS,
+                build_compatibility_rows(methods["methods"]),
+            )
+            if self.analysis_compatibility_model.rowCount():
+                self.analysis_compatibility_table.setCurrentIndex(
+                    self.analysis_compatibility_model.index(0, 0)
+                )
             self.prepare_analysis_arguments()
+
+    def inspect_analysis_compatibility(self, current: Any, previous: Any) -> None:
+        del previous
+        if current is None or not current.isValid():
+            return
+        row = current.row()
+        if row < 0 or row >= len(self.analysis_compatibility_model.rows):
+            return
+        values = self.analysis_compatibility_model.rows[row]
+        if len(values) < 5:
+            return
+        self.analysis_compatibility_detail.setText(
+            f"Reproducibility: {values[3]}\nLimits: {values[4]}"
+        )
 
     def prepare_analysis_arguments(self) -> None:
         while self.analysis_guided_form.rowCount():
@@ -4047,6 +4117,7 @@ class ResearchWindow(QMainWindow):
         running = self._assistant_running()
         pending = self.assistant_pending_tool is not None
         self.assistant_send_button.setEnabled(ready and not running and not pending)
+        self.assistant_cancel_button.setEnabled(running)
         self.assistant_prompt.setEnabled(ready and not running and not pending)
         self.assistant_approve_button.setEnabled(backend_available and pending and not running)
         self.assistant_deny_button.setEnabled(backend_available and pending and not running)
@@ -4096,6 +4167,48 @@ class ResearchWindow(QMainWindow):
         self.assistant_transcript.setPlainText("\n\n".join(lines))
         pending = payload.get("pending_tool")
         self._set_assistant_pending(pending if isinstance(pending, Mapping) else None)
+        usage = payload.get("usage")
+        if isinstance(usage, Mapping):
+            self.assistant_usage_status.setText(self._format_ai_usage(usage))
+
+    @staticmethod
+    def _format_ai_usage(summary: Mapping[str, Any]) -> str:
+        raw_providers = summary.get("providers", {})
+        providers = raw_providers if isinstance(raw_providers, Mapping) else {}
+        requests = 0
+        failed = 0
+        cancelled = 0
+        input_tokens = 0
+        output_tokens = 0
+        tokens_known = True
+        weighted_latency = 0.0
+        for raw in providers.values():
+            if not isinstance(raw, Mapping):
+                continue
+            count = int(raw.get("requests", 0))
+            requests += count
+            failed += int(raw.get("failed", 0))
+            cancelled += int(raw.get("cancelled", 0))
+            input_tokens += int(raw.get("input_tokens", 0))
+            output_tokens += int(raw.get("output_tokens", 0))
+            tokens_known = tokens_known and bool(raw.get("tokens_known", False))
+            weighted_latency += float(raw.get("mean_latency_ms", 0.0)) * count
+        if requests == 0:
+            return "Model usage: no calls recorded for this project. Monetary cost: unknown."
+        token_text = (
+            f"{input_tokens:,} input + {output_tokens:,} output tokens"
+            if tokens_known
+            else "token totals incomplete"
+        )
+        mean_latency = weighted_latency / requests
+        failure_text = f" · {failed} failed" if failed else ""
+        cancelled_text = f" · {cancelled} cancelled" if cancelled else ""
+        return (
+            f"Model usage: {requests:,} logical model call{'s' if requests != 1 else ''} · "
+            f"{token_text} · "
+            f"mean latency {mean_latency:.0f} ms{failure_text}{cancelled_text}. "
+            "Monetary cost: unknown (provider pricing is not configured)."
+        )
 
     def refresh_assistant(self) -> None:
         self.assistant_model_available = False
@@ -4107,6 +4220,7 @@ class ResearchWindow(QMainWindow):
                 "remain usable."
             )
             self.assistant_tool_status.setText("No integrated model runtime is connected.")
+            self.assistant_usage_status.setText("Model usage is unavailable without the AI host.")
             self._set_assistant_pending(None)
             return
         try:
@@ -4125,6 +4239,9 @@ class ResearchWindow(QMainWindow):
             else:
                 self.assistant_transcript.clear()
                 self._set_assistant_pending(None)
+                self.assistant_usage_status.setText(
+                    self._format_ai_usage(backend.usage_summary(self.project_id))
+                )
             if self.assistant_model_available:
                 self.assistant_tool_status.setText(
                     f"Active model: {model_state.get('active_profile')} · assistant ready."
@@ -4137,6 +4254,14 @@ class ResearchWindow(QMainWindow):
             self.assistant_tool_status.setText(
                 "Assistant history or model configuration could not be loaded."
             )
+        self._sync_assistant_controls()
+
+    def cancel_assistant(self) -> None:
+        if not self._assistant_running():
+            self._set_status("No assistant request is currently running.")
+            return
+        self.jobs.cancel("assistant")
+        self.assistant_tool_status.setText("Cancelling assistant request…")
         self._sync_assistant_controls()
 
     def send_assistant(self) -> None:
@@ -4229,6 +4354,9 @@ class ResearchWindow(QMainWindow):
         conversation_id = data.get("conversation_id")
         if isinstance(conversation_id, str) and conversation_id:
             self.assistant_conversation_id = conversation_id
+        usage = data.get("usage")
+        if isinstance(usage, Mapping):
+            self.assistant_usage_status.setText(self._format_ai_usage(usage))
         events = data.get("tool_events", [])
         tool_names = (
             [
@@ -4263,6 +4391,8 @@ class ResearchWindow(QMainWindow):
             return
         if state == "running":
             self.assistant_tool_status.setText("Assistant is running…")
+        elif state == "cancelled":
+            self.assistant_tool_status.setText("Assistant request was cancelled.")
         self._sync_assistant_controls()
 
     def approve_assistant_tool(self) -> None:
@@ -4526,6 +4656,7 @@ class ResearchWindow(QMainWindow):
         self.provider_egress.setChecked(bool(response["egress_acknowledged"]))
         self.provider_scope.setText(", ".join(response["permission_scope"]))
         runtime_state = "Integrated AI host is not connected."
+        usage_state = "Model usage: unavailable without the integrated AI host."
         backend = self.facade.ai_backend
         if backend is not None:
             try:
@@ -4533,8 +4664,11 @@ class ResearchWindow(QMainWindow):
                 runtime_state = (
                     f"Active model profile: {model_state.get('active_profile') or 'none'}"
                 )
+                usage_state = self._format_ai_usage(backend.usage_summary(self.project_id))
             except Exception:
                 runtime_state = "Model runtime configuration could not be read."
+                usage_state = "Model usage diagnostics could not be read."
+        self.provider_usage_status.setText(usage_state)
         self.provider_status.setPlainText(
             f"Mode: {response['mode']}\nProvider: {response['provider_id']}\n"
             f"Protocol: {response.get('protocol', 'openai-compatible')}\n"

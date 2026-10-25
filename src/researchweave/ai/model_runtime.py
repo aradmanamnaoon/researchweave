@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import random
 import re
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -193,10 +195,48 @@ class ConfiguredModelRuntime:
         policy: EgressPolicy,
         *,
         transport: HTTPTransport | None = None,
+        max_retries: int = 2,
+        retry_base_seconds: float = 0.25,
+        retry_max_seconds: float = 4.0,
+        sleep: Callable[[float], None] | None = None,
+        jitter: Callable[[], float] | None = None,
     ) -> None:
+        if not 0 <= max_retries <= 5:
+            raise AIError("INVALID_INPUT", "Model retry count is outside supported bounds")
+        if not 0.01 <= retry_base_seconds <= 10:
+            raise AIError("INVALID_INPUT", "Model retry base delay is outside supported bounds")
+        if not retry_base_seconds <= retry_max_seconds <= 30:
+            raise AIError("INVALID_INPUT", "Model retry maximum delay is outside supported bounds")
         self.store = store
         self.policy = policy
         self.transport = transport or PinnedHTTPTransport()
+        self.max_retries: int = max_retries
+        self.retry_base_seconds: float = retry_base_seconds
+        self.retry_max_seconds: float = retry_max_seconds
+        self._sleep: Callable[[float], None] = sleep or time.sleep
+        self._jitter: Callable[[], float] = jitter or random.random
+
+    def _retry_delay(self, exc: AIError, attempt: int) -> float:
+        hint = exc.retry_after_seconds
+        if hint is not None:
+            return min(max(0.0, hint), self.retry_max_seconds)
+        jitter = float(self._jitter())
+        if not 0.0 <= jitter <= 1.0:
+            jitter = 0.5
+        exponential = self.retry_base_seconds * (2**attempt)
+        return float(min(exponential * (0.75 + 0.5 * jitter), self.retry_max_seconds))
+
+    def _with_retry(self, action: Callable[[], ProviderResult]) -> ProviderResult:
+        for attempt in range(self.max_retries + 1):
+            try:
+                return action()
+            except AIError as exc:
+                if exc.code not in {"RATE_LIMITED", "SERVICE_UNAVAILABLE"}:
+                    raise
+                if attempt >= self.max_retries:
+                    raise
+                self._sleep(self._retry_delay(exc, attempt))
+        raise AIError("INTERNAL_ERROR", "Provider retry loop ended unexpectedly")
 
     @staticmethod
     def _credential(profile: ModelProfile) -> str | None:
@@ -260,11 +300,13 @@ class ConfiguredModelRuntime:
         temperature: float = 0.0,
     ) -> ProviderResult:
         adapter = self.adapter(profile_id)
-        return adapter.complete(
-            messages,
-            self.policy,
-            max_tokens=max_tokens,
-            temperature=temperature,
+        return self._with_retry(
+            lambda: adapter.complete(
+                messages,
+                self.policy,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            )
         )
 
     def complete_with_tools(
@@ -282,15 +324,17 @@ class ConfiguredModelRuntime:
         complete_with_tools = getattr(adapter, "complete_with_tools", None)
         if not callable(complete_with_tools):
             raise AIError("PROVIDER_UNAVAILABLE", "Active adapter cannot execute native tools")
-        return cast(
-            ProviderResult,
-            cast(Any, complete_with_tools)(
-                messages,
-                self.policy,
-                tools,
-                max_tokens=max_tokens,
-                temperature=temperature,
-            ),
+        return self._with_retry(
+            lambda: cast(
+                ProviderResult,
+                cast(Any, complete_with_tools)(
+                    messages,
+                    self.policy,
+                    tools,
+                    max_tokens=max_tokens,
+                    temperature=temperature,
+                ),
+            )
         )
 
     def stream(

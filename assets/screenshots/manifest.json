@@ -39,38 +39,38 @@
     },
     {
       "actual_integrated_app": true,
-      "bytes": 69352,
+      "bytes": 113851,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-statistics-light.png",
       "screen": "Statistics",
-      "sha256": "494ebe71f07b4b356661169394788a6bc62b998741fcbb747c94f01840a54318",
+      "sha256": "ced6a02959163d37edc33e6bf41e51ee4d963d196b09d1ccc27b6121ffd7dc3b",
       "theme": "light"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 90748,
+      "bytes": 85430,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-analysis-results-light.png",
       "screen": "Analysis Results",
-      "sha256": "a1aa1a0eda02e3865b8729ff60d6e92ec66805c81d2f6b88e7fdea52532802a4",
+      "sha256": "818f66c4afedc5342326fed923742c6f0231523d9126054644394e3b7292a8a7",
       "theme": "light"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 75944,
+      "bytes": 82398,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-agent-light.png",
       "screen": "Agent",
-      "sha256": "20f6787f1ffd469fa04504eadeb8d52e0144d433a76914f09b209aebde562ea5",
+      "sha256": "608affa197883396c5ff40df2e29adcc570d33da08d18ae7079e9dcfad0f73c9",
       "theme": "light"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 94107,
+      "bytes": 97314,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-providers-light.png",
       "screen": "Providers",
-      "sha256": "e82b7de31cf4a7a2bde712b939f8275224ea1c2e97f35e5265ea463a35b55267",
+      "sha256": "c3b1f1101db327c6e69b80f1d55052f52407f3dc791efa15452794feba046696",
       "theme": "light"
     },
     {
@@ -138,38 +138,38 @@
     },
     {
       "actual_integrated_app": true,
-      "bytes": 69565,
+      "bytes": 114094,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-statistics-dark.png",
       "screen": "Statistics",
-      "sha256": "de8755fdaa0fc2b9a2fd3e4351052e365cff4dc58dc2e29b12c628dae94c40a6",
+      "sha256": "1034f8027ad1fbfbed7fab1a907a9f4d3c6882768505815ec448793855e4ee16",
       "theme": "dark"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 90791,
+      "bytes": 85387,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-analysis-results-dark.png",
       "screen": "Analysis Results",
-      "sha256": "01913888892bedc6148b7bdb8ca01ef8821709caf4f409b2a422d2032957adf7",
+      "sha256": "2cf03232ce8e67b4e4c2e1e358baff4116558afd4cf504ec7586689e080a82bb",
       "theme": "dark"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 76146,
+      "bytes": 82665,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-agent-dark.png",
       "screen": "Agent",
-      "sha256": "b0b1c033a77a24bbe5c16a7f2ef9cd53fed043abd2614d77b88d72e2f914a47c",
+      "sha256": "1f2ae7b3da33d78217aa36009de6f1f9bb9070c9c220bbe86433a29b62b84e1b",
       "theme": "dark"
     },
     {
       "actual_integrated_app": true,
-      "bytes": 95059,
+      "bytes": 98051,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-providers-dark.png",
       "screen": "Providers",
-      "sha256": "44511a21a556451bed13d508da5c29c9c35b997f9ed2e54cac1778ba7fb910d8",
+      "sha256": "53818eac2f8a6f384b51e0260fcf73f1d7ce2cb3c7ec79a6ef32961e710bfe94",
       "theme": "dark"
     },
     {

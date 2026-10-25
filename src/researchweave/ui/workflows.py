@@ -485,6 +485,9 @@ class AIBackend(Protocol):
     def assistant_conversations(self, project_id: str) -> Mapping[str, Any]:
         """List durable assistant conversations for one project."""
 
+    def usage_summary(self, project_id: str) -> Mapping[str, Any]:
+        """Read payload-free local provider usage diagnostics for one project."""
+
     def assistant_send(
         self,
         project_id: str,

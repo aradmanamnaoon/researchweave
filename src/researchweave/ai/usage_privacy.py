@@ -128,6 +128,8 @@ class UsageDiagnostics:
     """Durable aggregate provider telemetry stored locally only.
 
     Prompts, responses, credentials and request bodies are never persisted.
+    Each usage row represents one logical model call; transport-level retry attempts are folded into
+    that call rather than counted as separate requests.
     """
 
     def __init__(self, database: Path) -> None:

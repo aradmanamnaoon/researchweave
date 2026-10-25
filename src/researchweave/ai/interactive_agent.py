@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -30,6 +31,17 @@ class AgentLoopResult:
     events: tuple[AgentToolEvent, ...]
     iterations: int
     pending_approval: AgentToolEvent | None = None
+
+
+@dataclass(frozen=True)
+class ProviderCallEvent:
+    provider: str
+    model: str
+    status: str
+    input_tokens: int | None
+    output_tokens: int | None
+    latency_ms: int
+    error_code: str | None = None
 
 
 _FALLBACK_SCHEMA: Mapping[str, Any] = {
@@ -199,6 +211,7 @@ class ModelAgentLoop:
         max_tokens: int = 1024,
         on_delta: Callable[[str], None] | None = None,
         is_cancelled: Callable[[], bool] | None = None,
+        on_provider_call: Callable[[ProviderCallEvent], None] | None = None,
     ) -> AgentLoopResult:
         if not project_id:
             raise AIError("INVALID_INPUT", "Agent requires a project ID")
@@ -215,27 +228,76 @@ class ModelAgentLoop:
             if is_cancelled is not None and is_cancelled():
                 raise AIError("CANCELLED", "Agent turn was cancelled")
 
+        def call_provider(adapter: Any, action: Callable[[], Any]) -> Any:
+            started = time.perf_counter()
+            response = None
+            try:
+                response = action()
+                check_cancelled()
+            except AIError as exc:
+                if on_provider_call is not None:
+                    if response is None:
+                        provider = str(adapter.identifier)
+                        model = str(adapter.model)
+                        input_tokens = None
+                        output_tokens = None
+                    else:
+                        provider = str(response.provider)
+                        model = str(response.model)
+                        input_tokens = response.usage.input_tokens
+                        output_tokens = response.usage.output_tokens
+                    on_provider_call(
+                        ProviderCallEvent(
+                            provider=provider,
+                            model=model,
+                            status="cancelled" if exc.code == "CANCELLED" else "failed",
+                            input_tokens=input_tokens,
+                            output_tokens=output_tokens,
+                            latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
+                            error_code=exc.code,
+                        )
+                    )
+                raise
+            if on_provider_call is not None:
+                on_provider_call(
+                    ProviderCallEvent(
+                        provider=str(response.provider),
+                        model=str(response.model),
+                        status="ok",
+                        input_tokens=response.usage.input_tokens,
+                        output_tokens=response.usage.output_tokens,
+                        latency_ms=max(0, int((time.perf_counter() - started) * 1000)),
+                    )
+                )
+            return response
+
         for iteration in range(1, max_iterations + 1):
             check_cancelled()
             adapter = self.models.adapter(profile_id)
             native_tools = adapter.capabilities.tool_calling and bool(definitions)
             if native_tools:
                 if on_delta is None or not adapter.capabilities.streaming:
-                    response = self.models.complete_with_tools(
-                        conversation,
-                        definitions,
-                        profile_id=profile_id,
-                        max_tokens=max_tokens,
-                        temperature=0.0,
+                    response = call_provider(
+                        adapter,
+                        lambda: self.models.complete_with_tools(
+                            conversation,
+                            definitions,
+                            profile_id=profile_id,
+                            max_tokens=max_tokens,
+                            temperature=0.0,
+                        ),
                     )
                 else:
-                    response = self.models.stream_with_tools(
-                        conversation,
-                        definitions,
-                        profile_id=profile_id,
-                        max_tokens=max_tokens,
-                        temperature=0.0,
-                        on_delta=on_delta,
+                    response = call_provider(
+                        adapter,
+                        lambda: self.models.stream_with_tools(
+                            conversation,
+                            definitions,
+                            profile_id=profile_id,
+                            max_tokens=max_tokens,
+                            temperature=0.0,
+                            on_delta=on_delta,
+                        ),
                     )
                 check_cancelled()
                 if response.tool_calls:
@@ -264,11 +326,14 @@ class ModelAgentLoop:
                     return AgentLoopResult(response.text, tuple(events), iteration)
                 raise AIError("SCHEMA_MISMATCH", "Model returned neither text nor a tool call")
 
-            response = self.models.complete(
-                [ProviderMessage("system", self._fallback_instruction()), *conversation],
-                profile_id=profile_id,
-                max_tokens=max_tokens,
-                temperature=0.0,
+            response = call_provider(
+                adapter,
+                lambda: self.models.complete(
+                    [ProviderMessage("system", self._fallback_instruction()), *conversation],
+                    profile_id=profile_id,
+                    max_tokens=max_tokens,
+                    temperature=0.0,
+                ),
             )
             check_cancelled()
             parsed = parse_structured_output(response.text, _FALLBACK_SCHEMA)

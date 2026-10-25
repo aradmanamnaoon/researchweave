@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import csv
 import hashlib
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from pathlib import Path
 from typing import Any
 from uuid import UUID, uuid4
@@ -262,8 +262,26 @@ class ProductionAnalysisBackend:
         data = dict(response.get("data", {}))
         warnings = [str(item) for item in response.get("warnings", [])]
         assumptions = data.pop("assumptions", [])
-        if not isinstance(assumptions, list):
+        if not isinstance(assumptions, Sequence) or isinstance(
+            assumptions, (str, bytes, bytearray)
+        ):
             assumptions = [str(assumptions)]
+        scientific_result = {
+            "method",
+            "dataset_revision",
+            "n_total",
+            "n_used",
+            "n_excluded",
+        } <= data.keys()
+        result_warnings = data.pop("warnings", []) if scientific_result else []
+        if not isinstance(result_warnings, Sequence) or isinstance(
+            result_warnings, (str, bytes, bytearray)
+        ):
+            result_warnings = [str(result_warnings)]
+        for warning in result_warnings:
+            rendered = str(warning)
+            if rendered not in warnings:
+                warnings.append(rendered)
         return {
             "method": operation,
             "method_version": str(capability.get("version", "researchweave-analysis-v2")),

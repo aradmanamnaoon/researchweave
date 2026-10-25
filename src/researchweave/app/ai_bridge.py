@@ -102,6 +102,30 @@ class ProductionAIBackend:
         finally:
             facade.close()
 
+    def usage_summary(self, project_id: str) -> Mapping[str, Any]:
+        try:
+            scope = UUID(project_id)
+        except ValueError as exc:
+            raise AIError("INVALID_INPUT", "Usage summary requires a valid project ID") from exc
+        response = self._bus.dispatch(
+            OperationRequest(
+                operation="usage.summary",
+                project_id=scope,
+                arguments={"project_id": project_id},
+                actor="desktop-user",
+            )
+        )
+        if response.get("status") != "ok":
+            error = response.get("error", {})
+            code = str(error.get("code", "AI_ERROR")) if isinstance(error, Mapping) else "AI_ERROR"
+            message = (
+                str(error.get("message", "Usage summary failed"))
+                if isinstance(error, Mapping)
+                else "Usage summary failed"
+            )
+            raise AIError(code, message)
+        return dict(response.get("data", {}))
+
     def assistant_send(
         self,
         project_id: str,

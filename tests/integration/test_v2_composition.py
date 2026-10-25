@@ -206,7 +206,7 @@ def test_desktop_automatic_analysis_uses_declared_variable_metadata(tmp_path: Pa
                     "project_id": str(project_id),
                     "expected_revision": created["revision"],
                     "name": "Synthetic groups",
-                    "csv_text": "score,group\n1,A\n2,A\n3,A\n7,B\n8,B\n9,B\n",
+                    "csv_text": "score,group\n1,A\n2,A\n3,A\n7,B\n8,B\n9,B\n5,C\n",
                 },
             ),
         )["data"]
@@ -290,6 +290,31 @@ def test_desktop_automatic_analysis_uses_declared_variable_metadata(tmp_path: Pa
             record["provenance"]["staged_csv_sha256"]
             == record["provenance"]["analysis_source_sha256"]
         )
+
+        direct = approved(
+            services,
+            request(
+                "ui.analysis.run",
+                project_id,
+                {
+                    "project_id": str(project_id),
+                    "expected_revision": result["data"]["revision"],
+                    "method": "analysis.statistics.test",
+                    "inputs": {
+                        "dataset_id": imported["dataset_id"],
+                        "outcome": "score",
+                        "options": {"group": "group", "groups": ["A", "B"]},
+                    },
+                },
+            ),
+        )
+        assert direct["status"] == "ok", direct
+        direct_record = direct["data"]["result"]
+        assert direct_record["estimates"]["method"] == "welch_t"
+        assert direct_record["estimates"]["n_used"] == 6
+        assert direct_record["estimates"]["n_excluded"] == 1
+        assert direct_record["warnings"] == ["Other group levels excluded by explicit selection"]
+        assert "warnings" not in direct_record["estimates"]
     finally:
         services.close()
 
@@ -555,17 +580,33 @@ def test_desktop_exports_revision_bound_python_and_r_syntax(tmp_path: Path) -> N
         assert r_export["status"] == "ok", r_export
         assert "mean(v)" in r_export["data"]["result"]["estimates"]["source"]
 
-        unsupported = gateway.execute(
+        r_t_export = gateway.execute(
             "ui.analysis.run",
             {
                 "project_id": project_id,
                 "expected_revision": r_export["data"]["revision"],
                 "method": "analysis.syntax.r",
-                "inputs": {**common, "operation": "statistics.model"},
+                "inputs": {
+                    "dataset_id": dataset["dataset_id"],
+                    "operation": "statistics.test",
+                    "arguments": {"outcome": "score"},
+                },
+            },
+        )
+        assert r_t_export["status"] == "ok", r_t_export
+        assert "t.test(x" in r_t_export["data"]["result"]["estimates"]["source"]
+
+        unsupported = gateway.execute(
+            "ui.analysis.run",
+            {
+                "project_id": project_id,
+                "expected_revision": r_t_export["data"]["revision"],
+                "method": "analysis.syntax.r",
+                "inputs": {**common, "operation": "statistics.poisson"},
             },
         )
         assert unsupported["status"] == "failed"
         assert unsupported["error"]["code"] == "INVALID_INPUT"
-        assert len(services.ui.store.open(project_id).analysis_results) == 2
+        assert len(services.ui.store.open(project_id).analysis_results) == 3
     finally:
         services.close()
