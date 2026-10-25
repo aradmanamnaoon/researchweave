@@ -249,8 +249,8 @@ jobs:
           (
             cd dist
             sha256sum "${expected[@]}" > SHA256SUMS.txt
+            sha256sum --check SHA256SUMS.txt
           )
-          sha256sum --check dist/SHA256SUMS.txt
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
       - name: Prepare release notes
         shell: bash
