@@ -17,12 +17,29 @@ from .streaming import StreamAssembler, sse_events
 class ProviderMessage:
     role: str
     content: str
+    tool_call_id: str | None = None
+    tool_calls: tuple[ProviderToolCall, ...] = ()
 
     def validate(self) -> None:
-        if self.role not in {"system", "user", "assistant"}:
+        if self.role not in {"system", "user", "assistant", "tool"}:
             raise AIError("INVALID_INPUT", "Unsupported provider message role")
-        if not self.content or len(self.content) > 200_000:
+        if len(self.content.encode()) > 200_000:
             raise AIError("RESOURCE_LIMIT", "Provider message exceeds text budget")
+        if self.role == "tool":
+            if not self.content or not self.tool_call_id or self.tool_calls:
+                raise AIError("INVALID_INPUT", "Tool provider message is incomplete")
+            if len(self.tool_call_id) > 200:
+                raise AIError("RESOURCE_LIMIT", "Tool call identifier exceeds text budget")
+            return
+        if self.role == "assistant" and self.tool_calls:
+            if self.tool_call_id is not None:
+                raise AIError("INVALID_INPUT", "Assistant tool-call message has invalid metadata")
+            for call in self.tool_calls:
+                if not call.call_id or not call.name or len(call.call_id) > 200:
+                    raise AIError("INVALID_INPUT", "Assistant tool-call message is incomplete")
+            return
+        if not self.content or self.tool_call_id is not None or self.tool_calls:
+            raise AIError("INVALID_INPUT", "Provider message content or tool metadata is invalid")
 
 
 @dataclass(frozen=True)
@@ -37,6 +54,33 @@ class ProviderToolCall:
     call_id: str
     name: str
     arguments: dict[str, Any]
+
+
+def _openai_message(message: ProviderMessage) -> dict[str, Any]:
+    message.validate()
+    payload: dict[str, Any] = {"role": message.role, "content": message.content}
+    if message.role == "assistant" and message.tool_calls:
+        payload["content"] = message.content or None
+        payload["tool_calls"] = [
+            {
+                "id": call.call_id,
+                "type": "function",
+                "function": {
+                    "name": call.name,
+                    "arguments": json.dumps(
+                        call.arguments,
+                        ensure_ascii=False,
+                        sort_keys=True,
+                        separators=(",", ":"),
+                        allow_nan=False,
+                    ),
+                },
+            }
+            for call in message.tool_calls
+        ]
+    elif message.role == "tool":
+        payload["tool_call_id"] = message.tool_call_id
+    return payload
 
 
 @dataclass(frozen=True)
@@ -249,9 +293,7 @@ class OpenAICompatibleAdapter:
             raise AIError("DEPENDENCY_MISSING", "Configured transport does not support streaming")
         request: dict[str, Any] = {
             "model": self.model,
-            "messages": [
-                {"role": message.role, "content": message.content} for message in messages
-            ],
+            "messages": [_openai_message(message) for message in messages],
             "max_tokens": max_tokens,
             "temperature": float(temperature),
             "stream": True,
@@ -303,9 +345,7 @@ class OpenAICompatibleAdapter:
         policy.permit(self.endpoint, local=self.local)
         payload: dict[str, Any] = {
             "model": self.model,
-            "messages": [
-                {"role": message.role, "content": message.content} for message in messages
-            ],
+            "messages": [_openai_message(message) for message in messages],
             "max_tokens": max_tokens,
             "temperature": float(temperature),
             "stream": False,
@@ -383,9 +423,11 @@ class OpenAICompatibleAdapter:
             if not isinstance(arguments, dict):
                 raise AIError("SCHEMA_MISMATCH", "Provider tool arguments must be an object")
             call_id = item.get("id")
+            if not isinstance(call_id, str) or not call_id or len(call_id) > 200:
+                raise AIError("SCHEMA_MISMATCH", "Provider tool call identifier is invalid")
             calls.append(
                 ProviderToolCall(
-                    "" if call_id is None else str(call_id)[:200],
+                    call_id,
                     name,
                     dict(arguments),
                 )

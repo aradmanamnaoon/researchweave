@@ -33,6 +33,19 @@ class StreamingQueueTransport(QueueTransport):
         yield from self.streams.pop(0)
 
 
+class FailOnceTransport(QueueTransport):
+    def __init__(self, responses: list[Mapping[str, object]]) -> None:
+        super().__init__(responses)
+        self.failed = False
+
+    def send(self, url: str, headers: Mapping[str, str], payload: bytes, timeout: float) -> bytes:
+        self.payloads.append(json.loads(payload))
+        if not self.failed:
+            self.failed = True
+            raise AIError("PROVIDER_UNAVAILABLE", "synthetic provider failure")
+        return self.responses.pop(0)
+
+
 def _storage(tmp_path: Path) -> Path:
     storage = tmp_path / "ai"
     storage.mkdir()
@@ -268,6 +281,183 @@ def test_no_active_model_fails_before_persisting_user_prompt(tmp_path: Path) -> 
         facade.assistant_chat("project", "Must not be saved", conversation_id=conversation_id)
 
     assert facade.conversations.history("project", conversation_id) == []
+    facade.close()
+
+
+def test_failed_provider_request_does_not_duplicate_retry_prompt(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    facade = build_ai_facade(storage, policy=EgressPolicy())
+    _activate_local_profile(facade)
+    conversation_id = facade.conversations.create("project", title="Retry")
+    facade.model_runtime.transport = FailOnceTransport(
+        [
+            {
+                "choices": [{"message": {"content": "Recovered"}, "finish_reason": "stop"}],
+                "usage": {},
+            }
+        ]
+    )
+
+    with pytest.raises(AIError, match="synthetic provider failure"):
+        facade.assistant_chat("project", "Retry me", conversation_id=conversation_id)
+    assert facade.conversations.history("project", conversation_id) == []
+
+    result = facade.assistant_chat("project", "Retry me", conversation_id=conversation_id)
+    assert result["text"] == "Recovered"
+    history = facade.conversations.history("project", conversation_id)
+    assert [item.role for item in history] == ["user", "assistant"]
+    assert [item.content for item in history].count("Retry me") == 1
+    facade.close()
+
+
+def test_completed_write_is_finalized_after_interruption_without_replay(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _storage(tmp_path)
+    issuer = ApprovalIssuer(b"assistant-facade-recovery-test-key-0001")
+    observed: list[str] = []
+    facade = build_ai_facade(storage, policy=EgressPolicy(), issuer=issuer)
+    _activate_local_profile(facade)
+    facade.durable_agents.register_tool(
+        ToolContract(
+            "write.note",
+            "local-write",
+            lambda args: observed.append(str(args["text"])) or {"saved": True},
+            True,
+            False,
+            frozenset({"text"}),
+            argument_schema={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+        )
+    )
+    transport = QueueTransport(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call-write",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "write.note",
+                                        "arguments": '{"text":"once"}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {},
+            },
+            {
+                "choices": [
+                    {"message": {"content": "Recovered without replay"}, "finish_reason": "stop"}
+                ],
+                "usage": {},
+            },
+        ]
+    )
+    facade.model_runtime.transport = transport
+    pending = facade.assistant_chat("project", "Save once")
+    conversation_id = str(pending["conversation_id"])
+    original_finalize = facade.conversations.finalize_completed_tool
+
+    def crash_after_completed(project_id: str, current_conversation_id: str) -> dict[str, object]:
+        raise RuntimeError("synthetic crash before durable finalization")
+
+    monkeypatch.setattr(facade.conversations, "finalize_completed_tool", crash_after_completed)
+    with pytest.raises(RuntimeError, match="synthetic crash"):
+        facade.assistant_approve("project", conversation_id)
+    assert observed == ["once"]
+    assert facade.conversations.pending_tool("project", conversation_id)["execution_state"] == (
+        "completed"
+    )
+
+    monkeypatch.setattr(facade.conversations, "finalize_completed_tool", original_finalize)
+    resumed = facade.assistant_approve("project", conversation_id)
+    assert resumed["text"] == "Recovered without replay"
+    assert observed == ["once"]
+    assert facade.conversations.pending_tool("project", conversation_id) is None
+    facade.close()
+
+
+def test_interrupted_unjournaled_write_is_never_automatically_replayed(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    storage = _storage(tmp_path)
+    issuer = ApprovalIssuer(b"assistant-facade-uncertain-test-key-0001")
+    observed: list[str] = []
+    facade = build_ai_facade(storage, policy=EgressPolicy(), issuer=issuer)
+    _activate_local_profile(facade)
+    facade.durable_agents.register_tool(
+        ToolContract(
+            "write.note",
+            "local-write",
+            lambda args: observed.append(str(args["text"])) or {"saved": True},
+            True,
+            False,
+            frozenset({"text"}),
+            argument_schema={
+                "type": "object",
+                "properties": {"text": {"type": "string"}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+        )
+    )
+    facade.model_runtime.transport = QueueTransport(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call-write",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "write.note",
+                                        "arguments": '{"text":"uncertain"}',
+                                    },
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {},
+            }
+        ]
+    )
+    pending = facade.assistant_chat("project", "Save carefully")
+    conversation_id = str(pending["conversation_id"])
+
+    def lose_completion_record(
+        project_id: str, current_conversation_id: str, result: dict[str, object]
+    ) -> None:
+        raise RuntimeError("synthetic crash before completion journal")
+
+    monkeypatch.setattr(
+        facade.conversations,
+        "mark_pending_tool_completed",
+        lose_completion_record,
+    )
+    with pytest.raises(RuntimeError, match="synthetic crash"):
+        facade.assistant_approve("project", conversation_id)
+    assert observed == ["uncertain"]
+
+    with pytest.raises(AIError, match="automatic replay is blocked"):
+        facade.assistant_approve("project", conversation_id)
+    assert observed == ["uncertain"]
     facade.close()
 
 

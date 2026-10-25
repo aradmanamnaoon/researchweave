@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -44,6 +45,23 @@ def test_provider_context_compacts_old_chat_but_preserves_rules_and_evidence(
     assert "Verified source passage" in joined
     assert "recent question" in joined
     assert "old chatter" not in joined
+
+
+def test_existing_pending_tool_schema_is_migrated_for_execution_journal(tmp_path: Path) -> None:
+    database = tmp_path / "legacy-conversations.sqlite"
+    with sqlite3.connect(database) as db:
+        db.execute(
+            "CREATE TABLE pending_tool_calls ("
+            "conversation_id TEXT PRIMARY KEY, operation TEXT NOT NULL, effect TEXT NOT NULL, "
+            "risk TEXT NOT NULL, arguments_json TEXT NOT NULL, profile_id TEXT, "
+            "created_at TEXT NOT NULL)"
+        )
+
+    ConversationStore(database)
+
+    with sqlite3.connect(database) as db:
+        columns = {str(row[1]) for row in db.execute("PRAGMA table_info(pending_tool_calls)")}
+    assert {"execution_state", "result_json", "started_at"} <= columns
 
 
 def test_facade_exposes_durable_conversation_operations(tmp_path: Path) -> None:

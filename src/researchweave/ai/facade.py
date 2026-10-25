@@ -245,19 +245,23 @@ class AIFacade:
                 "NEEDS_APPROVAL",
                 "Resolve the pending assistant tool request before sending another message",
             )
-        self.conversations.append(project_id, conversation_id, "user", prompt)
+        user_message = self.conversations.append(project_id, conversation_id, "user", prompt)
         messages = self.conversations.provider_context(
             project_id,
             conversation_id,
             max_chars=max_chars,
         )
-        result = self.interactive_agent.run(
-            project_id,
-            messages,
-            profile_id=selected_profile,
-            max_tokens=max_tokens,
-            on_delta=on_delta,
-        )
+        try:
+            result = self.interactive_agent.run(
+                project_id,
+                messages,
+                profile_id=selected_profile,
+                max_tokens=max_tokens,
+                on_delta=on_delta,
+            )
+        except Exception:
+            self.conversations.remove_message(project_id, conversation_id, user_message.sequence)
+            raise
         return self._assistant_result(project_id, conversation_id, selected_profile, result)
 
     def assistant_approve(
@@ -276,36 +280,44 @@ class AIFacade:
             raise AIError("NEEDS_APPROVAL", "Trusted host approval issuer is required")
         operation = str(pending["operation"])
         arguments = dict(pending["arguments"])
-        approval = self.issuer.issue(
-            project_id,
-            "agent.tool",
-            {"operation": operation, "arguments": arguments},
-            datetime.now(UTC) + timedelta(minutes=2),
-        )
-        tool_result = dict(
-            self.durable_agents.invoke_tool(
-                project_id,
-                operation,
-                arguments,
-                approval=approval,
+        execution_state = str(pending.get("execution_state", "pending"))
+        if execution_state in {"executing", "uncertain"}:
+            raise AIError(
+                "CONFLICT",
+                "Previous tool execution may already have produced a side effect; automatic replay "
+                "is blocked. Review project state before clearing the pending request.",
             )
-        )
-        self.conversations.clear_pending_tool(project_id, conversation_id)
-        self.conversations.append(
-            project_id,
-            conversation_id,
-            "tool",
-            json.dumps(tool_result, ensure_ascii=False, sort_keys=True, separators=(",", ":")),
-            metadata={
-                "operation": operation,
-                "effect": pending["effect"],
-                "risk": pending["risk"],
-                "approved": True,
-            },
-        )
+        if execution_state not in {"pending", "completed"}:
+            raise AIError("INTEGRITY_FAILURE", "Pending tool execution state is invalid")
+        if execution_state == "pending":
+            approval = self.issuer.issue(
+                project_id,
+                "agent.tool",
+                {"operation": operation, "arguments": arguments},
+                datetime.now(UTC) + timedelta(minutes=2),
+            )
+            self.conversations.mark_pending_tool_executing(project_id, conversation_id)
+            try:
+                tool_result = dict(
+                    self.durable_agents.invoke_tool(
+                        project_id,
+                        operation,
+                        arguments,
+                        approval=approval,
+                    )
+                )
+            except Exception:
+                self.conversations.mark_pending_tool_uncertain(project_id, conversation_id)
+                raise
+            self.conversations.mark_pending_tool_completed(
+                project_id,
+                conversation_id,
+                tool_result,
+            )
         profile_id = self._selected_profile(
             None if pending.get("profile_id") in (None, "") else str(pending["profile_id"])
         )
+        self.conversations.finalize_completed_tool(project_id, conversation_id)
         messages = self.conversations.provider_context(
             project_id,
             conversation_id,
@@ -324,17 +336,30 @@ class AIFacade:
         pending = self.conversations.pending_tool(project_id, conversation_id)
         if pending is None:
             raise AIError("NOT_FOUND", "No pending assistant tool request exists")
+        execution_state = str(pending.get("execution_state", "pending"))
+        if execution_state == "completed":
+            raise AIError(
+                "CONFLICT",
+                "The tool already completed; approve once more to finalize its recorded result.",
+            )
         self.conversations.clear_pending_tool(project_id, conversation_id)
+        uncertain = execution_state in {"executing", "uncertain"}
         self.conversations.append(
             project_id,
             conversation_id,
             "tool",
-            f"User denied tool {pending['operation']}; it was not executed.",
+            (
+                "User abandoned automatic replay after an interrupted tool execution; the prior "
+                "side-effect status is uncertain and must be checked manually."
+                if uncertain
+                else f"User denied tool {pending['operation']}; it was not executed."
+            ),
             metadata={
                 "operation": pending["operation"],
                 "effect": pending["effect"],
                 "risk": pending["risk"],
                 "approved": False,
+                "execution_uncertain": uncertain,
             },
         )
         return {
