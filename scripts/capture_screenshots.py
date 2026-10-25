@@ -12,7 +12,7 @@ from pathlib import Path
 if os.name != "nt":
     os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
-from PyQt6.QtWidgets import QApplication  # noqa: E402
+from PyQt6.QtWidgets import QApplication, QScrollArea  # noqa: E402
 
 from researchweave.app.composition import build_services  # noqa: E402
 from researchweave.app.config import AppConfig  # noqa: E402
@@ -113,6 +113,17 @@ def capture(root: Path, output: Path, theme: str, screen: str) -> dict[str, obje
         app.processEvents()
         if hasattr(window, "navigate"):
             window.navigate(screen)  # type: ignore[attr-defined]
+            app.processEvents()
+        if screen == "Statistics" and hasattr(window, "analysis_method"):
+            method_picker = window.analysis_method  # type: ignore[attr-defined]
+            for index in range(method_picker.count()):
+                method = method_picker.itemData(index)
+                if isinstance(method, dict) and method.get("id") == "analysis.statistics.frequency":
+                    method_picker.setCurrentIndex(index)
+                    break
+            page = window.pages.currentWidget()  # type: ignore[attr-defined]
+            if isinstance(page, QScrollArea):
+                page.verticalScrollBar().setValue(page.verticalScrollBar().maximum())
             app.processEvents()
         output.parent.mkdir(parents=True, exist_ok=True)
         if not window.grab().save(str(output), "PNG"):

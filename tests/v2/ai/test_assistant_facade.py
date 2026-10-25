@@ -272,6 +272,90 @@ def test_assistant_approve_executes_exact_pending_write_then_resumes_model(tmp_p
     facade.close()
 
 
+def test_assistant_chat_cancellation_removes_unfinished_user_message(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    facade = build_ai_facade(storage, policy=EgressPolicy())
+    _activate_local_profile(facade)
+    transport = QueueTransport([])
+    facade.model_runtime.transport = transport
+    conversation_id = facade.conversations.create("project", title="Cancelled")
+
+    with pytest.raises(AIError) as error:
+        facade.assistant_chat(
+            "project",
+            "Do not send this turn",
+            conversation_id=conversation_id,
+            is_cancelled=lambda: True,
+        )
+
+    assert error.value.code == "CANCELLED"
+    assert transport.payloads == []
+    assert facade.conversations.history("project", conversation_id) == []
+    facade.close()
+
+
+def test_assistant_approval_cancellation_preserves_pending_write(tmp_path: Path) -> None:
+    storage = _storage(tmp_path)
+    issuer = ApprovalIssuer(b"assistant-facade-cancel-test-key-0001")
+    observed: list[str] = []
+    facade = build_ai_facade(storage, policy=EgressPolicy(), issuer=issuer)
+    _activate_local_profile(facade)
+    facade.durable_agents.register_tool(
+        ToolContract(
+            "write.note",
+            "local-write",
+            lambda args: observed.append(str(args["text"])) or {"saved": True},
+            True,
+            True,
+            frozenset({"text"}),
+            description="Write a synthetic note.",
+            argument_schema={
+                "type": "object",
+                "properties": {"text": {"type": "string", "minLength": 1}},
+                "required": ["text"],
+                "additionalProperties": False,
+            },
+        )
+    )
+    facade.model_runtime.transport = QueueTransport(
+        [
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "content": None,
+                            "tool_calls": [
+                                {
+                                    "id": "call-write",
+                                    "type": "function",
+                                    "function": {
+                                        "name": "write.note",
+                                        "arguments": '{"text":"keep pending"}',
+                                    },
+                                }
+                            ],
+                        },
+                        "finish_reason": "tool_calls",
+                    }
+                ],
+                "usage": {},
+            }
+        ]
+    )
+    pending = facade.assistant_chat("project", "Save this later")
+    conversation_id = str(pending["conversation_id"])
+
+    with pytest.raises(AIError) as error:
+        facade.assistant_approve("project", conversation_id, is_cancelled=lambda: True)
+
+    assert error.value.code == "CANCELLED"
+    assert observed == []
+    still_pending = facade.assistant_history("project", conversation_id)["pending_tool"]
+    assert still_pending is not None
+    assert still_pending["execution_state"] == "pending"
+    facade.close()
+
+
 def test_no_active_model_fails_before_persisting_user_prompt(tmp_path: Path) -> None:
     storage = _storage(tmp_path)
     facade = build_ai_facade(storage, policy=EgressPolicy())

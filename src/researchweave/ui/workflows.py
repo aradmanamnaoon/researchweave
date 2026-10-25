@@ -495,6 +495,7 @@ class AIBackend(Protocol):
         offline: bool,
         egress_acknowledged: bool,
         on_delta: Callable[[str], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> Mapping[str, Any]:
         """Run one assistant turn inside the calling thread and stream real deltas."""
 
@@ -506,6 +507,7 @@ class AIBackend(Protocol):
         offline: bool,
         egress_acknowledged: bool,
         on_delta: Callable[[str], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> Mapping[str, Any]:
         """Execute exactly one persisted pending tool after trusted user approval."""
 

@@ -92,7 +92,9 @@ class FakeAIBackend:
         offline: bool,
         egress_acknowledged: bool,
         on_delta: Callable[[str], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> Mapping[str, Any]:
+        assert is_cancelled is None or not is_cancelled()
         self.messages.append({"role": "user", "content": prompt, "metadata": {}})
         if on_delta is not None:
             on_delta("Stream")
@@ -124,7 +126,9 @@ class FakeAIBackend:
         offline: bool,
         egress_acknowledged: bool,
         on_delta: Callable[[str], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> Mapping[str, Any]:
+        assert is_cancelled is None or not is_cancelled()
         assert self.pending is not None
         operation = str(self.pending["operation"])
         arguments = dict(self.pending["arguments"])

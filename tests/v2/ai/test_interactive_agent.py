@@ -383,3 +383,65 @@ def test_write_tool_pauses_for_exact_host_approval(tmp_path: Path) -> None:
     }
     assert observed == ["draft"]
     tools.close()
+
+
+@pytest.mark.parametrize("native", [True, False])
+def test_cancellation_before_provider_prevents_request(tmp_path: Path, native: bool) -> None:
+    transport = QueueTransport([])
+    tools = _read_tools(tmp_path)
+    loop = ModelAgentLoop(_model_runtime(tmp_path, transport, tool_calling=native), tools)
+    with pytest.raises(AIError) as error:
+        loop.run("project", [ProviderMessage("user", "hello")], is_cancelled=lambda: True)
+    assert error.value.code == "CANCELLED"
+    assert transport.payloads == []
+    tools.close()
+
+
+@pytest.mark.parametrize("native", [True, False])
+def test_cancellation_after_provider_prevents_tool_execution(tmp_path: Path, native: bool) -> None:
+    response = (
+        {
+            "choices": [
+                {
+                    "message": {
+                        "content": None,
+                        "tool_calls": [
+                            {
+                                "id": "call-1",
+                                "type": "function",
+                                "function": {"name": "read.echo", "arguments": '{"value":"x"}'},
+                            }
+                        ],
+                    }
+                }
+            ]
+        }
+        if native
+        else {
+            "choices": [
+                {
+                    "message": {
+                        "content": '{"type":"tool","name":"read.echo","arguments":{"value":"x"}}'
+                    }
+                }
+            ]
+        }
+    )
+
+    class CancelAfterResponse(QueueTransport):
+        def send(
+            self, url: str, headers: Mapping[str, str], payload: bytes, timeout: float
+        ) -> bytes:
+            result = super().send(url, headers, payload, timeout)
+            cancelled[0] = True
+            return result
+
+    cancelled = [False]
+    transport = CancelAfterResponse([response])
+    tools = _read_tools(tmp_path)
+    loop = ModelAgentLoop(_model_runtime(tmp_path, transport, tool_calling=native), tools)
+    with pytest.raises(AIError) as error:
+        loop.run("project", [ProviderMessage("user", "echo")], is_cancelled=lambda: cancelled[0])
+    assert error.value.code == "CANCELLED"
+    assert len(transport.payloads) == 1
+    tools.close()

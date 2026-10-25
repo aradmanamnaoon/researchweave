@@ -39,11 +39,11 @@
     },
     {
       "actual_integrated_app": true,
-      "bytes": 105777,
+      "bytes": 69352,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-statistics-light.png",
       "screen": "Statistics",
-      "sha256": "376bed8ebb7e0f10a11f62ae90755e629827629c936fc7b833f1562a316352e5",
+      "sha256": "494ebe71f07b4b356661169394788a6bc62b998741fcbb747c94f01840a54318",
       "theme": "light"
     },
     {
@@ -138,11 +138,11 @@
     },
     {
       "actual_integrated_app": true,
-      "bytes": 106308,
+      "bytes": 69565,
       "fixture": "deterministic synthetic local project",
       "path": "assets/screenshots/researchweave-statistics-dark.png",
       "screen": "Statistics",
-      "sha256": "99c5a3050b7d2f79d8b6aab66e2d494337ea9e5e916c06ffa9d1788dbef4aa7d",
+      "sha256": "de8755fdaa0fc2b9a2fd3e4351052e365cff4dc58dc2e29b12c628dae94c40a6",
       "theme": "dark"
     },
     {

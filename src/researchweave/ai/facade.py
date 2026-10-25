@@ -235,6 +235,7 @@ class AIFacade:
         max_chars: int = 32_000,
         max_tokens: int = 1024,
         on_delta: Callable[[str], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> Mapping[str, Any]:
         selected_profile = self._selected_profile(profile_id)
         if conversation_id is None:
@@ -258,6 +259,7 @@ class AIFacade:
                 profile_id=selected_profile,
                 max_tokens=max_tokens,
                 on_delta=on_delta,
+                is_cancelled=is_cancelled,
             )
         except Exception:
             self.conversations.remove_message(project_id, conversation_id, user_message.sequence)
@@ -272,7 +274,13 @@ class AIFacade:
         max_chars: int = 32_000,
         max_tokens: int = 1024,
         on_delta: Callable[[str], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> Mapping[str, Any]:
+        def check_cancelled() -> None:
+            if is_cancelled is not None and is_cancelled():
+                raise AIError("CANCELLED", "Agent turn was cancelled")
+
+        check_cancelled()
         pending = self.conversations.pending_tool(project_id, conversation_id)
         if pending is None:
             raise AIError("NOT_FOUND", "No pending assistant tool request exists")
@@ -290,6 +298,7 @@ class AIFacade:
         if execution_state not in {"pending", "completed"}:
             raise AIError("INTEGRITY_FAILURE", "Pending tool execution state is invalid")
         if execution_state == "pending":
+            check_cancelled()
             approval = self.issuer.issue(
                 project_id,
                 "agent.tool",
@@ -298,6 +307,7 @@ class AIFacade:
             )
             self.conversations.mark_pending_tool_executing(project_id, conversation_id)
             try:
+                check_cancelled()
                 tool_result = dict(
                     self.durable_agents.invoke_tool(
                         project_id,
@@ -314,6 +324,7 @@ class AIFacade:
                 conversation_id,
                 tool_result,
             )
+        check_cancelled()
         profile_id = self._selected_profile(
             None if pending.get("profile_id") in (None, "") else str(pending["profile_id"])
         )
@@ -329,6 +340,7 @@ class AIFacade:
             profile_id=profile_id,
             max_tokens=max_tokens,
             on_delta=on_delta,
+            is_cancelled=is_cancelled,
         )
         return self._assistant_result(project_id, conversation_id, profile_id, result)
 

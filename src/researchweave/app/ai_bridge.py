@@ -112,6 +112,7 @@ class ProductionAIBackend:
         offline: bool,
         egress_acknowledged: bool,
         on_delta: Callable[[str], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> Mapping[str, Any]:
         policy, selected_profile = self._assistant_policy(
             profile_id=profile_id,
@@ -127,6 +128,7 @@ class ProductionAIBackend:
                 conversation_id=conversation_id,
                 profile_id=selected_profile,
                 on_delta=on_delta,
+                is_cancelled=is_cancelled,
             )
         finally:
             facade.close()
@@ -139,6 +141,7 @@ class ProductionAIBackend:
         offline: bool,
         egress_acknowledged: bool,
         on_delta: Callable[[str], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> Mapping[str, Any]:
         pending = ConversationStore(self._storage / "conversations.sqlite").pending_tool(
             project_id,
@@ -160,6 +163,7 @@ class ProductionAIBackend:
                 project_id,
                 conversation_id,
                 on_delta=on_delta,
+                is_cancelled=is_cancelled,
             )
         finally:
             facade.close()

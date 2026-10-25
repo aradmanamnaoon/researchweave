@@ -198,6 +198,7 @@ class ModelAgentLoop:
         max_iterations: int = 8,
         max_tokens: int = 1024,
         on_delta: Callable[[str], None] | None = None,
+        is_cancelled: Callable[[], bool] | None = None,
     ) -> AgentLoopResult:
         if not project_id:
             raise AIError("INVALID_INPUT", "Agent requires a project ID")
@@ -210,7 +211,12 @@ class ModelAgentLoop:
         events: list[AgentToolEvent] = []
         definitions, provider_to_operation = self._native_definitions()
 
+        def check_cancelled() -> None:
+            if is_cancelled is not None and is_cancelled():
+                raise AIError("CANCELLED", "Agent turn was cancelled")
+
         for iteration in range(1, max_iterations + 1):
+            check_cancelled()
             adapter = self.models.adapter(profile_id)
             native_tools = adapter.capabilities.tool_calling and bool(definitions)
             if native_tools:
@@ -231,6 +237,7 @@ class ModelAgentLoop:
                         temperature=0.0,
                         on_delta=on_delta,
                     )
+                check_cancelled()
                 if response.tool_calls:
                     if len(response.tool_calls) != 1:
                         raise AIError(
@@ -239,6 +246,7 @@ class ModelAgentLoop:
                         )
                     call = response.tool_calls[0]
                     operation = provider_to_operation.get(call.name, call.name)
+                    check_cancelled()
                     event = self._invoke(project_id, operation, call.arguments, approval_map)
                     events.append(event)
                     if event.result is None:
@@ -262,6 +270,7 @@ class ModelAgentLoop:
                 max_tokens=max_tokens,
                 temperature=0.0,
             )
+            check_cancelled()
             parsed = parse_structured_output(response.text, _FALLBACK_SCHEMA)
             if not isinstance(parsed, dict):
                 raise AIError("SCHEMA_MISMATCH", "Agent fallback output is not an object")
@@ -274,6 +283,7 @@ class ModelAgentLoop:
             arguments = parsed.get("arguments")
             if not isinstance(name, str) or not isinstance(arguments, Mapping):
                 raise AIError("SCHEMA_MISMATCH", "Agent tool response is incomplete")
+            check_cancelled()
             event = self._invoke(project_id, name, arguments, approval_map)
             events.append(event)
             if event.result is None:

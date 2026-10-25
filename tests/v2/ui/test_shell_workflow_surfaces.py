@@ -10,7 +10,7 @@ import pytest
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
 from PyQt6.QtCore import Qt
-from PyQt6.QtWidgets import QApplication, QInputDialog, QMessageBox
+from PyQt6.QtWidgets import QApplication, QComboBox, QInputDialog, QMessageBox
 
 from researchweave.ui import build_ui_facade, build_ui_shell
 
@@ -56,6 +56,60 @@ def shell_fixture(tmp_path: Path):
     shell = build_ui_shell(fake_services=facade)
     shell.open_project(pid)
     return facade, shell, pid, source, dataset
+
+
+def test_guided_frequency_analysis_hides_host_fields_and_dispatches(
+    qt_app: QApplication, tmp_path: Path
+) -> None:
+    facade, shell, pid, _source, dataset = shell_fixture(tmp_path)
+
+    class GuidedBackend:
+        def methods(self) -> list[dict[str, object]]:
+            return [{
+                "id": "analysis.statistics.frequency",
+                "label": "Frequency",
+                "available": True,
+                "arguments_schema": {
+                    "type": "object",
+                    "properties": {
+                        "dataset_id": {"type": "string"},
+                        "revision": {"type": "string"},
+                        "column": {"type": "string"},
+                    },
+                    "required": ["dataset_id", "revision", "column"],
+                },
+            }]
+
+        def run_for_project(
+            self, method: str, inputs: object, *, project_id: str
+        ) -> dict[str, object]:
+            assert method == "analysis.statistics.frequency"
+            assert project_id == pid
+            assert inputs == {"dataset_id": dataset["dataset_id"], "column": "group"}
+            return {
+                "method": "frequency", "method_version": "test-v1",
+                "inputs": {"dataset_id": dataset["dataset_id"], "column": "group"},
+                "assumptions": [], "warnings": [], "estimates": {"n": 3},
+                "uncertainty": {}, "diagnostics": {}, "provenance": {"source": "synthetic"},
+            }
+
+    facade.analysis_backend = GuidedBackend()  # type: ignore[assignment]
+    shell.refresh_datasets()
+    index = next(
+        i for i in range(shell.analysis_method.count())
+        if shell.analysis_method.itemData(i)["id"] == "analysis.statistics.frequency"
+    )
+    shell.analysis_method.setCurrentIndex(index)
+    assert shell.analysis_guided_supported
+    assert set(shell.analysis_guided_widgets) == {"column"}
+    assert shell.analysis_arguments.isReadOnly()
+    picker = shell.analysis_guided_widgets["column"]
+    assert isinstance(picker, QComboBox)
+    picker.setCurrentIndex(picker.findData("group"))
+    shell.run_analysis()
+    assert shell.page_heading.text() == "Analysis Results"
+    assert shell.analysis_results_list.count() == 1
+    shell.close()
 
 
 def test_codebook_mixed_references_and_activity_surfaces(

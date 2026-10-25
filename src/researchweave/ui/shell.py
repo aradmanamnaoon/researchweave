@@ -40,6 +40,7 @@ from PyQt6.QtWidgets import (
     QWidget,
 )
 
+from .analysis_forms import FieldSpec, build_field_specs, parse_form_values
 from .assets import asset_path
 from .contracts import Preferences, UIError
 from .design import apply_theme, named
@@ -1190,12 +1191,22 @@ class ResearchWindow(QMainWindow):
         result_surface, result_surface_layout = surface("Result and advanced analysis")
         self.stats_result = QPlainTextEdit()
         self.stats_result.setReadOnly(True)
+        self.stats_result.setMaximumHeight(120)
+        self.stats_result.setPlaceholderText(
+            "Run an analysis to see a concise summary here. Full numerical output is saved in "
+            "Analysis Results."
+        )
         named(self.stats_result, "Text alternative for numeric summary")
         result_surface_layout.addWidget(self.stats_result)
         self.analysis_method = QComboBox()
         named(self.analysis_method, "Scientific analysis method")
         self.analysis_method.currentIndexChanged.connect(self.prepare_analysis_arguments)
         result_surface_layout.addWidget(self.analysis_method)
+        self.analysis_guided_form = QFormLayout()
+        self.analysis_guided_widgets: dict[str, QWidget] = {}
+        self.analysis_guided_specs: tuple[FieldSpec, ...] = ()
+        self.analysis_guided_supported = False
+        result_surface_layout.addLayout(self.analysis_guided_form)
         self.analysis_arguments = QPlainTextEdit()
         self.analysis_arguments.setPlaceholderText(
             "Advanced methods: enter operation arguments as a JSON object. "
@@ -3390,14 +3401,19 @@ class ResearchWindow(QMainWindow):
             self.prepare_analysis_arguments()
 
     def prepare_analysis_arguments(self) -> None:
+        while self.analysis_guided_form.rowCount():
+            self.analysis_guided_form.removeRow(0)
+        self.analysis_guided_widgets.clear()
+        self.analysis_guided_specs = ()
+        self.analysis_guided_supported = False
         method = self.analysis_method.currentData()
         if not isinstance(method, dict):
             return
         if method.get("id") in {"descriptive", "analysis.statistics.describe"}:
             self.analysis_arguments.setPlainText("{}")
-            self.analysis_arguments.setEnabled(False)
+            self.analysis_arguments.setReadOnly(True)
+            self.analysis_arguments.setVisible(False)
             return
-        self.analysis_arguments.setEnabled(True)
         schema = method.get("arguments_schema", {})
         properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
         defaults: dict[str, object] = {}
@@ -3407,6 +3423,112 @@ class ResearchWindow(QMainWindow):
             if "column" in properties and self.variable_picker.currentText():
                 defaults["column"] = self.variable_picker.currentText()
         self.analysis_arguments.setPlainText(json.dumps(defaults, indent=2))
+        if not isinstance(schema, dict) or not isinstance(properties, dict) or not properties:
+            self.analysis_arguments.setReadOnly(False)
+            self.analysis_arguments.setVisible(True)
+            return
+        try:
+            specs = build_field_specs(schema)
+        except ValueError:
+            self.analysis_arguments.setReadOnly(False)
+            self.analysis_arguments.setVisible(True)
+            return
+        self.analysis_guided_specs = specs
+        self.analysis_guided_supported = True
+        self.analysis_arguments.setReadOnly(True)
+        self.analysis_arguments.setVisible(False)
+        for spec in specs:
+            widget: QWidget
+            if spec.kind == "string" and spec.variable:
+                picker = QComboBox()
+                picker.addItem("Select variable", "")
+                for index in range(self.variable_picker.count()):
+                    name = self.variable_picker.itemText(index)
+                    picker.addItem(name, name)
+                if spec.name in {"column", "outcome"} and self.variable_picker.currentText():
+                    selected = picker.findData(self.variable_picker.currentText())
+                    if selected >= 0:
+                        picker.setCurrentIndex(selected)
+                widget = picker
+            elif spec.choices or spec.kind == "boolean":
+                picker = QComboBox()
+                picker.addItem("Not set", "")
+                choices = spec.choices if spec.choices else ("true", "false")
+                for choice in choices:
+                    picker.addItem(choice, choice)
+                widget = picker
+            elif spec.kind == "json":
+                editor = QPlainTextEdit()
+                editor.setMaximumHeight(70)
+                editor.setPlaceholderText("JSON object or array")
+                widget = editor
+            else:
+                editor_line = QLineEdit()
+                if spec.kind == "string-array":
+                    editor_line.setPlaceholderText("Comma-separated variable names")
+                widget = editor_line
+            friendly_labels = {
+                "column": "Variable",
+                "columns": "Variables",
+                "x": "First variable",
+                "y": "Second variable",
+                "first": "First variable",
+                "second": "Second variable",
+                "group": "Grouping variable",
+                "levels": "Group levels",
+                "outcome": "Outcome",
+                "predictors": "Predictors",
+                "covariates": "Covariates",
+                "factor": "Factor",
+                "factors": "Factors",
+                "subject": "Subject identifier",
+                "within": "Within-subject factor",
+                "duration": "Duration variable",
+                "event": "Event indicator",
+                "time_column": "Time variable",
+                "value_column": "Value variable",
+            }
+            label_text = friendly_labels.get(spec.name, spec.name.replace("_", " ").title())
+            label = f"{label_text}{' *' if spec.required else ''}"
+            widget.setAccessibleName(f"Analysis {label}")
+            widget.setAccessibleDescription(spec.description or f"Input for {spec.name}")
+            self.analysis_guided_form.addRow(label, widget)
+            self.analysis_guided_widgets[spec.name] = widget
+            if isinstance(widget, QComboBox):
+                widget.currentIndexChanged.connect(self._preview_guided_analysis)
+            elif isinstance(widget, QLineEdit):
+                widget.textChanged.connect(self._preview_guided_analysis)
+            elif isinstance(widget, QPlainTextEdit):
+                widget.textChanged.connect(self._preview_guided_analysis)
+        self._preview_guided_analysis()
+
+    def _guided_analysis_values(self) -> dict[str, str]:
+        values: dict[str, str] = {}
+        for name, widget in self.analysis_guided_widgets.items():
+            if isinstance(widget, QComboBox):
+                values[name] = str(widget.currentData() or "")
+            elif isinstance(widget, QLineEdit):
+                values[name] = widget.text()
+            elif isinstance(widget, QPlainTextEdit):
+                values[name] = widget.toPlainText()
+        return values
+
+    def _preview_guided_analysis(self) -> None:
+        if not self.analysis_guided_supported:
+            return
+        method = self.analysis_method.currentData()
+        schema = method.get("arguments_schema", {}) if isinstance(method, dict) else {}
+        properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+        preview: dict[str, object] = {}
+        if isinstance(properties, dict) and "dataset_id" in properties and self.current_dataset_id:
+            preview["dataset_id"] = self.current_dataset_id
+        try:
+            preview.update(
+                parse_form_values(self.analysis_guided_specs, self._guided_analysis_values())
+            )
+        except ValueError:
+            pass
+        self.analysis_arguments.setPlainText(json.dumps(preview, indent=2))
 
     def load_data_page(self) -> None:
         if not self.current_dataset_id:
@@ -3737,16 +3859,33 @@ class ResearchWindow(QMainWindow):
                 "column": self.variable_picker.currentText(),
             }
         else:
-            raw_arguments = self.analysis_arguments.toPlainText().strip() or "{}"
-            try:
-                parsed_arguments = json.loads(raw_arguments)
-            except json.JSONDecodeError:
-                self._set_status("Advanced analysis arguments must be valid JSON.")
-                return
-            if not isinstance(parsed_arguments, dict):
-                self._set_status("Advanced analysis arguments must be a JSON object.")
-                return
-            inputs = parsed_arguments
+            if self.analysis_guided_supported:
+                try:
+                    inputs = parse_form_values(
+                        self.analysis_guided_specs, self._guided_analysis_values()
+                    )
+                except ValueError as exc:
+                    self._set_status(str(exc))
+                    return
+                schema = method.get("arguments_schema", {})
+                properties = schema.get("properties", {}) if isinstance(schema, dict) else {}
+                if isinstance(properties, dict) and "dataset_id" in properties:
+                    if not self.current_dataset_id:
+                        self._set_status("Choose a dataset before running this analysis.")
+                        return
+                    inputs["dataset_id"] = self.current_dataset_id
+                self.analysis_arguments.setPlainText(json.dumps(inputs, indent=2))
+            else:
+                raw_arguments = self.analysis_arguments.toPlainText().strip() or "{}"
+                try:
+                    parsed_arguments = json.loads(raw_arguments)
+                except json.JSONDecodeError:
+                    self._set_status("Advanced analysis arguments must be valid JSON.")
+                    return
+                if not isinstance(parsed_arguments, dict):
+                    self._set_status("Advanced analysis arguments must be a JSON object.")
+                    return
+                inputs = parsed_arguments
         response = self._call(
             "ui.analysis.run",
             method=method_id,
@@ -3879,6 +4018,8 @@ class ResearchWindow(QMainWindow):
         code = getattr(exc, "code", None)
         if isinstance(code, str) and code:
             message = str(exc).strip() or "Assistant request failed."
+            if code == "CANCELLED":
+                return {"status": "cancelled", "data": {}}
             return {
                 "status": "failed",
                 "error": {"code": code, "message": message[:1_000]},
@@ -4033,6 +4174,7 @@ class ResearchWindow(QMainWindow):
                     offline=offline,
                     egress_acknowledged=egress_acknowledged,
                     on_delta=emit,
+                    is_cancelled=stop.is_set,
                 )
                 return {"status": "ok", "data": dict(data)}
             except Exception as exc:
@@ -4061,7 +4203,7 @@ class ResearchWindow(QMainWindow):
             return
         status = value.get("status")
         if status == "cancelled":
-            self.assistant_tool_status.setText("Assistant request was cancelled before it started.")
+            self.assistant_tool_status.setText("Assistant request was cancelled.")
             self._sync_assistant_controls()
             return
         if status != "ok":
@@ -4161,6 +4303,7 @@ class ResearchWindow(QMainWindow):
                     offline=offline,
                     egress_acknowledged=egress_acknowledged,
                     on_delta=emit,
+                    is_cancelled=stop.is_set,
                 )
                 return {"status": "ok", "data": dict(data)}
             except Exception as exc:

@@ -19,6 +19,41 @@ class ProductionAnalysisBackend:
 
     METHOD = "analysis.statistics.describe"
 
+    _METHOD_LABELS = {
+        "statistics.frequency": "Frequencies",
+        "statistics.grouped_describe": "Descriptive statistics by group",
+        "statistics.test": "T test",
+        "statistics.correlate": "Correlation",
+        "statistics.correlation_matrix": "Correlation matrix",
+        "statistics.contingency": "Crosstabs and chi-square",
+        "statistics.rank": "Rank-sum test",
+        "statistics.wilcoxon": "Wilcoxon signed-rank test",
+        "statistics.kruskal": "Kruskal-Wallis test",
+        "statistics.friedman": "Friedman test",
+        "statistics.anova": "One-way ANOVA",
+        "statistics.welch_anova": "Welch ANOVA",
+        "statistics.tukey": "Tukey post-hoc comparisons",
+        "statistics.factorial_anova": "Factorial ANOVA",
+        "statistics.repeated_anova": "Repeated-measures ANOVA",
+        "statistics.ancova": "ANCOVA",
+        "statistics.model": "Linear regression",
+        "statistics.logistic": "Logistic regression",
+        "statistics.poisson": "Poisson regression",
+        "statistics.negative_binomial": "Negative-binomial regression",
+        "statistics.psychometric": "Scale reliability and psychometrics",
+        "statistics.reliability_diagnostics": "Reliability diagnostics",
+        "statistics.pca": "Principal component analysis",
+        "statistics.efa": "Exploratory factor analysis",
+        "statistics.survival": "Survival analysis",
+        "statistics.logrank": "Log-rank test",
+        "statistics.cox": "Cox regression",
+        "statistics.gee": "Generalized estimating equations",
+        "statistics.mixed_effects": "Mixed-effects model",
+        "statistics.ordinal": "Ordinal regression",
+        "statistics.survey_mean": "Complex-survey mean",
+        "statistics.survey_proportions": "Complex-survey proportions",
+    }
+
     def __init__(
         self,
         ui: UIFacade,
@@ -56,7 +91,10 @@ class ProductionAnalysisBackend:
             methods.append(
                 {
                     "id": f"analysis.{operation}",
-                    "label": f"Advanced · {operation}",
+                    "label": self._METHOD_LABELS.get(
+                        operation,
+                        operation.removeprefix("statistics.").replace("_", " ").title(),
+                    ),
                     "available": True,
                     "arguments_schema": dict(capability.get("arguments_schema", {})),
                     "effect": capability.get("effect", "read"),
