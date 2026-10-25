@@ -4,5 +4,7 @@
 *.ico binary
 *.pdf binary
 *.svg text eol=lf
+*.sh text eol=lf
+*.desktop text eol=lf
 .agents/skills/security-best-practices/references/** whitespace=-blank-at-eol
 .agents/skills/security-threat-model/references/** whitespace=-blank-at-eol

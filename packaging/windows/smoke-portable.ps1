@@ -1,6 +1,9 @@
 $ErrorActionPreference = "Stop"
 $Repo = (Resolve-Path (Join-Path $PSScriptRoot "..\..")).Path
-$Zip = Join-Path $Repo "dist\ResearchWeave-windows-x86_64.zip"
+$VersionMatch = Select-String -Path (Join-Path $Repo "pyproject.toml") -Pattern '^version\s*=\s*"([^"]+)"' | Select-Object -First 1
+if (-not $VersionMatch) { throw "Could not determine ResearchWeave version" }
+$Version = $VersionMatch.Matches[0].Groups[1].Value
+$Zip = Join-Path $Repo "dist\ResearchWeave-v$Version-windows-x64-portable.zip"
 if (-not (Test-Path -LiteralPath $Zip)) { throw "Build the Windows package first" }
 
 $Scratch = Join-Path ([System.IO.Path]::GetTempPath()) ("researchweave-portable-" + [guid]::NewGuid())
