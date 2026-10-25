@@ -77,9 +77,7 @@ def test_agent_discovers_and_reads_real_application_tools(tmp_path: Path) -> Non
         assert "ui.analysis.run" in names
         assert "runtime.python" not in names
         automatic = bridge.search({"query": "auto_analyze", "limit": 10})
-        assert "statistics.auto_analyze" in {
-            item["operation"] for item in automatic["tools"]
-        }
+        assert "statistics.auto_analyze" in {item["operation"] for item in automatic["tools"]}
 
         response = services.ai.durable_agents.invoke_tool(
             project_id,
@@ -90,6 +88,56 @@ def test_agent_discovers_and_reads_real_application_tools(tmp_path: Path) -> Non
         assert response["result"]["status"] == "ok"
         assert response["result"]["data"]["title"] == "Agent bridge"
         assert response["result"]["data"]["question"] == "Initial question"
+        evidence = bridge.search({"domain": "evidence", "effect": "read", "limit": 30})
+        assert evidence["tools"], "Registered evidence reads must be discoverable"
+        assert all(item["wrapper_tool"] == "app.read" for item in evidence["tools"])
+        ai_reads = bridge.search({"query": "provider.list", "domain": "ai"})
+        assert [item["operation"] for item in ai_reads["tools"]] == ["provider.list"]
+        provider_result = services.ai.durable_agents.invoke_tool(
+            project_id, "app.read", {"operation": "provider.list", "arguments": {}}
+        )
+        assert provider_result["result"]["status"] == "ok"
+    finally:
+        services.close()
+
+
+def test_high_risk_export_is_discoverable_but_requires_exact_approval(tmp_path: Path) -> None:
+    services = build_services(tmp_path)
+    try:
+        project_id, _revision = _project(services)
+        bridge = register_application_tools(services.ai.durable_agents, services.bus, project_id)
+        found = bridge.search({"query": "dataset.export_csv"})
+        matches = [item for item in found["tools"] if item["operation"] == "dataset.export_csv"]
+        assert len(matches) == 1
+        assert matches[0]["effect"] == "sensitive-export"
+        assert matches[0]["wrapper_tool"] == "app.sensitive_export"
+        call = {"operation": "dataset.export_csv", "arguments": {}}
+        with pytest.raises(AIError, match="approval"):
+            services.ai.durable_agents.invoke_tool(project_id, "app.sensitive_export", call)
+        mismatched = services.ai_issuer.issue(
+            project_id,
+            "agent.tool",
+            {
+                "operation": "app.sensitive_export",
+                "arguments": {
+                    "operation": "dataset.export_csv",
+                    "arguments": {"dataset_id": "different"},
+                },
+            },
+            datetime.now(UTC) + timedelta(minutes=1),
+        )
+        with pytest.raises(AIError, match="[Aa]pproval"):
+            services.ai.durable_agents.invoke_tool(
+                project_id, "app.sensitive_export", call, approval=mismatched
+            )
+        with pytest.raises(AIError, match="cross project"):
+            bridge.sensitive_export(
+                {
+                    "operation": "dataset.export_csv",
+                    "arguments": {"project_id": str(uuid4())},
+                }
+            )
+        assert not bridge.search({"query": "agent.action."})["tools"]
     finally:
         services.close()
 
@@ -259,8 +307,7 @@ def test_desktop_assistant_executes_real_project_write_only_after_approval(
         )
         assert after["data"]["question"] == "Agent-approved question"
         assert any(
-            item["function"]["name"] == "app_write"
-            for item in transport.payloads[0]["tools"]
+            item["function"]["name"] == "app_write" for item in transport.payloads[0]["tools"]
         )
     finally:
         services.close()

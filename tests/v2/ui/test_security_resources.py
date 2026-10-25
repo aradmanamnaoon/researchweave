@@ -344,6 +344,50 @@ def test_variable_analysis_provider_integration_and_notification_denials() -> No
         lambda: workflows.configure_provider(project, {"mode": "unsupported"}),
         "INVALID_INPUT",
     )
+    ollama = workflows.configure_provider(
+        project,
+        {
+            "mode": "local",
+            "provider_id": "ollama-local",
+            "protocol": "ollama",
+            "endpoint": "http://127.0.0.1:11434",
+            "model": "synthetic:latest",
+            "enabled": True,
+        },
+    )
+    assert ollama["protocol"] == "ollama"
+    assert ollama["mode"] == "local"
+    assert ollama["credential_present"] is False
+    assert ollama["egress_acknowledged"] is False
+    assert_error(
+        lambda: workflows.configure_provider(
+            project,
+            {
+                "mode": "cloud-api",
+                "provider_id": "ollama-remote",
+                "protocol": "ollama",
+                "endpoint": "https://example.org",
+                "model": "synthetic:latest",
+                "enabled": True,
+            },
+        ),
+        "INVALID_INPUT",
+    )
+    assert_error(
+        lambda: workflows.configure_provider(
+            project,
+            {
+                "mode": "local",
+                "provider_id": "ollama-tools",
+                "protocol": "ollama",
+                "endpoint": "http://127.0.0.1:11434",
+                "model": "synthetic:latest",
+                "tool_calling": True,
+                "enabled": True,
+            },
+        ),
+        "INVALID_INPUT",
+    )
     assert_error(
         lambda: workflows.configure_provider(
             project,

@@ -80,6 +80,53 @@ def test_openai_compatible_local_servers_share_one_runtime_contract(
     assert transport.requests[0][0] == endpoint + "/chat/completions"
 
 
+def test_native_ollama_profile_uses_local_chat_and_reports_usage(tmp_path: Path) -> None:
+    transport = FakeTransport(
+        {
+            "model": "synthetic:latest",
+            "message": {"role": "assistant", "content": "local native reply"},
+            "done": True,
+            "prompt_eval_count": 12,
+            "eval_count": 5,
+        }
+    )
+    store = ModelConfigStore(tmp_path / "models.json")
+    store.upsert(
+        ModelProfile(
+            "native-local", "ollama", "http://127.0.0.1:11434", "synthetic:latest", local=True
+        ),
+        activate=True,
+    )
+    runtime = ConfiguredModelRuntime(store, EgressPolicy(), transport=transport)
+    adapter = runtime.adapter()
+    assert not adapter.capabilities.streaming
+    assert not adapter.capabilities.tool_calling
+    result = runtime.complete([ProviderMessage("user", "hello")])
+    assert result.text == "local native reply"
+    assert result.usage.total_tokens == 17
+    assert transport.requests[0][0] == "http://127.0.0.1:11434/api/chat"
+    assert json.loads(transport.requests[0][2])["stream"] is False
+
+
+def test_native_ollama_rejects_remote_and_unimplemented_tools(tmp_path: Path) -> None:
+    store = ModelConfigStore(tmp_path / "models.json")
+    with pytest.raises(AIError) as exc:
+        store.upsert(ModelProfile("unsafe", "ollama", "https://example.org", "m"))
+    assert exc.value.code == "INVALID_INPUT"
+    with pytest.raises(AIError) as exc:
+        store.upsert(
+            ModelProfile(
+                "unsupported",
+                "ollama",
+                "http://127.0.0.1:11434",
+                "m",
+                local=True,
+                tool_calling=True,
+            )
+        )
+    assert exc.value.code == "INVALID_INPUT"
+
+
 def test_remote_profile_resolves_credential_from_environment_only(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

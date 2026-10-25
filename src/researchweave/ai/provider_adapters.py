@@ -8,6 +8,7 @@ from typing import Any, Protocol, cast
 from urllib.parse import quote
 
 from .errors import AIError
+from .ollama import OllamaAdapter, OllamaMessage, OllamaOptions
 from .policy import EgressPolicy, validate_endpoint
 from .providers import HTTPTransport
 from .streaming import StreamAssembler, sse_events
@@ -120,6 +121,57 @@ class ChatAdapter(Protocol):
         max_tokens: int = 512,
         temperature: float = 0.0,
     ) -> ProviderResult: ...
+
+
+class NativeOllamaChatAdapter:
+    """Expose the existing loopback Ollama client through the chat contract."""
+
+    capabilities = ProviderCapabilities(
+        streaming=False, structured_output=False, tool_calling=False, local=True
+    )
+
+    def __init__(
+        self, identifier: str, endpoint: str, model: str, *, transport: HTTPTransport
+    ) -> None:
+        self.identifier = identifier
+        self.endpoint = validate_endpoint(endpoint, local=True).rstrip("/")
+        self.model = model
+        self.local = True
+        self.client = OllamaAdapter(self.endpoint, transport=transport)
+
+    def complete(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+    ) -> ProviderResult:
+        _validate_generation(messages, max_tokens=max_tokens, temperature=temperature)
+        if any(item.role == "tool" or item.tool_calls for item in messages):
+            raise AIError("PROVIDER_UNAVAILABLE", "Native Ollama tool messages are unsupported")
+        # The Ollama client enforces its own loopback validation and checks this policy.
+        self.client.policy = policy
+        response = self.client.chat(
+            self.model,
+            [OllamaMessage(item.role, item.content) for item in messages],
+            OllamaOptions(max_output_tokens=max_tokens, temperature=temperature),
+        )
+        input_tokens = response.prompt_eval_tokens
+        output_tokens = response.output_eval_tokens
+        return ProviderResult(
+            provider=self.identifier,
+            model=response.model,
+            text=response.text,
+            usage=ProviderUsage(
+                input_tokens,
+                output_tokens,
+                input_tokens + output_tokens
+                if input_tokens is not None and output_tokens is not None
+                else None,
+            ),
+            finish_reason="stop",
+        )
 
 
 def _validate_generation(
@@ -835,11 +887,7 @@ class GeminiAdapter:
             payload["systemInstruction"] = {"parts": [{"text": system}]}
         if tools is not None:
             payload["tools"] = [
-                {
-                    "functionDeclarations": [
-                        self._tool_definition(item) for item in tools
-                    ]
-                }
+                {"functionDeclarations": [self._tool_definition(item) for item in tools]}
             ]
             payload["toolConfig"] = {"functionCallingConfig": {"mode": "AUTO"}}
         path = "/v1beta/models/" + quote(self.model, safe="._-") + ":generateContent"
@@ -886,11 +934,7 @@ class GeminiAdapter:
                 or (raw_id is not None and not isinstance(raw_id, str))
             ):
                 raise AIError("SCHEMA_MISMATCH", "Gemini function call is malformed")
-            call_id = (
-                raw_id
-                if isinstance(raw_id, str) and raw_id
-                else f"gemini-auto-{index + 1}"
-            )
+            call_id = raw_id if isinstance(raw_id, str) and raw_id else f"gemini-auto-{index + 1}"
             tool_calls.append(ProviderToolCall(call_id, name, dict(arguments)))
         if not texts and not tool_calls:
             raise AIError("SCHEMA_MISMATCH", "Gemini response contains no output")

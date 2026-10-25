@@ -968,11 +968,11 @@ def configure_provider(project: Project, payload: Mapping[str, Any]) -> dict[str
         "Provider protocol",
         40,
     )
-    if protocol not in ("openai-compatible", "anthropic", "gemini"):
+    if protocol not in ("openai-compatible", "ollama", "anthropic", "gemini"):
         raise UIError(
             "INVALID_INPUT",
             "Unsupported provider protocol.",
-            "Choose OpenAI-compatible, Anthropic or Gemini.",
+            "Choose OpenAI-compatible, Ollama, Anthropic or Gemini.",
         )
     endpoint = _clean_text(payload.get("endpoint", ""), "Provider endpoint", 2_000, required=False)
     model = _clean_text(payload.get("model", ""), "Model identifier", 256, required=False)
@@ -996,6 +996,28 @@ def configure_provider(project: Project, payload: Mapping[str, Any]) -> dict[str
         payload.get("permission_scope", []), "Provider permission scope", limit=100, item_limit=120
     )
     egress_ack = bool(payload.get("egress_acknowledged", False))
+    if protocol == "ollama":
+        if mode != "local":
+            raise UIError(
+                "INVALID_INPUT",
+                "Native Ollama profiles are local-only.",
+                "Choose local mode, or use an OpenAI-compatible endpoint for another server.",
+            )
+        if credential_env or credential_present:
+            raise UIError(
+                "INVALID_INPUT",
+                "Native Ollama does not use API credentials.",
+                "Clear the credential fields for this local profile.",
+            )
+        if tool_calling:
+            raise UIError(
+                "INVALID_INPUT",
+                "Native Ollama tool calling is not enabled by this adapter.",
+                "Disable native tool calling or use an OpenAI-compatible Ollama endpoint "
+                "that supports it.",
+            )
+        credential_present = False
+        egress_ack = False
     if mode == "cloud-api" and enabled and not credential_present:
         raise UIError(
             "PROVIDER_UNAVAILABLE",

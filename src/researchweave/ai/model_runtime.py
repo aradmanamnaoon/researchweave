@@ -15,6 +15,7 @@ from .provider_adapters import (
     AnthropicAdapter,
     ChatAdapter,
     GeminiAdapter,
+    NativeOllamaChatAdapter,
     OpenAICompatibleAdapter,
     ProviderMessage,
     ProviderResult,
@@ -23,7 +24,7 @@ from .providers import HTTPTransport
 
 _PROFILE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
 _ENV_NAME = re.compile(r"^[A-Z_][A-Z0-9_]{0,127}$")
-_KINDS = frozenset({"openai-compatible", "anthropic", "gemini"})
+_KINDS = frozenset({"openai-compatible", "anthropic", "gemini", "ollama"})
 
 
 @dataclass(frozen=True)
@@ -49,6 +50,8 @@ class ModelProfile:
         validate_endpoint(self.endpoint, local=self.local)
         if self.kind in {"anthropic", "gemini"} and self.local:
             raise AIError("INVALID_INPUT", "Native Anthropic and Gemini adapters are remote-only")
+        if self.kind == "ollama" and (not self.local or self.tool_calling):
+            raise AIError("INVALID_INPUT", "Native Ollama requires local mode without native tools")
         if self.credential_env is not None and not _ENV_NAME.fullmatch(self.credential_env):
             raise AIError("INVALID_INPUT", "Credential environment variable name is invalid")
         return self
@@ -212,6 +215,12 @@ class ConfiguredModelRuntime:
         if not profile.enabled:
             raise AIError("PROVIDER_UNAVAILABLE", "Selected model profile is disabled")
         credential = self._credential(profile)
+        if profile.kind == "ollama":
+            if credential is not None:
+                raise AIError("INVALID_INPUT", "Native Ollama does not use API credentials")
+            return NativeOllamaChatAdapter(
+                profile.identifier, profile.endpoint, profile.model, transport=self.transport
+            )
         if profile.kind == "openai-compatible":
             return OpenAICompatibleAdapter(
                 profile.identifier,

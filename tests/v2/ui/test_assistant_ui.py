@@ -242,6 +242,43 @@ def test_provider_form_persists_real_model_profile_without_secret_material(
     shell.close()
 
 
+def test_provider_form_exposes_native_ollama_with_local_safe_defaults(
+    qt_app: QApplication,
+    tmp_path: Path,
+) -> None:
+    backend = FakeAIBackend()
+    facade = build_ui_facade(tmp_path, ai_backend=backend)
+    project_id = _create_project(facade)
+    shell = build_ui_shell(fake_services=facade)
+    shell.open_project(project_id)
+
+    shell.provider_protocol.setCurrentText("ollama")
+    shell.provider_id.setText("ollama-local")
+    shell.provider_model.setText("synthetic:latest")
+    shell.provider_enabled.setChecked(True)
+
+    assert shell.provider_mode.currentText() == "local"
+    assert shell.provider_endpoint.text() == "http://127.0.0.1:11434"
+    assert not shell.provider_credential_env.isEnabled()
+    assert not shell.provider_tool_calling.isEnabled()
+    assert not shell.provider_egress.isEnabled()
+
+    shell.save_provider()
+
+    assert backend.active_profile == "ollama-local"
+    assert backend.profiles["ollama-local"] == {
+        "identifier": "ollama-local",
+        "kind": "ollama",
+        "endpoint": "http://127.0.0.1:11434",
+        "model": "synthetic:latest",
+        "local": True,
+        "credential_env": None,
+        "tool_calling": False,
+        "enabled": True,
+    }
+    shell.close()
+
+
 def test_assistant_streams_inside_agent_page_and_reports_tool_use(
     qt_app: QApplication,
     tmp_path: Path,

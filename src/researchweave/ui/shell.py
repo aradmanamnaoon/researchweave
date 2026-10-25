@@ -1541,7 +1541,8 @@ class ResearchWindow(QMainWindow):
         self.provider_mode.addItems(["manual", "local", "cloud-api"])
         self.provider_id = QLineEdit("manual")
         self.provider_protocol = QComboBox()
-        self.provider_protocol.addItems(["openai-compatible", "anthropic", "gemini"])
+        self.provider_protocol.addItems(["openai-compatible", "ollama", "anthropic", "gemini"])
+        self.provider_protocol.currentTextChanged.connect(self._provider_protocol_changed)
         self.provider_endpoint = QLineEdit()
         self.provider_endpoint.setPlaceholderText("http://127.0.0.1:1234/v1 or https://host/v1")
         self.provider_model = QLineEdit()
@@ -3938,9 +3939,7 @@ class ResearchWindow(QMainWindow):
         result = response.get("result", {})
         estimates = result.get("estimates", {}) if isinstance(result, dict) else {}
         report = estimates.get("report", {}) if isinstance(estimates, dict) else {}
-        manifest = (
-            estimates.get("execution_manifest", {}) if isinstance(estimates, dict) else {}
-        )
+        manifest = estimates.get("execution_manifest", {}) if isinstance(estimates, dict) else {}
         selected = report.get("selected_methods", []) if isinstance(report, dict) else []
         failures = estimates.get("failures", []) if isinstance(estimates, dict) else []
         self.stats_result.setPlainText(
@@ -4550,6 +4549,25 @@ class ResearchWindow(QMainWindow):
             f"Observed network calls: {response['network_calls_observed']}\n"
             f"{runtime_state}\n{response['note']}"
         )
+
+    def _provider_protocol_changed(self, protocol: str) -> None:
+        native_ollama = protocol == "ollama"
+        if native_ollama:
+            self.provider_mode.setCurrentText("local")
+            if not self.provider_endpoint.text().strip():
+                self.provider_endpoint.setText("http://127.0.0.1:11434")
+            self.provider_credential_env.clear()
+            self.provider_credential.setChecked(False)
+            self.provider_egress.setChecked(False)
+            self.provider_tool_calling.setChecked(False)
+        self.provider_credential_env.setEnabled(not native_ollama)
+        self.provider_credential.setEnabled(not native_ollama)
+        self.provider_egress.setEnabled(not native_ollama)
+        self.provider_tool_calling.setEnabled(not native_ollama)
+        if native_ollama:
+            self.provider_model.setPlaceholderText("Installed Ollama tag, for example llama3.2:3b")
+        else:
+            self.provider_model.setPlaceholderText("Exact model identifier")
 
     def save_provider(self) -> None:
         mode = self.provider_mode.currentText()

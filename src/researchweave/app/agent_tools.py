@@ -16,23 +16,21 @@ from researchweave.ai.agent_runtime_v2 import DurableAgentRuntime, ToolContract
 from researchweave.ai.errors import AIError
 from researchweave.core import CommandBus, OperationRequest
 
-_SAFE_DOMAINS = frozenset({"analysis", "evidence", "ui"})
-_SAFE_EFFECTS = frozenset({"read", "local-write"})
+_SAFE_DOMAINS = frozenset({"analysis", "evidence", "ui", "ai"})
+_EFFECT_TO_WRAPPER = {
+    "read": "app.read",
+    "local-write": "app.write",
+    "code-execution": "app.execute_code",
+    "sensitive-export": "app.sensitive_export",
+    "external-network": "app.external_network",
+    "irreversible": "app.irreversible",
+}
+_RUNTIME_EFFECT = {"sensitive-export": "sensitive-egress"}
 _BLOCKED_OPERATION_FRAGMENTS = (
-    ".delete",
-    ".discard",
-    ".restore",
-    ".disconnect",
-    ".undo",
-    ".repair",
-    ".rebuild",
-    "export.write",
-    "backup.create",
-    "backup.restore",
-    "code.execution",
-    "runtime.python",
-    "runtime.r",
     "agent.action.",
+    "app.search_tools",
+    "app.read",
+    "app.write",
 )
 
 
@@ -40,7 +38,13 @@ def _is_safe_capability(capability: Mapping[str, Any]) -> bool:
     operation = str(capability.get("operation", ""))
     domain = str(capability.get("domain", ""))
     effect = str(capability.get("effect", ""))
-    if domain not in _SAFE_DOMAINS or effect not in _SAFE_EFFECTS:
+    schema = capability.get("arguments_schema")
+    if domain not in _SAFE_DOMAINS or effect not in _EFFECT_TO_WRAPPER:
+        return False
+    if not isinstance(schema, Mapping):
+        if not (domain == "ai" and effect == "read" and capability.get("arguments") == ()):
+            return False
+    elif schema.get("type") != "object" or not isinstance(schema.get("properties"), Mapping):
         return False
     return not any(fragment in operation for fragment in _BLOCKED_OPERATION_FRAGMENTS)
 
@@ -55,7 +59,11 @@ def _summary(capability: Mapping[str, Any]) -> str:
 
 def _public_schema(capability: Mapping[str, Any]) -> dict[str, Any]:
     raw = capability.get("arguments_schema")
-    schema = dict(raw) if isinstance(raw, Mapping) else {"type": "object"}
+    schema = (
+        dict(raw)
+        if isinstance(raw, Mapping)
+        else {"type": "object", "properties": {}, "additionalProperties": False}
+    )
     properties = schema.get("properties")
     if isinstance(properties, Mapping) and "project_id" in properties:
         cleaned = dict(properties)
@@ -93,9 +101,7 @@ class ApplicationToolBridge:
             )
         return capability
 
-    def _arguments(
-        self, capability: Mapping[str, Any], supplied: object
-    ) -> dict[str, Any]:
+    def _arguments(self, capability: Mapping[str, Any], supplied: object) -> dict[str, Any]:
         if not isinstance(supplied, Mapping):
             raise AIError("INVALID_INPUT", "Application tool arguments must be an object")
         arguments = dict(supplied)
@@ -153,6 +159,7 @@ class ApplicationToolBridge:
                         "operation": operation,
                         "domain": capability["domain"],
                         "effect": capability["effect"],
+                        "wrapper_tool": _EFFECT_TO_WRAPPER[str(capability["effect"])],
                         "summary": summary,
                         "arguments_schema": _public_schema(capability),
                     },
@@ -165,8 +172,9 @@ class ApplicationToolBridge:
             "count": len(matches),
             "project_id": str(self.project_id),
             "note": (
-                "Read operations run immediately. Local writes require explicit user approval "
-                "and are bound to this project."
+                "Read operations run immediately. Every non-read wrapper requires exact "
+                "durable approval and independent CommandBus approval/audit. Operations "
+                "remain bound to this project; external egress is never implicitly granted."
             ),
         }
 
@@ -201,6 +209,18 @@ class ApplicationToolBridge:
     def write(self, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
         return self.invoke(arguments, effect="local-write")
 
+    def execute_code(self, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        return self.invoke(arguments, effect="code-execution")
+
+    def sensitive_export(self, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        return self.invoke(arguments, effect="sensitive-export")
+
+    def external_network(self, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        return self.invoke(arguments, effect="external-network")
+
+    def irreversible(self, arguments: Mapping[str, Any]) -> Mapping[str, Any]:
+        return self.invoke(arguments, effect="irreversible")
+
 
 def register_application_tools(
     runtime: DurableAgentRuntime,
@@ -226,8 +246,8 @@ def register_application_tools(
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "maxLength": 200},
-                    "domain": {"enum": ["", "analysis", "evidence", "ui"]},
-                    "effect": {"enum": ["", "read", "local-write"]},
+                    "domain": {"enum": ["", *sorted(_SAFE_DOMAINS)]},
+                    "effect": {"enum": ["", *sorted(_EFFECT_TO_WRAPPER)]},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 30},
                 },
                 "additionalProperties": False,
@@ -272,4 +292,27 @@ def register_application_tools(
             argument_schema=invocation_schema,
         )
     )
+    for effect, handler, title in (
+        ("code-execution", bridge.execute_code, "code execution"),
+        ("sensitive-export", bridge.sensitive_export, "sensitive export"),
+        ("external-network", bridge.external_network, "external network action"),
+        ("irreversible", bridge.irreversible, "irreversible action"),
+    ):
+        if not any(item["effect"] == effect for item in bridge._capabilities.values()):
+            continue
+        runtime.register_tool(
+            ToolContract(
+                _EFFECT_TO_WRAPPER[effect],
+                _RUNTIME_EFFECT.get(effect, effect),
+                handler,
+                reversible=False,
+                idempotent=False,
+                allowed_arguments=frozenset({"operation", "arguments"}),
+                description=(
+                    f"Invoke a discovered {title} in the current project only after exact "
+                    "human approval. CommandBus independently validates and audits the action."
+                ),
+                argument_schema=invocation_schema,
+            )
+        )
     return bridge
