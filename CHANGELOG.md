@@ -2,9 +2,25 @@
 
 ## Unreleased
 
+## 0.1.2 - 2026-10-25
+
+- Added schema-driven statistical forms for common analysis workflows and structured Analysis
+  Results tables with diagnostics, provenance and reproducibility details instead of raw JSON-first
+  interaction.
+- Expanded the controlled assistant application-tool bridge across typed ResearchWeave read, write,
+  code-execution, export, network and irreversible effects while preserving project scope, exact
+  human approval and the CommandBus audit boundary.
+- Added cooperative assistant cancellation through provider calls and tool/approval boundaries so a
+  cancelled turn cannot begin another side effect.
+- Added first-class native local Ollama profiles with safe local-only defaults alongside existing
+  OpenAI-compatible, Anthropic and Gemini provider paths.
 - Hardened interactive AI tool execution: sequential native tool-call enforcement, protocol-correct
   tool responses, untrusted tool/evidence boundaries, retry-safe failed prompts, and durable
   write-execution journaling that blocks ambiguous replay after interruption.
+- Fixed the cross-platform release publication checksum path after the `v0.1.1` tag successfully
+  built all six native packages but stopped before GitHub Release publication.
+- Stabilized Qt background-job regression tests and normalized repository formatting so the hosted
+  Windows, Linux and macOS quality gates exercise the same deterministic checks as local validation.
 
 ## 0.1.1 - 2026-10-25
 

@@ -2,4 +2,4 @@ import researchweave
 
 
 def test_version() -> None:
-    assert researchweave.__version__ == "0.1.1"
+    assert researchweave.__version__ == "0.1.2"
