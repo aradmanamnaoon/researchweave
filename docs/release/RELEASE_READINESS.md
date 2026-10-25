@@ -1,8 +1,10 @@
 # Local release-readiness evidence
 
-This document is the local, no-push release handoff for the current ResearchWeave `main` checkout.
-It records observed evidence only. Remote publication, tags, package upload, and GitHub release creation
-are intentionally outside this mission.
+This document began as the local pre-publication readiness snapshot for ResearchWeave `v0.1.0` and
+retains that observed evidence. The `v0.1.0` tag and GitHub release were subsequently published on
+2026-10-24 with the Windows ZIP whose hash is recorded below. The current local checkout contains
+post-release AI hardening after that tag; this continuation intentionally stops before another push,
+tag, package upload, or remote release.
 
 ## Repository map and UI-core guardrails
 
@@ -35,6 +37,10 @@ uses the existing Agent and Providers pages instead of replacing that shell.
   policy/profile rather than cosmetic metadata.
 - Existing `DurableAgentRuntime` and `LongTaskOrchestrator` were retained; a redundant orchestration
   subsystem was intentionally not added.
+- Post-release local hardening rejects unexpected multiple native tool calls before execution,
+  preserves native assistant/tool call identities, treats evidence/tool output as untrusted data,
+  removes failed-turn prompts before safe retry, and journals approved writes to prevent ambiguous
+  automatic replay after interruption.
 
 ## Manual/native QA ledger
 
@@ -64,6 +70,7 @@ No API key was used and no local model was downloaded for this validation.
 | Conversation SQLite connections remained open on Windows because transaction context managers do not close connections | Release blocker | Added explicit per-operation connection context manager with `finally: close()`; exact journey retested and full suite rerun green |
 | Desktop shell assumed direct `UIFacade.ai_backend`; production receives `DesktopCommandGateway` | High integration regression | Gateway now exposes typed backend property; UI/composition regressions pass |
 | Provider UI previously stored metadata without configuring runtime policy/model selection | Functional gap | Providers now validates/persists/activates real model profiles and respects offline/egress policy |
+| Interactive assistant could silently ignore extra native tool calls, send provider-incompatible tool results, duplicate failed prompts, and replay an interrupted approved write | High reliability/security gap | Local post-release hardening fails closed on multi-call output, uses protocol-correct tool messages, bounds untrusted output, rolls back failed prompts, and journals write execution before/after the side effect; focused AI suite passes |
 
 No known critical/high local blocker remains after the final validation below. External
 interoperability and research-duration evidence are listed under limitations rather than hidden.
@@ -73,13 +80,13 @@ interoperability and research-duration evidence are listed under limitations rat
 - `ruff format --check .`: **395 files already formatted**.
 - `ruff check .`: **pass**.
 - `mypy src`: **156 source files, 0 issues**.
-- `pytest -q`: **729 passed, 10 skipped, 3 warnings**.
+- `pytest -q`: **735 passed, 10 skipped, 3 warnings** after post-release AI hardening.
 - `git diff --check`: **pass**; existing Windows LF→CRLF warning for `tests/ui/test_smoke.py` only.
 - skills validator: **27 repository skills valid**.
 - broader mission capability inventory: **67 no-login/no-key capabilities observed as available
   during the mission**; mission-only UI automation packages were removed by the final locked sync; see
   [`../DEVELOPER_CAPABILITIES.md`](../DEVELOPER_CAPABILITIES.md).
-- current source metric: **51,222 substantive Python SLOC across 156 files**.
+- current source metric: **51,478 substantive Python SLOC across 156 files**.
 - `pip-audit --local`: **no known vulnerabilities**; local `researchweave` package is skipped
   because it is not a PyPI distribution.
 - final post-build filesystem disposition audit: **27,211 files** = 616 `KEEP_PUBLIC`, 7,025
@@ -89,9 +96,13 @@ interoperability and research-duration evidence are listed under limitations rat
 - fresh secret scan across all tracked + intended untracked public candidates: **338 findings in 27
   files**, all within the already-reviewed synthetic fixture/hash/scanner-output categories; no new
   AI/runtime source file produced a secret candidate.
-- final Windows portable rebuild: **170,209,243 bytes**, SHA-256
-  `639D7F98FE42F0CA212066763718B70014DEA54493FDBB7FDDB9C681AA38630C`; extracted executable
-  startup and user-data-retention smoke tests both passed.
+- published `v0.1.0` Windows portable ZIP: **170,209,243 bytes**, SHA-256
+  `639D7F98FE42F0CA212066763718B70014DEA54493FDBB7FDDB9C681AA38630C`; that exact artifact is
+  attached to the GitHub `v0.1.0` release.
+- current post-release local Windows portable rebuild: **170,211,558 bytes**, SHA-256
+  `9980D338D93308CB0D4C103C2B4073E86E2A52F7BF32C918DEE99AAF5ECE2608`; clean extraction,
+  packaged executable startup, and user-data-retention smoke tests passed. This newer local artifact
+  has not been uploaded or published.
 - reachable Git history scan: **194 commits / 652 historical paths / 0 high-confidence secret hits**.
 
 ## Release checklist
@@ -106,7 +117,7 @@ interoperability and research-duration evidence are listed under limitations rat
 | README/screenshots | Pass after current refresh | Deterministic screenshot set and manifest; README link validator required before handoff |
 | Hosted provider/live connector interoperability | Not claimed | Requires opt-in user-owned endpoints/accounts |
 | 120-minute active research log | **Not verified** | Reference artifacts exist, but retained evidence cannot prove active minutes; see research evidence |
-| Remote publication | Pending at readiness snapshot | Final local gates are green; repository/tag/release publication follows this snapshot |
+| `v0.1.0` remote publication | Published after readiness snapshot | GitHub release published 2026-10-24 with the recorded Windows ZIP; current post-release local hardening is not included in that release |
 
 Because the master prompt makes the research-duration log a completion question, the repository
 must **not** be described as satisfying every line of that prompt until the missing active-time log
@@ -116,7 +127,7 @@ is genuinely completed. This is an evidence limitation, not a known application 
 
 ### ResearchWeave V2 — local-first integrated research workspace
 
-This release candidate combines evidence management, scientific analysis, reproducible project
+The `v0.1.0` release combines evidence management, scientific analysis, reproducible project
 workflows, a redesigned PyQt6 desktop shell, and optional controlled AI assistance. The desktop
 keeps its local-first workflow usable without accounts, API keys, network access, or model downloads.
 AI model configuration now lives in Providers and project-scoped assistance is embedded in Agent,
@@ -158,5 +169,7 @@ uv run --extra dev pytest -q
 uv run --extra dev --extra formats python scripts/tasks.py readme
 ```
 
-At the time this readiness snapshot was written, no `git push`, remote tag, GitHub release, or package
-publication had yet been performed. Those publication steps intentionally follow the final local gates.
+At the time the original readiness snapshot was written, no `git push`, remote tag, GitHub release,
+or package publication had yet been performed. `v0.1.0` was later published on 2026-10-24. The
+post-release local hardening recorded in this document is intentionally left unpushed and untagged by
+the current continuation.

@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Hardened interactive AI tool execution: sequential native tool-call enforcement, protocol-correct
+  tool responses, untrusted tool/evidence boundaries, retry-safe failed prompts, and durable
+  write-execution journaling that blocks ambiguous replay after interruption.
+
 ## 0.1.1 - 2026-10-25
 
 - Added a per-user Windows setup executable with Start Menu integration, uninstall support, a portable ZIP, and install/launch/uninstall smoke verification.

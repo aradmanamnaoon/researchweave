@@ -5,6 +5,11 @@ It deliberately distinguishes deterministic local acceptance from live-provider,
 manual-user verification. A passing domain test alone is not treated as proof of a required integrated
 cross-boundary path.
 
+This is a historical integration snapshot. Its test counts and source metrics describe the integration
+phase when they were observed. Later `v0.1.0` publication and post-release local hardening are recorded
+in [`../release/RELEASE_READINESS.md`](../release/RELEASE_READINESS.md); do not substitute newer counts
+into this ledger retroactively.
+
 ## Provenance and recovery
 
 - Original repository: `D:\coding\codex\researchweave`
@@ -41,7 +46,7 @@ The final integration continuation added these local commits after the original 
 - `99722f0` — canonicalized UI asset integrity hashes so the tracked manifest is stable on the Windows
   checkout used for the final full-suite run.
 
-No push was performed.
+No push was performed during this integration phase.
 
 ## Current deterministic/local verification
 
@@ -177,6 +182,6 @@ listed individually above rather than hidden behind a blanket Gate B pass.
   `.agents` skill code that the repository's normal Ruff discovery excludes. Neither user-owned prompts nor
   vendored skill internals were modified to manufacture a clean result.
 
-No push was performed. The repository is locally integrated and promoted, but the external/native limitations
-listed above remain unverified and therefore prevent a claim of universal cross-platform/live-service release
-readiness.
+No push was performed during this integration phase. The repository was locally integrated and promoted;
+the external/native limitations listed above remained unverified and therefore prevented a claim of
+universal cross-platform/live-service release readiness at this snapshot.
