@@ -56,7 +56,36 @@ def seed(gateway: DesktopCommandGateway) -> tuple[str, int]:
             "csv_text": "score,group\n6,A\n7,A\n8,A\n9,B\n10,B\n11,B\n",
         },
     )["data"]
-    return project_id, int(dataset["revision"])
+    metadata = gateway.execute(
+        "ui.variable.metadata.update",
+        {
+            "project_id": project_id,
+            "expected_revision": dataset["revision"],
+            "dataset_id": dataset["dataset_id"],
+            "variable": "score",
+            "metadata": {
+                "type": "numeric",
+                "role": "outcome",
+                "units": "synthetic points",
+                "levels": [],
+                "missing_codes": [],
+                "description": "Synthetic recall score",
+            },
+        },
+    )["data"]
+    result = gateway.execute(
+        "ui.analysis.run",
+        {
+            "project_id": project_id,
+            "expected_revision": metadata["revision"],
+            "method": "descriptive",
+            "inputs": {
+                "dataset_id": dataset["dataset_id"],
+                "column": "score",
+            },
+        },
+    )["data"]
+    return project_id, int(result["revision"])
 
 
 def capture(root: Path, output: Path, theme: str, screen: str) -> dict[str, object]:
@@ -114,7 +143,19 @@ def main() -> int:
         data_root = capture_root / "workspace"
         records = []
         for theme in ("light", "dark"):
-            for screen in ("Dashboard", "Library", "Statistics", "Review", "Exports"):
+            for screen in (
+                "Dashboard",
+                "Library",
+                "Data View",
+                "Variable View",
+                "Statistics",
+                "Analysis Results",
+                "Agent",
+                "Providers",
+                "Review",
+                "Exports",
+                "Preferences",
+            ):
                 filename = f"researchweave-{screen.lower().replace(' ', '-')}-{theme}.png"
                 records.append(capture(data_root, output_root / filename, theme, screen))
     finally:

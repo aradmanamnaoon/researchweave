@@ -49,6 +49,7 @@ from .jobs import JobManager
 from .models import ResearchTableModel
 from .pdf_reader import PDFReader
 from .presets import WORKSPACE_SCREENS
+from .result_presentation import format_result_record
 from .text_offsets import codepoint_range_to_qt, qt_range_to_codepoints
 from .visualization import Bin, ChartSpec, HistogramWidget
 
@@ -1215,9 +1216,19 @@ class ResearchWindow(QMainWindow):
         named(self.analysis_results_list, "Versioned analysis results")
         self.analysis_results_list.currentItemChanged.connect(self.inspect_analysis_result)
         layout.addWidget(self.analysis_results_list)
+        self.analysis_result_model = ResearchTableModel()
+        self.analysis_result_table = QTableView()
+        self.analysis_result_table.setModel(self.analysis_result_model)
+        self.analysis_result_table.setAlternatingRowColors(True)
+        self.analysis_result_table.setSortingEnabled(False)
+        named(self.analysis_result_table, "Structured analysis result table")
+        layout.addWidget(self.analysis_result_table)
         self.analysis_result_detail = QPlainTextEdit()
         self.analysis_result_detail.setReadOnly(True)
-        named(self.analysis_result_detail, "Selected analysis result provenance")
+        named(
+            self.analysis_result_detail,
+            "Selected analysis assumptions warnings and reproducibility",
+        )
         layout.addWidget(self.analysis_result_detail)
 
         layout = self._page("Qualitative", "Code Unicode spans with original source offsets.")
@@ -3807,6 +3818,8 @@ class ResearchWindow(QMainWindow):
 
     def refresh_analysis_results(self) -> None:
         self.analysis_results_list.clear()
+        self.analysis_result_model.set_records([], [])
+        self.analysis_result_detail.clear()
         if not self.project_id:
             return
         response = self._call("ui.analysis.results")
@@ -3818,7 +3831,9 @@ class ResearchWindow(QMainWindow):
             )
             item.setData(Qt.ItemDataRole.UserRole, record)
             self.analysis_results_list.addItem(item)
-        if not response["results"]:
+        if response["results"]:
+            self.analysis_results_list.setCurrentRow(0)
+        else:
             self.analysis_results_list.addItem(
                 empty_list_item("No analysis results yet. Run an analysis from Statistics first.")
             )
@@ -3831,13 +3846,13 @@ class ResearchWindow(QMainWindow):
         record = current.data(Qt.ItemDataRole.UserRole)
         if not isinstance(record, dict):
             return
-        self.analysis_result_detail.setPlainText(
-            f"Method: {record['method']}\nVersion: {record['method_version']}\n"
-            f"Inputs: {record['inputs']}\nAssumptions: {record['assumptions']}\n"
-            f"Warnings: {record['warnings']}\nEstimates: {record['estimates']}\n"
-            f"Uncertainty: {record['uncertainty']}\nDiagnostics: {record['diagnostics']}\n"
-            f"Provenance: {record['provenance']}"
+        presentation = format_result_record(record)
+        self.analysis_result_model.set_records(
+            list(presentation.columns),
+            [list(row) for row in presentation.rows],
         )
+        self.analysis_result_table.resizeColumnsToContents()
+        self.analysis_result_detail.setPlainText(presentation.detail)
 
     def save_text(self, which: str) -> None:
         if not self.project_id:

@@ -9,6 +9,7 @@ import pytest
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
 
+from PyQt6.QtCore import Qt
 from PyQt6.QtWidgets import QApplication, QInputDialog, QMessageBox
 
 from researchweave.ui import build_ui_facade, build_ui_shell
@@ -151,10 +152,17 @@ def test_analysis_prisma_tutorial_and_notification_surfaces(
     shell.run_analysis()
     assert shell.page_heading.text() == "Analysis Results"
     assert shell.analysis_results_list.count() == 1
-    shell.analysis_results_list.setCurrentRow(0)
+    assert shell.analysis_results_list.currentRow() == 0
     detail = shell.analysis_result_detail.toPlainText()
     assert "Method:" in detail
     assert "Provenance:" in detail
+    assert "Reproducibility" in detail
+    assert shell.analysis_result_model.rowCount() >= 1
+    assert shell.analysis_result_model.headerData(
+        0,
+        Qt.Orientation.Horizontal,
+        Qt.ItemDataRole.DisplayRole,
+    ) == "Section"
 
     shell.navigate("PRISMA")
     shell.prisma_fields["records_identified"].setText("9")
