@@ -1,0 +1,317 @@
+name: Release
+
+on:
+  pull_request:
+    paths:
+      - "src/**"
+      - "tests/**"
+      - "packaging/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/release.yml"
+  push:
+    tags:
+      - "v*.*.*"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  windows:
+    name: Windows x64 installer
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev --extra formats --extra release
+      - name: Run release-relevant tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run --no-sync pytest -q tests/unit tests/integration tests/ui/test_smoke.py
+      - name: Ensure Inno Setup is available
+        shell: pwsh
+        run: |
+          $iscc = @(
+            (Get-Command "ISCC.exe" -ErrorAction SilentlyContinue).Source,
+            (Join-Path ([Environment]::GetFolderPath("ProgramFilesX86")) "Inno Setup 6\ISCC.exe"),
+            (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
+          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
+          if (-not $iscc) {
+            choco install innosetup --no-progress -y
+          }
+      - name: Build Windows installer and portable package
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File packaging/windows/build.ps1
+      - name: Smoke-test portable package
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File packaging/windows/smoke-portable.ps1
+      - name: Install, launch, and uninstall installer
+        shell: pwsh
+        run: powershell -ExecutionPolicy Bypass -File packaging/windows/smoke-installer.ps1
+      - name: Verify Windows release files
+        shell: pwsh
+        run: |
+          $version = (Select-String -Path "pyproject.toml" -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
+          $expected = @(
+            "dist\ResearchWeave-v$version-windows-x64-setup.exe",
+            "dist\ResearchWeave-v$version-windows-x64-portable.zip",
+            "dist\SHA256SUMS-windows.txt"
+          )
+          foreach ($path in $expected) {
+            if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -le 0) {
+              throw "Missing or empty release file: $path"
+            }
+          }
+      - name: Upload Windows release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-windows-x64
+          path: |
+            dist/ResearchWeave-v*-windows-x64-setup.exe
+            dist/ResearchWeave-v*-windows-x64-portable.zip
+            dist/SHA256SUMS-windows.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  linux:
+    name: Linux x86_64 AppImage and DEB
+    runs-on: ubuntu-22.04
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev --extra formats --extra release
+      - name: Run release-relevant tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run --no-sync pytest -q tests/unit tests/integration tests/ui/test_smoke.py
+      - name: Build AppImage and DEB
+        run: bash packaging/linux/build.sh
+      - name: Smoke-test AppImage and DEB
+        run: bash packaging/linux/smoke.sh
+      - name: Verify Linux release files
+        run: |
+          set -euo pipefail
+          VERSION=$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
+          for path in \
+            "dist/ResearchWeave-v$VERSION-linux-x86_64.AppImage" \
+            "dist/ResearchWeave-v$VERSION-linux-amd64.deb" \
+            "dist/SHA256SUMS-linux.txt"; do
+            test -s "$path"
+          done
+      - name: Upload Linux release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-linux-x86_64
+          path: |
+            dist/ResearchWeave-v*-linux-x86_64.AppImage
+            dist/ResearchWeave-v*-linux-amd64.deb
+            dist/SHA256SUMS-linux.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-arm64:
+    name: macOS Apple Silicon DMG
+    runs-on: macos-15
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev --extra formats --extra release
+      - name: Run release-relevant tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run --no-sync pytest -q tests/unit tests/integration tests/ui/test_smoke.py
+      - name: Build Apple Silicon DMG
+        run: bash packaging/macos/build.sh
+      - name: Smoke-test Apple Silicon DMG
+        run: bash packaging/macos/smoke.sh
+      - name: Verify Apple Silicon release files
+        run: |
+          set -euo pipefail
+          VERSION=$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
+          test -s "dist/ResearchWeave-v$VERSION-macos-arm64.dmg"
+          test -s "dist/SHA256SUMS-macos-arm64.txt"
+      - name: Upload Apple Silicon release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-macos-arm64
+          path: |
+            dist/ResearchWeave-v*-macos-arm64.dmg
+            dist/SHA256SUMS-macos-arm64.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  macos-x64:
+    name: macOS Intel DMG
+    runs-on: macos-15-intel
+    timeout-minutes: 90
+    steps:
+      - name: Check out source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Set up uv and Python
+        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+        with:
+          enable-cache: true
+          python-version: "3.12"
+      - name: Install locked dependencies
+        run: uv sync --locked --extra dev --extra formats --extra release
+      - name: Run release-relevant tests
+        env:
+          QT_QPA_PLATFORM: offscreen
+        run: uv run --no-sync pytest -q tests/unit tests/integration tests/ui/test_smoke.py
+      - name: Build Intel DMG
+        run: bash packaging/macos/build.sh
+      - name: Smoke-test Intel DMG
+        run: bash packaging/macos/smoke.sh
+      - name: Verify Intel release files
+        run: |
+          set -euo pipefail
+          VERSION=$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
+          test -s "dist/ResearchWeave-v$VERSION-macos-x64.dmg"
+          test -s "dist/SHA256SUMS-macos-x64.txt"
+      - name: Upload Intel release files
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: release-macos-x64
+          path: |
+            dist/ResearchWeave-v*-macos-x64.dmg
+            dist/SHA256SUMS-macos-x64.txt
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [windows, linux, macos-arm64, macos-x64]
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    steps:
+      - name: Check out tagged source
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Download verified release files
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          pattern: release-*
+          path: dist
+          merge-multiple: true
+      - name: Validate tag, files, and checksums
+        id: release
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="$GITHUB_REF_NAME"
+          VERSION="${TAG#v}"
+          PROJECT_VERSION=$(python3 -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
+          if [ "$VERSION" != "$PROJECT_VERSION" ]; then
+            echo "Tag $TAG does not match project version $PROJECT_VERSION" >&2
+            exit 1
+          fi
+
+          expected=(
+            "ResearchWeave-v$VERSION-windows-x64-setup.exe"
+            "ResearchWeave-v$VERSION-windows-x64-portable.zip"
+            "ResearchWeave-v$VERSION-macos-arm64.dmg"
+            "ResearchWeave-v$VERSION-macos-x64.dmg"
+            "ResearchWeave-v$VERSION-linux-x86_64.AppImage"
+            "ResearchWeave-v$VERSION-linux-amd64.deb"
+          )
+          for name in "${expected[@]}"; do
+            test -s "dist/$name"
+          done
+
+          (
+            cd dist
+            sha256sum "${expected[@]}" > SHA256SUMS.txt
+          )
+          sha256sum --check dist/SHA256SUMS.txt
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+      - name: Prepare release notes
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.release.outputs.version }}"
+          {
+            echo "# ResearchWeave v$VERSION"
+            echo
+            echo "ResearchWeave is a local-first PyQt6 research workspace for evidence, analysis, reproducibility, and controlled AI assistance."
+            echo
+            echo "## Downloads"
+            echo
+            echo "- Windows 10/11 x64: \`ResearchWeave-v$VERSION-windows-x64-setup.exe\`"
+            echo "- Windows portable x64: \`ResearchWeave-v$VERSION-windows-x64-portable.zip\`"
+            echo "- macOS Apple Silicon: \`ResearchWeave-v$VERSION-macos-arm64.dmg\`"
+            echo "- macOS Intel: \`ResearchWeave-v$VERSION-macos-x64.dmg\`"
+            echo "- Linux x86_64 AppImage: \`ResearchWeave-v$VERSION-linux-x86_64.AppImage\`"
+            echo "- Debian/Ubuntu amd64: \`ResearchWeave-v$VERSION-linux-amd64.deb\`"
+            echo
+            echo "Each artifact bundles the Python runtime and application dependencies; end users do not need Python or developer tooling."
+            echo
+            echo "## Installation"
+            echo
+            echo "- Windows: run the setup EXE. It installs for the current user and includes an uninstaller."
+            echo "- macOS: open the DMG and drag ResearchWeave to Applications."
+            echo "- Linux AppImage: mark it executable and run it."
+            echo "- Debian/Ubuntu: install the DEB with your package manager."
+            echo
+            echo "## Signing status"
+            echo
+            echo "These release artifacts are checksum-verified but are not code-signed. The macOS builds are not Apple-notarized because signing/notarization credentials are not configured in this repository."
+            echo
+            echo "## SHA-256"
+            echo
+            echo '~~~text'
+            cat dist/SHA256SUMS.txt
+            echo '~~~'
+            echo
+            echo "Report problems at https://github.com/$GITHUB_REPOSITORY/issues."
+          } > RELEASE_NOTES.md
+      - name: Refuse duplicate release publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "Release $GITHUB_REF_NAME already exists; refusing to overwrite it." >&2
+            exit 1
+          fi
+      - name: Publish release with verified files
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${{ steps.release.outputs.version }}"
+          gh release create "$GITHUB_REF_NAME" \
+            "dist/ResearchWeave-v$VERSION-windows-x64-setup.exe" \
+            "dist/ResearchWeave-v$VERSION-windows-x64-portable.zip" \
+            "dist/ResearchWeave-v$VERSION-macos-arm64.dmg" \
+            "dist/ResearchWeave-v$VERSION-macos-x64.dmg" \
+            "dist/ResearchWeave-v$VERSION-linux-x86_64.AppImage" \
+            "dist/ResearchWeave-v$VERSION-linux-amd64.deb" \
+            "dist/SHA256SUMS.txt" \
+            --repo "$GITHUB_REPOSITORY" \
+            --verify-tag \
+            --title "ResearchWeave v$VERSION" \
+            --notes-file RELEASE_NOTES.md
