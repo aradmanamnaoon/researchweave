@@ -120,7 +120,9 @@ The smoke script extracts the ZIP into a fresh temporary directory, launches the
 
 The Windows executable uses the original ResearchWeave mark as its application icon. `scripts/generate_brand_icon.py` renders the reviewed SVG into release PNG/ICO assets, while the PyInstaller spec bundles the runtime SVG assets used by the desktop shell.
 
-Linux and macOS build scripts are included under [`packaging`](packaging/) and a GitHub Actions matrix is defined in [`.github/workflows/release-builds.yml`](.github/workflows/release-builds.yml). Those operating-system builds are **not locally verified in this Windows session**.
+Linux and macOS build scripts are included under [`packaging`](packaging/) and the native release matrix is defined in [`.github/workflows/release.yml`](.github/workflows/release.yml). Windows packaging is locally verified in this Windows session; macOS and Linux artifacts are verified on their native GitHub-hosted runners before release publication.
+
+Maintainer build and release procedures are documented in [`docs/BUILDING.md`](docs/BUILDING.md) and [`docs/RELEASING.md`](docs/RELEASING.md).
 
 ## Development checks
 
