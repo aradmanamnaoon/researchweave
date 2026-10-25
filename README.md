@@ -139,7 +139,7 @@ Native screenshot evidence can be regenerated with:
 uv run --extra dev python scripts/capture_screenshots.py
 ```
 
-The latest observed integrated run completed **729 tests passed, 10 explicitly skipped, with 3 warnings** and **84% total coverage**. The source metric report currently measures **51,222 substantive first-party Python SLOC across 156 source files** using AST/tokenize rules documented in [`docs/verification/CODE_METRICS.json`](docs/verification/CODE_METRICS.json). `cloc`/`tokei` were not installed in the observed environment, so no second counter is claimed.
+The latest observed integrated run completed **735 tests passed, 10 explicitly skipped, with 3 warnings** and **84% total coverage**. The source metric report currently measures **51,478 substantive first-party Python SLOC across 156 source files** using AST/tokenize rules documented in [`docs/verification/CODE_METRICS.json`](docs/verification/CODE_METRICS.json). `cloc`/`tokei` were not installed in the observed environment, so no second counter is claimed.
 
 ## Security, dependencies and reproducibility
 
@@ -160,7 +160,12 @@ Support levels use five labels: **native verified**, **file import/export verifi
 
 ## Repository and release status
 
-The integrated V2 baseline is now on the local `main` checkout. The current UI transformation and verification changes are reviewed locally before publication; this session does not push them automatically. Machine-local QA evidence, private prompts, caches, pre-integration recovery artifacts and disposable test workspaces are excluded from Git through explicit ignore rules. See the integration ledger for merge history and the verification documents for reproducible checks.
+ResearchWeave `v0.1.0` is published on GitHub with the verified Windows portable ZIP. The current
+local `main` checkout may include post-release hardening that is newer than that tag; the present
+completion pass validates those local changes and stops before another push, tag, or remote release.
+Machine-local QA evidence, private prompts, caches, pre-integration recovery artifacts and disposable
+test workspaces are excluded from Git through explicit ignore rules. See the integration ledger and
+verification documents for reproducible evidence and remaining unverified environments.
 
 ## Contributing
 

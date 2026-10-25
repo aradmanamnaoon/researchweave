@@ -8,16 +8,16 @@
     "src/researchweave/ai/agents.py": 137,
     "src/researchweave/ai/audit.py": 156,
     "src/researchweave/ai/budgets.py": 161,
-    "src/researchweave/ai/conversations.py": 332,
+    "src/researchweave/ai/conversations.py": 476,
     "src/researchweave/ai/crypto.py": 159,
     "src/researchweave/ai/embeddings.py": 154,
     "src/researchweave/ai/errors.py": 5,
     "src/researchweave/ai/external_connectors.py": 553,
-    "src/researchweave/ai/facade.py": 837,
+    "src/researchweave/ai/facade.py": 862,
     "src/researchweave/ai/grounding.py": 63,
     "src/researchweave/ai/http_transport.py": 266,
     "src/researchweave/ai/integrations.py": 144,
-    "src/researchweave/ai/interactive_agent.py": 183,
+    "src/researchweave/ai/interactive_agent.py": 230,
     "src/researchweave/ai/local_runtime.py": 78,
     "src/researchweave/ai/model_runtime.py": 294,
     "src/researchweave/ai/ollama.py": 180,
@@ -25,7 +25,7 @@
     "src/researchweave/ai/pdf_ingest.py": 112,
     "src/researchweave/ai/planner.py": 185,
     "src/researchweave/ai/policy.py": 90,
-    "src/researchweave/ai/provider_adapters.py": 608,
+    "src/researchweave/ai/provider_adapters.py": 648,
     "src/researchweave/ai/provider_services.py": 175,
     "src/researchweave/ai/providers.py": 68,
     "src/researchweave/ai/remote_sync.py": 216,
@@ -159,7 +159,7 @@
     "src/researchweave/ui/workflows.py": 1165
   },
   "per_package": {
-    "ai": 7732,
+    "ai": 7988,
     "analysis": 11811,
     "app": 875,
     "core": 366,
@@ -169,5 +169,5 @@
   },
   "python_files": 156,
   "source_root": "D:\\coding\\codex\\researchweave\\src\\researchweave",
-  "total_substantive_sloc": 51222
+  "total_substantive_sloc": 51478
 }
