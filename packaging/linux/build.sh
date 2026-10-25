@@ -72,6 +72,7 @@ Section: science
 Priority: optional
 Architecture: amd64
 Installed-Size: $INSTALLED_SIZE
+Depends: libegl1, libgl1, libopengl0, libxkbcommon0, libxkbcommon-x11-0, libxcb-cursor0
 Maintainer: ResearchWeave <spikick.cod@gmail.com>
 Homepage: https://github.com/aradmanamnaoon/researchweave
 Description: Local-first desktop research workspace
