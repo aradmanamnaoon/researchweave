@@ -193,7 +193,7 @@ def test_desktop_assistant_executes_real_project_write_only_after_approval(
                                         "id": "call-update",
                                         "type": "function",
                                         "function": {
-                                            "name": "app.write",
+                                            "name": "app_write",
                                             "arguments": json.dumps(
                                                 {
                                                     "operation": "ui.project.update",
@@ -259,7 +259,7 @@ def test_desktop_assistant_executes_real_project_write_only_after_approval(
         )
         assert after["data"]["question"] == "Agent-approved question"
         assert any(
-            item["function"]["name"] == "app.write"
+            item["function"]["name"] == "app_write"
             for item in transport.payloads[0]["tools"]
         )
     finally:

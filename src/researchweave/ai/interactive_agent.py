@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -9,7 +10,7 @@ from .agent_runtime_v2 import DurableAgentRuntime
 from .errors import AIError
 from .model_runtime import ConfiguredModelRuntime
 from .policy import Approval
-from .provider_adapters import OpenAICompatibleAdapter, ProviderMessage, ProviderToolCall
+from .provider_adapters import ProviderMessage, ProviderToolCall
 from .structured_output import parse_structured_output
 
 
@@ -42,6 +43,7 @@ _FALLBACK_SCHEMA: Mapping[str, Any] = {
     "required": ["type"],
     "additionalProperties": False,
 }
+_PROVIDER_TOOL_NAME = re.compile(r"^[A-Za-z0-9_-]{1,64}$")
 
 
 class ModelAgentLoop:
@@ -50,6 +52,36 @@ class ModelAgentLoop:
     def __init__(self, models: ConfiguredModelRuntime, tools: DurableAgentRuntime) -> None:
         self.models = models
         self.tools = tools
+
+    def _native_definitions(
+        self,
+    ) -> tuple[list[dict[str, Any]], dict[str, str]]:
+        converted: list[dict[str, Any]] = []
+        reverse: dict[str, str] = {}
+        for definition in self.tools.tool_definitions():
+            function = definition.get("function")
+            if not isinstance(function, Mapping):
+                raise AIError("INTEGRITY_FAILURE", "Tool definition is missing function metadata")
+            operation = function.get("name")
+            if not isinstance(operation, str) or not operation:
+                raise AIError("INTEGRITY_FAILURE", "Tool definition has an invalid operation name")
+            base = re.sub(r"[^A-Za-z0-9_-]", "_", operation)[:64] or "tool"
+            alias = base
+            suffix = 1
+            while alias in reverse and reverse[alias] != operation:
+                marker = f"_{suffix}"
+                alias = base[: 64 - len(marker)] + marker
+                suffix += 1
+            if not _PROVIDER_TOOL_NAME.fullmatch(alias):
+                raise AIError("INTEGRITY_FAILURE", "Could not create provider-safe tool name")
+            reverse[alias] = operation
+            converted.append(
+                {
+                    **dict(definition),
+                    "function": {**dict(function), "name": alias},
+                }
+            )
+        return converted, reverse
 
     def _fallback_instruction(self) -> str:
         definitions = self.tools.tool_definitions()
@@ -104,13 +136,14 @@ class ModelAgentLoop:
         call: ProviderToolCall,
         result: Mapping[str, Any],
         *,
+        operation: str | None = None,
         assistant_text: str = "",
     ) -> tuple[ProviderMessage, ProviderMessage]:
         return (
             ProviderMessage("assistant", assistant_text, tool_calls=(call,)),
             ProviderMessage(
                 "tool",
-                cls._tool_result_payload(call.name, result),
+                cls._tool_result_payload(operation or call.name, result),
                 tool_call_id=call.call_id,
             ),
         )
@@ -175,17 +208,13 @@ class ModelAgentLoop:
             raise AIError("INVALID_INPUT", "Agent requires at least one message")
         approval_map = approvals or {}
         events: list[AgentToolEvent] = []
-        definitions = self.tools.tool_definitions()
+        definitions, provider_to_operation = self._native_definitions()
 
         for iteration in range(1, max_iterations + 1):
             adapter = self.models.adapter(profile_id)
-            native_tools = (
-                isinstance(adapter, OpenAICompatibleAdapter)
-                and adapter.capabilities.tool_calling
-                and bool(definitions)
-            )
+            native_tools = adapter.capabilities.tool_calling and bool(definitions)
             if native_tools:
-                if on_delta is None:
+                if on_delta is None or not adapter.capabilities.streaming:
                     response = self.models.complete_with_tools(
                         conversation,
                         definitions,
@@ -209,7 +238,8 @@ class ModelAgentLoop:
                             "Model returned multiple tool calls despite sequential tool policy",
                         )
                     call = response.tool_calls[0]
-                    event = self._invoke(project_id, call.name, call.arguments, approval_map)
+                    operation = provider_to_operation.get(call.name, call.name)
+                    event = self._invoke(project_id, operation, call.arguments, approval_map)
                     events.append(event)
                     if event.result is None:
                         return AgentLoopResult("", tuple(events), iteration, event)
@@ -217,6 +247,7 @@ class ModelAgentLoop:
                         self._native_tool_messages(
                             call,
                             event.result,
+                            operation=operation,
                             assistant_text=response.text,
                         )
                     )

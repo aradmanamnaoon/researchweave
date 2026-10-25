@@ -12,6 +12,7 @@ from researchweave.ai.provider_adapters import (
     OpenAICompatibleAdapter,
     OpenAIStreamDecoder,
     ProviderMessage,
+    ProviderToolCall,
 )
 from researchweave.ai.provider_services import (
     ModelChooser,
@@ -97,6 +98,91 @@ def test_anthropic_maps_content_usage_and_credential_header() -> None:
     assert transport.calls[0][1]["x-api-key"] == "key"
 
 
+def test_anthropic_native_tools_round_trip_provider_safe_schema_and_result() -> None:
+    transport = FakeTransport(
+        [
+            json.dumps(
+                {
+                    "content": [
+                        {
+                            "type": "tool_use",
+                            "id": "toolu_1",
+                            "name": "app_read",
+                            "input": {"operation": "ui.project.dashboard", "arguments": {}},
+                        }
+                    ],
+                    "usage": {"input_tokens": 8, "output_tokens": 4},
+                    "stop_reason": "tool_use",
+                }
+            ).encode(),
+            json.dumps(
+                {
+                    "content": [{"type": "text", "text": "Dashboard inspected."}],
+                    "usage": {"input_tokens": 12, "output_tokens": 3},
+                    "stop_reason": "end_turn",
+                }
+            ).encode(),
+        ]
+    )
+    adapter = AnthropicAdapter("key", "claude-test", transport=transport)
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "app_read",
+                "description": "Read a ResearchWeave feature.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "operation": {"type": "string"},
+                        "arguments": {"type": "object"},
+                    },
+                    "required": ["operation", "arguments"],
+                },
+            },
+        }
+    ]
+    first = adapter.complete_with_tools(
+        [ProviderMessage("user", "Inspect my project.")],
+        remote_policy("api.anthropic.com"),
+        tools,
+    )
+    assert first.tool_calls == (
+        ProviderToolCall(
+            "toolu_1",
+            "app_read",
+            {"operation": "ui.project.dashboard", "arguments": {}},
+        ),
+    )
+    first_payload = json.loads(transport.calls[0][2])
+    assert first_payload["tools"][0]["name"] == "app_read"
+    assert first_payload["tools"][0]["input_schema"]["type"] == "object"
+    assert first_payload["tool_choice"] == {
+        "type": "auto",
+        "disable_parallel_tool_use": True,
+    }
+
+    call = first.tool_calls[0]
+    second = adapter.complete_with_tools(
+        [
+            ProviderMessage("user", "Inspect my project."),
+            ProviderMessage("assistant", "", tool_calls=(call,)),
+            ProviderMessage(
+                "tool",
+                '{"status":"ok","title":"Agent bridge"}',
+                tool_call_id=call.call_id,
+            ),
+        ],
+        remote_policy("api.anthropic.com"),
+        tools,
+    )
+    assert second.text == "Dashboard inspected."
+    follow_up = json.loads(transport.calls[1][2])
+    assert follow_up["messages"][-2]["content"][0]["type"] == "tool_use"
+    assert follow_up["messages"][-1]["content"][0]["type"] == "tool_result"
+    assert follow_up["messages"][-1]["content"][0]["tool_use_id"] == "toolu_1"
+
+
 def test_gemini_maps_response_and_does_not_put_key_in_url() -> None:
     transport = FakeTransport(
         [
@@ -126,6 +212,111 @@ def test_gemini_maps_response_and_does_not_put_key_in_url() -> None:
     assert "gem-key" not in url
     assert headers["x-goog-api-key"] == "gem-key"
     assert result.text == "gemini answer"
+
+
+def test_gemini_native_tools_round_trip_function_call_and_response() -> None:
+    transport = FakeTransport(
+        [
+            json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "content": {
+                                "parts": [
+                                    {
+                                        "functionCall": {
+                                            "id": "call-1",
+                                            "name": "app_read",
+                                            "args": {
+                                                "operation": "ui.project.dashboard",
+                                                "arguments": {},
+                                            },
+                                        }
+                                    }
+                                ]
+                            },
+                            "finishReason": "STOP",
+                        }
+                    ],
+                    "usageMetadata": {
+                        "promptTokenCount": 6,
+                        "candidatesTokenCount": 3,
+                        "totalTokenCount": 9,
+                    },
+                }
+            ).encode(),
+            json.dumps(
+                {
+                    "candidates": [
+                        {
+                            "content": {"parts": [{"text": "Dashboard inspected."}]},
+                            "finishReason": "STOP",
+                        }
+                    ],
+                    "usageMetadata": {
+                        "promptTokenCount": 10,
+                        "candidatesTokenCount": 2,
+                        "totalTokenCount": 12,
+                    },
+                }
+            ).encode(),
+        ]
+    )
+    adapter = GeminiAdapter("gem-key", "gemini-test", transport=transport)
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "app_read",
+                "description": "Read a ResearchWeave feature.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "operation": {"type": "string"},
+                        "arguments": {"type": "object"},
+                    },
+                    "required": ["operation", "arguments"],
+                },
+            },
+        }
+    ]
+    first = adapter.complete_with_tools(
+        [ProviderMessage("user", "Inspect my project.")],
+        remote_policy("generativelanguage.googleapis.com"),
+        tools,
+    )
+    assert first.tool_calls == (
+        ProviderToolCall(
+            "call-1",
+            "app_read",
+            {"operation": "ui.project.dashboard", "arguments": {}},
+        ),
+    )
+    first_payload = json.loads(transport.calls[0][2])
+    declaration = first_payload["tools"][0]["functionDeclarations"][0]
+    assert declaration["name"] == "app_read"
+    assert declaration["parameters"]["type"] == "object"
+
+    call = first.tool_calls[0]
+    second = adapter.complete_with_tools(
+        [
+            ProviderMessage("user", "Inspect my project."),
+            ProviderMessage("assistant", "", tool_calls=(call,)),
+            ProviderMessage(
+                "tool",
+                '{"status":"ok","title":"Agent bridge"}',
+                tool_call_id=call.call_id,
+            ),
+        ],
+        remote_policy("generativelanguage.googleapis.com"),
+        tools,
+    )
+    assert second.text == "Dashboard inspected."
+    follow_up = json.loads(transport.calls[1][2])
+    assert follow_up["contents"][-2]["parts"][0]["functionCall"]["id"] == "call-1"
+    function_response = follow_up["contents"][-1]["parts"][0]["functionResponse"]
+    assert function_response["id"] == "call-1"
+    assert function_response["name"] == "app_read"
 
 
 def test_deepseek_error_mapping_is_preserved_from_controlled_transport() -> None:

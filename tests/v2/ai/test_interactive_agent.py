@@ -114,6 +114,7 @@ def test_native_tool_call_executes_read_tool_then_continues(tmp_path: Path) -> N
     assert result.events[0].result == {"echo": "alpha"}
     assert result.events[0].risk == "read"
     assert transport.payloads[0]["tools"]
+    assert transport.payloads[0]["tools"][0]["function"]["name"] == "read_echo"
     follow_up_messages = transport.payloads[1]["messages"]
     assert follow_up_messages[-2]["role"] == "assistant"
     assert follow_up_messages[-2]["tool_calls"][0]["id"] == "call-1"

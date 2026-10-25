@@ -505,14 +505,104 @@ class AnthropicAdapter:
         max_tokens: int = 512,
         temperature: float = 0.0,
     ) -> ProviderResult:
+        return self._complete(
+            messages,
+            policy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=None,
+        )
+
+    def complete_with_tools(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        tools: Sequence[Mapping[str, Any]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+    ) -> ProviderResult:
+        if not 1 <= len(tools) <= 64:
+            raise AIError("RESOURCE_LIMIT", "Native tool list must contain 1-64 tools")
+        return self._complete(
+            messages,
+            policy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=tools,
+        )
+
+    @staticmethod
+    def _tool_definition(raw: Mapping[str, Any]) -> dict[str, Any]:
+        function = raw.get("function")
+        if not isinstance(function, Mapping):
+            raise AIError("INVALID_INPUT", "Tool definition is missing function metadata")
+        name = function.get("name")
+        parameters = function.get("parameters")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", name):
+            raise AIError("INVALID_INPUT", "Anthropic tool name is invalid")
+        if not isinstance(parameters, Mapping):
+            raise AIError("INVALID_INPUT", "Anthropic tool parameters must be a schema object")
+        description = function.get("description")
+        return {
+            "name": name,
+            "description": "" if description is None else str(description)[:4096],
+            "input_schema": dict(parameters),
+        }
+
+    @staticmethod
+    def _messages(messages: Sequence[ProviderMessage]) -> tuple[list[str], list[dict[str, Any]]]:
+        system_parts: list[str] = []
+        conversational: list[dict[str, Any]] = []
+        for item in messages:
+            item.validate()
+            if item.role == "system":
+                system_parts.append(item.content)
+                continue
+            if item.role == "tool":
+                conversational.append(
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "tool_result",
+                                "tool_use_id": item.tool_call_id,
+                                "content": item.content,
+                            }
+                        ],
+                    }
+                )
+                continue
+            if item.role == "assistant" and item.tool_calls:
+                blocks: list[dict[str, Any]] = []
+                if item.content:
+                    blocks.append({"type": "text", "text": item.content})
+                blocks.extend(
+                    {
+                        "type": "tool_use",
+                        "id": call.call_id,
+                        "name": call.name,
+                        "input": dict(call.arguments),
+                    }
+                    for call in item.tool_calls
+                )
+                conversational.append({"role": "assistant", "content": blocks})
+                continue
+            conversational.append({"role": item.role, "content": item.content})
+        return system_parts, conversational
+
+    def _complete(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        *,
+        max_tokens: int,
+        temperature: float,
+        tools: Sequence[Mapping[str, Any]] | None,
+    ) -> ProviderResult:
         _validate_generation(messages, max_tokens=max_tokens, temperature=temperature)
         policy.permit(self.endpoint, local=False)
-        system_parts = [item.content for item in messages if item.role == "system"]
-        conversational = [
-            {"role": item.role, "content": item.content}
-            for item in messages
-            if item.role in {"user", "assistant"}
-        ]
+        system_parts, conversational = self._messages(messages)
         if not conversational or not any(item["role"] == "user" for item in conversational):
             raise AIError("INVALID_INPUT", "Anthropic chat requires a user message")
         payload: dict[str, Any] = {
@@ -524,6 +614,12 @@ class AnthropicAdapter:
         }
         if system_parts:
             payload["system"] = "\n\n".join(system_parts)
+        if tools is not None:
+            payload["tools"] = [self._tool_definition(item) for item in tools]
+            payload["tool_choice"] = {
+                "type": "auto",
+                "disable_parallel_tool_use": True,
+            }
         raw = self.transport.send(
             self.endpoint + "/v1/messages",
             {
@@ -545,10 +641,28 @@ class AnthropicAdapter:
                 for block in content
                 if isinstance(block, Mapping) and block.get("type") == "text"
             ]
-            if not texts:
-                raise ValueError
         except (KeyError, TypeError, ValueError) as exc:
             raise AIError("SCHEMA_MISMATCH", "Anthropic response content is malformed") from exc
+        tool_calls: list[ProviderToolCall] = []
+        for block in content:
+            if not isinstance(block, Mapping) or block.get("type") != "tool_use":
+                continue
+            call_id = block.get("id")
+            name = block.get("name")
+            arguments = block.get("input")
+            if (
+                not isinstance(call_id, str)
+                or not call_id
+                or len(call_id) > 200
+                or not isinstance(name, str)
+                or not name
+                or len(name) > 128
+                or not isinstance(arguments, Mapping)
+            ):
+                raise AIError("SCHEMA_MISMATCH", "Anthropic tool call is malformed")
+            tool_calls.append(ProviderToolCall(call_id, name, dict(arguments)))
+        if not texts and not tool_calls:
+            raise AIError("SCHEMA_MISMATCH", "Anthropic response contains no output")
         usage = response.get("usage")
         usage_map = usage if isinstance(usage, Mapping) else {}
         input_tokens = _token(usage_map.get("input_tokens"))
@@ -566,6 +680,7 @@ class AnthropicAdapter:
             finish_reason=None
             if response.get("stop_reason") is None
             else str(response.get("stop_reason")),
+            tool_calls=tuple(tool_calls),
         )
 
 
@@ -599,15 +714,114 @@ class GeminiAdapter:
         max_tokens: int = 512,
         temperature: float = 0.0,
     ) -> ProviderResult:
-        _validate_generation(messages, max_tokens=max_tokens, temperature=temperature)
-        policy.permit(self.endpoint, local=False)
+        return self._complete(
+            messages,
+            policy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=None,
+        )
+
+    def complete_with_tools(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        tools: Sequence[Mapping[str, Any]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+    ) -> ProviderResult:
+        if not 1 <= len(tools) <= 64:
+            raise AIError("RESOURCE_LIMIT", "Native tool list must contain 1-64 tools")
+        return self._complete(
+            messages,
+            policy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=tools,
+        )
+
+    @staticmethod
+    def _tool_definition(raw: Mapping[str, Any]) -> dict[str, Any]:
+        function = raw.get("function")
+        if not isinstance(function, Mapping):
+            raise AIError("INVALID_INPUT", "Tool definition is missing function metadata")
+        name = function.get("name")
+        parameters = function.get("parameters")
+        if not isinstance(name, str) or not re.fullmatch(r"[A-Za-z0-9_-]{1,128}", name):
+            raise AIError("INVALID_INPUT", "Gemini tool name is invalid")
+        if not isinstance(parameters, Mapping):
+            raise AIError("INVALID_INPUT", "Gemini tool parameters must be a schema object")
+        description = function.get("description")
+        return {
+            "name": name,
+            "description": "" if description is None else str(description)[:4096],
+            "parameters": dict(parameters),
+        }
+
+    @staticmethod
+    def _contents(messages: Sequence[ProviderMessage]) -> tuple[str, list[dict[str, Any]]]:
         system = "\n\n".join(item.content for item in messages if item.role == "system")
         contents: list[dict[str, Any]] = []
+        call_names: dict[str, str] = {}
         for item in messages:
+            item.validate()
             if item.role == "system":
                 continue
+            if item.role == "tool":
+                name = call_names.get(str(item.tool_call_id))
+                if name is None:
+                    raise AIError(
+                        "INVALID_INPUT",
+                        "Gemini tool result has no matching assistant function call",
+                    )
+                try:
+                    decoded = json.loads(item.content)
+                except (TypeError, ValueError):
+                    decoded = {"output": item.content}
+                response = decoded if isinstance(decoded, Mapping) else {"output": decoded}
+                function_response: dict[str, Any] = {
+                    "name": name,
+                    "response": dict(response),
+                }
+                if item.tool_call_id and not item.tool_call_id.startswith("gemini-auto-"):
+                    function_response["id"] = item.tool_call_id
+                contents.append(
+                    {
+                        "role": "user",
+                        "parts": [{"functionResponse": function_response}],
+                    }
+                )
+                continue
             role = "model" if item.role == "assistant" else "user"
-            contents.append({"role": role, "parts": [{"text": item.content}]})
+            parts: list[dict[str, Any]] = []
+            if item.content:
+                parts.append({"text": item.content})
+            for call in item.tool_calls:
+                call_names[call.call_id] = call.name
+                function_call: dict[str, Any] = {
+                    "name": call.name,
+                    "args": dict(call.arguments),
+                }
+                if not call.call_id.startswith("gemini-auto-"):
+                    function_call["id"] = call.call_id
+                parts.append({"functionCall": function_call})
+            if parts:
+                contents.append({"role": role, "parts": parts})
+        return system, contents
+
+    def _complete(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        *,
+        max_tokens: int,
+        temperature: float,
+        tools: Sequence[Mapping[str, Any]] | None,
+    ) -> ProviderResult:
+        _validate_generation(messages, max_tokens=max_tokens, temperature=temperature)
+        policy.permit(self.endpoint, local=False)
+        system, contents = self._contents(messages)
         if not contents:
             raise AIError("INVALID_INPUT", "Gemini chat requires conversational content")
         payload: dict[str, Any] = {
@@ -619,6 +833,15 @@ class GeminiAdapter:
         }
         if system:
             payload["systemInstruction"] = {"parts": [{"text": system}]}
+        if tools is not None:
+            payload["tools"] = [
+                {
+                    "functionDeclarations": [
+                        self._tool_definition(item) for item in tools
+                    ]
+                }
+            ]
+            payload["toolConfig"] = {"functionCallingConfig": {"mode": "AUTO"}}
         path = "/v1beta/models/" + quote(self.model, safe="._-") + ":generateContent"
         raw = self.transport.send(
             self.endpoint + path,
@@ -641,10 +864,36 @@ class GeminiAdapter:
                 for part in parts
                 if isinstance(part, Mapping) and "text" in part
             ]
-            if not texts:
-                raise ValueError
         except (KeyError, IndexError, TypeError, ValueError) as exc:
             raise AIError("SCHEMA_MISMATCH", "Gemini response content is malformed") from exc
+        tool_calls: list[ProviderToolCall] = []
+        for index, part in enumerate(parts):
+            if not isinstance(part, Mapping):
+                continue
+            raw_call = part.get("functionCall")
+            if raw_call is None:
+                continue
+            if not isinstance(raw_call, Mapping):
+                raise AIError("SCHEMA_MISMATCH", "Gemini function call is malformed")
+            name = raw_call.get("name")
+            arguments = raw_call.get("args", {})
+            raw_id = raw_call.get("id")
+            if (
+                not isinstance(name, str)
+                or not name
+                or len(name) > 128
+                or not isinstance(arguments, Mapping)
+                or (raw_id is not None and not isinstance(raw_id, str))
+            ):
+                raise AIError("SCHEMA_MISMATCH", "Gemini function call is malformed")
+            call_id = (
+                raw_id
+                if isinstance(raw_id, str) and raw_id
+                else f"gemini-auto-{index + 1}"
+            )
+            tool_calls.append(ProviderToolCall(call_id, name, dict(arguments)))
+        if not texts and not tool_calls:
+            raise AIError("SCHEMA_MISMATCH", "Gemini response contains no output")
         usage = response.get("usageMetadata")
         usage_map = usage if isinstance(usage, Mapping) else {}
         input_tokens = _token(usage_map.get("promptTokenCount"))
@@ -658,6 +907,7 @@ class GeminiAdapter:
             finish_reason=None
             if not isinstance(candidate, Mapping) or candidate.get("finishReason") is None
             else str(candidate.get("finishReason")),
+            tool_calls=tuple(tool_calls),
         )
 
 

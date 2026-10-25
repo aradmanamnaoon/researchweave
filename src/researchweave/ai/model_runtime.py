@@ -6,7 +6,7 @@ import re
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict, dataclass
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 from .errors import AIError
 from .http_transport import PinnedHTTPTransport
@@ -268,17 +268,20 @@ class ConfiguredModelRuntime:
         temperature: float = 0.0,
     ) -> ProviderResult:
         adapter = self.adapter(profile_id)
-        if (
-            not isinstance(adapter, OpenAICompatibleAdapter)
-            or not adapter.capabilities.tool_calling
-        ):
+        if not adapter.capabilities.tool_calling:
             raise AIError("PROVIDER_UNAVAILABLE", "Active model has no native tool calling")
-        return adapter.complete_with_tools(
-            messages,
-            self.policy,
-            tools,
-            max_tokens=max_tokens,
-            temperature=temperature,
+        complete_with_tools = getattr(adapter, "complete_with_tools", None)
+        if not callable(complete_with_tools):
+            raise AIError("PROVIDER_UNAVAILABLE", "Active adapter cannot execute native tools")
+        return cast(
+            ProviderResult,
+            cast(Any, complete_with_tools)(
+                messages,
+                self.policy,
+                tools,
+                max_tokens=max_tokens,
+                temperature=temperature,
+            ),
         )
 
     def stream(
