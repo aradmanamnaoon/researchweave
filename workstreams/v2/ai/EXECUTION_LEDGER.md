@@ -21,13 +21,13 @@ ledger's mis-numbering of AI-005, AI-012, AI-015 and AI-041.
 | AI-002 | OpenAI-compatible HTTP adapter | provider_adapters.py, http_transport.py; provider/transport tests | Implemented; external verification pending |
 | AI-003 | Ollama discovery | local_runtime.py, ollama.py; local runtime tests | Implemented; live runtime verification pending |
 | AI-004 | LM Studio adapter | provider_adapters.py; provider edge tests | Implemented; live runtime verification pending |
-| AI-005 | Anthropic adapter | provider_adapters.py; provider stack tests | Partial; deterministic message/usage mapping exists, live API and Anthropic-native streaming remain unverified |
+| AI-005 | Anthropic adapter | provider_adapters.py; provider stack/runtime/agent tests | Implemented; native Messages SSE text/tool streaming is deterministic locally, live API verification pending |
 | AI-006 | Gemini adapter | provider_adapters.py; provider stack tests | Partial; deterministic generation mapping exists, live capability/quota probing remains unverified |
 | AI-007 | DeepSeek adapter | provider_adapters.py; provider stack tests | Implemented; external verification pending |
 | AI-008 | Model chooser | provider_services.py; provider tests | Implemented for privacy/offline/local preference; richer task-quality scoring remains future work |
 | AI-009 | Provider health checks | provider_services.py; schema/stream security edge tests | Implemented |
 | AI-010 | Key management | secrets.py; secret-store tests | Implemented adapter; production host/keyring lifecycle wiring pending |
-| AI-011 | Streaming chunk assembler | streaming.py, provider_adapters.py; stream edge tests | Implemented for OpenAI-compatible SSE with bounded partial recovery |
+| AI-011 | Streaming chunk assembler | streaming.py, provider_adapters.py; stream edge tests | Implemented for OpenAI-compatible and Anthropic Messages SSE with bounded fragmented-event/tool assembly |
 | AI-012 | Structured output validator | structured_output.py; structured-output edge tests | Implemented safe JSON-Schema subset |
 | AI-013 | Embeddings abstraction | embeddings.py, ollama.py; embedding tests | Implemented local abstraction |
 | AI-014 | Hybrid retrieval | embeddings.py, retrieval.py; embedding tests | Implemented |

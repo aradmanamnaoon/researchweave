@@ -36,6 +36,7 @@ NON_REPLAYABLE_OPERATIONS = frozenset(
         "qualitative.annotate",
         "qualitative.add_memo",
         "qualitative.review_annotation",
+        "qualitative.adjudicate",
         "mixed.joint_display_sensitive",
         "plot.render",
         "runtime.python",

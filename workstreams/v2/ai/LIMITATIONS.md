@@ -5,8 +5,10 @@ No live hosted model account, Zotero library, WebDAV server, S3-compatible servi
 server was contacted. Their schemas, credentials, quotas and service-specific edge behavior
 therefore still require opt-in interoperability verification before production enablement.
 
-Anthropic-native streaming is not implemented; the generic bounded SSE assembler currently
-targets OpenAI-compatible event shape. Gemini capability/quota discovery is not live-probed.
+Anthropic-native Messages SSE streaming is implemented with bounded text/tool assembly and
+deterministic injected-transport tests, including fragmented UTF-8 and incremental tool JSON.
+Live Anthropic-account interoperability is still unverified. Gemini capability/quota discovery
+is not live-probed.
 The model chooser uses privacy/offline/local preference and does not claim to predict model
 quality or provider monetary cost. Non-streaming model calls now use bounded retries for typed
 HTTP 429/503 failures, honor bounded `Retry-After` hints, and never switch providers implicitly.

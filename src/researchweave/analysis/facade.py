@@ -277,7 +277,7 @@ class AnalysisFacade:
             "qualitative.review_annotation": "local-write",
             "qualitative.relocation_proposal": "read",
             "qualitative.kappa": "read",
-            "qualitative.adjudicate": "read",
+            "qualitative.adjudicate": "local-write",
             "mixed.joint_display": "read",
             "mixed.joint_display_sensitive": "sensitive-export",
             "audit.plan": "read",
@@ -577,6 +577,7 @@ class AnalysisFacade:
             "qualitative.annotate",
             "qualitative.add_memo",
             "qualitative.review_annotation",
+            "qualitative.adjudicate",
         }:
             project_id = str(arguments["project_id"])
             expected_hash = str(arguments["expected_content_hash"])
@@ -637,7 +638,7 @@ class AnalysisFacade:
                         code_id=arguments.get("code_id"),
                     )
                 )
-            else:
+            elif operation == "qualitative.review_annotation":
                 ledger = state.review_ledger()
                 decision = ledger.decide(
                     int(arguments["annotation_index"]),
@@ -649,12 +650,36 @@ class AnalysisFacade:
                     rationale=str(arguments["rationale"]),
                 )
                 state.attach_review_ledger(ledger)
+            else:
+                receipt = adjudicate_disagreements(
+                    state.project,
+                    coder_a=str(arguments["coder_a"]),
+                    coder_b=str(arguments["coder_b"]),
+                    unit_ids=list(arguments["unit_ids"]),
+                    resolutions={
+                        str(key): str(value)
+                        for key, value in dict(arguments["resolutions"]).items()
+                    },
+                    adjudicator=str(arguments["adjudicator"]),
+                    rationales={
+                        str(key): str(value) for key, value in dict(arguments["rationales"]).items()
+                    },
+                )
+                adjudication_event = state.record_adjudication(
+                    receipt,
+                    coder_a=str(arguments["coder_a"]),
+                    coder_b=str(arguments["coder_b"]),
+                    unit_ids=list(arguments["unit_ids"]),
+                )
             saved = self.qualitative_store.save(
                 project_id, state, expected_content_hash=expected_hash
             )
             data = {**saved, "state": state.to_json()}
             if operation == "qualitative.review_annotation":
                 data["decision"] = decision.__dict__
+            elif operation == "qualitative.adjudicate":
+                data.update(receipt)
+                data["adjudication_event"] = adjudication_event.__dict__
         elif operation == "qualitative.relocation_proposal":
             state = self.qualitative_store.load(str(arguments["project_id"]))
             index = int(arguments["annotation_index"])
@@ -679,21 +704,6 @@ class AnalysisFacade:
             first = {str(key): str(value) for key, value in dict(arguments["first"]).items()}
             second = {str(key): str(value) for key, value in dict(arguments["second"]).items()}
             data = cohen_kappa(first, second)
-        elif operation == "qualitative.adjudicate":
-            state = self.qualitative_store.load(str(arguments["project_id"]))
-            data = adjudicate_disagreements(
-                state.project,
-                coder_a=str(arguments["coder_a"]),
-                coder_b=str(arguments["coder_b"]),
-                unit_ids=list(arguments["unit_ids"]),
-                resolutions={
-                    str(key): str(value) for key, value in dict(arguments["resolutions"]).items()
-                },
-                adjudicator=str(arguments["adjudicator"]),
-                rationales={
-                    str(key): str(value) for key, value in dict(arguments["rationales"]).items()
-                },
-            )
         elif operation in {"mixed.joint_display", "mixed.joint_display_sensitive"}:
             obj = self._dataset(arguments)
             state = self.qualitative_store.load(str(arguments["project_id"]))

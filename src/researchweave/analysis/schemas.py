@@ -792,6 +792,7 @@ OPERATION_SCHEMAS: dict[str, OperationSchema] = {
     "qualitative.adjudicate": _schema(
         {
             "project_id": S,
+            "expected_content_hash": S,
             "coder_a": S,
             "coder_b": S,
             "unit_ids": AS,

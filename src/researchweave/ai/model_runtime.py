@@ -347,14 +347,20 @@ class ConfiguredModelRuntime:
         on_delta: Callable[[str], None] | None = None,
     ) -> ProviderResult:
         adapter = self.adapter(profile_id)
-        if not isinstance(adapter, OpenAICompatibleAdapter) or not adapter.capabilities.streaming:
+        if not adapter.capabilities.streaming:
             raise AIError("PROVIDER_UNAVAILABLE", "Active model profile does not support streaming")
-        return adapter.stream(
-            messages,
-            self.policy,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            on_delta=on_delta,
+        stream = getattr(adapter, "stream", None)
+        if not callable(stream):
+            raise AIError("PROVIDER_UNAVAILABLE", "Active adapter cannot stream responses")
+        return cast(
+            ProviderResult,
+            cast(Any, stream)(
+                messages,
+                self.policy,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                on_delta=on_delta,
+            ),
         )
 
     def stream_with_tools(
@@ -368,16 +374,19 @@ class ConfiguredModelRuntime:
         on_delta: Callable[[str], None] | None = None,
     ) -> ProviderResult:
         adapter = self.adapter(profile_id)
-        if (
-            not isinstance(adapter, OpenAICompatibleAdapter)
-            or not adapter.capabilities.tool_calling
-        ):
+        if not adapter.capabilities.streaming or not adapter.capabilities.tool_calling:
             raise AIError("PROVIDER_UNAVAILABLE", "Active model has no native tool calling")
-        return adapter.stream_with_tools(
-            messages,
-            self.policy,
-            tools,
-            max_tokens=max_tokens,
-            temperature=temperature,
-            on_delta=on_delta,
+        stream_with_tools = getattr(adapter, "stream_with_tools", None)
+        if not callable(stream_with_tools):
+            raise AIError("PROVIDER_UNAVAILABLE", "Active adapter cannot stream native tools")
+        return cast(
+            ProviderResult,
+            cast(Any, stream_with_tools)(
+                messages,
+                self.policy,
+                tools,
+                max_tokens=max_tokens,
+                temperature=temperature,
+                on_delta=on_delta,
+            ),
         )

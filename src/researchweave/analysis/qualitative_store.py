@@ -36,13 +36,30 @@ class CodebookEvent:
     after: dict[str, Any] | None
 
 
+@dataclass(frozen=True)
+class AdjudicationEvent:
+    event_id: str
+    scope_hash: str
+    receipt_hash: str
+    project_hash: str
+    coder_a: str
+    coder_b: str
+    unit_ids: list[str]
+    consensus: dict[str, str]
+    decisions: list[dict[str, str]]
+    adjudicator: str
+    n_disagreements: int
+    timestamp: str
+
+
 @dataclass
 class QualitativeState:
     project: CodingProject = field(default_factory=CodingProject)
     memos: dict[str, Memo] = field(default_factory=dict)
     codebook_events: list[CodebookEvent] = field(default_factory=list)
     review_events: list[CodingDecision] = field(default_factory=list)
-    schema_version: int = 2
+    adjudication_events: list[AdjudicationEvent] = field(default_factory=list)
+    schema_version: int = 3
 
     def _record(
         self,
@@ -161,6 +178,76 @@ class QualitativeState:
         }
         return CodingReviewLedger.load_json(self.project, payload)
 
+    def record_adjudication(
+        self,
+        receipt: dict[str, Any],
+        *,
+        coder_a: str,
+        coder_b: str,
+        unit_ids: list[str],
+    ) -> AdjudicationEvent:
+        """Append one immutable human adjudication receipt for this exact coding snapshot."""
+
+        project_hash = digest(self.project.to_json())
+        normalized_units = sorted(str(unit) for unit in unit_ids)
+        consensus = {str(key): str(value) for key, value in dict(receipt["consensus"]).items()}
+        decisions = [
+            {str(key): str(value) for key, value in dict(row).items()}
+            for row in list(receipt["decisions"])
+        ]
+        adjudicator = str(receipt["adjudicator"])
+        n_disagreements = int(receipt["n_disagreements"])
+        require(
+            n_disagreements == len(decisions),
+            "Adjudication disagreement count does not match its decisions",
+            "INTEGRITY_FAILURE",
+        )
+        scope = {
+            "project_hash": project_hash,
+            "coders": sorted((coder_a, coder_b)),
+            "unit_ids": normalized_units,
+        }
+        scope_hash = digest(scope)
+        require(
+            all(event.scope_hash != scope_hash for event in self.adjudication_events),
+            "This qualitative snapshot and coder/unit scope was already adjudicated",
+            "CONFLICT",
+        )
+        receipt_payload = {
+            "project_hash": project_hash,
+            "coder_a": coder_a,
+            "coder_b": coder_b,
+            "unit_ids": normalized_units,
+            "consensus": consensus,
+            "decisions": decisions,
+            "adjudicator": adjudicator,
+            "n_disagreements": n_disagreements,
+        }
+        receipt_hash = digest(receipt_payload)
+        timestamp = utc_now()
+        event_payload = {
+            **receipt_payload,
+            "scope_hash": scope_hash,
+            "receipt_hash": receipt_hash,
+            "timestamp": timestamp,
+        }
+        event = AdjudicationEvent(
+            event_id=digest(event_payload),
+            scope_hash=scope_hash,
+            receipt_hash=receipt_hash,
+            project_hash=project_hash,
+            coder_a=coder_a,
+            coder_b=coder_b,
+            unit_ids=normalized_units,
+            consensus=consensus,
+            decisions=decisions,
+            adjudicator=adjudicator,
+            n_disagreements=n_disagreements,
+            timestamp=timestamp,
+        )
+        self.adjudication_events.append(event)
+        return event
+
     def to_json(self) -> dict[str, Any]:
         return {
             "schema_version": self.schema_version,
@@ -168,16 +255,19 @@ class QualitativeState:
             "memos": [asdict(value) for value in self.memos.values()],
             "codebook_events": [asdict(value) for value in self.codebook_events],
             "review_events": [asdict(value) for value in self.review_events],
+            "adjudication_events": [asdict(value) for value in self.adjudication_events],
         }
 
     @classmethod
     def from_json(cls, data: dict[str, Any]) -> QualitativeState:
         schema_version = data.get("schema_version")
         expected_keys = {"schema_version", "project", "memos", "codebook_events"}
-        if schema_version == 2:
+        if schema_version in {2, 3}:
             expected_keys.add("review_events")
+        if schema_version == 3:
+            expected_keys.add("adjudication_events")
         require(set(data) == expected_keys, "Invalid qualitative state keys")
-        require(schema_version in {1, 2}, "Unsupported qualitative schema", "SCHEMA_MISMATCH")
+        require(schema_version in {1, 2, 3}, "Unsupported qualitative schema", "SCHEMA_MISMATCH")
         state = cls(project=CodingProject.from_json(data["project"]))
         for entry in data["memos"]:
             state.add_memo(Memo(**entry))
@@ -201,9 +291,71 @@ class QualitativeState:
                 "Codebook event hash mismatch",
                 "INTEGRITY_FAILURE",
             )
-        if schema_version == 2:
+        if schema_version in {2, 3}:
             state.review_events = [CodingDecision(**entry) for entry in data["review_events"]]
             state.review_ledger()  # validates event hashes/anchors/duplicate reviewers
+        if schema_version == 3:
+            state.adjudication_events = [
+                AdjudicationEvent(**entry) for entry in data["adjudication_events"]
+            ]
+            event_ids: set[str] = set()
+            scope_hashes: set[str] = set()
+            for adjudication in state.adjudication_events:
+                require(
+                    len(adjudication.project_hash) == 64
+                    and all(char in "0123456789abcdef" for char in adjudication.project_hash),
+                    "Adjudication project hash is invalid",
+                    "INTEGRITY_FAILURE",
+                )
+                scope = {
+                    "project_hash": adjudication.project_hash,
+                    "coders": sorted((adjudication.coder_a, adjudication.coder_b)),
+                    "unit_ids": sorted(adjudication.unit_ids),
+                }
+                require(
+                    digest(scope) == adjudication.scope_hash,
+                    "Adjudication scope hash mismatch",
+                    "INTEGRITY_FAILURE",
+                )
+                receipt_payload = {
+                    "project_hash": adjudication.project_hash,
+                    "coder_a": adjudication.coder_a,
+                    "coder_b": adjudication.coder_b,
+                    "unit_ids": sorted(adjudication.unit_ids),
+                    "consensus": dict(adjudication.consensus),
+                    "decisions": [dict(row) for row in adjudication.decisions],
+                    "adjudicator": adjudication.adjudicator,
+                    "n_disagreements": adjudication.n_disagreements,
+                }
+                require(
+                    adjudication.n_disagreements == len(adjudication.decisions),
+                    "Adjudication disagreement count mismatch",
+                    "INTEGRITY_FAILURE",
+                )
+                require(
+                    digest(receipt_payload) == adjudication.receipt_hash,
+                    "Adjudication receipt hash mismatch",
+                    "INTEGRITY_FAILURE",
+                )
+                event_payload = {
+                    **receipt_payload,
+                    "scope_hash": adjudication.scope_hash,
+                    "receipt_hash": adjudication.receipt_hash,
+                    "timestamp": adjudication.timestamp,
+                }
+                require(
+                    digest(event_payload) == adjudication.event_id,
+                    "Adjudication event hash mismatch",
+                    "INTEGRITY_FAILURE",
+                )
+                require(
+                    adjudication.event_id not in event_ids
+                    and adjudication.scope_hash not in scope_hashes,
+                    "Duplicate adjudication event",
+                    "INTEGRITY_FAILURE",
+                )
+                event_ids.add(adjudication.event_id)
+                scope_hashes.add(adjudication.scope_hash)
         return state
 
 

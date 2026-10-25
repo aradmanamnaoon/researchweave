@@ -195,6 +195,59 @@ def test_runtime_streams_real_sse_deltas_to_callback(tmp_path: Path) -> None:
     assert result.usage.total_tokens == 4
 
 
+def test_runtime_routes_anthropic_streaming_by_capability(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    events = [
+        {
+            "type": "message_start",
+            "message": {"role": "assistant", "usage": {"input_tokens": 3, "output_tokens": 0}},
+        },
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}},
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "anthropic stream"},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 2},
+        },
+        {"type": "message_stop"},
+    ]
+    chunks = [b"".join(b"data: " + json.dumps(event).encode() + b"\n\n" for event in events)]
+    store = ModelConfigStore(tmp_path / "models.json")
+    store.upsert(
+        ModelProfile(
+            "anthropic-test",
+            "anthropic",
+            "https://api.anthropic.com",
+            "claude-test",
+            credential_env="RESEARCHWEAVE_ANTHROPIC_TEST_KEY",
+            tool_calling=True,
+        ),
+        activate=True,
+    )
+    monkeypatch.setenv("RESEARCHWEAVE_ANTHROPIC_TEST_KEY", "synthetic-key")
+    transport = FakeStreamingTransport(chunks)
+    runtime = ConfiguredModelRuntime(
+        store,
+        EgressPolicy(offline=False, allowed_hosts=("api.anthropic.com",)),
+        transport=transport,
+    )
+    deltas: list[str] = []
+
+    result = runtime.stream([ProviderMessage("user", "hello")], on_delta=deltas.append)
+
+    assert deltas == ["anthropic stream"]
+    assert result.text == "anthropic stream"
+    assert result.usage.total_tokens == 5
+    assert transport.requests[0][0] == "https://api.anthropic.com/v1/messages"
+    assert json.loads(transport.requests[0][2])["stream"] is True
+
+
 def test_runtime_retries_retryable_non_streaming_calls_with_bounded_delay(tmp_path: Path) -> None:
     store = ModelConfigStore(tmp_path / "models.json")
     store.upsert(

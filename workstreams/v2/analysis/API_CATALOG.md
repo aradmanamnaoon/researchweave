@@ -1,6 +1,6 @@
 # Analysis facade v1
 
-`researchweave.analysis.build_analysis_facade(...)` is the headless host boundary. At the current checkpoint it registers **116 namespaced operations**: 91 reads, 21 local writes, 2 sensitive exports and 2 code-execution operations. The complete generated operation/schema manifest is `capabilities.v1.json`.
+`researchweave.analysis.build_analysis_facade(...)` is the headless host boundary. At the current checkpoint it registers **121 namespaced operations**: 95 reads, 22 local writes, 2 sensitive exports and 2 code-execution operations. The complete generated operation/schema manifest is `capabilities.v1.json`.
 
 Every facade response uses the strict top-level envelope:
 
@@ -35,7 +35,7 @@ Capabilities are HMAC-signed by the process-local host issuer and bind project, 
 
 - `dataset.*`: import, bounded Parquet scan, inspect/page/view, CSV export, transform, variable metadata, missingness/select/user-missing, complete-case/imputation, join/aggregate/pivot.
 - `statistics.*`: descriptive/frequency/grouped and weighted summaries; effects; t/rank/categorical/ANOVA/repeated/ANCOVA; correlation/psychometrics; OLS/logit/count/mixed/ordinal/survival/survey; PCA/EFA/clustering; power/time-series/meta/diagnostics; bootstrap/permutation; recommendations.
-- `qualitative.*`: durable project inspection, code/transcript/annotation/memo/review operations, relocation, agreement and adjudication.
+- `qualitative.*`: durable project inspection, code/transcript/annotation/memo/review operations, relocation, agreement and approved CAS-protected adjudication receipts.
 - `mixed.*`: privacy-aware joint display operations.
 - `audit.plan`, `audit.verify_replay`: read-only deterministic plan inspection and integrity-checked receipt comparison; they deliberately do not execute nested plans, preventing a read wrapper from bypassing write authorization.
 - `plot.render`: SVG/PNG/PDF rendering with structured plot data/metadata for the supported grammar.

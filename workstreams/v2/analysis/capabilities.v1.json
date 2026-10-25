@@ -2,11 +2,11 @@
   "protocol_version": 1,
   "package": "researchweave.analysis",
   "factory": "build_analysis_facade",
-  "operation_count": 116,
+  "operation_count": 121,
   "effect_counts": {
     "code-execution": 2,
-    "local-write": 21,
-    "read": 91,
+    "local-write": 22,
+    "read": 95,
     "sensitive-export": 2
   },
   "offline_default": true,
@@ -960,6 +960,132 @@
                 "type": "null"
               }
             ]
+          }
+        },
+        "required": [
+          "dataset_id",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed"
+            ]
+          },
+          "data": {
+            "type": "object"
+          },
+          "artifacts": {
+            "type": "array"
+          },
+          "warnings": {
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provenance": {
+            "type": "array"
+          },
+          "impact": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "data",
+          "artifacts",
+          "warnings",
+          "error",
+          "provenance",
+          "impact"
+        ],
+        "additionalProperties": false
+      },
+      "requires_permission": "local-data-read"
+    },
+    {
+      "operation": "dataset.quality",
+      "version": "1.0.0",
+      "effect": "read",
+      "offline": true,
+      "risk": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "subject_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "predictors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "split_column": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "train_values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "test_values": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "outlier_threshold": {
+            "type": "number"
           }
         },
         "required": [
@@ -2124,6 +2250,312 @@
         },
         "required": [
           "outcome_type"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed"
+            ]
+          },
+          "data": {
+            "type": "object"
+          },
+          "artifacts": {
+            "type": "array"
+          },
+          "warnings": {
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provenance": {
+            "type": "array"
+          },
+          "impact": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "data",
+          "artifacts",
+          "warnings",
+          "error",
+          "provenance",
+          "impact"
+        ],
+        "additionalProperties": false
+      },
+      "requires_permission": "local-data-read"
+    },
+    {
+      "operation": "statistics.auto_plan",
+      "version": "1.0.0",
+      "effect": "read",
+      "offline": true,
+      "risk": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "design": {
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "levels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "predictors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "paired_with": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "seed": {
+            "type": "integer"
+          },
+          "max_operations": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "design",
+          "mode",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed"
+            ]
+          },
+          "data": {
+            "type": "object"
+          },
+          "artifacts": {
+            "type": "array"
+          },
+          "warnings": {
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provenance": {
+            "type": "array"
+          },
+          "impact": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "data",
+          "artifacts",
+          "warnings",
+          "error",
+          "provenance",
+          "impact"
+        ],
+        "additionalProperties": false
+      },
+      "requires_permission": "local-data-read"
+    },
+    {
+      "operation": "statistics.auto_analyze",
+      "version": "1.0.0",
+      "effect": "read",
+      "offline": true,
+      "risk": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "dataset_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          },
+          "mode": {
+            "type": "string"
+          },
+          "design": {
+            "type": "string"
+          },
+          "outcome": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "outcome_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "group": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "levels": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "predictors": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "paired_with": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "variables": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "seed": {
+            "type": "integer"
+          },
+          "max_operations": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "dataset_id",
+          "design",
+          "mode",
+          "revision"
         ],
         "additionalProperties": false
       },
@@ -9976,13 +10408,16 @@
     {
       "operation": "qualitative.adjudicate",
       "version": "1.0.0",
-      "effect": "read",
+      "effect": "local-write",
       "offline": true,
-      "risk": "read",
+      "risk": "local-write",
       "arguments_schema": {
         "type": "object",
         "properties": {
           "project_id": {
+            "type": "string"
+          },
+          "expected_content_hash": {
             "type": "string"
           },
           "coder_a": {
@@ -10011,6 +10446,7 @@
           "adjudicator",
           "coder_a",
           "coder_b",
+          "expected_content_hash",
           "project_id",
           "rationales",
           "resolutions",
@@ -10069,7 +10505,7 @@
         ],
         "additionalProperties": false
       },
-      "requires_permission": "local-data-read"
+      "requires_permission": "local-data-write"
     },
     {
       "operation": "mixed.joint_display",
@@ -10556,6 +10992,170 @@
       "requires_permission": "local-data-read"
     },
     {
+      "operation": "syntax.python",
+      "version": "1.0.0",
+      "effect": "read",
+      "offline": true,
+      "risk": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "object"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "arguments",
+          "operation"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed"
+            ]
+          },
+          "data": {
+            "type": "object"
+          },
+          "artifacts": {
+            "type": "array"
+          },
+          "warnings": {
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provenance": {
+            "type": "array"
+          },
+          "impact": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "data",
+          "artifacts",
+          "warnings",
+          "error",
+          "provenance",
+          "impact"
+        ],
+        "additionalProperties": false
+      },
+      "requires_permission": "local-data-read"
+    },
+    {
+      "operation": "syntax.r",
+      "version": "1.0.0",
+      "effect": "read",
+      "offline": true,
+      "risk": "read",
+      "arguments_schema": {
+        "type": "object",
+        "properties": {
+          "operation": {
+            "type": "string"
+          },
+          "arguments": {
+            "type": "object"
+          },
+          "dataset_id": {
+            "type": "string"
+          },
+          "revision": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "arguments",
+          "dataset_id",
+          "operation",
+          "revision"
+        ],
+        "additionalProperties": false
+      },
+      "result_schema": {
+        "type": "object",
+        "properties": {
+          "request_id": {
+            "type": "string"
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "ok",
+              "failed"
+            ]
+          },
+          "data": {
+            "type": "object"
+          },
+          "artifacts": {
+            "type": "array"
+          },
+          "warnings": {
+            "type": "array"
+          },
+          "error": {
+            "anyOf": [
+              {
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "provenance": {
+            "type": "array"
+          },
+          "impact": {
+            "type": "object"
+          }
+        },
+        "required": [
+          "request_id",
+          "status",
+          "data",
+          "artifacts",
+          "warnings",
+          "error",
+          "provenance",
+          "impact"
+        ],
+        "additionalProperties": false
+      },
+      "requires_permission": "local-data-read"
+    },
+    {
       "operation": "plot.render",
       "version": "1.0.0",
       "effect": "local-write",
@@ -10825,7 +11425,5 @@
       },
       "requires_permission": "local-data-write"
     }
-  ],
-  "limitations": "See LIMITATIONS.md and FEATURE_MATRIX.md; code execution is not an OS sandbox and unsupported statistical designs remain explicit.",
-  "gui_wiring": "final-integrator-owned"
+  ]
 }

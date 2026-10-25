@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import re
 from collections.abc import Callable, Mapping, Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any, Protocol, cast
 from urllib.parse import quote
 
@@ -525,10 +525,201 @@ class DeepSeekAdapter(OpenAICompatibleAdapter):
         )
 
 
+@dataclass
+class _AnthropicStreamAssembler:
+    """Bounded state machine for Anthropic Messages API SSE events."""
+
+    text_parts: list[str] = field(default_factory=list)
+    usage: dict[str, Any] = field(default_factory=dict)
+    finish_reason: str | None = None
+    _blocks: dict[int, dict[str, Any]] = field(default_factory=dict)
+    _stopped_blocks: set[int] = field(default_factory=set)
+    _message_started: bool = False
+    _message_stopped: bool = False
+    _text_characters: int = 0
+    _tool_argument_bytes: int = 0
+
+    def _index(self, event: Mapping[str, Any]) -> int:
+        index = event.get("index")
+        if type(index) is not int or not 0 <= index < 64:
+            raise AIError("SCHEMA_MISMATCH", "Anthropic stream block index is invalid")
+        return index
+
+    def _append_text(self, text: Any) -> str:
+        if not isinstance(text, str):
+            raise AIError("SCHEMA_MISMATCH", "Anthropic stream text delta is invalid")
+        self._text_characters += len(text)
+        if self._text_characters > 1_000_000:
+            raise AIError("RESOURCE_LIMIT", "Anthropic streamed text exceeds budget")
+        self.text_parts.append(text)
+        return text
+
+    def feed(self, event: dict[str, Any]) -> str:
+        event_type = event.get("type")
+        if event_type == "ping":
+            return ""
+        if event_type == "error":
+            raise AIError("PROVIDER_UNAVAILABLE", "Anthropic stream returned an error event")
+        if event_type == "message_start":
+            if self._message_started or self._message_stopped:
+                raise AIError("SCHEMA_MISMATCH", "Anthropic stream has duplicate message start")
+            message = event.get("message")
+            if not isinstance(message, Mapping) or message.get("role") != "assistant":
+                raise AIError("SCHEMA_MISMATCH", "Anthropic stream message start is malformed")
+            usage = message.get("usage")
+            if usage is not None:
+                if not isinstance(usage, Mapping):
+                    raise AIError("SCHEMA_MISMATCH", "Anthropic stream usage is malformed")
+                self.usage.update(dict(usage))
+            self._message_started = True
+            return ""
+        if not self._message_started or self._message_stopped:
+            raise AIError("SCHEMA_MISMATCH", "Anthropic stream event is outside an active message")
+        if event_type == "content_block_start":
+            index = self._index(event)
+            if index in self._blocks:
+                raise AIError("SCHEMA_MISMATCH", "Anthropic stream block started twice")
+            block = event.get("content_block")
+            if not isinstance(block, Mapping):
+                raise AIError("SCHEMA_MISMATCH", "Anthropic stream content block is malformed")
+            block_type = block.get("type")
+            if block_type == "text":
+                self._blocks[index] = {"type": "text"}
+                return self._append_text(block.get("text", ""))
+            if block_type in {"thinking", "redacted_thinking", "fallback"}:
+                # These blocks are provider-side metadata/reasoning, not assistant text or
+                # application tool requests. Preserve lifecycle validation but never expose
+                # hidden reasoning or treat provider fallback metadata as executable work.
+                self._blocks[index] = {"type": "ignored"}
+                return ""
+            if block_type != "tool_use":
+                raise AIError("SCHEMA_MISMATCH", "Unsupported Anthropic stream content block")
+            call_id = block.get("id")
+            name = block.get("name")
+            initial_input = block.get("input", {})
+            if (
+                not isinstance(call_id, str)
+                or not call_id
+                or len(call_id) > 200
+                or not isinstance(name, str)
+                or not name
+                or len(name) > 128
+                or not isinstance(initial_input, Mapping)
+            ):
+                raise AIError("SCHEMA_MISMATCH", "Anthropic stream tool block is malformed")
+            self._blocks[index] = {
+                "type": "tool_use",
+                "id": call_id,
+                "name": name,
+                "input": dict(initial_input),
+                "partial_json": "",
+            }
+            return ""
+        if event_type == "content_block_delta":
+            index = self._index(event)
+            block = self._blocks.get(index)
+            if block is None or index in self._stopped_blocks:
+                raise AIError("SCHEMA_MISMATCH", "Anthropic stream delta references inactive block")
+            delta = event.get("delta")
+            if not isinstance(delta, Mapping):
+                raise AIError("SCHEMA_MISMATCH", "Anthropic stream content delta is malformed")
+            if block["type"] == "text":
+                if delta.get("type") != "text_delta":
+                    raise AIError("SCHEMA_MISMATCH", "Anthropic text block received invalid delta")
+                return self._append_text(delta.get("text"))
+            if block["type"] == "ignored":
+                return ""
+            if delta.get("type") != "input_json_delta":
+                raise AIError("SCHEMA_MISMATCH", "Anthropic tool block received invalid delta")
+            partial = delta.get("partial_json")
+            if not isinstance(partial, str):
+                raise AIError("SCHEMA_MISMATCH", "Anthropic tool JSON delta is invalid")
+            self._tool_argument_bytes += len(partial.encode("utf-8"))
+            if self._tool_argument_bytes > 200_000:
+                raise AIError("RESOURCE_LIMIT", "Anthropic streamed tool arguments exceed budget")
+            block["partial_json"] += partial
+            return ""
+        if event_type == "content_block_stop":
+            index = self._index(event)
+            if index not in self._blocks or index in self._stopped_blocks:
+                raise AIError("SCHEMA_MISMATCH", "Anthropic stream block stop is invalid")
+            self._stopped_blocks.add(index)
+            return ""
+        if event_type == "message_delta":
+            delta = event.get("delta")
+            if not isinstance(delta, Mapping):
+                raise AIError("SCHEMA_MISMATCH", "Anthropic stream message delta is malformed")
+            stop_reason = delta.get("stop_reason")
+            if stop_reason is not None:
+                if not isinstance(stop_reason, str) or len(stop_reason) > 100:
+                    raise AIError("SCHEMA_MISMATCH", "Anthropic stop reason is invalid")
+                self.finish_reason = stop_reason
+            usage = event.get("usage")
+            if usage is not None:
+                if not isinstance(usage, Mapping):
+                    raise AIError("SCHEMA_MISMATCH", "Anthropic stream usage is malformed")
+                self.usage.update(dict(usage))
+            return ""
+        if event_type == "message_stop":
+            if set(self._blocks) != self._stopped_blocks:
+                raise AIError(
+                    "SCHEMA_MISMATCH", "Anthropic stream stopped with an open content block"
+                )
+            self._message_stopped = True
+            return ""
+        # Anthropic's versioning policy permits new top-level stream event types. Ignore
+        # unknown events while keeping the required message/block lifecycle strict.
+        return ""
+
+    def finish(self) -> tuple[str, tuple[ProviderToolCall, ...]]:
+        if not self._message_started or not self._message_stopped:
+            raise AIError(
+                "SCHEMA_MISMATCH", "Anthropic streaming response ended before message_stop"
+            )
+        calls: list[ProviderToolCall] = []
+        for index in sorted(self._blocks):
+            block = self._blocks[index]
+            if block["type"] != "tool_use":
+                continue
+            partial = block["partial_json"]
+            initial = block["input"]
+            if partial:
+                if initial:
+                    raise AIError(
+                        "SCHEMA_MISMATCH",
+                        "Anthropic tool stream mixed complete and incremental arguments",
+                    )
+                try:
+                    arguments = json.loads(partial)
+                except ValueError as exc:
+                    raise AIError(
+                        "SCHEMA_MISMATCH", "Anthropic streamed tool arguments are not valid JSON"
+                    ) from exc
+            else:
+                arguments = initial
+            if not isinstance(arguments, dict):
+                raise AIError("SCHEMA_MISMATCH", "Anthropic tool arguments must be an object")
+            calls.append(ProviderToolCall(block["id"], block["name"], dict(arguments)))
+        text = "".join(self.text_parts)
+        if calls and self.finish_reason != "tool_use":
+            raise AIError(
+                "SCHEMA_MISMATCH",
+                "Anthropic tool stream ended without the required tool_use stop reason",
+            )
+        if self.finish_reason == "tool_use" and not calls:
+            raise AIError(
+                "SCHEMA_MISMATCH",
+                "Anthropic stream declared tool_use without a client tool call",
+            )
+        if not text and not calls:
+            raise AIError("SCHEMA_MISMATCH", "Anthropic streaming response contains no output")
+        return text, tuple(calls)
+
+
 class AnthropicAdapter:
     identifier = "anthropic"
     local = False
-    capabilities = ProviderCapabilities(tool_calling=True)
+    capabilities = ProviderCapabilities(streaming=True, tool_calling=True)
 
     def __init__(
         self,
@@ -582,6 +773,45 @@ class AnthropicAdapter:
             max_tokens=max_tokens,
             temperature=temperature,
             tools=tools,
+        )
+
+    def stream(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> ProviderResult:
+        return self._stream(
+            messages,
+            policy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=None,
+            on_delta=on_delta,
+        )
+
+    def stream_with_tools(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        tools: Sequence[Mapping[str, Any]],
+        *,
+        max_tokens: int = 512,
+        temperature: float = 0.0,
+        on_delta: Callable[[str], None] | None = None,
+    ) -> ProviderResult:
+        if not 1 <= len(tools) <= 64:
+            raise AIError("RESOURCE_LIMIT", "Native tool list must contain 1-64 tools")
+        return self._stream(
+            messages,
+            policy,
+            max_tokens=max_tokens,
+            temperature=temperature,
+            tools=tools,
+            on_delta=on_delta,
         )
 
     @staticmethod
@@ -642,6 +872,73 @@ class AnthropicAdapter:
                 continue
             conversational.append({"role": item.role, "content": item.content})
         return system_parts, conversational
+
+    def _stream(
+        self,
+        messages: Sequence[ProviderMessage],
+        policy: EgressPolicy,
+        *,
+        max_tokens: int,
+        temperature: float,
+        tools: Sequence[Mapping[str, Any]] | None,
+        on_delta: Callable[[str], None] | None,
+    ) -> ProviderResult:
+        _validate_generation(messages, max_tokens=max_tokens, temperature=temperature)
+        policy.permit(self.endpoint, local=False)
+        streamer = getattr(self.transport, "stream", None)
+        if not callable(streamer):
+            raise AIError("DEPENDENCY_MISSING", "Configured transport does not support streaming")
+        system_parts, conversational = self._messages(messages)
+        if not conversational or not any(item["role"] == "user" for item in conversational):
+            raise AIError("INVALID_INPUT", "Anthropic chat requires a user message")
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "messages": conversational,
+            "max_tokens": max_tokens,
+            "temperature": float(temperature),
+            "stream": True,
+        }
+        if system_parts:
+            payload["system"] = "\n\n".join(system_parts)
+        if tools is not None:
+            payload["tools"] = [self._tool_definition(item) for item in tools]
+            payload["tool_choice"] = {
+                "type": "auto",
+                "disable_parallel_tool_use": True,
+            }
+        body = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode()
+        chunks = cast(Any, self.transport).stream(
+            self.endpoint + "/v1/messages",
+            {
+                "Content-Type": "application/json",
+                "Accept": "text/event-stream",
+                "x-api-key": self.credential,
+                "anthropic-version": self.api_version,
+            },
+            body,
+            timeout=60,
+        )
+        assembler = _AnthropicStreamAssembler()
+        for event in sse_events(chunks):
+            delta = assembler.feed(event)
+            if delta and on_delta is not None:
+                on_delta(delta)
+        text, tool_calls = assembler.finish()
+        input_tokens = _token(assembler.usage.get("input_tokens"))
+        output_tokens = _token(assembler.usage.get("output_tokens"))
+        total = (
+            input_tokens + output_tokens
+            if input_tokens is not None and output_tokens is not None
+            else None
+        )
+        return ProviderResult(
+            provider=self.identifier,
+            model=self.model,
+            text=text,
+            usage=ProviderUsage(input_tokens, output_tokens, total),
+            finish_reason=assembler.finish_reason,
+            tool_calls=tool_calls,
+        )
 
     def _complete(
         self,

@@ -45,12 +45,20 @@ uses the existing Agent and Providers pages instead of replacing that shell.
 - Non-streaming provider calls now retry only typed 429/503 failures with bounded exponential jitter and
   bounded `Retry-After` support. Streaming stays single-attempt, and retry-before-tool tests prove a host
   tool is not duplicated when the model request is retried.
+- Native Anthropic Messages SSE streaming now assembles bounded fragmented text and incremental tool JSON,
+  preserves provider tool IDs, disables parallel tool use, and routes through the same host-side approval
+  boundary as other native tool adapters. This is deterministic transport-fixture evidence, not a claim of
+  live Anthropic-account interoperability.
 - The production assistant now records payload-free provider usage diagnostics (logical model-call status,
   reported token counts, latency and error codes) and Agent/Providers surface the project summary. Internal
   transient retry attempts remain folded into one logical call. Monetary cost is explicitly unknown until a
   provenance-aware price source is configured.
 - Agent exposes inline cancellation using the existing supervised Qt job manager and reports the terminal
   cancelled state in place; it does not create a second orchestration path.
+- Qualitative fixed-unit adjudication now requires an approved local write with the current qualitative
+  content hash. The human resolution/rationale is stored as an immutable hashed event, survives restart,
+  and leaves both original coder annotations intact; legacy qualitative schema v1/v2 snapshots migrate on
+  load to the current schema without manufacturing adjudication history.
 
 ## Manual/native QA ledger
 
@@ -92,13 +100,14 @@ interoperability and research-duration evidence are listed under limitations rat
 - `ruff format --check .`: **408 files already formatted**.
 - `ruff check .`: **pass**.
 - `mypy src`: **161 source files, 0 issues**.
-- `pytest -q`: **800 passed, 10 skipped, 3 warnings** after the statistics/R and provider-agent hardening checkpoints.
+- `pytest -q`: **812 passed, 10 skipped, 3 warnings** after the statistics/R, provider-agent,
+  Anthropic-streaming and durable qualitative-adjudication checkpoints.
 - `git diff --check`: **pass**; Windows reports expected LF→CRLF normalization warnings on several modified text files.
 - skills validator: **27 repository skills valid**.
 - broader mission capability inventory: **67 no-login/no-key capabilities observed as available
   during the mission**; mission-only UI automation packages were removed by the final locked sync; see
   [`../DEVELOPER_CAPABILITIES.md`](../DEVELOPER_CAPABILITIES.md).
-- current source metric: **54,355 substantive Python SLOC across 161 files**.
+- current source metric: **54,804 substantive Python SLOC across 161 files**.
 - `pip-audit --local`: **no known vulnerabilities**; local `researchweave` package is skipped
   because it is not a PyPI distribution.
 - final post-build filesystem disposition audit: **27,211 files** = 616 `KEEP_PUBLIC`, 7,025

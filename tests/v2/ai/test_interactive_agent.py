@@ -35,6 +35,10 @@ class StreamingQueueTransport(QueueTransport):
         yield from self.streams.pop(0)
 
 
+def _anthropic_sse(*events: dict[str, object]) -> bytes:
+    return b"".join(b"data: " + json.dumps(event).encode() + b"\n\n" for event in events)
+
+
 def _model_runtime(
     tmp_path: Path, transport: QueueTransport, *, tool_calling: bool
 ) -> ConfiguredModelRuntime:
@@ -51,6 +55,31 @@ def _model_runtime(
         activate=True,
     )
     return ConfiguredModelRuntime(store, EgressPolicy(), transport=transport)
+
+
+def _anthropic_model_runtime(
+    tmp_path: Path,
+    transport: StreamingQueueTransport,
+    monkeypatch: pytest.MonkeyPatch,
+) -> ConfiguredModelRuntime:
+    store = ModelConfigStore(tmp_path / "anthropic-models.json")
+    store.upsert(
+        ModelProfile(
+            "anthropic",
+            "anthropic",
+            "https://api.anthropic.com",
+            "claude-test",
+            credential_env="RESEARCHWEAVE_ANTHROPIC_AGENT_TEST_KEY",
+            tool_calling=True,
+        ),
+        activate=True,
+    )
+    monkeypatch.setenv("RESEARCHWEAVE_ANTHROPIC_AGENT_TEST_KEY", "synthetic-key")
+    return ConfiguredModelRuntime(
+        store,
+        EgressPolicy(offline=False, allowed_hosts=("api.anthropic.com",)),
+        transport=transport,
+    )
 
 
 def _read_tools(tmp_path: Path) -> DurableAgentRuntime:
@@ -126,6 +155,143 @@ def test_native_tool_call_executes_read_tool_then_continues(tmp_path: Path) -> N
         "operation": "read.echo",
         "trust": "untrusted_tool_output",
     }
+    tools.close()
+
+
+def test_anthropic_streaming_tool_call_executes_only_after_complete_stream(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    first = _anthropic_sse(
+        {
+            "type": "message_start",
+            "message": {"role": "assistant", "usage": {"input_tokens": 5, "output_tokens": 1}},
+        },
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_echo",
+                "name": "read_echo",
+                "input": {},
+            },
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": '{"value":"alpha"}'},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 4},
+        },
+        {"type": "message_stop"},
+    )
+    second = _anthropic_sse(
+        {
+            "type": "message_start",
+            "message": {"role": "assistant", "usage": {"input_tokens": 9, "output_tokens": 1}},
+        },
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}},
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "Finished"},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 2},
+        },
+        {"type": "message_stop"},
+    )
+    transport = StreamingQueueTransport([[first], [second]])
+    tools = _read_tools(tmp_path)
+    deltas: list[str] = []
+    result = ModelAgentLoop(_anthropic_model_runtime(tmp_path, transport, monkeypatch), tools).run(
+        "project",
+        [ProviderMessage("user", "echo alpha")],
+        on_delta=deltas.append,
+    )
+
+    assert result.text == "Finished"
+    assert result.events[0].result == {"echo": "alpha"}
+    assert result.events[0].risk == "read"
+    assert deltas == ["Finished"]
+    assert len(transport.payloads) == 2
+    assert transport.payloads[0]["stream"] is True
+    assert transport.payloads[0]["tool_choice"] == {
+        "type": "auto",
+        "disable_parallel_tool_use": True,
+    }
+    follow_up = transport.payloads[1]["messages"]
+    assert follow_up[-2]["content"][0]["id"] == "toolu_echo"
+    assert follow_up[-1]["content"][0]["type"] == "tool_result"
+    assert follow_up[-1]["content"][0]["tool_use_id"] == "toolu_echo"
+    tools.close()
+
+
+def test_anthropic_streaming_stop_reason_mismatch_never_executes_tool(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    stream = _anthropic_sse(
+        {
+            "type": "message_start",
+            "message": {"role": "assistant", "usage": {"input_tokens": 5, "output_tokens": 1}},
+        },
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_bad_stop",
+                "name": "read_echo",
+                "input": {},
+            },
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": '{"value":"alpha"}'},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "max_tokens"},
+            "usage": {"output_tokens": 4},
+        },
+        {"type": "message_stop"},
+    )
+    observed: list[str] = []
+    tools = DurableAgentRuntime(tmp_path / "agent-mismatch.sqlite")
+    tools.register_tool(
+        ToolContract(
+            "read.echo",
+            "read",
+            lambda args: observed.append(str(args["value"])) or {"echo": args["value"]},
+            True,
+            True,
+            frozenset({"value"}),
+            argument_schema={
+                "type": "object",
+                "properties": {"value": {"type": "string"}},
+                "required": ["value"],
+                "additionalProperties": False,
+            },
+        )
+    )
+    transport = StreamingQueueTransport([[stream]])
+    with pytest.raises(AIError) as error:
+        ModelAgentLoop(_anthropic_model_runtime(tmp_path, transport, monkeypatch), tools).run(
+            "project",
+            [ProviderMessage("user", "echo alpha")],
+            on_delta=lambda _delta: None,
+        )
+    assert error.value.code == "SCHEMA_MISMATCH"
+    assert observed == []
     tools.close()
 
 

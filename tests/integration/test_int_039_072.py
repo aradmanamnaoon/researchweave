@@ -711,11 +711,11 @@ def test_int_047_adjudication_receipt_requires_reason(tmp_path: Path) -> None:
     project_id = "coding_receipt"
     try:
 
-        def call(operation: str, arguments: dict) -> dict:
+        def call(operation: str, arguments: dict, *, approve: bool = True) -> dict:
             req = OperationRequest(operation=operation, project_id=scope, arguments=arguments)
             approval = (
                 services.bus.issue_approval(req)
-                if services.bus.effect_for(operation) != "read"
+                if approve and services.bus.effect_for(operation) != "read"
                 else None
             )
             return dict(services.bus.dispatch(req, approval=approval))
@@ -769,6 +769,7 @@ def test_int_047_adjudication_receipt_requires_reason(tmp_path: Path) -> None:
             revision = annotation["data"]["content_hash"]
         base = {
             "project_id": project_id,
+            "expected_content_hash": revision,
             "coder_a": "coder_a",
             "coder_b": "coder_b",
             "unit_ids": ["u1"],
@@ -776,12 +777,33 @@ def test_int_047_adjudication_receipt_requires_reason(tmp_path: Path) -> None:
             "adjudicator": "reviewer",
             "rationales": {"u1": "Reviewed the passage."},
         }
+        denied = call("qualitative.adjudicate", base, approve=False)
+        assert denied["status"] == "failed"
+        assert denied["error"]["code"] == "NEEDS_APPROVAL"
         resolved = call("qualitative.adjudicate", base)
         assert resolved["status"] == "ok", resolved
         assert resolved["data"]["n_disagreements"] == 1
         assert resolved["data"]["decisions"][0]["resolved_code"] == "support"
-        rejected = call("qualitative.adjudicate", {**base, "rationales": {}})
+        assert resolved["data"]["adjudication_event"]["receipt_hash"]
+        revision_after = resolved["data"]["content_hash"]
+        inspected = call("qualitative.inspect", {"project_id": project_id})
+        events = inspected["data"]["state"]["adjudication_events"]
+        assert len(events) == 1
+        assert events[0]["event_id"] == resolved["data"]["adjudication_event"]["event_id"]
+        rejected = call(
+            "qualitative.adjudicate",
+            {**base, "expected_content_hash": revision_after, "rationales": {}},
+        )
         assert rejected["status"] == "failed"
+        assert call("qualitative.inspect", {"project_id": project_id})["data"]["content_hash"] == (
+            revision_after
+        )
+        duplicate = call(
+            "qualitative.adjudicate",
+            {**base, "expected_content_hash": revision_after},
+        )
+        assert duplicate["status"] == "failed"
+        assert duplicate["error"]["code"] == "CONFLICT"
         assert "qualitative.adjudicate" in [event["operation"] for event in services.audit.events()]
     finally:
         services.close()

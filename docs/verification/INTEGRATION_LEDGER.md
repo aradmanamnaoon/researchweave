@@ -121,7 +121,7 @@ success.
 | 044 | partial | Optional-R absence behavior exists; a live installed R runtime was not observed on this host. |
 | 045 | verified-local | Real SVG/PNG artifacts, SHA-256, caption, alt text, structured data table; log scale now fails closed on non-positive input. |
 | 046 | verified-local | Durable Unicode qualitative coding and stale-anchor conflict through bus. |
-| 047 | partial | Kappa/undefined metric and human adjudication receipt/rationale/audit verified; adjudication is returned/audited but not stored as a separate qualitative-state adjudication event. |
+| 047 | verified-local | Kappa/undefined metric and human adjudication are verified through the shared bus; adjudication is an approved local write with optimistic concurrency and a hashed immutable event that survives restart without rewriting either coder's annotations. |
 | 048 | verified-local | Positive linked joint display, privacy-minimum behavior, sensitive approval denial and unrelated-project isolation. |
 | 049 | verified-local | Local AI capability entry and host/offline policy boundaries. |
 | 050 | external/native-blocked | No locally installed/running model endpoint supplied; no fake success. |

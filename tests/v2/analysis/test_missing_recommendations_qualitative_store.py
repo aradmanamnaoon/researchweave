@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from researchweave.analysis.coding_review import CodingReviewLedger
+from researchweave.analysis.coding_review import CodingReviewLedger, adjudicate_disagreements
 from researchweave.analysis.datasets import import_csv
 from researchweave.analysis.errors import AnalysisError
 from researchweave.analysis.missing_data import (
@@ -117,6 +117,78 @@ def test_qualitative_store_restart_history_memo_and_tamper(tmp_path: Path):
     path.write_text(json.dumps(envelope), encoding="utf-8")
     with pytest.raises(AnalysisError, match="hash mismatch"):
         store.load("project1")
+
+
+def test_qualitative_adjudication_event_restart_migration_duplicate_and_tamper(tmp_path: Path):
+    state = QualitativeState()
+    state.project.add_transcript(Transcript("source", "alpha beta gamma", "case1"))
+    state.add_code(Code("one", "One"), actor="lead")
+    state.add_code(Code("two", "Two"), actor="lead")
+    state.project.annotate("source", 0, 5, "one", "coder_a", "u1")
+    state.project.annotate("source", 6, 10, "two", "coder_b", "u1")
+    state.project.annotate("source", 6, 10, "two", "coder_a", "u2")
+    state.project.annotate("source", 11, 16, "one", "coder_b", "u2")
+    receipt = adjudicate_disagreements(
+        state.project,
+        coder_a="coder_a",
+        coder_b="coder_b",
+        unit_ids=["u1", "u2"],
+        resolutions={"u1": "one", "u2": "two"},
+        adjudicator="lead",
+        rationales={
+            "u1": "The first label best matches the declared codebook.",
+            "u2": "The second unit is best represented by the second code.",
+        },
+    )
+    event = state.record_adjudication(
+        receipt,
+        coder_a="coder_a",
+        coder_b="coder_b",
+        unit_ids=["u1", "u2"],
+    )
+    with pytest.raises(AnalysisError, match="already adjudicated"):
+        state.record_adjudication(
+            receipt,
+            coder_a="coder_a",
+            coder_b="coder_b",
+            unit_ids=["u2", "u1"],
+        )
+    with pytest.raises(AnalysisError, match="already adjudicated"):
+        state.record_adjudication(
+            receipt,
+            coder_a="coder_b",
+            coder_b="coder_a",
+            unit_ids=["u1", "u2"],
+        )
+
+    store = QualitativeStore(tmp_path / "adjudication")
+    store.save("project1", state)
+    reopened = QualitativeStore(tmp_path / "adjudication").load("project1")
+    assert reopened.schema_version == 3
+    assert len(reopened.adjudication_events) == 1
+    assert reopened.adjudication_events[0].event_id == event.event_id
+    assert reopened.adjudication_events[0].receipt_hash == event.receipt_hash
+    assert reopened.adjudication_events[0].consensus == {"u1": "one", "u2": "two"}
+
+    previous_hash = store.content_hash("project1")
+    reopened.add_code(Code("three", "Three"), actor="lead")
+    store.save("project1", reopened, expected_content_hash=previous_hash)
+    edited_reopened = store.load("project1")
+    assert "three" in edited_reopened.project.codes
+    assert edited_reopened.adjudication_events[0].event_id == event.event_id
+
+    tampered = edited_reopened.to_json()
+    tampered["adjudication_events"][0]["adjudicator"] = "intruder"
+    with pytest.raises(AnalysisError, match="receipt hash mismatch"):
+        QualitativeState.from_json(tampered)
+
+    legacy_v2 = QualitativeState().to_json()
+    legacy_v2["schema_version"] = 2
+    legacy_v2.pop("adjudication_events")
+    migrated = QualitativeState.from_json(legacy_v2)
+    assert migrated.schema_version == 3
+    assert migrated.adjudication_events == []
+    assert migrated.to_json()["schema_version"] == 3
 
 
 def test_multiple_imputation_rejects_all_missing_row(tmp_path: Path):

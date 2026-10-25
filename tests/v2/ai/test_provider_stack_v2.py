@@ -39,6 +39,22 @@ class FakeTransport:
         return self.responses.pop(0)
 
 
+class FakeStreamingTransport(FakeTransport):
+    def __init__(self, chunks: list[bytes]):
+        super().__init__()
+        self.chunks = chunks
+
+    def stream(self, url, headers, payload, timeout):
+        self.calls.append((url, dict(headers), payload, timeout))
+        yield from self.chunks
+
+
+def _anthropic_sse(*events: dict[str, object]) -> bytes:
+    return b"".join(
+        b"data: " + json.dumps(event, ensure_ascii=False).encode() + b"\n\n" for event in events
+    )
+
+
 def remote_policy(*hosts: str):
     return EgressPolicy(offline=False, allowed_hosts=hosts)
 
@@ -181,6 +197,298 @@ def test_anthropic_native_tools_round_trip_provider_safe_schema_and_result() -> 
     assert follow_up["messages"][-2]["content"][0]["type"] == "tool_use"
     assert follow_up["messages"][-1]["content"][0]["type"] == "tool_result"
     assert follow_up["messages"][-1]["content"][0]["tool_use_id"] == "toolu_1"
+
+
+def test_anthropic_streams_fragmented_text_and_native_tool_arguments() -> None:
+    raw = _anthropic_sse(
+        {
+            "type": "message_start",
+            "message": {"role": "assistant", "usage": {"input_tokens": 8, "output_tokens": 1}},
+        },
+        {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}},
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "text_delta", "text": "Inspecting 🌍 "},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {
+            "type": "content_block_start",
+            "index": 1,
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_stream_1",
+                "name": "app_read",
+                "input": {},
+            },
+        },
+        {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {
+                "type": "input_json_delta",
+                "partial_json": '{"operation":"ui.project.dashboard",',
+            },
+        },
+        {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "input_json_delta", "partial_json": '"arguments":{}}'},
+        },
+        {"type": "content_block_stop", "index": 1},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "tool_use"},
+            "usage": {"output_tokens": 6},
+        },
+        {"type": "message_stop"},
+    )
+    globe = raw.index("🌍".encode())
+    chunks = [raw[: globe + 1], raw[globe + 1 : globe + 3], raw[globe + 3 :]]
+    transport = FakeStreamingTransport(chunks)
+    adapter = AnthropicAdapter("key", "claude-test", transport=transport)
+    tools = [
+        {
+            "type": "function",
+            "function": {
+                "name": "app_read",
+                "description": "Read a project summary.",
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "operation": {"type": "string"},
+                        "arguments": {"type": "object"},
+                    },
+                    "required": ["operation", "arguments"],
+                    "additionalProperties": False,
+                },
+            },
+        }
+    ]
+    deltas: list[str] = []
+
+    result = adapter.stream_with_tools(
+        [ProviderMessage("system", "rules"), ProviderMessage("user", "Inspect")],
+        remote_policy("api.anthropic.com"),
+        tools,
+        on_delta=deltas.append,
+    )
+
+    assert deltas == ["Inspecting 🌍 "]
+    assert result.text == "Inspecting 🌍 "
+    assert result.finish_reason == "tool_use"
+    assert result.usage.input_tokens == 8
+    assert result.usage.output_tokens == 6
+    assert result.usage.total_tokens == 14
+    assert result.tool_calls == (
+        ProviderToolCall(
+            "toolu_stream_1",
+            "app_read",
+            {"operation": "ui.project.dashboard", "arguments": {}},
+        ),
+    )
+    url, headers, payload, _timeout = transport.calls[0]
+    request = json.loads(payload)
+    assert url == "https://api.anthropic.com/v1/messages"
+    assert headers["Accept"] == "text/event-stream"
+    assert request["stream"] is True
+    assert request["system"] == "rules"
+    assert request["tool_choice"]["disable_parallel_tool_use"] is True
+
+
+@pytest.mark.parametrize(
+    "stream",
+    [
+        _anthropic_sse(
+            {
+                "type": "message_start",
+                "message": {"role": "assistant", "usage": {"input_tokens": 1}},
+            },
+            {"type": "content_block_start", "index": 0, "content_block": {"type": "text"}},
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "text_delta", "text": "partial"},
+            },
+            {"type": "content_block_stop", "index": 0},
+        ),
+        _anthropic_sse(
+            {
+                "type": "message_start",
+                "message": {"role": "assistant", "usage": {"input_tokens": 1}},
+            },
+            {
+                "type": "content_block_start",
+                "index": 0,
+                "content_block": {
+                    "type": "tool_use",
+                    "id": "toolu_bad",
+                    "name": "app_read",
+                    "input": {},
+                },
+            },
+            {
+                "type": "content_block_delta",
+                "index": 0,
+                "delta": {"type": "input_json_delta", "partial_json": '{"broken":'},
+            },
+            {"type": "content_block_stop", "index": 0},
+            {"type": "message_stop"},
+        ),
+    ],
+)
+def test_anthropic_stream_rejects_truncated_or_invalid_output(stream: bytes) -> None:
+    adapter = AnthropicAdapter("key", "claude-test", transport=FakeStreamingTransport([stream]))
+    with pytest.raises(AIError) as error:
+        adapter.stream(
+            [ProviderMessage("user", "question")],
+            remote_policy("api.anthropic.com"),
+        )
+    assert error.value.code == "SCHEMA_MISMATCH"
+
+
+def test_anthropic_stream_error_does_not_expose_provider_payload() -> None:
+    stream = _anthropic_sse(
+        {
+            "type": "error",
+            "error": {"type": "overloaded_error", "message": "secret synthetic payload"},
+        }
+    )
+    adapter = AnthropicAdapter("key", "claude-test", transport=FakeStreamingTransport([stream]))
+    with pytest.raises(AIError) as error:
+        adapter.stream(
+            [ProviderMessage("user", "question")],
+            remote_policy("api.anthropic.com"),
+        )
+    assert error.value.code == "PROVIDER_UNAVAILABLE"
+    assert "secret synthetic payload" not in str(error.value)
+
+
+def test_anthropic_stream_ignores_reasoning_blocks_without_exposing_them() -> None:
+    stream = _anthropic_sse(
+        {
+            "type": "message_start",
+            "message": {"role": "assistant", "usage": {"input_tokens": 2, "output_tokens": 1}},
+        },
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": "thinking", "thinking": "", "signature": ""},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "thinking_delta", "thinking": "private reasoning"},
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "signature_delta", "signature": "synthetic-signature"},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {"type": "content_block_start", "index": 1, "content_block": {"type": "text"}},
+        {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "text_delta", "text": "Visible answer"},
+        },
+        {"type": "content_block_stop", "index": 1},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 5},
+        },
+        {"type": "message_stop"},
+    )
+    deltas: list[str] = []
+    result = AnthropicAdapter(
+        "key", "claude-test", transport=FakeStreamingTransport([stream])
+    ).stream(
+        [ProviderMessage("user", "question")],
+        remote_policy("api.anthropic.com"),
+        on_delta=deltas.append,
+    )
+    assert result.text == "Visible answer"
+    assert deltas == ["Visible answer"]
+    assert "private reasoning" not in result.text
+
+
+@pytest.mark.parametrize("block_type", ["redacted_thinking", "fallback"])
+def test_anthropic_stream_accepts_non_executable_auxiliary_blocks(block_type: str) -> None:
+    stream = _anthropic_sse(
+        {
+            "type": "message_start",
+            "message": {"role": "assistant", "usage": {"input_tokens": 2, "output_tokens": 1}},
+        },
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {"type": block_type},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {"type": "content_block_start", "index": 1, "content_block": {"type": "text"}},
+        {
+            "type": "content_block_delta",
+            "index": 1,
+            "delta": {"type": "text_delta", "text": "Visible"},
+        },
+        {"type": "content_block_stop", "index": 1},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "end_turn"},
+            "usage": {"output_tokens": 2},
+        },
+        {"type": "message_stop"},
+    )
+    deltas: list[str] = []
+    result = AnthropicAdapter(
+        "key", "claude-test", transport=FakeStreamingTransport([stream])
+    ).stream(
+        [ProviderMessage("user", "question")],
+        remote_policy("api.anthropic.com"),
+        on_delta=deltas.append,
+    )
+    assert result.text == "Visible"
+    assert result.tool_calls == ()
+    assert deltas == ["Visible"]
+
+
+def test_anthropic_stream_rejects_tool_call_with_non_tool_stop_reason() -> None:
+    stream = _anthropic_sse(
+        {
+            "type": "message_start",
+            "message": {"role": "assistant", "usage": {"input_tokens": 2, "output_tokens": 1}},
+        },
+        {
+            "type": "content_block_start",
+            "index": 0,
+            "content_block": {
+                "type": "tool_use",
+                "id": "toolu_mismatch",
+                "name": "app_read",
+                "input": {},
+            },
+        },
+        {
+            "type": "content_block_delta",
+            "index": 0,
+            "delta": {"type": "input_json_delta", "partial_json": '{"operation":"x"}'},
+        },
+        {"type": "content_block_stop", "index": 0},
+        {
+            "type": "message_delta",
+            "delta": {"stop_reason": "max_tokens"},
+            "usage": {"output_tokens": 3},
+        },
+        {"type": "message_stop"},
+    )
+    adapter = AnthropicAdapter("key", "claude-test", transport=FakeStreamingTransport([stream]))
+    with pytest.raises(AIError) as error:
+        adapter.stream(
+            [ProviderMessage("user", "question")],
+            remote_policy("api.anthropic.com"),
+        )
+    assert error.value.code == "SCHEMA_MISMATCH"
 
 
 def test_gemini_maps_response_and_does_not_put_key_in_url() -> None:
