@@ -1,11 +1,23 @@
-# PyInstaller specification for a self-contained ResearchWeave desktop bundle.
+# PyInstaller specification for self-contained ResearchWeave desktop bundles.
 
+import os
+import sys
 from pathlib import Path
 
 from PyInstaller.utils.hooks import collect_submodules
 
 repo = Path(SPECPATH).resolve().parent
+version = os.environ.get("RESEARCHWEAVE_VERSION", "0.0.0")
 hiddenimports = collect_submodules("researchweave")
+if sys.platform == "win32":
+    icon = str(repo / "assets" / "branding" / "researchweave.ico")
+elif sys.platform == "darwin":
+    icon = os.environ.get(
+        "RESEARCHWEAVE_ICON",
+        str(repo / "assets" / "branding" / "researchweave-icon.png"),
+    )
+else:
+    icon = None
 
 a = Analysis(
     [str(repo / "src" / "researchweave" / "__main__.py")],
@@ -31,7 +43,7 @@ exe = EXE(
     strip=False,
     upx=False,
     console=False,
-    icon=str(repo / "assets" / "branding" / "researchweave.ico"),
+    icon=icon,
 )
 coll = COLLECT(
     exe,
@@ -41,3 +53,18 @@ coll = COLLECT(
     upx=False,
     name="ResearchWeave",
 )
+
+if sys.platform == "darwin":
+    app = BUNDLE(
+        coll,
+        name="ResearchWeave.app",
+        icon=icon,
+        bundle_identifier="io.github.aradmanamnaoon.researchweave",
+        version=version,
+        info_plist={
+            "CFBundleDisplayName": "ResearchWeave",
+            "CFBundleShortVersionString": version,
+            "CFBundleVersion": version,
+            "NSHighResolutionCapable": True,
+        },
+    )
