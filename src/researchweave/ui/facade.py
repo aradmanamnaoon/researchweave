@@ -440,6 +440,10 @@ class UIFacade:
             "sort_column": string,
             "sort_desc": {"type": "boolean"},
         }
+        schemas["ui.dataset.import"] |= {
+            "name": string,
+            "csv_text": {"type": "string", "maxLength": MAX_CSV_CHARS},
+        }
         schemas["ui.extraction.schema.update"] |= {
             "title": string,
             "fields": {"type": "array"},
@@ -540,6 +544,9 @@ class UIFacade:
         }
         schemas["ui.manuscript.sections.update"] |= {
             "sections": {"type": "array", "items": {"type": "object"}},
+        }
+        schemas["ui.manuscript.save"] |= {
+            "manuscript": {"type": "string", "maxLength": MAX_NOTE},
         }
         schemas["ui.activity.list"] |= {
             "operation_filter": string,

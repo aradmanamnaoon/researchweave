@@ -15,6 +15,8 @@ from researchweave.ai.model_runtime import ModelConfigStore, ModelProfile
 from researchweave.ai.policy import ApprovalIssuer, EgressPolicy
 from researchweave.core import CommandBus, OperationRequest
 
+from .agent_tools import register_application_tools
+
 
 class ProductionAIBackend:
     """Route approved desktop actions through the shared AI command-bus boundary."""
@@ -118,6 +120,7 @@ class ProductionAIBackend:
         )
         facade = build_ai_facade(self._storage, policy=policy, issuer=self._issuer)
         try:
+            register_application_tools(facade.durable_agents, self._bus, project_id)
             return facade.assistant_chat(
                 project_id,
                 prompt,
@@ -152,6 +155,7 @@ class ProductionAIBackend:
         )
         facade = build_ai_facade(self._storage, policy=policy, issuer=self._issuer)
         try:
+            register_application_tools(facade.durable_agents, self._bus, project_id)
             return facade.assistant_approve(
                 project_id,
                 conversation_id,
