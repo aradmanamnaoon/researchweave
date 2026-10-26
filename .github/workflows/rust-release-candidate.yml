@@ -65,11 +65,17 @@ jobs:
           archive="gitleaks_${version}_linux_x64.tar.gz"
           expected="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
           mkdir -p target/security-tools/gitleaks
-          curl --fail --location --proto '=https' --tlsv1.2 +            "https://github.com/gitleaks/gitleaks/releases/download/v${version}/${archive}" +            --output "target/security-tools/${archive}"
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${version}/${archive}" \
+            --output "target/security-tools/${archive}"
           echo "${expected}  target/security-tools/${archive}" | sha256sum --check -
           tar -xzf "target/security-tools/${archive}" -C target/security-tools/gitleaks gitleaks
           target/security-tools/gitleaks/gitleaks version | grep -Fx "${version}"
-          target/security-tools/gitleaks/gitleaks git +            --redact +            --config .gitleaks.toml +            --gitleaks-ignore-path .gitleaksignore +            --log-opts='--all'
+          target/security-tools/gitleaks/gitleaks git \
+            --redact \
+            --config .gitleaks.toml \
+            --gitleaks-ignore-path .gitleaksignore \
+            --log-opts='--all'
       - name: Archive SBOM
         uses: actions/upload-artifact@v4
         with:
