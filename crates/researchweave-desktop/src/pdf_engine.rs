@@ -27,13 +27,13 @@ const PDFIUM_LIBRARY: &str = "libpdfium.dylib";
 const PDFIUM_LIBRARY: &str = "libpdfium.so";
 
 fn packaged_runtime_candidates(exe_dir: &Path) -> Vec<PathBuf> {
-    let mut candidates = Vec::with_capacity(2);
-    candidates.push(exe_dir.join(PDFIUM_LIBRARY));
-    #[cfg(target_os = "macos")]
-    candidates.push(exe_dir.join("../Frameworks").join(PDFIUM_LIBRARY));
-    #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
-    candidates.push(exe_dir.join("../lib").join(PDFIUM_LIBRARY));
-    candidates
+    vec![
+        exe_dir.join(PDFIUM_LIBRARY),
+        #[cfg(target_os = "macos")]
+        exe_dir.join("../Frameworks").join(PDFIUM_LIBRARY),
+        #[cfg(all(not(target_os = "windows"), not(target_os = "macos")))]
+        exe_dir.join("../lib").join(PDFIUM_LIBRARY),
+    ]
 }
 
 pub fn runtime_library() -> Result<PathBuf, String> {
