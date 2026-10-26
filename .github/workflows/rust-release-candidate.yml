@@ -125,9 +125,9 @@ jobs:
         run: |
           set -euo pipefail
           version="${VERSION:-}"
-          if [[ -z "$version" ]]; then version="$(python3 -c 'import tomllib;print(tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"])')"; fi
+          actual="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;data=json.load(sys.stdin);print(next(package["version"] for package in data["packages"] if package["name"]=="researchweave-desktop"))')"
+          if [[ -z "$version" ]]; then version="$actual"; fi
           [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]
-          actual="$(python3 -c 'import tomllib;print(tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"])')"
           [[ "$version" == "$actual" ]]
           echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
           case "$PLATFORM" in
@@ -238,7 +238,9 @@ jobs:
         run: |
           set -euo pipefail
           version="${{ inputs.version }}"
-          if [[ -z "$version" ]]; then version="$(python3 -c 'import tomllib;print(tomllib.load(open("Cargo.toml","rb"))["workspace"]["package"]["version"])')"; fi
+          if [[ -z "$version" ]]; then
+            version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;data=json.load(sys.stdin);print(next(package["version"] for package in data["packages"] if package["name"]=="researchweave-desktop"))')"
+          fi
           cd dist
           sha256sum ResearchWeave-v* > SHA256SUMS.txt
           cd ..

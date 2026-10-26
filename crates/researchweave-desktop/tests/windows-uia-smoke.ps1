@@ -96,6 +96,24 @@ function Read-JsonRetry([string]$Path, [int]$Attempts = 20) {
     }
     return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json)
 }
+function WaitForNameLike(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Pattern,
+    [int]$TimeoutMilliseconds = 3000
+) {
+    $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
+    do {
+        $names = @($Window.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition
+        ) | ForEach-Object { $_.Current.Name })
+        if ($names | Where-Object { $_ -like $Pattern }) {
+            return
+        }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "UIA result missing: $Pattern"
+}
 try {
     $window = WindowFor $p 'Native window missing from UIA tree'
     $edits = Children $window ([System.Windows.Automation.ControlType]::Edit)
@@ -923,14 +941,7 @@ try {
     if ($restoredManuscriptValue -ne $recoveredManuscript) {
         throw 'Abrupt-exit manuscript draft was not restored into the fresh process'
     }
-    Start-Sleep -Milliseconds 1000
-    $recoveredManuscriptNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($recoveredManuscriptNames | Where-Object { $_ -like '*Recovered manuscript autosaved to project revisions*' })) {
-        throw 'Recovered manuscript draft did not autosave without a new user edit'
-    }
+    WaitForNameLike $window '*Recovered manuscript autosaved to project revisions*' 3000
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect manuscript').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $recoveredInspectNames = @($window.FindAll(
@@ -991,14 +1002,7 @@ try {
     if ($restoredNotebookValue -ne $recoveredNotebook) {
         throw 'Abrupt-exit notebook draft was not restored into the fresh process'
     }
-    Start-Sleep -Milliseconds 1000
-    $recoveredNotebookNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($recoveredNotebookNames | Where-Object { $_ -like '*Recovered notebook autosaved to project revisions*' })) {
-        throw 'Recovered notebook draft did not autosave without a new user edit'
-    }
+    WaitForNameLike $window '*Recovered notebook autosaved to project revisions*' 3000
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export notebook Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $recoveredNotebookExportNames = @($window.FindAll(
