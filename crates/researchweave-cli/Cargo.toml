@@ -1,0 +1,20 @@
+[package]
+name = "researchweave-cli"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+researchweave-core = { path = "../researchweave-core", version = "=0.1.0" }
+researchweave-analysis = { path = "../researchweave-analysis", version = "=0.1.0" }
+researchweave-ai = { path = "../researchweave-ai", version = "=0.1.0" }
+researchweave-cloud = { path = "../researchweave-cloud", version = "=0.1.0" }
+researchweave-evidence = { path = "../researchweave-evidence", version = "=0.1.0" }
+researchweave-library = { path = "../researchweave-library", version = "=0.1.0" }
+researchweave-project = { path = "../researchweave-project", version = "=0.1.0" }
+serde_json.workspace = true
+ureq = { version = "2.12", default-features = true, features = ["json"] }
+
+[dev-dependencies]
+tempfile = "3"

@@ -1,0 +1,35 @@
+[workspace]
+members = [
+    "crates/researchweave-core",
+    "crates/researchweave-crypto",
+    "crates/researchweave-project",
+    "crates/researchweave-sync",
+    "crates/researchweave-cloud",
+    "crates/researchweave-desktop",
+    "crates/researchweave-analysis",
+    "crates/researchweave-evidence",
+    "crates/researchweave-ai",
+    "crates/researchweave-cli",
+    "crates/researchweave-library",
+]
+resolver = "2"
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "GPL-3.0-only"
+rust-version = "1.94.1"
+
+[workspace.dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+sha2 = "0.10"
+rand = "0.8"
+hex = "0.4"
+
+# The Slint/PDFium desktop link graph produces a very large Windows PDB with
+# full debug info and can hit LINK LNK1318 during iterative UI work. Line-table
+# debug info keeps development stacks useful without changing release builds.
+[profile.dev]
+debug = 1

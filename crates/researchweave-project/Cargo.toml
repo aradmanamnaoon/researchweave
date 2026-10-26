@@ -1,0 +1,21 @@
+[package]
+name = "researchweave-project"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+researchweave-core = { path = "../researchweave-core", version = "=0.1.0" }
+researchweave-crypto = { path = "../researchweave-crypto", version = "=0.1.0" }
+hex.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+sha2.workspace = true
+thiserror.workspace = true
+rusqlite = { version = "0.38", features = ["bundled", "backup"] }
+tempfile = "3"
+time = { version = "0.3", features = ["formatting", "parsing"] }
+uuid = { version = "1", features = ["v4"] }
+zip = { version = "9.1", default-features = false, features = ["deflate-flate2-zlib-rs"] }
+

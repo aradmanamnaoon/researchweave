@@ -1,0 +1,15 @@
+[package]
+name = "researchweave-sync"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+researchweave-crypto = { path = "../researchweave-crypto", version = "=0.1.0" }
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+sha2.workspace = true
+hex.workspace = true
+uuid = { version = "1", features = ["v4"] }

@@ -1,0 +1,4 @@
+# Exact historical false positives retained for auditability. Do not add broad
+# path/rule ignores here: future findings must be reviewed independently.
+7d8e647cf86d4143900ce87563f5e48d446d7de3:docs/verification/NEXT_ACTION.md:generic-api-key:13
+f62c2a76d1c59c47a08b6eb0873151e03c6b3c79:README.md:generic-api-key:143

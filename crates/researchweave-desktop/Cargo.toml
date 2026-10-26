@@ -1,0 +1,29 @@
+[package]
+name = "researchweave-desktop"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+build = "build.rs"
+
+[dependencies]
+slint = "1.13"
+researchweave-project = { path = "../researchweave-project", version = "=0.1.0" }
+researchweave-library = { path = "../researchweave-library", version = "=0.1.0" }
+researchweave-evidence = { path = "../researchweave-evidence", version = "=0.1.0" }
+researchweave-analysis = { path = "../researchweave-analysis", version = "=0.1.0" }
+researchweave-ai = { path = "../researchweave-ai", version = "=0.1.0" }
+researchweave-core = { path = "../researchweave-core", version = "=0.1.0" }
+uuid = { version = "1", features = ["v4"] }
+serde_json.workspace = true
+serde.workspace = true
+sha2.workspace = true
+hex.workspace = true
+firecrawl-pdfium = "=0.1.0"
+png = "0.17"
+
+[build-dependencies]
+slint-build = "1.13"
+
+[dev-dependencies]
+lopdf = { version = "0.42", default-features = false }

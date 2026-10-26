@@ -1,0 +1,38 @@
+[package]
+name = "researchweave-cloud"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+researchweave-sync = { path = "../researchweave-sync", version = "=0.1.0" }
+researchweave-core = { path = "../researchweave-core", version = "=0.1.0" }
+researchweave-project = { path = "../researchweave-project", version = "=0.1.0" }
+researchweave-crypto = { path = "../researchweave-crypto", version = "=0.1.0" }
+aws-config = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
+aws-credential-types = "1"
+aws-sdk-s3 = { version = "1", default-features = false, features = ["default-https-client", "http-1x", "rt-tokio"] }
+aws-smithy-types = "1"
+aws-types = "1"
+parking_lot = "0.12"
+serde.workspace = true
+serde_json.workspace = true
+thiserror.workspace = true
+tokio = { version = "1", features = ["rt-multi-thread", "time"] }
+url = "2"
+uuid = { version = "1", features = ["v4"] }
+tempfile = "3"
+zeroize = "1"
+sha2 = "0.10"
+hex = "0.4"
+
+[target.'cfg(target_os = "windows")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["windows-native"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["apple-native"] }
+
+[target.'cfg(target_os = "linux")'.dependencies]
+keyring = { version = "3", default-features = false, features = ["sync-secret-service"] }
+

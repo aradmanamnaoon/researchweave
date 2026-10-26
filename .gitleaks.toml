@@ -1,0 +1,15 @@
+[extend]
+useDefault = true
+
+# These files are deliberately non-secret verification artifacts. Keep this
+# allowlist path-scoped rather than weakening the generic-api-key detector:
+# - the two JSON files are prior detect-secrets scanner metadata and contain
+#   detector hashes/results that recursively resemble high-entropy tokens;
+# - the UI journey is an explicitly synthetic, offline authorization trace
+#   whose 64-hex fingerprint/idempotency fields are deterministic test data.
+[[allowlists]]
+description = "Reviewed generated scanner metadata and deterministic synthetic authorization journey"
+paths = [
+  '''docs/verification/SECRETS_(SCAN|REVIEW_FOCUSED)\.json$''',
+  '''workstreams/v2/ui/journeys/JOURNEY_4_UNAUTHORIZED_AI_ACTION\.json$''',
+]

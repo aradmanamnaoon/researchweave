@@ -1,0 +1,2194 @@
+import { Button, LineEdit, TextEdit, ListView, ScrollView, Palette } from "std-widgets.slint";
+export { Palette } from "std-widgets.slint";
+
+export global Theme {
+    in-out property <bool> dark-mode: false;
+    in-out property <bool> high-contrast: false;
+    in-out property <bool> compact-density: false;
+    in-out property <int> ui-scale: 100;
+    in-out property <bool> reduced-motion: false;
+    in-out property <color> canvas: high-contrast ? #000000 : (dark-mode ? #101923 : #f6f5f1);
+    in-out property <color> surface: high-contrast ? #111111 : (dark-mode ? #172438 : #ffffff);
+    in-out property <color> raised: high-contrast ? #1b1b1b : (dark-mode ? #1d2e3a : #edf1f0);
+    in-out property <color> ink: high-contrast ? #ffffff : (dark-mode ? #f4f6f8 : #172438);
+    in-out property <color> muted-ink: high-contrast ? #ffffff : (dark-mode ? #b9c5d3 : #5b677a);
+    in-out property <color> divider: high-contrast ? #ffffff : (dark-mode ? #81919f : #87989a);
+    // Brand accent deliberately uses a darker teal in light mode so white
+    // primary-button text remains WCAG-AA readable.
+    in-out property <color> accent: high-contrast ? #ffff00 : (dark-mode ? #55c7bd : #147a75);
+    in-out property <color> accent-subtle: high-contrast ? #262600 : (dark-mode ? #173d3b : #ddeDEA);
+    in-out property <color> accent-ink: high-contrast ? #000000 : (dark-mode ? #101923 : #ffffff);
+    in-out property <color> focus: high-contrast ? #00ffff : (dark-mode ? #a997e8 : #7564b5);
+    in-out property <color> success: high-contrast ? #7cffb2 : (dark-mode ? #7fd4af : #237a57);
+    in-out property <color> warning: high-contrast ? #ffd166 : (dark-mode ? #e0a17b : #8a5a00);
+    in-out property <color> danger: high-contrast ? #ff8899 : (dark-mode ? #ff9fad : #a9243e);
+    in-out property <color> conflict: high-contrast ? #ffffff : (dark-mode ? #a997e8 : #7564b5);
+    in-out property <color> evidence-violet: high-contrast ? #ffffff : (dark-mode ? #a997e8 : #7564b5);
+    in-out property <color> discovery-copper: high-contrast ? #ffd166 : (dark-mode ? #e0a17b : #9a5b3a);
+    in-out property <color> rail-muted: high-contrast ? #ffffff : (dark-mode ? #b9c5d3 : #b8c4d4);
+    in-out property <color> rail-background: high-contrast ? #000000 : (dark-mode ? #101923 : #172438);
+    in-out property <color> reader-canvas: high-contrast ? #000000 : (dark-mode ? #0c141d : #efede7);
+    in-out property <color> tab-strip: high-contrast ? #1b1b1b : (dark-mode ? #13202c : #edf1f0);
+    // Scientific-visualization roles. Charts must still expose numeric labels,
+    // uncertainty and machine-readable data rather than encoding meaning by color.
+    in-out property <color> data-1: high-contrast ? #00ffff : (dark-mode ? #55c7bd : #147a75);
+    in-out property <color> data-2: high-contrast ? #ff99ff : (dark-mode ? #a997e8 : #7564b5);
+    in-out property <color> data-3: high-contrast ? #ffd166 : (dark-mode ? #e0a17b : #9a5b3a);
+    in-out property <color> data-4: high-contrast ? #ffffff : (dark-mode ? #8fb9e8 : #315f8f);
+    in-out property <length> panel-radius: 8px;
+    in-out property <length> control-radius: 5px;
+    in-out property <length> space1: 4px;
+    in-out property <length> space2: 8px;
+    in-out property <length> space3: compact-density ? 8px : 12px;
+    in-out property <length> space4: compact-density ? 12px : 16px;
+    in-out property <length> space5: compact-density ? 16px : 20px;
+    in-out property <length> space6: compact-density ? 18px : 24px;
+    in-out property <length> space8: 32px;
+}
+
+component SemanticProgress inherits Rectangle {
+    in property <float> progress;
+    in property <string> label;
+    min-height: 6px;
+    preferred-height: 6px;
+    max-height: 6px;
+    horizontal-stretch: 1;
+    vertical-stretch: 0;
+    background: Theme.divider;
+    border-radius: 3px;
+    accessible-role: progress-indicator;
+    accessible-label: root.label;
+    accessible-value: root.progress;
+    accessible-value-minimum: 0.0;
+    accessible-value-maximum: 1.0;
+    Rectangle {
+        width: parent.width * min(1, max(0, root.progress));
+        height: parent.height;
+        background: Theme.accent;
+        border-radius: parent.border-radius;
+    }
+}
+
+component ActivityNavButton inherits Rectangle {
+    in property <string> label;
+    in property <image> icon;
+    in property <bool> selected;
+    callback clicked;
+
+    min-height: Theme.ui-scale > 150 ? 62px : 50px;
+    preferred-height: Theme.ui-scale > 150 ? 62px : 50px;
+    max-height: Theme.ui-scale > 150 ? 62px : 50px;
+    horizontal-stretch: 1;
+    background: root.selected
+        ? Theme.accent-subtle
+        : (touch.has-hover ? (Theme.dark-mode ? #213244 : #26384f) : transparent);
+    border-radius: 9px;
+    border-width: root.selected ? 1px : 0px;
+    border-color: root.selected ? Theme.accent : transparent;
+    clip: true;
+
+    accessible-role: button;
+    accessible-label: root.label + " activity";
+    accessible-description: root.selected
+        ? "Current ResearchWeave activity"
+        : "Switch to the " + root.label + " research activity";
+    accessible-action-default => { root.clicked(); }
+    forward-focus: focus-scope;
+
+    Rectangle {
+        x: 7px;
+        y: 10px;
+        width: 3px;
+        height: parent.height - 20px;
+        border-radius: 2px;
+        background: root.selected ? Theme.accent : transparent;
+        accessible-role: none;
+    }
+
+    VerticalLayout {
+        padding-left: 12px;
+        padding-right: 8px;
+        padding-top: 5px;
+        padding-bottom: 5px;
+        spacing: 3px;
+        alignment: center;
+
+        Image {
+            source: root.icon;
+            min-width: Theme.ui-scale > 150 ? 24px : 18px;
+            preferred-width: Theme.ui-scale > 150 ? 24px : 18px;
+            max-width: Theme.ui-scale > 150 ? 24px : 18px;
+            min-height: Theme.ui-scale > 150 ? 24px : 18px;
+            preferred-height: Theme.ui-scale > 150 ? 24px : 18px;
+            max-height: Theme.ui-scale > 150 ? 24px : 18px;
+            image-fit: contain;
+            colorize: root.selected ? Theme.accent : Theme.rail-muted;
+            accessible-role: none;
+        }
+        Text {
+            text: root.label;
+            color: root.selected ? Theme.ink : Theme.rail-muted;
+            font-size: Theme.ui-scale > 150 ? 14px : 10px;
+            font-weight: root.selected ? 700 : 550;
+            horizontal-alignment: center;
+            vertical-alignment: center;
+            accessible-role: none;
+        }
+    }
+
+    touch := TouchArea {
+        clicked => {
+            focus-scope.focus();
+            root.clicked();
+        }
+    }
+
+    focus-scope := FocusScope {
+        x: 0;
+        width: 0;
+        key-pressed(event) => {
+            if (event.text == Key.Space || event.text == Key.Return) {
+                root.clicked();
+                return accept;
+            }
+            return reject;
+        }
+    }
+
+    if focus-scope.has-focus: Rectangle {
+        border-radius: root.border-radius;
+        border-width: 2px;
+        border-color: Theme.focus;
+        accessible-role: none;
+    }
+}
+
+export component MainWindow inherits Window {
+    title: "ResearchWeave · Research workbench";
+    icon: @image-url("../../../assets/branding/researchweave-icon.png");
+    preferred-width: 1280px;
+    preferred-height: 800px;
+    min-width: 760px;
+    min-height: 560px;
+    background: Theme.canvas;
+    default-font-size: 14px * Theme.ui-scale / 100;
+
+    in-out property <int> page: 0;
+    in-out property <float> progress: 0;
+    in-out property <string> project-title: "No project selected";
+    in-out property <int> project-revision: 0;
+    in-out property <string> status: "Offline ready";
+    in-out property <string> durable-jobs: "No completed PDF operations";
+    in-out property <string> durable-notifications: "No notifications";
+    callback clear-job-history();
+    callback dismiss-notifications();
+    in-out property <image> pdf-image;
+    in-out property <string> pdf-status: "Choose a local PDF file";
+    in-out property <int> pdf-matches: 0;
+    in-out property <float> pdf-highlight-x: 0;
+    in-out property <float> pdf-highlight-y: 0;
+    in-out property <float> pdf-highlight-w: 0;
+    in-out property <float> pdf-highlight-h: 0;
+    in-out property <bool> pdf-highlight-visible: false;
+    in-out property <int> pdf-job: 0;
+    in-out property <string> library-results: "Open a project, then refresh its sources.";
+    in-out property <string> research-summary: "Open a project to inspect its recorded research question and design.";
+    in-out property <string> question-results: "Preview a structured question before recording it.";
+    in-out property <string> protocol-results: "Preview a protocol before recording it.";
+    in-out property <string> reference-results: "Register or inspect project references.";
+    in-out property <string> review-results: "Use persisted references to build and screen a review.";
+    in-out property <string> extraction-results: "Create a versioned extraction schema, then record validated values for a review record.";
+    in-out property <string> analysis-results: "Import an immutable dataset revision or inspect saved analysis data.";
+    in-out property <string> statistics-result-title: "No analysis run yet";
+    in-out property <string> statistics-result-primary: "Choose a method and run it against an immutable dataset revision.";
+    in-out property <string> statistics-result-secondary: "";
+    in-out property <string> statistics-result-provenance: "";
+    in-out property <string> variable-results: "Inspect variable metadata, missingness and quality before creating a revised immutable dataset.";
+    in-out property <string> analysis-report-results: "Persist verified statistical outputs, reload them by digest, and compose deterministic provenance reports.";
+    in-out property <string> mixed-methods-results: "Combine an immutable dataset revision with persisted qualitative case mappings. Caller-supplied coding provenance is not accepted.";
+    in-out property <string> writing-results: "Preview and save a versioned manuscript section.";
+    in-out property <string> agent-results: "Durable project-scoped assistant conversations and prompt templates are available offline.";
+    in-out property <string> agent-action-results: "Stage an offline retrieval tool proposal to review its exact operation, effect and fingerprint before approval.";
+    in-out property <string> provider-results: "Provider validation is offline-only; remote egress is disabled until explicitly configured.";
+    in-out property <string> diagnostics-results: "Run structural diagnostics for the open project.";
+    in-out property <string> project-activity-results: "Local project event provenance is not authenticated identity evidence.";
+    in-out property <string> notebook-results: "Save a revisioned project notebook, inspect history, or export Markdown.";
+    in-out property <string> notebook-draft: "";
+    in-out property <string> manuscript-draft-id: "";
+    in-out property <string> manuscript-draft-section: "";
+    in-out property <string> manuscript-draft-citations: "";
+    in-out property <string> manuscript-draft-body: "";
+    callback notebook-draft-edited(string);
+    callback manuscript-draft-edited(string, string, string, string);
+    in-out property <string> qualitative-results: "Inspect the codebook before editing; writes require the current content hash.";
+    in-out property <string> backup-results: "Open a project, then choose an absolute archive path.";
+    in-out property <string> recovery-results: "Restore always creates a new project directory.";
+    in-out property <string> command-results: "Search views, resources, settings and help";
+
+    callback load-pdf(string, string);
+    callback create-project(string, string);
+    callback create-default-project(string);
+    callback open-project(string);
+    callback start-job();
+    callback run-command(string);
+    callback query-command(string) -> string;
+    callback sync-widget-theme(bool);
+    callback update-preference(string, bool);
+    callback update-ui-scale(int);
+    callback library-action(string, string, string);
+    callback refresh-research();
+    callback preview-question(string, string, string, string);
+    callback preview-protocol(string, string, string, string);
+    callback apply-evidence-preview();
+    callback load-question-history(string);
+    callback load-protocol-history(string);
+    callback preview-reference(string, string, string, string, string, string, string);
+    callback apply-library-preview();
+    callback refresh-references();
+    callback preview-review-record(string, string);
+    callback preview-review-screen(string, string, string, string, string, string);
+    callback refresh-review(string);
+    callback load-review-status(string, string, string);
+    callback preview-extraction-form(string, string, string);
+    callback preview-extraction-form-revision(string, string, string, string, string);
+    callback preview-extraction-values(string, string, string, string);
+    callback load-extraction-history(string);
+    callback load-extraction-values(string);
+    callback preview-analysis-import(string);
+    callback apply-analysis-preview();
+    callback inspect-dataset(string, string);
+    callback run-descriptives(string, string, string);
+    callback run-frequency(string, string, string);
+    callback run-correlation(string, string, string, string);
+    callback run-t-test(string, string, string, string, string, string);
+    callback run-linear-model(string, string, string, string);
+    callback inspect-variable-view(string, string);
+    callback preview-variable-update(string, string, string, string);
+    callback preview-analysis-result-save(string, string, string);
+    callback apply-analysis-command-preview();
+    callback load-analysis-result(string);
+    callback render-analysis-report(string, string);
+    callback export-analysis-script(string);
+    callback run-mixed-joint-display(string, string, string, string, string, string);
+    callback preview-writing-section(string, string, string, string);
+    callback inspect-manuscript(string);
+    callback export-manuscript(string, string);
+    callback publishing-action(string, string, string);
+    callback preview-conversation-create(string, string);
+    callback preview-assistant-message(string, string, string);
+    callback apply-ai-preview();
+    callback load-assistant-history(string);
+    callback list-assistant-conversations();
+    callback preview-prompt-template(string, string, string);
+    callback render-prompt-template(string, string);
+    callback preview-agent-plan(string, string, string);
+    callback stage-agent-action(string, string);
+    callback approve-agent-action();
+    callback deny-agent-action(string);
+    callback execute-agent-action();
+    callback load-agent-action-timeline();
+    callback validate-provider(string, string, string, string, string);
+    callback profile-action(string, string, string, string, string, string);
+    callback list-provider-profiles();
+    callback run-diagnostics();
+    callback load-project-activity(string, string, string);
+    callback clear-project-activity-view();
+    callback preview-notebook-save(string);
+    callback load-notebook-history();
+    callback export-notebook();
+    callback inspect-qualitative();
+    callback preview-qualitative-code(string, string, string, string, string, string);
+    callback preview-qualitative-transcript(string, string, string, string, bool);
+    callback preview-qualitative-annotation(string, string, string, string, string, string, string);
+    callback compute-qualitative-kappa(string, string);
+    callback backup-action(string, string, string);
+    callback restore-backup(bool, string, string, string);
+
+    sync-widget-theme(dark) => {
+        Palette.color-scheme = dark ? ColorScheme.dark : ColorScheme.light;
+    }
+
+    private property <[string]> pages: [
+        "Welcome", "Dashboard", "Question", "Search", "Protocol", "Library", "Reader", "PDF Reader",
+        "Evidence", "Review", "PRISMA", "Extraction", "Data View", "Variable View", "Statistics",
+        "Analysis Results", "Qualitative", "Codebook", "Mixed Methods", "Manuscript", "References",
+        "Notebook", "Publishing", "Agent", "Providers", "Privacy", "Integrations", "Exports",
+        "Backups", "Recovery", "Diagnostics", "Jobs", "Notifications", "Tutorials", "Guidance",
+        "Shortcuts", "Preferences", "Activity", "About"
+    ];
+
+    // Activity roots are intentionally much smaller than the legacy 39-screen directory.
+    // Legacy page ids remain stable for migration, automation and command aliases.
+    private property <int> activity:
+        (root.page == 0 || root.page == 1 || root.page == 2 || root.page == 4) ? 0 :
+        (root.page == 3 || root.page == 5 || root.page == 6 || root.page == 7 || root.page == 8 ||
+         root.page == 9 || root.page == 10 || root.page == 11 || root.page == 20) ? 1 :
+        (root.page >= 12 && root.page <= 18) ? 2 :
+        (root.page == 19 || root.page == 21 || root.page == 22 || root.page == 27) ? 3 :
+        (root.page == 23 || root.page == 31 || root.page == 32) ? 4 : 5;
+    private property <string> activity-name:
+        root.activity == 0 ? "Home" :
+        root.activity == 1 ? "Sources" :
+        root.activity == 2 ? "Analyze" :
+        root.activity == 3 ? "Synthesize" :
+        root.activity == 4 ? "Automate" : "Manage";
+    // Keep responsive state imperative so child layout metrics never feed back
+    // into the width expression that decides whether those children collapse.
+    // Do not replace these changed callbacks with a direct width-dependent
+    // visibility binding: doing so creates a cyclic Slint layout dependency.
+    private property <bool> show-context-sidebar: true;
+    private property <bool> show-inspector: true;
+    private property <length> responsive-width: root.width;
+    private property <int> responsive-scale: Theme.ui-scale;
+    changed responsive-width => {
+        root.show-context-sidebar = Theme.ui-scale < 160 && root.responsive-width >= 980px * Theme.ui-scale / 100;
+        root.show-inspector = root.responsive-width >= 1180px * Theme.ui-scale / 100;
+    }
+    changed responsive-scale => {
+        root.show-context-sidebar = Theme.ui-scale < 160 && root.responsive-width >= 980px * Theme.ui-scale / 100;
+        root.show-inspector = root.responsive-width >= 1180px * Theme.ui-scale / 100;
+    }
+    private property <string> object-kind:
+        (root.page == 0 || root.page == 1 || root.page == 2 || root.page == 4) ? "Project" :
+        (root.page >= 3 && root.page <= 11) || root.page == 20 ? "Source" :
+        (root.page == 12 || root.page == 13) ? "Dataset" :
+        (root.page >= 14 && root.page <= 18) ? "Analysis" :
+        (root.page == 19 || root.page == 21 || root.page == 22 || root.page == 27) ? "Document" :
+        (root.page == 23 || root.page == 31 || root.page == 32) ? "Automation" : "Workspace";
+    private property <int> focus-region: 0;
+    private property <int> statistics-mode: 0;
+
+    FocusScope {
+        KeyBinding {
+            keys: @keys(F6);
+            activated => {
+                if (root.focus-region == 0) {
+                    if (root.show-context-sidebar) {
+                        context-start.focus();
+                        root.focus-region = 1;
+                    } else {
+                        command-field.focus();
+                        root.focus-region = 2;
+                    }
+                } else if (root.focus-region == 1) {
+                    command-field.focus();
+                    root.focus-region = 2;
+                } else if (root.focus-region == 2) {
+                    tray-focus.focus();
+                    root.focus-region = 3;
+                } else {
+                    home-activity.focus();
+                    root.focus-region = 0;
+                }
+            }
+        }
+        KeyBinding {
+            keys: @keys(Shift + F6);
+            activated => {
+                if (root.focus-region == 0) {
+                    tray-focus.focus();
+                    root.focus-region = 3;
+                } else if (root.focus-region == 3) {
+                    command-field.focus();
+                    root.focus-region = 2;
+                } else if (root.focus-region == 2) {
+                    if (root.show-context-sidebar) {
+                        context-start.focus();
+                        root.focus-region = 1;
+                    } else {
+                        home-activity.focus();
+                        root.focus-region = 0;
+                    }
+                } else {
+                    home-activity.focus();
+                    root.focus-region = 0;
+                }
+            }
+        }
+        key-pressed(event) => {
+            if (event.modifiers.control && (event.text == "k" || event.text == "K")) {
+                command-field.focus();
+                accept
+            } else if (event.text == Key.Escape) {
+                command-field.text = "";
+                root.command-results = "Search views, resources, settings and help";
+                home-activity.focus();
+                root.focus-region = 0;
+                accept
+            } else if (event.modifiers.control && event.text == "1") {
+                root.page = 0;
+                accept
+            } else if (event.modifiers.control && event.text == "2") {
+                root.page = 1;
+                accept
+            } else {
+                reject
+            }
+        }
+
+        VerticalLayout {
+            spacing: 0px;
+
+            HorizontalLayout {
+                spacing: 0px;
+
+                // Activity rail: stable roots instead of 39 equal-weight destinations.
+                Rectangle {
+                    min-width: Theme.ui-scale > 150 ? 176px : (Theme.ui-scale > 120 ? 132px : 104px);
+                    preferred-width: Theme.ui-scale > 150 ? 176px : (Theme.ui-scale > 120 ? 132px : 104px);
+                    max-width: Theme.ui-scale > 150 ? 176px : (Theme.ui-scale > 120 ? 132px : 104px);
+                    horizontal-stretch: 0;
+                    background: Theme.rail-background;
+                    accessible-role: navigation;
+                    accessible-label: "Activity rail";
+                    ScrollView {
+                      VerticalLayout {
+                        padding: 10px;
+                        spacing: 5px;
+                        alignment: start;
+                        Image {
+                            source: @image-url("../../../assets/branding/researchweave-mark.svg");
+                            min-height: 34px;
+                            preferred-height: 34px;
+                            max-height: 34px;
+                            image-fit: contain;
+                        }
+                        Text {
+                            text: "WORKBENCH";
+                            color: Theme.rail-muted;
+                            font-size: Theme.ui-scale > 150 ? 12px : 9px;
+                            horizontal-alignment: center;
+                        }
+                        Rectangle { height: 2px; }
+                        home-activity := ActivityNavButton {
+                            label: "Home";
+                            icon: @image-url("../../../assets/icons/home.svg");
+                            selected: root.activity == 0;
+                            clicked => { root.page = 1; }
+                        }
+                        ActivityNavButton {
+                            label: "Sources";
+                            icon: @image-url("../../../assets/icons/sources.svg");
+                            selected: root.activity == 1;
+                            clicked => { root.page = 5; }
+                        }
+                        ActivityNavButton {
+                            label: "Analyze";
+                            icon: @image-url("../../../assets/icons/analyze.svg");
+                            selected: root.activity == 2;
+                            clicked => { root.page = 12; }
+                        }
+                        ActivityNavButton {
+                            label: "Synthesize";
+                            icon: @image-url("../../../assets/icons/synthesize.svg");
+                            selected: root.activity == 3;
+                            clicked => { root.page = 21; }
+                        }
+                        ActivityNavButton {
+                            label: "Automate";
+                            icon: @image-url("../../../assets/icons/automate.svg");
+                            selected: root.activity == 4;
+                            clicked => { root.page = 23; }
+                        }
+                        ActivityNavButton {
+                            label: "Manage";
+                            icon: @image-url("../../../assets/icons/manage.svg");
+                            selected: root.activity == 5;
+                            clicked => { root.page = 36; }
+                        }
+                      }
+                    }
+                }
+
+                // Context sidebar changes with the active research activity.
+                Rectangle {
+                    visible: root.show-context-sidebar;
+                    min-width: root.show-context-sidebar ? 180px * Theme.ui-scale / 100 : 0px;
+                    preferred-width: root.show-context-sidebar ? 245px * Theme.ui-scale / 100 : 0px;
+                    max-width: root.show-context-sidebar ? 255px * Theme.ui-scale / 100 : 0px;
+                    horizontal-stretch: 0;
+                    clip: true;
+                    background: Theme.surface;
+                    border-color: Theme.divider;
+                    border-width: 1px;
+                    accessible-role: navigation;
+                    accessible-label: root.activity-name + " navigation";
+                    VerticalLayout {
+                        padding: 14px;
+                        spacing: 8px;
+                        Text {
+                            text: root.activity-name;
+                            color: Theme.ink;
+                            font-size: 18px * Theme.ui-scale / 100;
+                            font-weight: 650;
+                        }
+                        context-start := Button {
+                            text: "Current activity";
+                            max-height: 32px;
+                            accessible-label: root.activity-name + " navigation start";
+                            accessible-description: "Keyboard focus entry point for the current activity sidebar";
+                            clicked => {
+                                root.page =
+                                    root.activity == 0 ? 1 :
+                                    root.activity == 1 ? 5 :
+                                    root.activity == 2 ? 12 :
+                                    root.activity == 3 ? 21 :
+                                    root.activity == 4 ? 23 : 36;
+                            }
+                        }
+                        Text {
+                            text: root.project-title;
+                            color: Theme.muted-ink;
+                            font-size: 12px * Theme.ui-scale / 100;
+                        }
+                        Rectangle { height: 6px; }
+
+                        if root.activity == 0: VerticalLayout {
+                            spacing: 5px;
+                            Button { text: root.page == 0 ? "› Start Center" : "Start Center"; accessible-label: "Welcome workspace screen"; clicked => { root.page = 0; } }
+                            Button { text: root.page == 1 ? "› Project Home" : "Project Home"; accessible-label: "Dashboard workspace screen"; clicked => { root.page = 1; } }
+                            Button { text: root.page == 2 ? "› Research Question" : "Research Question"; accessible-label: "Question workspace screen"; clicked => { root.page = 2; } }
+                            Button { text: root.page == 4 ? "› Protocol" : "Protocol"; accessible-label: "Protocol workspace screen"; clicked => { root.page = 4; } }
+                        }
+                        if root.activity == 1: VerticalLayout {
+                            spacing: 5px;
+                            Button { text: root.page == 5 ? "› Library" : "Library"; accessible-label: "Library workspace screen"; clicked => { root.page = 5; } }
+                            Button { text: root.page == 3 ? "› Search" : "Search"; accessible-label: "Search workspace screen"; clicked => { root.page = 3; } }
+                            Button { text: root.page == 6 ? "› Reader" : "Reader"; accessible-label: "Reader workspace screen"; clicked => { root.page = 6; } }
+                            Button { text: root.page == 7 ? "› PDF Reader" : "PDF Reader"; accessible-label: "PDF Reader workspace screen"; clicked => { root.page = 7; } }
+                            Button { text: root.page == 8 ? "› Evidence" : "Evidence"; accessible-label: "Evidence workspace screen"; clicked => { root.page = 8; } }
+                            Button { text: root.page == 20 ? "› References" : "References"; accessible-label: "References workspace screen"; clicked => { root.page = 20; } }
+                            Text { text: "SYSTEMATIC REVIEW"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                            Button { text: root.page == 9 ? "› Review" : "Review"; accessible-label: "Review workspace screen"; clicked => { root.page = 9; } }
+                            Button { text: root.page == 10 ? "› PRISMA" : "PRISMA"; accessible-label: "PRISMA workspace screen"; clicked => { root.page = 10; } }
+                            Button { text: root.page == 11 ? "› Extraction" : "Extraction"; accessible-label: "Extraction workspace screen"; clicked => { root.page = 11; } }
+                        }
+                        if root.activity == 2: VerticalLayout {
+                            spacing: 5px;
+                            Text { text: "DATA"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                            Button { text: root.page == 12 ? "› Data" : "Data"; accessible-label: "Data View workspace screen"; clicked => { root.page = 12; } }
+                            Button { text: root.page == 13 ? "› Variables" : "Variables"; accessible-label: "Variable View workspace screen"; clicked => { root.page = 13; } }
+                            Text { text: "ANALYSIS"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                            Button { text: root.page == 14 ? "› Statistics" : "Statistics"; accessible-label: "Statistics workspace screen"; clicked => { root.page = 14; } }
+                            Button { text: root.page == 15 ? "› Results" : "Results"; accessible-label: "Analysis Results workspace screen"; clicked => { root.page = 15; } }
+                            Button { text: root.page == 16 ? "› Qualitative" : "Qualitative"; accessible-label: "Qualitative workspace screen"; clicked => { root.page = 16; } }
+                            Button { text: root.page == 17 ? "› Codebook" : "Codebook"; accessible-label: "Codebook workspace screen"; clicked => { root.page = 17; } }
+                            Button { text: root.page == 18 ? "› Mixed Methods" : "Mixed Methods"; accessible-label: "Mixed Methods workspace screen"; clicked => { root.page = 18; } }
+                        }
+                        if root.activity == 3: VerticalLayout {
+                            spacing: 5px;
+                            Button { text: root.page == 21 ? "› Notebook" : "Notebook"; accessible-label: "Notebook workspace screen"; clicked => { root.page = 21; } }
+                            Button { text: root.page == 19 ? "› Manuscript" : "Manuscript"; accessible-label: "Manuscript workspace screen"; clicked => { root.page = 19; } }
+                            Button { text: root.page == 22 ? "› Publishing" : "Publishing"; accessible-label: "Publishing workspace screen"; clicked => { root.page = 22; } }
+                            Button { text: root.page == 27 ? "› Exports" : "Exports"; accessible-label: "Exports workspace screen"; clicked => { root.page = 27; } }
+                        }
+                        if root.activity == 4: VerticalLayout {
+                            spacing: 5px;
+                            Button { text: root.page == 23 ? "› Assistant" : "Assistant"; accessible-label: "Agent workspace screen"; clicked => { root.page = 23; } }
+                            Button { text: root.page == 31 ? "› Jobs" : "Jobs"; accessible-label: "Jobs workspace screen"; clicked => { root.page = 31; } }
+                            Button { text: root.page == 32 ? "› Notifications" : "Notifications"; accessible-label: "Notifications workspace screen"; clicked => { root.page = 32; } }
+                        }
+                        if root.activity == 5: VerticalLayout {
+                            spacing: 4px;
+                            Button { text: root.page == 24 ? "› Providers" : "Providers"; accessible-label: "Providers workspace screen"; clicked => { root.page = 24; } }
+                            Button { text: root.page == 25 ? "› Privacy & approvals" : "Privacy & approvals"; accessible-label: "Privacy workspace screen"; clicked => { root.page = 25; } }
+                            Button { text: root.page == 26 ? "› Integrations" : "Integrations"; accessible-label: "Integrations workspace screen"; clicked => { root.page = 26; } }
+                            Button { text: root.page == 28 ? "› Backups" : "Backups"; accessible-label: "Backups workspace screen"; clicked => { root.page = 28; } }
+                            Button { text: root.page == 29 ? "› Recovery" : "Recovery"; accessible-label: "Recovery workspace screen"; clicked => { root.page = 29; } }
+                            Button { text: root.page == 30 ? "› Diagnostics" : "Diagnostics"; accessible-label: "Diagnostics workspace screen"; clicked => { root.page = 30; } }
+                            Button { text: root.page == 36 ? "› Preferences" : "Preferences"; accessible-label: "Preferences workspace screen"; clicked => { root.page = 36; } }
+                            Button { text: root.page == 35 ? "› Shortcuts" : "Shortcuts"; accessible-label: "Shortcuts workspace screen"; clicked => { root.page = 35; } }
+                            Button { text: root.page == 33 ? "› Tutorials" : "Tutorials"; accessible-label: "Tutorials workspace screen"; clicked => { root.page = 33; } }
+                            Button { text: root.page == 34 ? "› Guidance" : "Guidance"; accessible-label: "Guidance workspace screen"; clicked => { root.page = 34; } }
+                            Button { text: root.page == 37 ? "› Activity" : "Activity"; accessible-label: "Activity workspace screen"; clicked => { root.page = 37; } }
+                            Button { text: root.page == 38 ? "› About" : "About"; accessible-label: "About workspace screen"; clicked => { root.page = 38; } }
+                        }
+                    }
+                }
+
+                // Primary work area.
+                VerticalLayout {
+                    spacing: 0px;
+                    accessible-role: main;
+                    accessible-label: root.pages[root.page] + " work area";
+                    Rectangle {
+                        height: 84px * Theme.ui-scale / 100;
+                        background: Theme.surface;
+                        border-color: Theme.divider;
+                        border-width: 1px;
+                        HorizontalLayout {
+                            padding: 14px;
+                            spacing: 12px;
+                            VerticalLayout {
+                                spacing: 2px;
+                                Text {
+                                    text: root.activity-name + "  /  " + root.pages[root.page];
+                                    color: Theme.muted-ink;
+                                    font-size: 11px * Theme.ui-scale / 100;
+                                    wrap: word-wrap;
+                                }
+                                Text {
+                                    text: root.pages[root.page];
+                                    color: Theme.ink;
+                                    font-size: 22px * Theme.ui-scale / 100;
+                                    font-weight: 700;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            Rectangle { width: 16px; }
+                            command-field := LineEdit {
+                                placeholder-text: "Find workbench views…  Ctrl+K";
+                                accessible-id: "command-palette";
+                                accessible-label: "Command palette";
+                                accessible-description: "Press Control K, type a workbench activity or destination, and press Enter";
+                                edited(text) => { root.command-results = root.query-command(text); }
+                                accepted(text) => {
+                                    root.run-command(text);
+                                    root.command-results = root.query-command(text);
+                                }
+                            }
+                            Text {
+                                text: "Ctrl+K";
+                                visible: Theme.ui-scale <= 150;
+                                color: Theme.muted-ink;
+                                font-size: 11px * Theme.ui-scale / 100;
+                                vertical-alignment: center;
+                            }
+                            Text {
+                                text: root.project-title + " · r" + root.project-revision;
+                                visible: Theme.ui-scale <= 150 && root.width >= 1100px;
+                                horizontal-alignment: right;
+                                vertical-alignment: center;
+                                color: Theme.muted-ink;
+                                font-size: 12px * Theme.ui-scale / 100;
+                                    wrap: word-wrap;
+                            }
+                        }
+                    }
+
+                    if command-field.text != "": Rectangle {
+                        height: 38px * Theme.ui-scale / 100;
+                        background: Theme.accent-subtle;
+                        border-color: Theme.divider;
+                        border-width: 1px;
+                        Text {
+                            x: 14px;
+                            width: parent.width - 28px;
+                            vertical-alignment: center;
+                            text: root.command-results;
+                            color: Theme.ink;
+                            font-size: 11px * Theme.ui-scale / 100;
+                            accessible-label: "Command center results: " + root.command-results;
+                        }
+                    }
+
+                    // A compact object-tab strip establishes persistent workbench structure.
+                    Rectangle {
+                        height: 34px * Theme.ui-scale / 100;
+                        background: Theme.tab-strip;
+                        border-color: Theme.divider;
+                        border-width: 1px;
+                        HorizontalLayout {
+                            padding-left: 10px;
+                            padding-right: 10px;
+                            spacing: 6px;
+                            Text {
+                                text: root.object-kind;
+                                color: Theme.muted-ink;
+                                font-size: 9px * Theme.ui-scale / 100;
+                                vertical-alignment: center;
+                            }
+                            Rectangle {
+                                width: min(300px, 170px * Theme.ui-scale / 100);
+                                background: Theme.surface;
+                                border-radius: 4px;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                Text {
+                                    x: 10px;
+                                    vertical-alignment: center;
+                                    text: root.pages[root.page] + " · " + root.object-kind;
+                                    color: Theme.ink;
+                                    font-size: 12px * Theme.ui-scale / 100;
+                                    wrap: word-wrap;
+                                }
+                            }
+                        }
+                    }
+
+                    if root.page == 0: Rectangle {
+                        background: Theme.raised;
+                        HorizontalLayout {
+                            padding: 24px;
+                            spacing: 20px;
+                            Rectangle {
+                                background: Theme.surface;
+                                border-radius: Theme.panel-radius;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                VerticalLayout {
+                                    padding: 22px;
+                                    spacing: 12px;
+                                    Text { text: "Start a research project"; font-size: 24px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                                    Text { text: "Private and local by default. Cloud sync is always opt-in."; color: Theme.muted-ink; font-size: 13px * Theme.ui-scale / 100; }
+                                    Button {
+                                        text: "Quick create in managed local storage";
+                                        primary: true;
+                                        accessible-label: "Create default project";
+                                        accessible-description: "Create a private local project without choosing a filesystem path";
+                                        clicked => { root.create-default-project(project-name.text); }
+                                    }
+                                    Text { text: "CUSTOM LOCATION"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                    Text { text: "PROJECT LOCATION"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                    project-path := LineEdit {
+                                        placeholder-text: "Absolute project folder path";
+                                        accessible-id: "project-path";
+                                        accessible-label: "Project path";
+                                        accessible-description: "Absolute directory path for creating or opening a local project";
+                                    }
+                                    Text { text: "PROJECT TITLE"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                    project-name := LineEdit {
+                                        placeholder-text: "New project title";
+                                        text: "My Research";
+                                        accessible-id: "project-title";
+                                        accessible-label: "Project title";
+                                        accessible-description: "Title used when creating a new local project";
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Create at custom path";
+                                            accessible-label: "Create project";
+                                            accessible-description: "Create a project in the specified directory";
+                                            clicked => { root.create-project(project-path.text, project-name.text); }
+                                        }
+                                        Button {
+                                            text: "Open existing";
+                                            accessible-label: "Open project";
+                                            accessible-description: "Open the existing project in the specified directory";
+                                            clicked => { root.open-project(project-path.text); }
+                                        }
+                                    }
+                                    Text { text: "Research note"; color: Theme.ink; font-weight: 600; }
+                                    TextEdit {
+                                        text: "Try multiline text, selection and international input.";
+                                        accessible-id: "research-note";
+                                        accessible-label: "Research note";
+                                        accessible-description: "Multiline editable research note";
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                visible: root.show-inspector;
+                                min-width: 0px;
+                                preferred-width: root.show-inspector ? 280px : 0px;
+                                max-width: root.show-inspector ? 280px : 0px;
+                                horizontal-stretch: 0;
+                                background: Theme.accent-subtle;
+                                border-radius: Theme.panel-radius;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                accessible-role: complementary;
+                                accessible-label: "Start Center guidance";
+                                VerticalLayout {
+                                    padding: 18px;
+                                    spacing: 10px;
+                                    Text { text: "ResearchWeave"; color: Theme.ink; font-size: 18px * Theme.ui-scale / 100; font-weight: 700; }
+                                    Text { text: "A traceable research workbench"; color: Theme.accent; font-size: 12px * Theme.ui-scale / 100; }
+                                    Rectangle { height: 6px; }
+                                    Text { text: "• Question and protocol"; color: Theme.ink; font-size: 12px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                    Text { text: "• Sources and evidence"; color: Theme.ink; font-size: 12px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                    Text { text: "• Data and analysis"; color: Theme.ink; font-size: 12px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                    Text { text: "• Synthesis and publishing"; color: Theme.ink; font-size: 12px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                    Text { text: "• Approval-bound automation"; color: Theme.ink; font-size: 12px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                    Rectangle { height: 8px; }
+                                    Text { text: "No project selected yet."; color: Theme.muted-ink; font-size: 12px * Theme.ui-scale / 100; }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.page == 1: Rectangle {
+                        background: Theme.raised;
+                        HorizontalLayout {
+                            padding: 22px;
+                            spacing: 18px;
+                            VerticalLayout {
+                                spacing: 12px;
+                                Text { text: "Project home"; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                                Text { text: "Current project"; color: Theme.muted-ink; font-size: 11px * Theme.ui-scale / 100; }
+                                Text { text: root.project-title; color: Theme.ink; font-size: 18px * Theme.ui-scale / 100; font-weight: 600; }
+                                Text { text: "Revision " + root.project-revision + " · local workspace"; color: Theme.muted-ink; }
+                                Text { text: "Continue research"; color: Theme.muted-ink; font-size: 11px * Theme.ui-scale / 100; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { text: "Question"; icon: @image-url("../../../assets/icons/question.svg"); icon-size: 18px; colorize-icon: true; accessible-label: "Open research question"; clicked => { root.page = 2; } }
+                                    Button { text: "Protocol"; icon: @image-url("../../../assets/icons/protocol.svg"); icon-size: 18px; colorize-icon: true; accessible-label: "Open protocol"; clicked => { root.page = 4; } }
+                                    Button { text: "Library"; icon: @image-url("../../../assets/icons/sources.svg"); icon-size: 18px; colorize-icon: true; accessible-label: "Open library"; clicked => { root.page = 5; } }
+                                    Button { text: "Data"; icon: @image-url("../../../assets/icons/data.svg"); icon-size: 18px; colorize-icon: true; accessible-label: "Open data view"; clicked => { root.page = 12; } }
+                                }
+                                Rectangle {
+                                    height: 76px;
+                                    background: Theme.accent-subtle;
+                                    border-radius: Theme.panel-radius;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    HorizontalLayout {
+                                        padding: 12px;
+                                        spacing: 18px;
+                                        VerticalLayout {
+                                            spacing: 3px;
+                                            Text { text: "REVISION"; color: Theme.muted-ink; font-size: 9px * Theme.ui-scale / 100; }
+                                            Text { text: root.project-revision; color: Theme.ink; font-size: 18px * Theme.ui-scale / 100; font-weight: 700; }
+                                            Text { text: "immutable project state"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                        }
+                                        Rectangle { width: 1px; background: Theme.divider; }
+                                        VerticalLayout {
+                                            spacing: 3px;
+                                            Text { text: "STORAGE"; color: Theme.muted-ink; font-size: 9px * Theme.ui-scale / 100; }
+                                            Text { text: "Local first"; color: Theme.success; font-size: 14px * Theme.ui-scale / 100; font-weight: 650; }
+                                            Text { text: "project-scoped data"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                        }
+                                        Rectangle { width: 1px; background: Theme.divider; }
+                                        VerticalLayout {
+                                            spacing: 3px;
+                                            Text { text: "WRITES"; color: Theme.muted-ink; font-size: 9px * Theme.ui-scale / 100; }
+                                            Text { text: "Approval bound"; color: Theme.accent; font-size: 14px * Theme.ui-scale / 100; font-weight: 650; }
+                                            Text { text: "preview before mutation"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                        }
+                                    }
+                                }
+                                Text { text: "Responsiveness"; color: Theme.ink; font-weight: 600; }
+                                Button {
+                                    text: "Run local responsiveness check";
+                                    accessible-label: "Run local responsiveness check";
+                                    clicked => { root.start-job(); }
+                                }
+                                SemanticProgress {
+                                    progress: root.progress;
+                                    label: "Background operation progress";
+                                }
+                                Text {
+                                    text: "No sample research data is fabricated in the production workspace. Open or import real project data from Analyze.";
+                                    color: Theme.muted-ink;
+                                    font-size: 11px * Theme.ui-scale / 100;
+                                    wrap: word-wrap;
+                                }
+                            }
+                            Rectangle {
+                                visible: root.show-inspector;
+                                min-width: 0px;
+                                preferred-width: root.show-inspector ? 250px : 0px;
+                                max-width: root.show-inspector ? 250px : 0px;
+                                horizontal-stretch: 0;
+                                background: Theme.surface;
+                                border-radius: Theme.panel-radius;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                accessible-role: complementary;
+                                accessible-label: "Project context inspector";
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 8px;
+                                    Text { text: "Context"; color: Theme.ink; font-size: 15px * Theme.ui-scale / 100; font-weight: 600; }
+                                    Text { text: "Project revision"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                    Text { text: root.project-revision; color: Theme.ink; }
+                                    Text { text: "Storage"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                    Text { text: "Local first"; color: Theme.success; }
+                                    Text { text: "Network"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                    Text { text: "Explicit approval required"; color: Theme.ink; font-size: 11px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.page == 7: Rectangle {
+                        background: Theme.raised;
+                        HorizontalLayout {
+                            padding: 16px;
+                            spacing: 14px;
+                            VerticalLayout {
+                                spacing: 8px;
+                                Text { text: "PDF source"; font-size: 18px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                                pdf-path := LineEdit {
+                                    placeholder-text: "Absolute path to a local PDF";
+                                    accessible-label: "PDF file path";
+                                    accessible-description: "Absolute path to the PDF file to display";
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    pdf-query := LineEdit {
+                                        text: "PDFium";
+                                        placeholder-text: "Search first page";
+                                        accessible-label: "PDF search query";
+                                    }
+                                    Button {
+                                        text: "Open";
+                                        primary: true;
+                                        accessible-label: "Open PDF";
+                                        clicked => {
+                                            root.pdf-job += 1;
+                                            root.pdf-status = "Rendering PDF…";
+                                            root.load-pdf(pdf-path.text, pdf-query.text);
+                                        }
+                                    }
+                                    Button {
+                                        text: "Search";
+                                        accessible-label: "Search PDF";
+                                        clicked => {
+                                            root.pdf-job += 1;
+                                            root.pdf-status = "Searching PDF…";
+                                            root.load-pdf(pdf-path.text, pdf-query.text);
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: root.pdf-status + " · matches: " + root.pdf-matches;
+                                    color: Theme.muted-ink;
+                                    accessible-label: "PDF search status: " + root.pdf-status + " matches: " + root.pdf-matches;
+                                }
+                                Rectangle {
+                                    background: Theme.reader-canvas;
+                                    clip: true;
+                                    pdf-view := Image {
+                                        source: root.pdf-image;
+                                        width: parent.width;
+                                        height: parent.height;
+                                        image-fit: contain;
+                                        accessible-label: "Rendered PDF page";
+                                    }
+                                    if root.pdf-highlight-visible: Rectangle {
+                                        x: root.pdf-highlight-x * pdf-view.width;
+                                        y: root.pdf-highlight-y * pdf-view.height;
+                                        width: root.pdf-highlight-w * pdf-view.width;
+                                        height: root.pdf-highlight-h * pdf-view.height;
+                                        background: Theme.accent-subtle;
+                                        border-color: Theme.warning;
+                                        border-width: 2px;
+                                    }
+                                }
+                            }
+                            Rectangle {
+                                visible: root.show-inspector;
+                                min-width: 0px;
+                                preferred-width: root.show-inspector ? 250px : 0px;
+                                max-width: root.show-inspector ? 250px : 0px;
+                                horizontal-stretch: 0;
+                                background: Theme.surface;
+                                border-radius: Theme.panel-radius;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                accessible-role: complementary;
+                                accessible-label: "PDF reader context inspector";
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 8px;
+                                    Text { text: "Reader context"; color: Theme.ink; font-size: 15px * Theme.ui-scale / 100; font-weight: 600; }
+                                    Text { text: "Current native scope"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                    Text { text: "First-page render and search"; color: Theme.ink; font-size: 11px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                    Text { text: "Selection and annotations remain pending."; color: Theme.warning; font-size: 11px * Theme.ui-scale / 100; }
+                                    Text { text: "Evidence"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                    Button { text: "Open evidence"; clicked => { root.page = 8; } }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.page == 5: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 10px;
+                            Text { text: "Local source library"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; }
+                            source-title := LineEdit { placeholder-text: "Source title"; accessible-label: "Source title"; }
+                            source-body := TextEdit { accessible-label: "Source text"; text: ""; }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Button { text: "Add source"; accessible-label: "Add source"; clicked => { root.library-action("add", source-title.text, source-body.text); } }
+                                Button { text: "Refresh sources"; accessible-label: "Refresh sources"; clicked => { root.library-action("list", "", ""); } }
+                            }
+                            Text { text: root.library-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Library results"; }
+                        }
+                    }
+
+                    if root.page == 36: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                          VerticalLayout {
+                            padding: 24px;
+                            spacing: 14px;
+                            Text { text: "Display preferences"; color: Theme.ink; font-size: 24px * Theme.ui-scale / 100; font-weight: 700; }
+                            Text { text: "Saved locally and restored when you reopen ResearchWeave."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Button {
+                                text: Theme.dark-mode ? "Dark theme: on" : "Dark theme: off";
+                                accessible-label: "Toggle dark theme";
+                                clicked => { root.update-preference("dark-mode", !Theme.dark-mode); }
+                            }
+                            Text { text: Theme.dark-mode ? "Dark theme: on" : "Dark theme: off"; accessible-label: Theme.dark-mode ? "Dark theme: on" : "Dark theme: off"; color: Theme.ink; }
+                            Button {
+                                text: Theme.high-contrast ? "High contrast: on" : "High contrast: off";
+                                accessible-label: "Toggle high contrast";
+                                clicked => { root.update-preference("high-contrast", !Theme.high-contrast); }
+                            }
+                            Text { text: Theme.high-contrast ? "High contrast: on" : "High contrast: off"; accessible-label: Theme.high-contrast ? "High contrast: on" : "High contrast: off"; color: Theme.ink; }
+                            Button {
+                                text: Theme.compact-density ? "Compact density: on" : "Compact density: off";
+                                accessible-label: Theme.compact-density ? "Compact density: on" : "Compact density: off";
+                                clicked => { root.update-preference("compact-density", !Theme.compact-density); }
+                            }
+                            Text { text: "Interface text scale: " + Theme.ui-scale + "%"; accessible-label: "Interface text scale: " + Theme.ui-scale + "%"; color: Theme.ink; }
+                            HorizontalLayout {
+                                spacing: Theme.space3;
+                                Button { text: "Smaller"; accessible-label: "Decrease interface scale"; enabled: Theme.ui-scale > 80; clicked => { root.update-ui-scale(Theme.ui-scale - 10); } }
+                                Button { text: "Larger"; accessible-label: "Increase interface scale"; enabled: Theme.ui-scale < 200; clicked => { root.update-ui-scale(Theme.ui-scale + 10); } }
+                                Button { text: "Reset scale"; accessible-label: "Reset interface scale"; clicked => { root.update-ui-scale(100); } }
+                            }
+                            Button {
+                                text: Theme.reduced-motion ? "Reduced motion: on" : "Reduced motion: off";
+                                accessible-label: "Toggle reduced motion";
+                                clicked => { root.update-preference("reduced-motion", !Theme.reduced-motion); }
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                          }
+                        }
+                    }
+
+                    if root.page == 28: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 12px;
+                            Text { text: "Project backups"; color: Theme.ink; font-size: 24px * Theme.ui-scale / 100; font-weight: 700; }
+                            Text {
+                                text: "Portable archives are verified before completion. Encrypted archives use scrypt + AES-256-GCM and never save the password.";
+                                color: Theme.muted-ink;
+                                wrap: word-wrap;
+                            }
+                            backup-path := LineEdit {
+                                placeholder-text: "Absolute path ending in .rwproj or .rwproj.enc";
+                                accessible-label: "Backup archive path";
+                            }
+                            backup-password := LineEdit {
+                                placeholder-text: "Encryption password";
+                                input-type: password;
+                                accessible-label: "Backup encryption password";
+                            }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Button {
+                                    text: "Export portable";
+                                    accessible-label: "Export portable project archive";
+                                    clicked => { root.backup-action("export", backup-path.text, ""); }
+                                }
+                                Button {
+                                    text: "Export encrypted";
+                                    accessible-label: "Export encrypted project archive";
+                                    clicked => { root.backup-action("export-encrypted", backup-path.text, backup-password.text); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Button {
+                                    text: "Verify portable";
+                                    accessible-label: "Verify portable project archive";
+                                    clicked => { root.backup-action("verify", backup-path.text, ""); }
+                                }
+                                Button {
+                                    text: "Verify encrypted";
+                                    accessible-label: "Verify encrypted project archive";
+                                    clicked => { root.backup-action("verify-encrypted", backup-path.text, backup-password.text); }
+                                }
+                            }
+                            Text { text: root.backup-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Backup result"; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+
+                    if root.page == 29: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 12px;
+                            Text { text: "Recovery"; color: Theme.ink; font-size: 24px * Theme.ui-scale / 100; font-weight: 700; }
+                            Text {
+                                text: "Recovery validates the archive first and restores only into a new absolute directory.";
+                                color: Theme.muted-ink;
+                                wrap: word-wrap;
+                            }
+                            recovery-archive := LineEdit {
+                                placeholder-text: "Absolute .rwproj or .rwproj.enc archive path";
+                                accessible-label: "Recovery archive path";
+                            }
+                            recovery-destination := LineEdit {
+                                placeholder-text: "New absolute project directory";
+                                accessible-label: "Recovery destination path";
+                            }
+                            recovery-password := LineEdit {
+                                placeholder-text: "Encryption password for encrypted archives";
+                                input-type: password;
+                                accessible-label: "Recovery encryption password";
+                            }
+                            HorizontalLayout {
+                                spacing: 10px;
+                                Button {
+                                    text: "Restore portable";
+                                    accessible-label: "Restore portable project archive";
+                                    clicked => { root.restore-backup(false, recovery-archive.text, recovery-destination.text, ""); }
+                                }
+                                Button {
+                                    text: "Restore encrypted";
+                                    accessible-label: "Restore encrypted project archive";
+                                    clicked => { root.restore-backup(true, recovery-archive.text, recovery-destination.text, recovery-password.text); }
+                                }
+                            }
+                            Text { text: root.recovery-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Recovery result"; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+
+                    if root.page == 2: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 10px;
+                            Text { text: "Research question"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: root.research-summary; wrap: word-wrap; color: Theme.ink; accessible-label: "Recorded research metadata"; }
+                            Button { text: "Refresh from project"; accessible-label: "Refresh project research metadata"; clicked => { root.refresh-research(); } }
+                            Text { text: "Structured question document · EXPLORATORY framework"; color: Theme.muted-ink; font-size: 11px * Theme.ui-scale / 100; }
+                            question-text := TextEdit { accessible-label: "Structured research question"; text: ""; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                question-topic := LineEdit { placeholder-text: "Topic"; accessible-label: "Question topic"; }
+                                question-population := LineEdit { placeholder-text: "Population"; accessible-label: "Question population"; }
+                                question-author := LineEdit { placeholder-text: "Author"; accessible-label: "Question author"; }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: "Preview";
+                                    accessible-label: "Preview structured question";
+                                    clicked => { root.preview-question(question-text.text, question-topic.text, question-population.text, question-author.text); }
+                                }
+                                Button {
+                                    text: "Record previewed question";
+                                    accessible-label: "Record previewed structured question";
+                                    clicked => { root.apply-evidence-preview(); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                question-id := LineEdit { placeholder-text: "Question ID for history"; accessible-label: "Question history ID"; }
+                                Button { text: "Load history"; accessible-label: "Load question history"; clicked => { root.load-question-history(question-id.text); } }
+                            }
+                            Text { text: root.question-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Question operation result"; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                    if root.page == 4: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 10px;
+                            Text { text: "Research protocol"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Create a versioned protocol through the shared approval and audit path."; color: Theme.muted-ink; wrap: word-wrap; }
+                            protocol-title := LineEdit { placeholder-text: "Protocol title"; accessible-label: "Protocol title"; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                protocol-design := LineEdit { placeholder-text: "Design: observational, experimental, qualitative, mixed…"; accessible-label: "Protocol design"; }
+                                protocol-author := LineEdit { placeholder-text: "Author"; accessible-label: "Protocol author"; }
+                            }
+                            protocol-objective := TextEdit { accessible-label: "Protocol objective"; text: ""; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: "Preview";
+                                    accessible-label: "Preview protocol";
+                                    clicked => { root.preview-protocol(protocol-title.text, protocol-design.text, protocol-objective.text, protocol-author.text); }
+                                }
+                                Button {
+                                    text: "Record previewed protocol";
+                                    accessible-label: "Record previewed protocol";
+                                    clicked => { root.apply-evidence-preview(); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                protocol-id := LineEdit { placeholder-text: "Protocol ID for history"; accessible-label: "Protocol history ID"; }
+                                Button { text: "Load history"; accessible-label: "Load protocol history"; clicked => { root.load-protocol-history(protocol-id.text); } }
+                            }
+                            Text { text: root.protocol-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Protocol operation result"; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                    if root.page == 20: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 9px;
+                            Text { text: "References"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Register a lossless bibliography record through the project-scoped command path."; color: Theme.muted-ink; wrap: word-wrap; }
+                            reference-title := LineEdit { placeholder-text: "Reference title"; accessible-label: "Reference title"; }
+                            reference-authors := LineEdit { placeholder-text: "Authors separated by commas"; accessible-label: "Reference authors"; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                reference-year := LineEdit { placeholder-text: "Year (optional)"; accessible-label: "Reference year"; }
+                                reference-doi := LineEdit { placeholder-text: "DOI (optional)"; accessible-label: "Reference DOI"; }
+                                reference-kind := LineEdit { placeholder-text: "Kind, e.g. article"; accessible-label: "Reference kind"; }
+                                reference-format := LineEdit { placeholder-text: "Format: bibtex, ris, csl-json"; accessible-label: "Reference format"; }
+                            }
+                            reference-raw := TextEdit { accessible-label: "Raw reference record"; text: ""; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: "Preview registration";
+                                    accessible-label: "Preview reference registration";
+                                    clicked => { root.preview-reference(reference-title.text, reference-authors.text, reference-year.text, reference-doi.text, reference-kind.text, reference-format.text, reference-raw.text); }
+                                }
+                                Button {
+                                    text: "Register previewed reference";
+                                    accessible-label: "Register previewed reference";
+                                    clicked => { root.apply-library-preview(); }
+                                }
+                                Button { text: "Refresh references"; accessible-label: "Refresh project references"; clicked => { root.refresh-references(); } }
+                            }
+                            Text { text: root.reference-results; accessible-label: "Reference operation result " + root.reference-results; wrap: word-wrap; color: Theme.ink; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                    if root.page == 21: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 9px;
+                            Text { text: "Notebook"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Project notebook saves are revisioned and event-audited. Preview validates without changing the authoritative project."; color: Theme.muted-ink; wrap: word-wrap; }
+                            notebook-body := TextEdit { accessible-label: "Project notebook text"; text: root.notebook-draft; edited(text) => { root.notebook-draft = text; root.notebook-draft-edited(text); } }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button { text: "Preview save"; accessible-label: "Preview notebook save"; clicked => { root.preview-notebook-save(notebook-body.text); } }
+                                Button { text: "Record previewed notebook"; accessible-label: "Record previewed notebook save"; clicked => { root.apply-evidence-preview(); } }
+                                Button { text: "History"; accessible-label: "Load notebook history"; clicked => { root.load-notebook-history(); } }
+                                Button { text: "Export Markdown"; accessible-label: "Export notebook Markdown"; clicked => { root.export-notebook(); } }
+                            }
+                            Text { text: root.notebook-results; accessible-label: "Notebook operation result " + root.notebook-results; wrap: word-wrap; color: Theme.ink; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                    if root.page == 9: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 9px;
+                            Text { text: "Systematic review"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Register persisted references into a review, then record independent screening votes. Writes require Preview → Record."; color: Theme.muted-ink; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                review-id := LineEdit { placeholder-text: "Review ID"; accessible-label: "Review ID"; }
+                                review-reference-id := LineEdit { placeholder-text: "Reference ID"; accessible-label: "Review reference ID"; }
+                                Button { text: "Preview add record"; accessible-label: "Preview add review record"; clicked => { root.preview-review-record(review-id.text, review-reference-id.text); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                review-record-id := LineEdit { placeholder-text: "Review record ID"; accessible-label: "Review record ID"; }
+                                review-reviewer := LineEdit { placeholder-text: "Reviewer"; accessible-label: "Review reviewer"; }
+                                review-stage := LineEdit { placeholder-text: "Stage: title_abstract or full_text"; accessible-label: "Review stage"; }
+                                review-decision := LineEdit { placeholder-text: "Decision: include, exclude, unsure"; accessible-label: "Review decision"; }
+                            }
+                            review-reason := LineEdit { placeholder-text: "Reason (required for exclusion)"; accessible-label: "Review decision reason"; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: "Preview vote";
+                                    accessible-label: "Preview screening vote";
+                                    clicked => { root.preview-review-screen(review-id.text, review-record-id.text, review-reviewer.text, review-stage.text, review-decision.text, review-reason.text); }
+                                }
+                                Button { text: "Record previewed action"; accessible-label: "Record previewed review action"; clicked => { root.apply-evidence-preview(); } }
+                                Button { text: "Refresh review + PRISMA"; accessible-label: "Refresh review and PRISMA"; clicked => { root.refresh-review(review-id.text); } }
+                                Button { text: "Load screening status"; accessible-label: "Load screening status"; clicked => { root.load-review-status(review-id.text, review-record-id.text, review-stage.text); } }
+                            }
+                            Text { text: root.review-results; accessible-label: "Review operation result " + root.review-results; wrap: word-wrap; color: Theme.ink; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                    if root.page == 10: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 10px;
+                            Text { text: "PRISMA"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Counts are derived from persisted review/search/retrieval state. Incomplete accounting remains explicit."; color: Theme.muted-ink; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                prisma-review-id := LineEdit { placeholder-text: "Review ID"; accessible-label: "PRISMA review ID"; }
+                                Button { text: "Refresh derived counts"; accessible-label: "Refresh PRISMA counts"; clicked => { root.refresh-review(prisma-review-id.text); } }
+                            }
+                            Text { text: root.review-results; accessible-label: "PRISMA result " + root.review-results; wrap: word-wrap; color: Theme.ink; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                    if root.page == 11: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 8px;
+                            Text { text: "Extraction"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Schemas and values use the native typed JSON contract. Preview validates the complete payload without mutating the project."; color: Theme.muted-ink; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                extraction-form-name := LineEdit { placeholder-text: "Form name"; accessible-label: "Extraction form name"; }
+                                extraction-author := LineEdit { placeholder-text: "Author"; accessible-label: "Extraction form author"; }
+                                Button { text: "Preview new form"; accessible-label: "Preview extraction form creation"; clicked => { root.preview-extraction-form(extraction-form-name.text, extraction-author.text, extraction-fields.text); } }
+                                Button { text: "Record previewed action"; accessible-label: "Record previewed extraction action"; clicked => { root.apply-evidence-preview(); } }
+                            }
+                            extraction-fields := TextEdit { accessible-label: "Extraction fields JSON"; text: ""; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                extraction-form-id := LineEdit { placeholder-text: "Form ID"; accessible-label: "Extraction form ID"; }
+                                extraction-rationale := LineEdit { placeholder-text: "Revision rationale"; accessible-label: "Extraction revision rationale"; }
+                                Button { text: "History"; accessible-label: "Load extraction form history"; clicked => { root.load-extraction-history(extraction-form-id.text); } }
+                                Button { text: "Values"; accessible-label: "Load extraction form values"; clicked => { root.load-extraction-values(extraction-form-id.text); } }
+                            }
+                            extraction-migration := LineEdit { placeholder-text: "Migration JSON object for revision, e.g. {\"old\":\"new\"}"; accessible-label: "Extraction migration JSON"; }
+                            Button { text: "Preview form revision"; accessible-label: "Preview extraction form revision"; clicked => { root.preview-extraction-form-revision(extraction-form-id.text, extraction-author.text, extraction-rationale.text, extraction-fields.text, extraction-migration.text); } }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                extraction-record-id := LineEdit { placeholder-text: "Review record ID"; accessible-label: "Extraction review record ID"; }
+                                extraction-reviewer := LineEdit { placeholder-text: "Reviewer"; accessible-label: "Extraction reviewer"; }
+                            }
+                            extraction-values := TextEdit { accessible-label: "Extraction values JSON"; text: ""; }
+                            Button { text: "Preview values"; accessible-label: "Preview extraction values"; clicked => { root.preview-extraction-values(extraction-form-id.text, extraction-record-id.text, extraction-reviewer.text, extraction-values.text); } }
+                            Text { text: root.extraction-results; accessible-label: "Extraction operation result " + root.extraction-results; wrap: word-wrap; color: Theme.ink; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                    if root.page == 12: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 10px;
+                            Text { text: "Data view"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Import CSV, TSV, XLSX or ODS into an immutable project-local dataset revision. The file hash is bound to Preview → Import."; color: Theme.muted-ink; wrap: word-wrap; }
+                            analysis-import-path := LineEdit { placeholder-text: "Absolute data file path"; accessible-label: "Analysis import path"; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button { text: "Preview import"; accessible-label: "Preview analysis import"; clicked => { root.preview-analysis-import(analysis-import-path.text); } }
+                                Button { text: "Import previewed data"; accessible-label: "Import previewed analysis data"; clicked => { root.apply-analysis-preview(); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                analysis-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Analysis dataset ID"; }
+                                analysis-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Analysis dataset revision"; }
+                                Button { text: "Inspect dataset"; accessible-label: "Inspect analysis dataset"; clicked => { root.inspect-dataset(analysis-dataset-id.text, analysis-revision.text); } }
+                            }
+                            Text { text: root.analysis-results; accessible-label: "Analysis operation result " + root.analysis-results; wrap: word-wrap; color: Theme.ink; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                    if root.page == 13: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 24px;
+                                spacing: 10px;
+                                Text { text: "Variable view"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                                Text {
+                                    text: "Inspect the immutable variable dictionary, missingness and quality checks. Metadata edits create a new dataset revision; the original revision remains unchanged.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    variable-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Variable View dataset ID"; }
+                                    variable-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Variable View dataset revision"; }
+                                    Button { text: "Inspect variables"; accessible-label: "Inspect variable metadata and quality"; clicked => { root.inspect-variable-view(variable-dataset-id.text, variable-revision.text); } }
+                                }
+                                Rectangle {
+                                    min-height: 64px;
+                                    preferred-height: 72px;
+                                    background: Theme.surface;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    border-radius: Theme.panel-radius;
+                                    ScrollView {
+                                        VerticalLayout {
+                                            padding: 8px;
+                                            Text { text: root.variable-results; accessible-label: "Variable View operation result " + root.variable-results; wrap: word-wrap; color: Theme.ink; }
+                                        }
+                                    }
+                                }
+                                Text { text: "Create metadata revision"; color: Theme.ink; font-size: 14px * Theme.ui-scale / 100; font-weight: 600; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    variable-column := LineEdit { placeholder-text: "Column name"; accessible-label: "Variable View column name"; }
+                                    variable-updates := LineEdit {
+                                        accessible-label: "Variable View metadata updates JSON";
+                                        text: "{\"label\":\"\",\"scale\":\"unknown\",\"privacy_class\":\"internal\"}";
+                                    }
+                                    Button { text: "Preview metadata revision"; accessible-label: "Preview variable metadata revision"; clicked => { root.preview-variable-update(variable-dataset-id.text, variable-revision.text, variable-column.text, variable-updates.text); } }
+                                    Button { text: "Record previewed revision"; accessible-label: "Record previewed variable metadata revision"; clicked => { root.apply-analysis-command-preview(); } }
+                                }
+                                Text {
+                                    text: "Allowed metadata keys: label, units, scale, value_labels, missing_values, category_order, allowed_min, allowed_max, privacy_class, private, dtype.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                Rectangle { vertical-stretch: 1; }
+                            }
+                        }
+                    }
+                    if root.page == 14: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 24px;
+                                spacing: 12px;
+                                Text { text: "Statistics"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                                Text {
+                                    text: "Run tested native analyses against an immutable dataset revision. Results disclose complete-case counts, assumptions and warnings; ResearchWeave does not infer design validity from a selected test.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    stats-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Statistics dataset ID"; }
+                                    stats-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Statistics dataset revision"; }
+                                }
+
+                                Rectangle { height: 1px; background: Theme.divider; }
+                                Text { text: "Choose analysis"; color: Theme.ink; font-weight: 700; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { text: root.statistics-mode == 0 ? "› Descriptives" : "Descriptives"; accessible-label: "Show descriptive statistics form"; clicked => { root.statistics-mode = 0; } }
+                                    Button { text: root.statistics-mode == 1 ? "› Frequency" : "Frequency"; accessible-label: "Show frequency table form"; clicked => { root.statistics-mode = 1; } }
+                                    Button { text: root.statistics-mode == 2 ? "› Correlation" : "Correlation"; accessible-label: "Show correlation form"; clicked => { root.statistics-mode = 2; } }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { text: root.statistics-mode == 3 ? "› Welch t" : "Welch t"; accessible-label: "Show Welch t test form"; clicked => { root.statistics-mode = 3; } }
+                                    Button { text: root.statistics-mode == 4 ? "› Linear model" : "Linear model"; accessible-label: "Show linear model form"; clicked => { root.statistics-mode = 4; } }
+                                }
+
+                                if root.statistics-mode == 0: VerticalLayout {
+                                    spacing: 8px;
+                                    Text { text: "Descriptive statistics"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "Numeric summaries preserve immutable revision provenance and explicit missing-value accounting."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        stats-column := LineEdit { placeholder-text: "Numeric column"; accessible-label: "Statistics numeric column"; }
+                                        Button { text: "Run descriptives"; accessible-label: "Run descriptive statistics"; clicked => { root.run-descriptives(stats-dataset-id.text, stats-revision.text, stats-column.text); } }
+                                    }
+                                }
+                                if root.statistics-mode == 1: VerticalLayout {
+                                    spacing: 8px;
+                                    Text { text: "Frequency table"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "Count observed category levels and report valid/total percentages plus missing observations."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        stats-frequency-column := LineEdit { placeholder-text: "Categorical column"; accessible-label: "Statistics frequency column"; }
+                                        Button { text: "Run frequency"; accessible-label: "Run frequency table"; clicked => { root.run-frequency(stats-dataset-id.text, stats-revision.text, stats-frequency-column.text); } }
+                                    }
+                                }
+                                if root.statistics-mode == 2: VerticalLayout {
+                                    spacing: 8px;
+                                    Text { text: "Pearson correlation"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "Uses pairwise complete numeric observations and reports the sampling assumptions with the result."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        stats-correlation-x := LineEdit { placeholder-text: "X column"; accessible-label: "Statistics correlation X column"; }
+                                        stats-correlation-y := LineEdit { placeholder-text: "Y column"; accessible-label: "Statistics correlation Y column"; }
+                                        Button { text: "Run Pearson r"; accessible-label: "Run Pearson correlation"; clicked => { root.run-correlation(stats-dataset-id.text, stats-revision.text, stats-correlation-x.text, stats-correlation-y.text); } }
+                                    }
+                                }
+                                if root.statistics-mode == 3: VerticalLayout {
+                                    spacing: 8px;
+                                    Text { text: "Welch two-group t test"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "Requires two explicitly named groups; other levels are excluded with a warning rather than silently pooled."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        stats-test-outcome := LineEdit { placeholder-text: "Outcome"; accessible-label: "Statistics t test outcome column"; }
+                                        stats-test-group := LineEdit { placeholder-text: "Group column"; accessible-label: "Statistics t test group column"; }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        stats-test-first := LineEdit { placeholder-text: "First group"; accessible-label: "Statistics t test first group"; }
+                                        stats-test-second := LineEdit { placeholder-text: "Second group"; accessible-label: "Statistics t test second group"; }
+                                        Button { text: "Run Welch t"; accessible-label: "Run Welch t test"; clicked => { root.run-t-test(stats-dataset-id.text, stats-revision.text, stats-test-outcome.text, stats-test-group.text, stats-test-first.text, stats-test-second.text); } }
+                                    }
+                                }
+                                if root.statistics-mode == 4: VerticalLayout {
+                                    spacing: 8px;
+                                    Text { text: "Linear model"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "OLS with HC3 robust covariance. Predictors are comma-separated and complete-case rows are reported in the result."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        stats-model-outcome := LineEdit { placeholder-text: "Outcome"; accessible-label: "Statistics linear model outcome"; }
+                                        stats-model-predictors := LineEdit { placeholder-text: "Predictors, comma-separated"; accessible-label: "Statistics linear model predictors"; }
+                                        Button { text: "Fit OLS"; accessible-label: "Run linear model with HC3 covariance"; clicked => { root.run-linear-model(stats-dataset-id.text, stats-revision.text, stats-model-outcome.text, stats-model-predictors.text); } }
+                                    }
+                                }
+
+                                Rectangle { height: 1px; background: Theme.divider; }
+                                Text { text: "Result"; color: Theme.ink; font-weight: 700; }
+                                Text { text: root.statistics-result-title; accessible-label: "Statistics result title " + root.statistics-result-title; color: Theme.ink; font-size: 18px * Theme.ui-scale / 100; font-weight: 700; }
+                                Text { text: root.statistics-result-primary; accessible-label: "Statistics result primary " + root.statistics-result-primary; color: Theme.accent; font-size: 16px * Theme.ui-scale / 100; font-weight: 700; wrap: word-wrap; }
+                                if root.statistics-result-secondary != "": Text { text: root.statistics-result-secondary; accessible-label: "Statistics result secondary " + root.statistics-result-secondary; color: Theme.ink; wrap: word-wrap; }
+                                if root.statistics-result-provenance != "": Text { text: root.statistics-result-provenance; accessible-label: "Statistics result provenance " + root.statistics-result-provenance; color: Theme.muted-ink; font-size: 12px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                Text { text: "Verified payload"; color: Theme.muted-ink; font-size: 12px * Theme.ui-scale / 100; font-weight: 700; }
+                                Text {
+                                    text: root.analysis-results;
+                                    accessible-label: "Statistics operation result " + root.analysis-results;
+                                    wrap: word-wrap;
+                                    color: Theme.muted-ink;
+                                    font-size: 11px * Theme.ui-scale / 100;
+                                }
+                                Rectangle { vertical-stretch: 1; }
+                            }
+                        }
+                    }
+                    if root.page == 15: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 24px;
+                                spacing: 10px;
+                                Text { text: "Analysis results"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                                Text {
+                                    text: "Persist a recomputed statistical result against an immutable dataset revision, reload it by SHA-256 result ID, export a deterministic replay script, or compose verified results into a deterministic Markdown report.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                HorizontalLayout {
+                                    spacing: 10px;
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        min-height: 150px;
+                                        background: Theme.surface;
+                                        border-color: Theme.divider;
+                                        border-width: 1px;
+                                        border-radius: Theme.panel-radius;
+                                        VerticalLayout {
+                                            padding: 10px;
+                                            spacing: 6px;
+                                            Text { text: "Persist result"; color: Theme.ink; font-size: 14px * Theme.ui-scale / 100; font-weight: 600; }
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                result-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Analysis Results dataset ID"; }
+                                                result-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Analysis Results dataset revision"; }
+                                            }
+                                            result-column := LineEdit { placeholder-text: "Numeric column"; accessible-label: "Analysis Results numeric column"; }
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Button { text: "Preview"; accessible-label: "Preview immutable analysis result"; clicked => { root.preview-analysis-result-save(result-dataset-id.text, result-revision.text, result-column.text); } }
+                                                Button { text: "Record"; accessible-label: "Record previewed immutable analysis result"; clicked => { root.apply-analysis-command-preview(); } }
+                                            }
+                                        }
+                                    }
+                                    Rectangle {
+                                        horizontal-stretch: 1;
+                                        min-height: 150px;
+                                        background: Theme.surface;
+                                        border-color: Theme.divider;
+                                        border-width: 1px;
+                                        border-radius: Theme.panel-radius;
+                                        VerticalLayout {
+                                            padding: 10px;
+                                            spacing: 6px;
+                                            Text { text: "Inspect, replay & report"; color: Theme.ink; font-size: 14px * Theme.ui-scale / 100; font-weight: 600; }
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                result-id := LineEdit { placeholder-text: "Result ID"; accessible-label: "Analysis Results result ID"; }
+                                                Button { text: "Load"; accessible-label: "Load verified analysis result"; clicked => { root.load-analysis-result(result-id.text); } }
+                                                Button { text: "Replay"; accessible-label: "Export analysis replay script"; clicked => { root.export-analysis-script(result-id.text); } }
+                                            }
+                                            report-title := LineEdit { text: "Analysis report"; placeholder-text: "Report title"; accessible-label: "Analysis report title"; }
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                report-result-ids := LineEdit { placeholder-text: "Comma-separated result IDs"; accessible-label: "Analysis report result IDs"; }
+                                                Button { text: "Render report"; accessible-label: "Render verified analysis report"; clicked => { root.render-analysis-report(report-title.text, report-result-ids.text); } }
+                                            }
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    min-height: 90px;
+                                    preferred-height: 110px;
+                                    background: Theme.surface;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    border-radius: Theme.panel-radius;
+                                    ScrollView {
+                                        VerticalLayout {
+                                            padding: 8px;
+                                            Text { text: root.analysis-report-results; accessible-label: "Analysis Results operation result " + root.analysis-report-results; wrap: word-wrap; color: Theme.ink; }
+                                        }
+                                    }
+                                }
+                                Text {
+                                    text: "Reports reproduce stored outputs and provenance only. ResearchWeave does not generate causal or scientific interpretation here.";
+                                    color: Theme.warning;
+                                    wrap: word-wrap;
+                                }
+                                Rectangle { vertical-stretch: 1; }
+                            }
+                        }
+                    }
+                    if root.page == 16: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 24px;
+                                spacing: 8px;
+                                Text { text: "Qualitative coding"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                                Text { text: "Annotations are character-offset anchored to verified project source text. Use Inspect first and copy its current content_hash into any write."; color: Theme.muted-ink; wrap: word-wrap; }
+                                Button { text: "Inspect coding state"; accessible-label: "Inspect qualitative state"; clicked => { root.inspect-qualitative(); } }
+                                qualitative-hash := LineEdit { placeholder-text: "Current content hash"; accessible-label: "Qualitative content hash"; }
+                                Text { text: "Transcript → case mapping"; color: Theme.ink; font-size: 14px * Theme.ui-scale / 100; font-weight: 600; }
+                                Text { text: "Map a persisted source to the case ID used by your quantitative dataset. Mappings are treated as confidential; the host re-verifies source/body hashes before mixed-method analysis."; color: Theme.muted-ink; wrap: word-wrap; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    qualitative-transcript-source := LineEdit { placeholder-text: "Transcript source ID"; accessible-label: "Qualitative transcript source ID"; }
+                                    qualitative-transcript-case := LineEdit { placeholder-text: "Dataset case ID"; accessible-label: "Qualitative transcript case ID"; }
+                                }
+                                qualitative-transcript-body-hash := LineEdit { placeholder-text: "Expected source body SHA-256"; accessible-label: "Qualitative transcript expected body hash"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { text: "Preview case mapping"; accessible-label: "Preview qualitative transcript case mapping"; clicked => { root.preview-qualitative-transcript(qualitative-hash.text, qualitative-transcript-source.text, qualitative-transcript-case.text, qualitative-transcript-body-hash.text, false); } }
+                                    Button { text: "Preview mapping update"; accessible-label: "Preview qualitative transcript case mapping update"; clicked => { root.preview-qualitative-transcript(qualitative-hash.text, qualitative-transcript-source.text, qualitative-transcript-case.text, qualitative-transcript-body-hash.text, true); } }
+                                    Button { text: "Record previewed action"; accessible-label: "Record previewed qualitative action"; clicked => { root.apply-evidence-preview(); } }
+                                }
+                                Text { text: "Source annotation"; color: Theme.ink; font-size: 14px * Theme.ui-scale / 100; font-weight: 600; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    qualitative-source-id := LineEdit { placeholder-text: "Source ID"; accessible-label: "Qualitative source ID"; }
+                                    qualitative-code-id := LineEdit { placeholder-text: "Code ID"; accessible-label: "Qualitative annotation code ID"; }
+                                    qualitative-coder := LineEdit { placeholder-text: "Coder"; accessible-label: "Qualitative coder"; }
+                                    qualitative-unit-id := LineEdit { placeholder-text: "Unique unit ID"; accessible-label: "Qualitative unit ID"; }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    qualitative-start := LineEdit { placeholder-text: "Start character offset"; accessible-label: "Qualitative annotation start"; }
+                                    qualitative-end := LineEdit { placeholder-text: "End character offset"; accessible-label: "Qualitative annotation end"; }
+                                    Button { text: "Preview annotation"; accessible-label: "Preview qualitative annotation"; clicked => { root.preview-qualitative-annotation(qualitative-hash.text, qualitative-source-id.text, qualitative-code-id.text, qualitative-coder.text, qualitative-unit-id.text, qualitative-start.text, qualitative-end.text); } }
+                                    Button { text: "Record previewed action"; accessible-label: "Record previewed qualitative action"; clicked => { root.apply-evidence-preview(); } }
+                                }
+                                Text { text: "Fixed-unit nominal agreement"; color: Theme.ink; font-size: 14px * Theme.ui-scale / 100; font-weight: 600; }
+                                qualitative-first := LineEdit { placeholder-text: "Coder A JSON mapping unit IDs to labels"; accessible-label: "Qualitative first coder JSON"; }
+                                qualitative-second := LineEdit { placeholder-text: "Coder B JSON with identical unit IDs"; accessible-label: "Qualitative second coder JSON"; }
+                                Button { text: "Compute Cohen kappa"; accessible-label: "Compute qualitative kappa"; clicked => { root.compute-qualitative-kappa(qualitative-first.text, qualitative-second.text); } }
+                                Text { text: root.qualitative-results; accessible-label: "Qualitative operation result " + root.qualitative-results; wrap: word-wrap; color: Theme.ink; }
+                                Rectangle { vertical-stretch: 1; }
+                            }
+                        }
+                    }
+                    if root.page == 17: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 9px;
+                            Text { text: "Codebook"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Codebook edits are optimistic-concurrency guarded by the qualitative content hash."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Button { text: "Inspect current codebook"; accessible-label: "Inspect qualitative codebook"; clicked => { root.inspect-qualitative(); } }
+                            codebook-hash := LineEdit { placeholder-text: "Current content hash from Inspect"; accessible-label: "Codebook content hash"; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                codebook-id := LineEdit { placeholder-text: "Code ID"; accessible-label: "Codebook code ID"; }
+                                codebook-name := LineEdit { placeholder-text: "Code name"; accessible-label: "Codebook code name"; }
+                                codebook-actor := LineEdit { placeholder-text: "Actor"; accessible-label: "Codebook actor"; }
+                            }
+                            codebook-description := LineEdit { placeholder-text: "Description"; accessible-label: "Codebook code description"; }
+                            codebook-parent := LineEdit { placeholder-text: "Parent code ID (optional)"; accessible-label: "Codebook parent ID"; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button { text: "Preview add code"; accessible-label: "Preview qualitative code addition"; clicked => { root.preview-qualitative-code(codebook-hash.text, codebook-id.text, codebook-name.text, codebook-description.text, codebook-parent.text, codebook-actor.text); } }
+                                Button { text: "Record previewed action"; accessible-label: "Record previewed codebook action"; clicked => { root.apply-evidence-preview(); } }
+                            }
+                            Text { text: root.qualitative-results; accessible-label: "Codebook operation result " + root.qualitative-results; wrap: word-wrap; color: Theme.ink; }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                    if root.page == 18: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 24px;
+                                spacing: 10px;
+                                Text { text: "Mixed methods joint display"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                                Text {
+                                    text: "Join an immutable quantitative dataset revision to explicit transcript-to-case mappings stored in this project. ResearchWeave reloads and verifies the qualitative coding hash and case map itself; this screen never accepts caller-supplied provenance.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    mixed-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Mixed methods dataset ID"; }
+                                    mixed-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Mixed methods dataset revision"; }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    mixed-case-column := LineEdit { placeholder-text: "Case ID column"; accessible-label: "Mixed methods case column"; }
+                                    mixed-measure-column := LineEdit { placeholder-text: "Numeric outcome column"; accessible-label: "Mixed methods measure column"; }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    mixed-code-id := LineEdit { placeholder-text: "Qualitative code ID"; accessible-label: "Mixed methods code ID"; }
+                                    mixed-min-cases := LineEdit { text: "3"; placeholder-text: "Minimum reporting cases (3–50)"; accessible-label: "Mixed methods minimum reporting cases"; }
+                                }
+                                Button {
+                                    text: "Run verified joint display";
+                                    accessible-label: "Run verified mixed methods joint display";
+                                    clicked => {
+                                        root.run-mixed-joint-display(
+                                            mixed-dataset-id.text,
+                                            mixed-revision.text,
+                                            mixed-case-column.text,
+                                            mixed-measure-column.text,
+                                            mixed-code-id.text,
+                                            mixed-min-cases.text
+                                        );
+                                    }
+                                }
+                                Text {
+                                    text: "Descriptive comparison only. The result does not establish a causal effect.";
+                                    color: Theme.warning;
+                                    wrap: word-wrap;
+                                }
+                                Rectangle {
+                                    min-height: 130px;
+                                    preferred-height: 190px;
+                                    background: Theme.surface;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    border-radius: Theme.panel-radius;
+                                    ScrollView {
+                                        VerticalLayout {
+                                            padding: 10px;
+                                            Text {
+                                                text: root.mixed-methods-results;
+                                                accessible-label: "Mixed methods operation result " + root.mixed-methods-results;
+                                                wrap: word-wrap;
+                                                color: Theme.ink;
+                                            }
+                                        }
+                                    }
+                                }
+                                Rectangle { vertical-stretch: 1; }
+                            }
+                        }
+                    }
+                    if root.page == 19: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 9px;
+                            Text { text: "Manuscript"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Save versioned manuscript sections through the project approval/audit path. Citations are preserved with each section revision."; color: Theme.muted-ink; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                manuscript-id := LineEdit { accessible-label: "Manuscript ID"; placeholder-text: "Manuscript ID"; text: root.manuscript-draft-id; edited(text) => { root.manuscript-draft-id = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                                manuscript-section := LineEdit { accessible-label: "Manuscript section"; placeholder-text: "Section, e.g. Results"; text: root.manuscript-draft-section; edited(text) => { root.manuscript-draft-section = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                                manuscript-citations := LineEdit { accessible-label: "Manuscript citations"; placeholder-text: "Citation IDs separated by commas"; text: root.manuscript-draft-citations; edited(text) => { root.manuscript-draft-citations = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                            }
+                            manuscript-body := TextEdit {
+                                min-height: 140px;
+                                preferred-height: 220px;
+                                accessible-label: "Manuscript section body";
+                                text: root.manuscript-draft-body;
+                                edited(text) => { root.manuscript-draft-body = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, text); }
+                            }
+                            HorizontalLayout {
+                                min-height: 36px;
+                                preferred-height: 36px;
+                                max-height: 40px;
+                                spacing: 8px;
+                                Button { text: "Preview section"; accessible-label: "Preview manuscript section"; clicked => { root.preview-writing-section(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                                Button { text: "Record previewed section"; accessible-label: "Record previewed manuscript section"; clicked => { root.apply-evidence-preview(); } }
+                                Button { text: "Inspect manuscript"; accessible-label: "Inspect manuscript"; clicked => { root.inspect-manuscript(manuscript-id.text); } }
+                            }
+                            HorizontalLayout {
+                                min-height: 36px;
+                                preferred-height: 36px;
+                                max-height: 40px;
+                                spacing: 8px;
+                                Text {
+                                    min-width: 48px;
+                                    preferred-width: 48px;
+                                    max-width: 48px;
+                                    horizontal-stretch: 0;
+                                    text: "Export";
+                                    color: Theme.muted-ink;
+                                    vertical-alignment: center;
+                                }
+                                Button { text: "Markdown"; accessible-label: "Export manuscript Markdown"; clicked => { root.export-manuscript(manuscript-id.text, "markdown"); } }
+                                Button { text: "DOCX"; accessible-label: "Export manuscript DOCX"; clicked => { root.export-manuscript(manuscript-id.text, "docx"); } }
+                                Button { text: "HTML"; accessible-label: "Export manuscript HTML"; clicked => { root.export-manuscript(manuscript-id.text, "html"); } }
+                                Button { text: "PDF"; accessible-label: "Export manuscript PDF"; clicked => { root.export-manuscript(manuscript-id.text, "pdf"); } }
+                            }
+                            Rectangle {
+                                min-height: 110px;
+                                preferred-height: 160px;
+                                max-height: 180px;
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                ScrollView {
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        Text {
+                                            text: root.writing-results == "" ? "Manuscript results and export receipts appear here." : root.writing-results;
+                                            accessible-label: "Writing operation result " + root.writing-results;
+                                            wrap: word-wrap;
+                                            color: Theme.ink;
+                                        }
+                                    }
+                                }
+                            }
+                            Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+                    if root.page == 22: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 12px;
+                            Text { text: "Publishing"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text {
+                                text: "Validate the persisted manuscript, render its bibliography, or build a local draft submission packet. ResearchWeave never submits files or asserts journal readiness.";
+                                color: Theme.muted-ink;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                publishing-manuscript-id := LineEdit {
+                                    accessible-label: "Publishing manuscript ID";
+                                    placeholder-text: "Manuscript ID";
+                                    text: root.manuscript-draft-id;
+                                }
+                                publishing-journal := LineEdit {
+                                    accessible-label: "Target journal";
+                                    placeholder-text: "Target journal or venue";
+                                }
+                            }
+                            HorizontalLayout {
+                                min-height: 38px;
+                                preferred-height: 38px;
+                                max-height: 42px;
+                                spacing: 8px;
+                                Button {
+                                    text: "Check readiness";
+                                    accessible-label: "Check manuscript publishing readiness";
+                                    clicked => { root.publishing-action("check", publishing-manuscript-id.text, publishing-journal.text); }
+                                }
+                                Button {
+                                    text: "Generate bibliography";
+                                    accessible-label: "Generate manuscript bibliography";
+                                    clicked => { root.publishing-action("bibliography", publishing-manuscript-id.text, publishing-journal.text); }
+                                }
+                                Button {
+                                    text: "Build draft ZIP";
+                                    accessible-label: "Build incomplete draft submission ZIP";
+                                    accessible-description: "Creates a local review packet even when readiness checks report missing sections. No submission occurs.";
+                                    clicked => { root.publishing-action("draft-packet", publishing-manuscript-id.text, publishing-journal.text); }
+                                }
+                            }
+                            Rectangle {
+                                min-height: 64px;
+                                preferred-height: 64px;
+                                max-height: 80px;
+                                background: Theme.accent-subtle;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                Text {
+                                    x: 12px;
+                                    y: 10px;
+                                    width: parent.width - 24px;
+                                    text: "Draft packets may contain incomplete work. Confirm journal instructions, authorship, ethics declarations, privacy, references, figures/tables and reporting checklists before any external submission.";
+                                    wrap: word-wrap;
+                                    color: Theme.ink;
+                                }
+                            }
+                            Rectangle {
+                                min-height: 180px;
+                                vertical-stretch: 1;
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                ScrollView {
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        Text {
+                                            text: root.writing-results == "" ? "Publishing checks and packet receipts appear here." : root.writing-results;
+                                            accessible-label: "Publishing operation result " + root.writing-results;
+                                            wrap: word-wrap;
+                                            color: Theme.ink;
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if root.page == 23: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                          VerticalLayout {
+                            padding: 24px;
+                            spacing: 9px;
+                            Text { text: "Agent"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Local durable conversation, prompt-template and human-reviewed tool state. No model tool executes until its exact stored fingerprint is approved and Execute approved action is invoked."; color: Theme.muted-ink; wrap: word-wrap; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                agent-conversation-id := LineEdit { placeholder-text: "Conversation ID (ASCII letters/numbers/-/_)"; accessible-label: "Assistant conversation ID"; }
+                                agent-conversation-title := LineEdit { placeholder-text: "Conversation title"; accessible-label: "Assistant conversation title"; }
+                                Button { text: "Preview conversation"; accessible-label: "Preview assistant conversation creation"; clicked => { root.preview-conversation-create(agent-conversation-id.text, agent-conversation-title.text); } }
+                                Button { text: "Record previewed action"; accessible-label: "Record previewed assistant action"; clicked => { root.apply-ai-preview(); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                agent-role := LineEdit { placeholder-text: "Manual role: user, system, assistant"; accessible-label: "Assistant message role"; }
+                                agent-message := LineEdit { placeholder-text: "Manual conversation message"; accessible-label: "Assistant message content"; }
+                                Button { text: "Preview message"; accessible-label: "Preview assistant message append"; clicked => { root.preview-assistant-message(agent-conversation-id.text, agent-role.text, agent-message.text); } }
+                                Button { text: "History"; accessible-label: "Load assistant conversation history"; clicked => { root.load-assistant-history(agent-conversation-id.text); } }
+                                Button { text: "List"; accessible-label: "List assistant conversations"; clicked => { root.list-assistant-conversations(); } }
+                            }
+                            Text { text: "Versioned prompt template"; color: Theme.ink; font-size: 14px * Theme.ui-scale / 100; font-weight: 600; }
+                            agent-prompt-name := LineEdit { placeholder-text: "Prompt name"; accessible-label: "Assistant prompt name"; }
+                            agent-system-text := LineEdit { placeholder-text: "Trusted system instructions"; accessible-label: "Assistant prompt system text"; }
+                            agent-user-template := LineEdit { placeholder-text: "User template containing {{project_text}}"; accessible-label: "Assistant prompt user template"; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button { text: "Preview template"; accessible-label: "Preview assistant prompt template"; clicked => { root.preview-prompt-template(agent-prompt-name.text, agent-system-text.text, agent-user-template.text); } }
+                                agent-project-text := LineEdit { placeholder-text: "Project text to render as user content"; accessible-label: "Assistant project text"; }
+                                Button { text: "Render template"; accessible-label: "Render assistant prompt template"; clicked => { root.render-prompt-template(agent-prompt-name.text, agent-project-text.text); } }
+                            }
+                            Text { text: root.agent-results; accessible-label: "Agent operation result " + root.agent-results; wrap: word-wrap; color: Theme.ink; }
+                            Rectangle { min-height: 1px; background: Theme.divider; }
+                            Text { text: "Human-reviewed tool proposal"; color: Theme.ink; font-size: 14px * Theme.ui-scale / 100; font-weight: 600; }
+                            Text { text: "This desktop slice permits only assistant.retrieval.index and assistant.retrieval.revoke_source. Raw arguments stay in the local action store and are hidden from the review summary."; color: Theme.muted-ink; wrap: word-wrap; }
+                            agent-tool-goal := LineEdit { placeholder-text: "Goal for inert proposal plan"; accessible-label: "Agent proposal goal"; }
+                            agent-tool-operation := LineEdit { placeholder-text: "assistant.retrieval.index or assistant.retrieval.revoke_source"; accessible-label: "Agent proposed operation"; }
+                            agent-tool-arguments := LineEdit { placeholder-text: "JSON object arguments"; accessible-label: "Agent proposed arguments JSON"; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button { text: "Preview plan"; accessible-label: "Preview inert agent plan"; clicked => { root.preview-agent-plan(agent-tool-goal.text, agent-tool-operation.text, agent-tool-arguments.text); } }
+                                Button { text: "Stage proposal"; accessible-label: "Stage agent tool proposal"; clicked => { root.stage-agent-action(agent-tool-operation.text, agent-tool-arguments.text); } }
+                                Button { text: "Timeline"; accessible-label: "Load agent action timeline"; clicked => { root.load-agent-action-timeline(); } }
+                            }
+                            agent-denial-reason := LineEdit { placeholder-text: "Reason required when denying"; accessible-label: "Agent denial reason"; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button { text: "Approve exact proposal"; accessible-label: "Approve exact agent proposal"; clicked => { root.approve-agent-action(); } }
+                                Button { text: "Deny exact proposal"; accessible-label: "Deny exact agent proposal"; clicked => { root.deny-agent-action(agent-denial-reason.text); } }
+                                Button { text: "Execute approved action"; accessible-label: "Execute approved agent action"; clicked => { root.execute-agent-action(); } }
+                            }
+                            Text { text: root.agent-action-results; accessible-label: "Agent action review " + root.agent-action-results; wrap: word-wrap; color: Theme.ink; }
+                            Rectangle { min-height: 16px; }
+                          }
+                        }
+                    }
+                    if root.page == 24: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                         VerticalLayout {
+                            padding: 24px;
+                            spacing: 10px;
+                            Text { text: "Providers"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Validate provider configuration without resolving credentials or contacting the network. Remote chat remains disabled in this desktop slice."; color: Theme.muted-ink; wrap: word-wrap; }
+                            provider-id := LineEdit { placeholder-text: "Provider ID"; accessible-label: "Provider ID"; }
+                            provider-kind := LineEdit { placeholder-text: "Kind: open_ai_compatible, ollama, anthropic, gemini"; accessible-label: "Provider kind"; }
+                            provider-model := LineEdit { placeholder-text: "Model"; accessible-label: "Provider model"; }
+                            provider-endpoint := LineEdit { placeholder-text: "HTTPS endpoint or loopback HTTP"; accessible-label: "Provider endpoint"; }
+                            provider-local := LineEdit { placeholder-text: "Local: true or false"; accessible-label: "Provider local flag"; }
+                            Button { text: "Validate offline"; accessible-label: "Validate provider profile offline"; clicked => { root.validate-provider(provider-id.text, provider-kind.text, provider-model.text, provider-endpoint.text, provider-local.text); } }
+                            VerticalLayout {
+                                spacing: 8px;
+                                Button { text: "Preview configure"; accessible-label: "Preview configure provider profile"; clicked => { root.profile-action("configure", provider-id.text, provider-kind.text, provider-model.text, provider-endpoint.text, provider-local.text); } }
+                                Button { text: "Preview update"; accessible-label: "Preview update provider profile"; clicked => { root.profile-action("update", provider-id.text, provider-kind.text, provider-model.text, provider-endpoint.text, provider-local.text); } }
+                                Button { text: "Preview disconnect"; accessible-label: "Preview disconnect provider profile"; clicked => { root.profile-action("disconnect", provider-id.text, provider-kind.text, provider-model.text, provider-endpoint.text, provider-local.text); } }
+                            }
+                            VerticalLayout {
+                                Button { text: "Record profile change"; accessible-label: "Record approved provider profile change"; clicked => { root.apply-ai-preview(); } }
+                                Button { text: "List profiles"; accessible-label: "List stored provider profiles"; clicked => { root.list-provider-profiles(); } }
+                            }
+                            Text { text: root.provider-results; accessible-label: "Provider validation result " + root.provider-results; wrap: word-wrap; color: Theme.ink; }
+                         }
+                        }
+                    }
+                    if root.page == 31: Rectangle {
+                        background: Theme.surface;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 14px;
+                            Text { text: "Recent PDF operations"; font-size: 20px * Theme.ui-scale / 100; color: Theme.ink; }
+                            Text { text: root.durable-jobs; wrap: word-wrap; color: Theme.ink; accessible-label: "Persisted job history"; }
+                            Button { text: "Clear job history"; accessible-label: "Clear job history"; clicked => { root.clear-job-history(); } }
+                        }
+                    }
+                    if root.page == 32: Rectangle {
+                        background: Theme.surface;
+                        VerticalLayout {
+                            padding: 24px;
+                            spacing: 14px;
+                            Text { text: "Recent notifications"; font-size: 20px * Theme.ui-scale / 100; color: Theme.ink; }
+                            Text { text: root.durable-notifications; wrap: word-wrap; color: Theme.ink; accessible-label: "Persisted notifications"; }
+                            Button { text: "Dismiss notifications"; accessible-label: "Dismiss notifications"; clicked => { root.dismiss-notifications(); } }
+                        }
+                    }
+                    if root.page == 30: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                         VerticalLayout {
+                            padding: 24px;
+                            spacing: 12px;
+                            Text { text: "Project diagnostics"; color: Theme.ink; font-size: 22px * Theme.ui-scale / 100; }
+                            Text { text: "Structural checks only. No scientific or external-source certification."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Button { text: "Run diagnostics"; accessible-label: "Run project diagnostics"; clicked => { root.run-diagnostics(); } }
+                            Text { text: root.diagnostics-results; accessible-label: "Project diagnostics summary " + root.diagnostics-results; color: Theme.ink; wrap: word-wrap; }
+                         }
+                        }
+                    }
+                    if root.page == 37: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                         VerticalLayout {
+                            padding: 24px;
+                            spacing: 12px;
+                            Text { text: "Project activity history"; color: Theme.ink; font-size: 22px * Theme.ui-scale / 100; }
+                            Text { text: "Local project event chain. actor_authenticated=false; source=project_event_chain. No private payloads."; color: Theme.muted-ink; wrap: word-wrap; }
+                            activity-filter := LineEdit { placeholder-text: "Exact operation filter (optional)"; accessible-label: "Activity exact operation filter"; }
+                            activity-offset := LineEdit { text: "0"; accessible-label: "Activity offset"; }
+                            activity-limit := LineEdit { text: "25"; accessible-label: "Activity limit"; }
+                            HorizontalLayout {
+                                Button { text: "Load activity"; accessible-label: "Load project activity"; clicked => { root.load-project-activity(activity-filter.text, activity-offset.text, activity-limit.text); } }
+                                Button { text: "Clear view"; accessible-label: "Clear project activity view"; clicked => { root.clear-project-activity-view(); } }
+                            }
+                            Text { text: root.project-activity-results; accessible-label: "Verified project activity " + root.project-activity-results; color: Theme.ink; wrap: word-wrap; }
+                         }
+                        }
+                    }
+                    if root.page > 1 && root.page != 2 && root.page != 4 && root.page != 5 && root.page != 7 && root.page != 9 && root.page != 10 && root.page != 11 && root.page != 12 && root.page != 14 && root.page != 16 && root.page != 17 && root.page != 19 && root.page != 20 && root.page != 21 && root.page != 22 && root.page != 23 && root.page != 24 && root.page != 28 && root.page != 29 && root.page != 30 && root.page != 31 && root.page != 32 && root.page != 36 && root.page != 37: Rectangle {
+                        background: Theme.raised;
+                        HorizontalLayout {
+                            padding: 24px;
+                            spacing: 18px;
+                            Rectangle {
+                                background: Theme.surface;
+                                border-radius: Theme.panel-radius;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                VerticalLayout {
+                                    padding: 24px;
+                                    spacing: 12px;
+                                    Text { text: root.pages[root.page]; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                                    Text { text: "This capability remains reachable while its native Rust workflow is integrated."; color: Theme.muted-ink; }
+                                    Text { text: "The workbench shell is now organized by research activity rather than a flat screen directory."; color: Theme.muted-ink; font-size: 12px * Theme.ui-scale / 100; }
+                                    Rectangle { height: 8px; }
+                                    Text { text: "No mock workflow is shown here."; color: Theme.warning; font-size: 12px * Theme.ui-scale / 100; }
+                                }
+                            }
+                            Rectangle {
+                                visible: root.show-inspector;
+                                min-width: 0px;
+                                preferred-width: root.show-inspector ? 250px : 0px;
+                                max-width: root.show-inspector ? 250px : 0px;
+                                horizontal-stretch: 0;
+                                background: Theme.surface;
+                                border-radius: Theme.panel-radius;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                VerticalLayout {
+                                    padding: 16px;
+                                    spacing: 8px;
+                                    Text { text: "Inspector"; color: Theme.ink; font-size: 15px * Theme.ui-scale / 100; font-weight: 600; }
+                                    Text { text: "Activity"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                    Text { text: root.activity-name; color: Theme.ink; }
+                                    Text { text: "Project revision"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                    Text { text: root.project-revision; color: Theme.ink; }
+                                    Text { text: "Implementation state"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
+                                    Text { text: "Native workflow integration pending"; color: Theme.warning; font-size: 11px * Theme.ui-scale / 100; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Global bottom tray: stable keyboard target for jobs/notifications.
+            Rectangle {
+                height: Theme.compact-density ? 36px : 42px;
+                background: Theme.surface;
+                border-color: Theme.divider;
+                border-width: 1px;
+                accessible-role: complementary;
+                accessible-label: "Bottom job tray";
+                HorizontalLayout {
+                    padding-left: 10px;
+                    padding-right: 10px;
+                    spacing: 10px;
+                    tray-focus := Button {
+                        text: "Jobs";
+                        icon: @image-url("../../../assets/icons/jobs.svg");
+                        icon-size: 16px;
+                        colorize-icon: true;
+                        accessible-label: "Open jobs";
+                        clicked => { root.page = 31; }
+                    }
+                    Text {
+                        text: root.progress > 0 && root.progress < 1 ? "Local job running" :
+                              root.progress >= 1 ? "Last local job completed" : "No active local jobs";
+                        color: Theme.muted-ink;
+                        vertical-alignment: center;
+                        font-size: 11px * Theme.ui-scale / 100;
+                    }
+                    if root.progress > 0 && root.progress < 1: SemanticProgress {
+                        progress: root.progress;
+                        label: "Current local job progress";
+                    }
+                    Button {
+                        text: "Notifications";
+                        icon: @image-url("../../../assets/icons/notifications.svg");
+                        icon-size: 16px;
+                        colorize-icon: true;
+                        accessible-label: "Open notifications";
+                        clicked => { root.page = 32; }
+                    }
+                }
+            }
+
+            // Global status bar: concise state only; progress ticks are intentionally not announced here.
+            Rectangle {
+                height: 30px;
+                background: Theme.ink;
+                accessible-role: content-info;
+                accessible-label: "Workbench status";
+                HorizontalLayout {
+                    padding-left: 12px;
+                    padding-right: 12px;
+                    spacing: 14px;
+                    Text {
+                        text: root.status;
+                        color: Theme.surface;
+                        font-size: 11px * Theme.ui-scale / 100;
+                        vertical-alignment: center;
+                        accessible-label: "Status: " + root.status;
+                        accessible-live-region: polite;
+                    }
+                    Text {
+                        text: "LOCAL FIRST";
+                        color: #9fd0cc;
+                        font-size: 10px * Theme.ui-scale / 100;
+                        vertical-alignment: center;
+                    }
+                    Text {
+                        text: root.activity-name + " · " + root.pages[root.page];
+                        color: Theme.rail-muted;
+                        horizontal-alignment: right;
+                        vertical-alignment: center;
+                        font-size: 10px * Theme.ui-scale / 100;
+                    }
+                }
+            }
+        }
+    }
+}
