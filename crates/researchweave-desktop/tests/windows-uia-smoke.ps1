@@ -112,7 +112,35 @@ function WaitForNameLike(
         }
         Start-Sleep -Milliseconds 50
     } while ([DateTime]::UtcNow -lt $deadline)
+    $diagnosticNames = @($Window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name } | Where-Object {
+        $_ -like '*agent*' -or $_ -like '*proposal*' -or $_ -like '*plan*' -or
+        $_ -like '*tools_executed*' -or $_ -like '*arguments=hidden*' -or
+        $_ -like '*Open a project*' -or $_ -like '*invalid*'
+    })
+    if ($diagnosticNames.Count -gt 0) {
+        Write-Output ('UIA_WAIT_DIAGNOSTIC: ' + (($diagnosticNames | Select-Object -First 20) -join ' | '))
+    }
     throw "UIA result missing: $Pattern"
+}
+function ReachByTab(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [System.Windows.Automation.AutomationElement]$Anchor,
+    [System.Windows.Automation.ControlType]$Type,
+    [string]$Name,
+    [int]$MaxTabs = 8
+) {
+    $Anchor.SetFocus()
+    for ($attempt = 0; $attempt -le $MaxTabs; $attempt++) {
+        foreach ($item in (Children $Window $Type)) {
+            if ($item.Current.Name -eq $Name) { return $item }
+        }
+        [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
+        Start-Sleep -Milliseconds 120
+    }
+    throw "UIA element was not reachable by keyboard traversal: $Type '$Name'"
 }
 try {
     $window = WindowFor $p 'Native window missing from UIA tree'
@@ -1102,20 +1130,28 @@ try {
         Start-Sleep -Milliseconds 100
     }
     if (-not $agentGoal) { throw 'Agent tool review controls were not reachable in the Agent workspace' }
-    $agentOperation = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Agent proposed operation'
-    $agentArguments = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Agent proposed arguments JSON'
+    $agentOperation = ReachByTab $window $agentGoal ([System.Windows.Automation.ControlType]::Edit) 'Agent proposed operation' 4
+    $agentArguments = ReachByTab $window $agentOperation ([System.Windows.Automation.ControlType]::Edit) 'Agent proposed arguments JSON' 4
     ([System.Windows.Automation.ValuePattern]$agentGoal.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Index one local evidence passage')
     ([System.Windows.Automation.ValuePattern]$agentOperation.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('assistant.retrieval.index')
     $agentPrivateSentinel = 'AGENT_PRIVATE_SENTINEL_91D7'
     ([System.Windows.Automation.ValuePattern]$agentArguments.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('{"citation_id":"agent-uia-citation","source_id":"agent-uia-source","revision":"r1","content":"' + $agentPrivateSentinel + '"}')
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview inert agent plan').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 180
-    $planNames = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name })
-    if (-not ($planNames | Where-Object { $_ -like '*tools_executed=false*arguments=hidden*' })) {
-        throw 'Agent plan preview did not remain inert and privacy-safe'
+    $previewPlanButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview inert agent plan'
+    $stageProposalButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Stage agent tool proposal'
+    $timelineButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Load agent action timeline'
+    $previewPlanButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    # The result summary lives below the proposal row in the virtualized ScrollView.
+    # Traverse through real keyboard focus so both the lower controls and result are
+    # materialized instead of weakening the accessibility/privacy assertion.
+    $approveButton = ReachByTab $window $previewPlanButton ([System.Windows.Automation.ControlType]::Button) 'Approve exact agent proposal' 8
+    $approveButton.SetFocus()
+    for ($scrollStep = 0; $scrollStep -lt 3; $scrollStep++) {
+        [System.Windows.Forms.SendKeys]::SendWait('{PGDN}')
+        Start-Sleep -Milliseconds 100
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Stage agent tool proposal').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 180
+    WaitForNameLike $window '*tools_executed=false*arguments=hidden*' 3000
+    $stageProposalButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*state=proposed*arguments=hidden*' 3000
     # Clear the editable argument value before scanning the accessibility tree;
     # subsequent summaries must never reproduce this private payload.
     ([System.Windows.Automation.ValuePattern]$agentArguments.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('{}')
@@ -1126,18 +1162,10 @@ try {
     if ($stagedNames | Where-Object { $_ -like "*$agentPrivateSentinel*" }) {
         throw 'Agent proposal summary leaked raw tool arguments'
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Approve exact agent proposal').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 160
-    $approvedNames = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name })
-    if (-not ($approvedNames | Where-Object { $_ -like '*state=approved*fingerprint=*arguments=hidden*' })) {
-        throw 'Exact agent proposal approval was not reflected in the review summary'
-    }
+    $approveButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*state=approved*fingerprint=*arguments=hidden*' 3000
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Execute approved agent action').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 220
-    $completedNames = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name })
-    if (-not ($completedNames | Where-Object { $_ -like '*state=completed*result_status=ok*arguments=hidden*' })) {
-        throw 'Approved agent proposal did not complete through the router'
-    }
+    WaitForNameLike $window '*state=completed*result_status=ok*arguments=hidden*' 3000
 
     ([System.Windows.Automation.ValuePattern]$agentOperation.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('assistant.retrieval.revoke_source')
     ([System.Windows.Automation.ValuePattern]$agentArguments.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('{"source_id":"agent-uia-source"}')
@@ -1147,7 +1175,7 @@ try {
     ([System.Windows.Automation.ValuePattern]$denialReason.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Keep the indexed source')
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Deny exact agent proposal').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 160
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Load agent action timeline').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $timelineButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 180
     $timelineNames = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name })
     if (-not ($timelineNames | Where-Object { $_ -like '*state=completed*' }) -or -not ($timelineNames | Where-Object { $_ -like '*state=denied*' })) {

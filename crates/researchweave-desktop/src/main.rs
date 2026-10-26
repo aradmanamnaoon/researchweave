@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use researchweave_ai::{
     agent_actions::{AgentActionRecord, AgentActionStore},
     conversations::ConversationStore,
@@ -2643,6 +2644,193 @@ impl DisplayPreferences {
     }
 }
 
+fn native_package_workflow_smoke(phase: &str) -> Result<(), String> {
+    let root = host_data_root()?;
+    std::fs::create_dir_all(&root).map_err(|error| error.to_string())?;
+    let state_path = root.join("native-package-acceptance.json");
+    let preferences_path = root.join("display-preferences.json");
+    let source_path = root.join("native-package-study.csv");
+    let export_path = root.join("native-package-export.csv");
+
+    match phase {
+        "init" => {
+            if state_path.exists() {
+                return Err("Native package acceptance state already exists".into());
+            }
+            let info = create_managed_project_at(&root, "Native package acceptance")?;
+            let project = root.join("projects").join(&info.id);
+            if !project.is_dir() {
+                return Err("Managed acceptance project was not finalized".into());
+            }
+
+            std::fs::write(&source_path, b"score,group\n1,A\n3,A\n5,B\n")
+                .map_err(|error| error.to_string())?;
+            let source_sha256 = file_sha256(&source_path)?;
+            let (pending_import, preview) = analysis_preview_import_at(
+                &project,
+                source_path
+                    .to_str()
+                    .ok_or("Native package fixture path is not valid Unicode")?,
+                &root,
+            )?;
+            if preview["data"]["preview"] != true || preview["data"]["would_import"]["rows"] != 3 {
+                return Err("Native package import preview was incomplete".into());
+            }
+            let imported = analysis_execute_pending(&pending_import, &project, &root)?;
+            let dataset_id = imported["data"]["dataset_id"]
+                .as_str()
+                .ok_or("Native package import omitted dataset ID")?
+                .to_owned();
+            let revision = imported["data"]["revision"]
+                .as_str()
+                .ok_or("Native package import omitted dataset revision")?
+                .to_owned();
+            let described = analysis_read_at(
+                &project,
+                "statistics.describe",
+                serde_json::json!({"dataset_id":dataset_id,"revision":revision,"column":"score"}),
+                &root,
+            )?;
+            if described["data"]["n_valid"] != 3 || described["data"]["mean"] != 3.0 {
+                return Err(
+                    "Native package descriptive analysis returned unexpected values".into(),
+                );
+            }
+
+            let (pending_export, export_preview) = analysis_preview_command_at(
+                &project,
+                "dataset.export_csv",
+                serde_json::json!({
+                    "dataset_id":dataset_id,
+                    "revision":revision,
+                    "filename":"native-package-export.csv",
+                    "delimiter":",",
+                    "decimal":".",
+                    "formula_safe":true
+                }),
+                &root,
+            )?;
+            if export_preview["status"] != "ok" {
+                return Err("Native package export preview failed".into());
+            }
+            let exported = analysis_execute_command_pending(&pending_export, &project, &root)?;
+            let export_sha256 = exported["data"]["sha256"]
+                .as_str()
+                .ok_or("Native package export omitted SHA-256")?
+                .to_owned();
+            let encoded = exported["data"]["data_base64"]
+                .as_str()
+                .ok_or("Native package export omitted bytes")?;
+            let bytes = BASE64_STANDARD
+                .decode(encoded)
+                .map_err(|_| "Native package export returned invalid base64")?;
+            std::fs::write(&export_path, bytes).map_err(|error| error.to_string())?;
+            if file_sha256(&export_path)? != export_sha256 {
+                return Err("Native package exported file hash mismatch".into());
+            }
+
+            let preferences = DisplayPreferences {
+                dark_mode: true,
+                high_contrast: false,
+                compact_density: true,
+                reduced_motion: true,
+                ui_scale: 130,
+            };
+            preferences.write(&preferences_path)?;
+            if DisplayPreferences::read(&preferences_path)? != preferences {
+                return Err("Native package preferences did not persist".into());
+            }
+
+            let state = serde_json::json!({
+                "schema":1,
+                "project_id":info.id,
+                "dataset_id":dataset_id,
+                "revision":revision,
+                "source_sha256":source_sha256,
+                "export_sha256":export_sha256
+            });
+            std::fs::write(
+                &state_path,
+                serde_json::to_vec_pretty(&state).map_err(|error| error.to_string())?,
+            )
+            .map_err(|error| error.to_string())?;
+            println!(
+                "NATIVE_WORKFLOW_INIT_OK project_id={} export_sha256={}",
+                info.id, export_sha256
+            );
+            Ok(())
+        }
+        "verify" => {
+            let state: serde_json::Value = serde_json::from_slice(
+                &std::fs::read(&state_path)
+                    .map_err(|_| "Native package acceptance state is unavailable")?,
+            )
+            .map_err(|_| "Native package acceptance state has invalid JSON")?;
+            if state["schema"] != 1 {
+                return Err("Unsupported native package acceptance state schema".into());
+            }
+            let project_id = state["project_id"]
+                .as_str()
+                .ok_or("Native package acceptance state omitted project ID")?;
+            let dataset_id = state["dataset_id"]
+                .as_str()
+                .ok_or("Native package acceptance state omitted dataset ID")?;
+            let revision = state["revision"]
+                .as_str()
+                .ok_or("Native package acceptance state omitted dataset revision")?;
+            let source_sha256 = state["source_sha256"]
+                .as_str()
+                .ok_or("Native package acceptance state omitted source SHA-256")?;
+            let export_sha256 = state["export_sha256"]
+                .as_str()
+                .ok_or("Native package acceptance state omitted export SHA-256")?;
+            let project = root.join("projects").join(project_id);
+            let reopened = load_project_with_audit(
+                project
+                    .to_str()
+                    .ok_or("Native package project path is not valid Unicode")?,
+                "",
+                false,
+                &root.join("operation-audit.sqlite"),
+            )?;
+            if reopened.id != project_id || reopened.title != "Native package acceptance" {
+                return Err("Native package project did not reopen with persisted identity".into());
+            }
+            if file_sha256(&source_path)? != source_sha256 {
+                return Err("Native package imported source did not survive restart".into());
+            }
+            let described = analysis_read_at(
+                &project,
+                "statistics.describe",
+                serde_json::json!({"dataset_id":dataset_id,"revision":revision,"column":"score"}),
+                &root,
+            )?;
+            if described["data"]["n_valid"] != 3 || described["data"]["mean"] != 3.0 {
+                return Err("Native package analysis did not survive restart".into());
+            }
+            if file_sha256(&export_path)? != export_sha256 {
+                return Err("Native package exported file did not survive restart".into());
+            }
+            let expected_preferences = DisplayPreferences {
+                dark_mode: true,
+                high_contrast: false,
+                compact_density: true,
+                reduced_motion: true,
+                ui_scale: 130,
+            };
+            if DisplayPreferences::read(&preferences_path)? != expected_preferences {
+                return Err("Native package display preferences did not survive restart".into());
+            }
+            println!(
+                "NATIVE_WORKFLOW_VERIFY_OK project_id={} export_sha256={}",
+                project_id, export_sha256
+            );
+            Ok(())
+        }
+        _ => Err("Native package workflow smoke phase must be init or verify".into()),
+    }
+}
+
 fn apply_preferences(app: &MainWindow, preferences: DisplayPreferences) {
     app.global::<Theme>().set_dark_mode(preferences.dark_mode);
     app.global::<Theme>()
@@ -2660,6 +2848,13 @@ fn apply_preferences(app: &MainWindow, preferences: DisplayPreferences) {
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(args) = std::env::args().nth(1) {
+        if args == "--smoke-native-workflow" {
+            let phase = std::env::args()
+                .nth(2)
+                .ok_or("Expected native package workflow phase: init or verify")?;
+            native_package_workflow_smoke(&phase)?;
+            return Ok(());
+        }
         if args == "--smoke-project" {
             let harness =
                 std::env::temp_dir().join(format!("researchweave-desktop-{}", Uuid::new_v4()));
@@ -4701,7 +4896,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(summary) => {
                         ui.set_agent_action_results(summary.into());
-                        ui.set_status("Inert agent plan preview ready; no tool executed".into());
+                        ui.set_status(
+                            "Inert agent plan preview ready; no tool executed; tools_executed=false; arguments=hidden"
+                                .into(),
+                        );
                     }
                     Err(error) => {
                         ui.set_agent_action_results(error.clone().into());
@@ -4746,11 +4944,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(record) => {
                         *selected_agent_action.borrow_mut() =
                             Some(selected_agent_action_from_record(&record));
-                        ui.set_agent_action_results(agent_action_summary(&record).into());
-                        ui.set_status(
-                            "Agent tool proposal staged locally; exact fingerprint awaiting human decision"
-                                .into(),
-                        );
+                        let summary = agent_action_summary(&record);
+                        ui.set_agent_action_results(summary.clone().into());
+                        ui.set_status(format!(
+                            "Agent tool proposal staged locally; exact fingerprint awaiting human decision; {summary}"
+                        ).into());
                     }
                     Err(error) => {
                         selected_agent_action.borrow_mut().take();
@@ -4797,11 +4995,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(record) => {
                         *selected_agent_action_state.borrow_mut() =
                             Some(selected_agent_action_from_record(&record));
-                        ui.set_agent_action_results(agent_action_summary(&record).into());
-                        ui.set_status(
-                            "Exact agent proposal approved; execution remains a separate action"
-                                .into(),
-                        );
+                        let summary = agent_action_summary(&record);
+                        ui.set_agent_action_results(summary.clone().into());
+                        ui.set_status(format!(
+                            "Exact agent proposal approved; execution remains a separate action; {summary}"
+                        ).into());
                     }
                     Err(error) => {
                         ui.set_agent_action_results(error.clone().into());
@@ -4848,8 +5046,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(record) => {
                         *selected_agent_action_state.borrow_mut() =
                             Some(selected_agent_action_from_record(&record));
-                        ui.set_agent_action_results(agent_action_summary(&record).into());
-                        ui.set_status("Exact agent proposal denied; it cannot execute".into());
+                        let summary = agent_action_summary(&record);
+                        ui.set_agent_action_results(summary.clone().into());
+                        ui.set_status(
+                            format!("Exact agent proposal denied; it cannot execute; {summary}")
+                                .into(),
+                        );
                     }
                     Err(error) => {
                         ui.set_agent_action_results(error.clone().into());
@@ -4911,11 +5113,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(record) => {
                         *selected_agent_action_state.borrow_mut() =
                             Some(selected_agent_action_from_record(&record));
-                        ui.set_agent_action_results(agent_action_summary(&record).into());
-                        ui.set_status(
-                            "Approved agent action executed through the command router and was audited"
-                                .into(),
-                        );
+                        let summary = agent_action_summary(&record);
+                        ui.set_agent_action_results(summary.clone().into());
+                        ui.set_status(format!(
+                            "Approved agent action executed through the command router and was audited; {summary}"
+                        ).into());
                     }
                     Err(error) => {
                         ui.set_agent_action_results(error.clone().into());
@@ -4968,8 +5170,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 "Recovered {recovered} interrupted action(s) to interrupted_review; no retry occurred.\n{summary}"
                             );
                         }
+                        let state_summary = records
+                            .iter()
+                            .map(|record| format!("state={}", record.state))
+                            .collect::<Vec<_>>()
+                            .join(" ");
                         ui.set_agent_action_results(summary.into());
-                        ui.set_status("Durable privacy-safe agent action timeline loaded".into());
+                        ui.set_status(
+                            format!(
+                                "Durable privacy-safe agent action timeline loaded; {state_summary}; arguments=hidden"
+                            )
+                            .into(),
+                        );
                     }
                     Err(error) => {
                         ui.set_agent_action_results(error.clone().into());
