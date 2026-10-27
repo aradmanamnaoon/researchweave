@@ -142,13 +142,39 @@ function ReachByTab(
     }
     throw "UIA element was not reachable by keyboard traversal: $Type '$Name'"
 }
+function EnsureLiveFocus([System.Windows.Automation.AutomationElement]$Anchor) {
+    # AccessKit dispatches SetFocus through Slint's event loop. Confirm the
+    # actual keyboard target before sending any simulated Tab key.
+    $expectedType = $Anchor.Current.ControlType
+    $expectedName = $Anchor.Current.Name
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if ($focused) {
+        try {
+            if ($focused.Current.ControlType -eq $expectedType -and $focused.Current.Name -eq $expectedName) {
+                return
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+    }
+    $Anchor.SetFocus()
+    for ($focusAttempt = 0; $focusAttempt -lt 20; $focusAttempt++) {
+        Start-Sleep -Milliseconds 50
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if (-not $focused) { continue }
+        try {
+            if ($focused.Current.ControlType -eq $expectedType -and $focused.Current.Name -eq $expectedName) {
+                return
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+    }
+    throw "UIA anchor failed to receive keyboard focus: $expectedType '$expectedName'"
+}
 function FocusByTab(
     [System.Windows.Automation.AutomationElement]$Anchor,
     [System.Windows.Automation.ControlType]$Type,
     [string]$Name,
     [int]$MaxTabs = 8
 ) {
-    $Anchor.SetFocus()
+    EnsureLiveFocus $Anchor
     $visited = New-Object System.Collections.Generic.List[string]
     for ($attempt = 0; $attempt -le $MaxTabs; $attempt++) {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
@@ -177,7 +203,7 @@ function FocusByShiftTab(
     [string]$Name,
     [int]$MaxTabs = 8
 ) {
-    $Anchor.SetFocus()
+    EnsureLiveFocus $Anchor
     for ($attempt = 0; $attempt -le $MaxTabs; $attempt++) {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         if ($focused) {
