@@ -119,7 +119,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libfontconfig1-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfuse2 xvfb xauth dbus-x11 at-spi2-core python3-pyatspi gnome-keyring libsecret-tools
+          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfuse2 xvfb xauth dbus-x11 at-spi2-core python3-pyatspi gnome-keyring libsecret-tools
       - name: Resolve version and PDFium expected digest
         shell: bash
         run: |

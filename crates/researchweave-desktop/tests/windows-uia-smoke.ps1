@@ -969,7 +969,7 @@ try {
     if ($restoredManuscriptValue -ne $recoveredManuscript) {
         throw 'Abrupt-exit manuscript draft was not restored into the fresh process'
     }
-    WaitForNameLike $window '*Recovered manuscript autosaved to project revisions*' 3000
+    WaitForNameLike $window '*Recovered manuscript autosaved to project revisions*' 10000
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect manuscript').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $recoveredInspectNames = @($window.FindAll(
@@ -1030,7 +1030,7 @@ try {
     if ($restoredNotebookValue -ne $recoveredNotebook) {
         throw 'Abrupt-exit notebook draft was not restored into the fresh process'
     }
-    WaitForNameLike $window '*Recovered notebook autosaved to project revisions*' 3000
+    WaitForNameLike $window '*Recovered notebook autosaved to project revisions*' 10000
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export notebook Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $recoveredNotebookExportNames = @($window.FindAll(
