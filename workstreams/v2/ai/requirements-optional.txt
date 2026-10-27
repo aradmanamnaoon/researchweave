@@ -1,6 +1,0 @@
-# Optional AI worker dependencies, installed in the isolated worker venv for
-# authenticated backup and OS credential-store validation. Integrator should
-# merge these as a versioned project extra and regenerate the canonical lock.
-cryptography>=45,<48
-keyring>=25,<27
-pypdf>=6,<8

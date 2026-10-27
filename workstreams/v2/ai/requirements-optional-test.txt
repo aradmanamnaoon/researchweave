@@ -1,2 +1,0 @@
-# Synthetic PDF fixture generation; never required for production document reads.
-reportlab>=4,<5
