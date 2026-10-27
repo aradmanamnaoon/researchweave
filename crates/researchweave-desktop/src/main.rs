@@ -2385,6 +2385,59 @@ fn evidence_execute_pending(
     Ok((result, revision))
 }
 
+/// Construct a protocol amendment from persisted data without silently
+/// dropping fields not editable in the compact desktop form.
+///
+/// An empty design or objective means "keep the current value", not delete.
+/// The subsequent preview and one-use approved write still bind the exact
+/// project revision, preventing concurrent amendment from being overwritten.
+fn protocol_amendment_arguments_at(
+    project: &Path,
+    protocol_id: &str,
+    design: &str,
+    objective: &str,
+    author: &str,
+    rationale: &str,
+    data_root: &Path,
+) -> Result<serde_json::Value, String> {
+    let protocol_id = protocol_id.trim();
+    if protocol_id.is_empty() {
+        return Err("Enter a protocol ID to amend".into());
+    }
+    let history = evidence_read_at(
+        project,
+        "protocol.history",
+        serde_json::json!({"protocol_id":protocol_id}),
+        data_root,
+    )?;
+    let previous = history
+        .pointer("/data/history")
+        .and_then(serde_json::Value::as_array)
+        .and_then(|versions| versions.last())
+        .and_then(|version| version.get("body"))
+        .and_then(serde_json::Value::as_object)
+        .ok_or_else(|| "The current protocol body is unavailable".to_owned())?;
+    let mut body = previous.clone();
+    if !design.trim().is_empty() {
+        body.insert(
+            "design".into(),
+            serde_json::Value::String(design.trim().to_lowercase()),
+        );
+    }
+    if !objective.trim().is_empty() {
+        body.insert(
+            "objective".into(),
+            serde_json::Value::String(objective.to_owned()),
+        );
+    }
+    Ok(serde_json::json!({
+        "protocol_id":protocol_id,
+        "author":author.trim(),
+        "rationale":rationale.trim(),
+        "body":body
+    }))
+}
+
 fn evidence_read_at(
     project_path: &Path,
     operation: &str,
@@ -3525,19 +3578,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .ok_or_else(|| "Open a project first".to_string())
                     .and_then(|path| {
                         let root = host_data_root()?;
+                        let arguments = protocol_amendment_arguments_at(
+                            path,
+                            protocol_id.as_str(),
+                            design.as_str(),
+                            objective.as_str(),
+                            author.as_str(),
+                            rationale.as_str(),
+                            &root,
+                        )?;
                         evidence_preview_at(
                             path,
                             "protocol.amend",
                             "protocol",
-                            serde_json::json!({
-                                "protocol_id":protocol_id.as_str().trim(),
-                                "author":author.as_str().trim(),
-                                "rationale":rationale.as_str().trim(),
-                                "body":{
-                                    "design":design.as_str().trim().to_lowercase(),
-                                    "objective":objective.as_str()
-                                }
-                            }),
+                            arguments,
                             &root,
                         )
                     });
@@ -7842,23 +7896,37 @@ mod tests {
             serde_json::json!({
                 "title":"Clinical methods",
                 "author":"Researcher",
-                "body":{"design":"observational","objective":"Review cohorts"}
+                "body":{
+                    "design":"observational",
+                    "objective":"Review cohorts",
+                    "population":"Farsi speakers",
+                    "data_dictionary":{"score":"validated"}
+                }
             }),
             &data_root,
         )
         .unwrap();
         let (created, _) = evidence_execute_pending(&create, &project, &data_root).unwrap();
         let id = created["data"]["protocol_id"].as_str().unwrap();
+        let arguments = protocol_amendment_arguments_at(
+            &project,
+            id,
+            "",
+            "Compare groups",
+            "Researcher 2",
+            "Clarify research question",
+            &data_root,
+        )
+        .unwrap();
+        assert_eq!(arguments["body"]["design"], "observational");
+        assert_eq!(arguments["body"]["population"], "Farsi speakers");
+        assert_eq!(arguments["body"]["data_dictionary"]["score"], "validated");
+        assert_eq!(arguments["body"]["objective"], "Compare groups");
         let (pending, preview) = evidence_preview_at(
             &project,
             "protocol.amend",
             "protocol",
-            serde_json::json!({
-                "protocol_id":id,
-                "author":"Researcher 2",
-                "rationale":"Clarify research question",
-                "body":{"design":"experimental","objective":"Compare groups"}
-            }),
+            arguments,
             &data_root,
         )
         .unwrap();
@@ -7883,6 +7951,14 @@ mod tests {
         )
         .unwrap();
         assert_eq!(history["data"]["history"].as_array().unwrap().len(), 2);
+        assert_eq!(
+            history["data"]["history"][1]["body"]["population"],
+            "Farsi speakers"
+        );
+        assert_eq!(
+            history["data"]["history"][1]["body"]["data_dictionary"]["score"],
+            "validated"
+        );
         let exported = evidence_read_at(
             &project,
             "protocol.export",

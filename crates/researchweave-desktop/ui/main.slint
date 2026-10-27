@@ -1458,7 +1458,7 @@ export component MainWindow inherits Window {
                                 accessible-label: "Preview protocol amendment";
                                 clicked => { root.preview-protocol-amend(protocol-id.text, protocol-design.text, protocol-objective.text, protocol-author.text, protocol-rationale.text); }
                             }
-                            Text { text: "Amendments replace the complete protocol body (design and objective) with a new version. Preview before recording; the original version is preserved."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Text { text: "Amendments preserve all existing protocol-body fields, changing only nonempty design/objective inputs. A blank input keeps its previous value. Preview before recording; all earlier versions remain available."; color: Theme.muted-ink; wrap: word-wrap; }
                             Text { text: root.protocol-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Protocol operation result"; }
                             Rectangle { vertical-stretch: 1; }
                           }
