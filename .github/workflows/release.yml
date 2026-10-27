@@ -9,7 +9,10 @@ permissions:
   contents: read
 
 concurrency:
-  group: rust-native-release-${{ github.ref }}
+  # Serialize all tag publications, not just identical tags. Otherwise two
+  # different semver tags can race the final `latest` promotion even when each
+  # individual release passes its own public-verification gate.
+  group: rust-native-release-publication
   cancel-in-progress: false
 
 jobs:
