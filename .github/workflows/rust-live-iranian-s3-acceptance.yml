@@ -1,0 +1,243 @@
+name: Rust live Iranian S3 acceptance
+
+on:
+  workflow_dispatch:
+    inputs:
+      head_sha:
+        description: Exact lowercase 40-character main-branch commit to verify
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rust-live-iranian-s3-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  live-liara:
+    if: github.ref == 'refs/heads/main'
+    runs-on: windows-2022
+    timeout-minutes: 75
+    environment: live-iranian-s3-acceptance
+    env:
+      RESEARCHWEAVE_LIVE_S3_ACCEPTANCE: "1"
+      RESEARCHWEAVE_LIVE_S3_PROFILE_ID: ${{ vars.RESEARCHWEAVE_LIVE_S3_PROFILE_ID }}
+      RESEARCHWEAVE_LIVE_S3_ENDPOINT: ${{ vars.RESEARCHWEAVE_LIVE_S3_ENDPOINT }}
+      RESEARCHWEAVE_LIVE_S3_BUCKET: ${{ vars.RESEARCHWEAVE_LIVE_S3_BUCKET }}
+      RESEARCHWEAVE_LIVE_S3_RUN_TOKEN: run-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Verify protected run is exact main source
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -ne 'refs/heads/main') {
+            throw 'Live provider acceptance may run only from the main branch'
+          }
+          if ('${{ inputs.head_sha }}' -notmatch '^[0-9a-f]{40}$') {
+            throw 'head_sha input must be an exact lowercase 40-character commit SHA'
+          }
+          if ($env:GITHUB_SHA -ne '${{ inputs.head_sha }}') {
+            throw 'workflow_dispatch source SHA does not match the requested final commit'
+          }
+          $head = (git rev-parse HEAD).Trim()
+          if ($head -ne $env:GITHUB_SHA) {
+            throw 'Checked-out source does not match GITHUB_SHA'
+          }
+
+      - name: Validate protected Liara metadata
+        shell: pwsh
+        run: |
+          if ($env:RESEARCHWEAVE_LIVE_S3_PROFILE_ID -notmatch '^[A-Za-z0-9._-]{1,96}$') {
+            throw 'Protected environment is missing a valid live S3 profile ID'
+          }
+          $endpoint = [Uri]$env:RESEARCHWEAVE_LIVE_S3_ENDPOINT
+          if ($endpoint.Scheme -ne 'https' -or -not $endpoint.Host.EndsWith('.liara.site', [StringComparison]::OrdinalIgnoreCase)) {
+            throw 'Protected live S3 endpoint must be an HTTPS Liara hostname'
+          }
+          if ($env:RESEARCHWEAVE_LIVE_S3_BUCKET -notmatch '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') {
+            throw 'Protected environment is missing a valid Liara bucket name'
+          }
+
+      - name: Seed temporary provider credential into Windows Credential Manager
+        shell: pwsh
+        env:
+          RESEARCHWEAVE_LIVE_S3_ACCESS_KEY: ${{ secrets.RESEARCHWEAVE_LIVE_S3_ACCESS_KEY }}
+          RESEARCHWEAVE_LIVE_S3_SECRET_KEY: ${{ secrets.RESEARCHWEAVE_LIVE_S3_SECRET_KEY }}
+          RESEARCHWEAVE_LIVE_S3_SESSION_TOKEN: ${{ secrets.RESEARCHWEAVE_LIVE_S3_SESSION_TOKEN }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:RESEARCHWEAVE_LIVE_S3_ACCESS_KEY) -or
+              [string]::IsNullOrWhiteSpace($env:RESEARCHWEAVE_LIVE_S3_SECRET_KEY)) {
+            throw 'Live Liara credentials are not configured in the protected environment'
+          }
+          cargo test --locked -p researchweave-cloud tests::live_liara_seed_keyring_from_env -- --exact --ignored --nocapture
+
+      - name: Execute real conditional-write and encrypted-sync acceptance
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path target/live-s3 -Force | Out-Null
+          $raw = @(& cargo test --locked -p researchweave-cloud tests::live_liara_encrypted_sync_acceptance_from_keyring -- --exact --ignored --nocapture 2>&1)
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            throw "Live Liara acceptance failed with exit code $exitCode; raw provider output is intentionally not persisted"
+          }
+
+          $lines = @($raw | ForEach-Object { [string]$_ })
+          $stages = @(
+            'connection',
+            'conditional_write',
+            'encrypted_push',
+            'encrypted_pull',
+            'second_device_restore',
+            'conflict_preservation',
+            'history',
+            'cleanup'
+          )
+          $expected = New-Object System.Collections.Generic.List[string]
+          foreach ($stage in $stages) {
+            $expected.Add("LIVE_S3_STAGE_OK stage=$stage")
+          }
+          $endpointHost = ([Uri]$env:RESEARCHWEAVE_LIVE_S3_ENDPOINT).Host
+          $finalMarker = "LIVE_S3_ACCEPTANCE_OK provider=liara endpoint_host=$endpointHost"
+          $expected.Add($finalMarker)
+          $sanitized = @($lines | Where-Object { $_ -match '^LIVE_S3_(STAGE_OK|ACCEPTANCE_OK) ' })
+          if ($sanitized.Count -ne $expected.Count) {
+            throw 'Live Liara acceptance emitted an unexpected number of success markers'
+          }
+          for ($index = 0; $index -lt $expected.Count; $index++) {
+            if ($sanitized[$index] -ne $expected[$index]) {
+              throw "Live Liara acceptance marker order/content mismatch at index $index"
+            }
+          }
+          [System.IO.File]::WriteAllLines(
+            (Join-Path $PWD 'target/live-s3/live-s3.log'),
+            $sanitized,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+
+      - name: Build native desktop for protected live GUI acceptance
+        shell: pwsh
+        run: cargo build --locked --release -p researchweave-desktop
+
+      - name: Exercise live Liara sync through the real Windows GUI
+        shell: pwsh
+        run: |
+          $raw = @(& powershell.exe -NoProfile -ExecutionPolicy Bypass -File `
+            crates/researchweave-desktop/tests/windows-uia-live-cloud.ps1 `
+            -Exe target/release/researchweave-desktop.exe `
+            -ProfileId $env:RESEARCHWEAVE_LIVE_S3_PROFILE_ID `
+            -Endpoint $env:RESEARCHWEAVE_LIVE_S3_ENDPOINT `
+            -Bucket $env:RESEARCHWEAVE_LIVE_S3_BUCKET `
+            -RunToken $env:RESEARCHWEAVE_LIVE_S3_RUN_TOKEN `
+            -Screenshot target/live-s3/live-cloud-gui.png 2>&1)
+          $exitCode = $LASTEXITCODE
+          if ($exitCode -ne 0) {
+            throw "Live Liara GUI acceptance failed with exit code $exitCode; raw GUI output is intentionally not persisted"
+          }
+          $lines = @($raw | ForEach-Object { [string]$_ })
+          $stages = @(
+            'connection',
+            'encrypted_push',
+            'conflict_preservation',
+            'history',
+            'encrypted_pull',
+            'local_cleanup'
+          )
+          $expected = New-Object System.Collections.Generic.List[string]
+          foreach ($stage in $stages) {
+            $expected.Add("LIVE_S3_GUI_STAGE_OK stage=$stage")
+          }
+          $endpointHost = ([Uri]$env:RESEARCHWEAVE_LIVE_S3_ENDPOINT).Host
+          $expected.Add("LIVE_S3_GUI_ACCEPTANCE_OK provider=liara endpoint_host=$endpointHost")
+          $sanitized = @($lines | Where-Object { $_ -match '^LIVE_S3_GUI_(STAGE_OK|ACCEPTANCE_OK) ' })
+          if ($sanitized.Count -ne $expected.Count) {
+            throw 'Live Liara GUI acceptance emitted an unexpected number of success markers'
+          }
+          for ($index = 0; $index -lt $expected.Count; $index++) {
+            if ($sanitized[$index] -ne $expected[$index]) {
+              throw "Live Liara GUI acceptance marker order/content mismatch at index $index"
+            }
+          }
+          [System.IO.File]::WriteAllLines(
+            (Join-Path $PWD 'target/live-s3/live-s3-gui.log'),
+            $sanitized,
+            [System.Text.UTF8Encoding]::new($false)
+          )
+          python packaging/rust/verify_live_s3_gui_acceptance.py `
+            target/live-s3/live-s3-gui.log `
+            --expected-endpoint-host $endpointHost
+
+      - name: Remove live acceptance namespace
+        if: always()
+        shell: pwsh
+        run: cargo test --locked -p researchweave-cloud tests::live_liara_cleanup_namespace_from_keyring -- --exact --ignored --nocapture
+
+      - name: Remove temporary provider credential from Windows Credential Manager
+        if: always()
+        shell: pwsh
+        run: cargo test --locked -p researchweave-cloud tests::live_liara_delete_keyring_credential -- --exact --ignored --nocapture
+
+      - name: Build and verify exact-source live-provider evidence
+        shell: pwsh
+        run: |
+          python packaging/rust/build_live_s3_evidence.py `
+            --log target/live-s3/live-s3.log `
+            --output target/live-s3/live-iranian-s3-acceptance.json `
+            --endpoint "$env:RESEARCHWEAVE_LIVE_S3_ENDPOINT" `
+            --head-sha "${{ github.sha }}" `
+            --run-id "${{ github.run_id }}" `
+            --run-attempt "${{ github.run_attempt }}" `
+            --workflow-path ".github/workflows/rust-live-iranian-s3-acceptance.yml"
+          python packaging/rust/verify_live_s3_acceptance.py `
+            target/live-s3/live-iranian-s3-acceptance.json `
+            --log target/live-s3/live-s3.log `
+            --expected-head-sha "${{ github.sha }}" `
+            --expected-run-id "${{ github.run_id }}" `
+            --expected-run-attempt "${{ github.run_attempt }}" `
+            --expected-workflow-path ".github/workflows/rust-live-iranian-s3-acceptance.yml"
+
+      - name: Prove sanitized evidence does not contain protected credentials
+        shell: pwsh
+        env:
+          RESEARCHWEAVE_LIVE_S3_ACCESS_KEY: ${{ secrets.RESEARCHWEAVE_LIVE_S3_ACCESS_KEY }}
+          RESEARCHWEAVE_LIVE_S3_SECRET_KEY: ${{ secrets.RESEARCHWEAVE_LIVE_S3_SECRET_KEY }}
+          RESEARCHWEAVE_LIVE_S3_SESSION_TOKEN: ${{ secrets.RESEARCHWEAVE_LIVE_S3_SESSION_TOKEN }}
+        run: |
+          $evidence = (Get-Content target/live-s3/live-s3.log -Raw) + "`n" + `
+            (Get-Content target/live-s3/live-s3-gui.log -Raw) + "`n" + `
+            (Get-Content target/live-s3/live-iranian-s3-acceptance.json -Raw)
+          foreach ($secret in @(
+            $env:RESEARCHWEAVE_LIVE_S3_ACCESS_KEY,
+            $env:RESEARCHWEAVE_LIVE_S3_SECRET_KEY,
+            $env:RESEARCHWEAVE_LIVE_S3_SESSION_TOKEN
+          )) {
+            if (-not [string]::IsNullOrWhiteSpace($secret) -and $evidence.Contains($secret)) {
+              throw 'Sanitized live-provider evidence contains protected credential material'
+            }
+          }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: live-iranian-s3-evidence-${{ github.run_attempt }}
+          path: |
+            target/live-s3/live-iranian-s3-acceptance.json
+            target/live-s3/live-s3.log
+            target/live-s3/live-s3-gui.log
+          if-no-files-found: error
+          retention-days: 14
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: live-iranian-s3-gui-screenshot-${{ github.run_attempt }}
+          path: target/live-s3/live-cloud-gui.png
+          if-no-files-found: ignore
+          retention-days: 14

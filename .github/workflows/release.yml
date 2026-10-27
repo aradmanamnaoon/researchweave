@@ -1,321 +1,694 @@
-name: Release
+name: Rust native release
 
 on:
-  pull_request:
-    paths:
-      - "src/**"
-      - "tests/**"
-      - "packaging/**"
-      - "pyproject.toml"
-      - "uv.lock"
-      - ".github/workflows/release.yml"
   push:
     tags:
-      - "v*.*.*"
-  workflow_dispatch:
+      - 'v*.*.*'
 
 permissions:
   contents: read
 
-jobs:
-  windows:
-    name: Windows x64 installer
-    runs-on: windows-latest
-    timeout-minutes: 90
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up uv and Python
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-        with:
-          enable-cache: true
-          python-version: "3.12"
-      - name: Install locked dependencies
-        run: uv sync --locked --extra dev --extra formats --extra release
-      - name: Run release-relevant tests
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: uv run --no-sync pytest -q tests/unit tests/integration tests/ui/test_smoke.py
-      - name: Ensure Inno Setup is available
-        shell: pwsh
-        run: |
-          $iscc = @(
-            (Get-Command "ISCC.exe" -ErrorAction SilentlyContinue).Source,
-            (Join-Path ([Environment]::GetFolderPath("ProgramFilesX86")) "Inno Setup 6\ISCC.exe"),
-            (Join-Path $env:ProgramFiles "Inno Setup 6\ISCC.exe")
-          ) | Where-Object { $_ -and (Test-Path -LiteralPath $_) } | Select-Object -First 1
-          if (-not $iscc) {
-            choco install innosetup --no-progress -y
-          }
-      - name: Build Windows installer and portable package
-        shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File packaging/windows/build.ps1
-      - name: Smoke-test portable package
-        shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File packaging/windows/smoke-portable.ps1
-      - name: Install, launch, and uninstall installer
-        shell: pwsh
-        run: powershell -ExecutionPolicy Bypass -File packaging/windows/smoke-installer.ps1
-      - name: Verify Windows release files
-        shell: pwsh
-        run: |
-          $version = (Select-String -Path "pyproject.toml" -Pattern '^version\s*=\s*"([^"]+)"').Matches[0].Groups[1].Value
-          $expected = @(
-            "dist\ResearchWeave-v$version-windows-x64-setup.exe",
-            "dist\ResearchWeave-v$version-windows-x64-portable.zip",
-            "dist\SHA256SUMS-windows.txt"
-          )
-          foreach ($path in $expected) {
-            if (-not (Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -le 0) {
-              throw "Missing or empty release file: $path"
-            }
-          }
-      - name: Upload Windows release files
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-windows-x64
-          path: |
-            dist/ResearchWeave-v*-windows-x64-setup.exe
-            dist/ResearchWeave-v*-windows-x64-portable.zip
-            dist/SHA256SUMS-windows.txt
-          if-no-files-found: error
-          retention-days: 7
+concurrency:
+  group: rust-native-release-${{ github.ref }}
+  cancel-in-progress: false
 
-  linux:
-    name: Linux x86_64 AppImage and DEB
-    runs-on: ubuntu-22.04
-    timeout-minutes: 90
+jobs:
+  security:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up uv and Python
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: actions/checkout@v4
         with:
-          enable-cache: true
-          python-version: "3.12"
-      - name: Install Linux Qt runtime libraries
+          persist-credentials: false
+          fetch-depth: 0
+      - name: Linux workspace build prerequisites
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1 libopengl0 libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0
-      - name: Install locked dependencies
-        run: uv sync --locked --extra dev --extra formats --extra release
-      - name: Run release-relevant tests
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: uv run --no-sync pytest -q tests/unit tests/integration tests/ui/test_smoke.py
-      - name: Build AppImage and DEB
-        run: bash packaging/linux/build.sh
-      - name: Smoke-test AppImage and DEB
-        run: bash packaging/linux/smoke.sh
-      - name: Verify Linux release files
+          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+      - name: Verify release tag and Rust version
+        shell: bash
         run: |
           set -euo pipefail
-          VERSION=$(uv run --no-sync python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
-          for path in \
-            "dist/ResearchWeave-v$VERSION-linux-x86_64.AppImage" \
-            "dist/ResearchWeave-v$VERSION-linux-amd64.deb" \
-            "dist/SHA256SUMS-linux.txt"; do
-            test -s "$path"
-          done
-      - name: Upload Linux release files
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${GITHUB_REF_NAME#v}"
+          actual="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;data=json.load(sys.stdin);print(next(package["version"] for package in data["packages"] if package["name"]=="researchweave-desktop"))')"
+          [[ "$version" == "$actual" ]]
+      - name: Verify declared Rust MSRV
+        run: |
+          rustup toolchain install 1.94.1 --profile minimal
+          cargo +1.94.1 check --workspace --locked
+      - run: cargo fmt --all -- --check
+      - run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace --locked --all-features
+      - name: Install pinned cargo security commands
+        run: |
+          cargo install --locked cargo-audit --version 0.22.0
+          cargo install --locked cargo-deny --version 0.20.2
+          cargo install --locked cargo-cyclonedx --version 0.5.7
+      - name: RustSec vulnerabilities and unsafe/yanked dependency gate
+        run: cargo audit --deny unsound --deny yanked
+      - name: Dependency policies
+        run: |
+          test -f deny.toml
+          cargo deny check
+      - name: SBOM
+        run: cargo cyclonedx --format json --all
+      - name: Secret scan
+        shell: bash
+        run: |
+          set -euo pipefail
+          version=8.30.1
+          archive="gitleaks_${version}_linux_x64.tar.gz"
+          expected="551f6fc83ea457d62a0d98237cbad105af8d557003051f41f3e7ca7b3f2470eb"
+          mkdir -p target/security-tools/gitleaks
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            "https://github.com/gitleaks/gitleaks/releases/download/v${version}/${archive}" \
+            --output "target/security-tools/${archive}"
+          echo "${expected}  target/security-tools/${archive}" | sha256sum --check -
+          tar -xzf "target/security-tools/${archive}" -C target/security-tools/gitleaks gitleaks
+          target/security-tools/gitleaks/gitleaks version | grep -Fx "${version}"
+          target/security-tools/gitleaks/gitleaks git \
+            --redact \
+            --config .gitleaks.toml \
+            --gitleaks-ignore-path .gitleaksignore \
+            --log-opts='--all'
+      - name: Archive SBOM
+        uses: actions/upload-artifact@v4
         with:
-          name: release-linux-x86_64
+          name: rust-sbom
+          path: '**/*.cdx.json'
+          if-no-files-found: error
+
+  cloud-acceptance:
+    needs: security
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      run_id: ${{ steps.provenance.outputs.run_id }}
+      run_attempt: ${{ steps.provenance.outputs.run_attempt }}
+      provider_name: ${{ steps.provenance.outputs.provider_name }}
+      endpoint_host: ${{ steps.provenance.outputs.endpoint_host }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Locate and verify exact-source protected Liara acceptance
+        id: provenance
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow_file="rust-live-iranian-s3-acceptance.yml"
+          workflow_path=".github/workflows/$workflow_file"
+          mkdir -p target/live-s3-evidence
+
+          workflow_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_file")"
+          workflow_id="$(jq -er '.id | select(type == "number")' <<<"$workflow_json")"
+          workflow_api_path="$(jq -er '.path | strings' <<<"$workflow_json")"
+          workflow_api_path="${workflow_api_path%%@*}"
+          [[ "$workflow_api_path" == "$workflow_path" ]]
+
+          runs_json="$(gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id/runs?event=workflow_dispatch&branch=main&per_page=100")"
+          jq -er \
+            --arg sha "$GITHUB_SHA" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --argjson wid "$workflow_id" \
+            '[.[] | .workflow_runs[]? |
+              select(.head_sha == $sha and
+                     .head_branch == "main" and
+                     .event == "workflow_dispatch" and
+                     .workflow_id == $wid and
+                     .status == "completed" and
+                     .conclusion == "success" and
+                     .head_repository.full_name == $repo and
+                     (.run_attempt | type) == "number" and
+                     .run_attempt >= 1)] |
+             sort_by(.run_started_at) | reverse | .[0] // error("No successful exact-SHA live Liara acceptance run")' \
+            <<<"$runs_json" > target/live-s3-evidence/selected-run.json
+
+          run_id="$(jq -er '.id | tostring' target/live-s3-evidence/selected-run.json)"
+          run_attempt="$(jq -er '.run_attempt | tostring' target/live-s3-evidence/selected-run.json)"
+          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > target/live-s3-evidence/observed-run.json
+          jq -e \
+            --arg sha "$GITHUB_SHA" \
+            --arg repo "$GITHUB_REPOSITORY" \
+            --argjson id "$run_id" \
+            --argjson attempt "$run_attempt" \
+            --argjson wid "$workflow_id" \
+            '.id == $id and
+             .run_attempt == $attempt and
+             .workflow_id == $wid and
+             .head_sha == $sha and
+             .head_branch == "main" and
+             .event == "workflow_dispatch" and
+             .status == "completed" and
+             .conclusion == "success" and
+             .head_repository.full_name == $repo' \
+            target/live-s3-evidence/observed-run.json >/dev/null
+          observed_path="$(jq -er '.path | strings' target/live-s3-evidence/observed-run.json)"
+          observed_path="${observed_path%%@*}"
+          [[ "$observed_path" == "$workflow_path" ]]
+
+          artifact_name="live-iranian-s3-evidence-$run_attempt"
+          artifacts_json="$(gh api --paginate --slurp \
+            "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100")"
+          artifact_count="$(jq -r \
+            --arg name "$artifact_name" \
+            --argjson run "$run_id" \
+            '[.[] | .artifacts[]? |
+              select(.name == $name and .expired == false and .workflow_run.id == $run)] | length' \
+            <<<"$artifacts_json")"
+          [[ "$artifact_count" == "1" ]]
+
+          gh run download "$run_id" \
+            --repo "$GITHUB_REPOSITORY" \
+            --name "$artifact_name" \
+            --dir target/live-s3-evidence/download
+          test -f target/live-s3-evidence/download/live-iranian-s3-acceptance.json
+          test -f target/live-s3-evidence/download/live-s3.log
+          test -f target/live-s3-evidence/download/live-s3-gui.log
+          [[ "$(find target/live-s3-evidence/download -maxdepth 1 -type f | wc -l | tr -d ' ')" == "3" ]]
+
+          python3 packaging/rust/verify_live_s3_acceptance.py \
+            target/live-s3-evidence/download/live-iranian-s3-acceptance.json \
+            --log target/live-s3-evidence/download/live-s3.log \
+            --expected-head-sha "$GITHUB_SHA" \
+            --expected-run-id "$run_id" \
+            --expected-run-attempt "$run_attempt" \
+            --expected-workflow-path "$workflow_path"
+          endpoint_host="$(jq -er '.endpoint_host | strings' target/live-s3-evidence/download/live-iranian-s3-acceptance.json)"
+          python3 packaging/rust/verify_live_s3_gui_acceptance.py \
+            target/live-s3-evidence/download/live-s3-gui.log \
+            --expected-endpoint-host "$endpoint_host"
+
+          provider_name="$(jq -er '.provider_name | strings' target/live-s3-evidence/download/live-iranian-s3-acceptance.json)"
+          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+          echo "run_attempt=$run_attempt" >> "$GITHUB_OUTPUT"
+          echo "provider_name=$provider_name" >> "$GITHUB_OUTPUT"
+          echo "endpoint_host=$endpoint_host" >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-live-iranian-s3-evidence
           path: |
-            dist/ResearchWeave-v*-linux-x86_64.AppImage
-            dist/ResearchWeave-v*-linux-amd64.deb
-            dist/SHA256SUMS-linux.txt
+            target/live-s3-evidence/download/live-iranian-s3-acceptance.json
+            target/live-s3-evidence/download/live-s3.log
+            target/live-s3-evidence/download/live-s3-gui.log
+          if-no-files-found: error
+          retention-days: 14
+
+  native:
+    needs: [security, cloud-acceptance]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: windows-2022
+            platform: windows-x64
+          - os: macos-15
+            platform: macos-arm64
+          - os: macos-15-intel
+            platform: macos-x64
+          - os: ubuntu-22.04
+            platform: linux-x64
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 120
+    env:
+      PLATFORM: ${{ matrix.platform }}
+      PDFIUM_SHA256_WIN: 6f398552d8021a89078f64466557251a204999177287b876be49877eb8750d50
+      PDFIUM_SHA256_MAC_ARM: 4168356c2e62ad5e79553e2e9162f5c99949759d90cb83876a50311f0c32b9b3
+      PDFIUM_SHA256_MAC_X64: cbd0e695f5789549a6887833006cda0741278d4329718970cd16d5e6733d2e98
+      PDFIUM_SHA256_LINUX: 6248189e07bbc33cdeb31976c539a88614307c8a19f3276dbd018efbe5b4a2a2
+      APPIMAGETOOL_VERSION: 1.9.1
+      APPIMAGETOOL_SHA256: ed4ce84f0d9caff66f50bcca6ff6f35aae54ce8135408b3fa33abfc3cb384eb0
+      APPIMAGE_RUNTIME_VERSION: 20251108
+      APPIMAGE_RUNTIME_SHA256: 2fca8b443c92510f1483a883f60061ad09b46b978b2631c807cd873a47ec260d
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Linux build prerequisites
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfuse2 xvfb xauth dbus-x11 at-spi2-core python3-pyatspi gnome-keyring libsecret-tools
+      - name: Resolve version and PDFium expected digest
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${GITHUB_REF_NAME#v}"
+          actual="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;data=json.load(sys.stdin);print(next(package["version"] for package in data["packages"] if package["name"]=="researchweave-desktop"))')"
+          [[ "$version" == "$actual" ]]
+          echo "RELEASE_VERSION=$version" >> "$GITHUB_ENV"
+          case "$PLATFORM" in
+            windows-x64) expected="$PDFIUM_SHA256_WIN" ;;
+            macos-arm64) expected="$PDFIUM_SHA256_MAC_ARM" ;;
+            macos-x64) expected="$PDFIUM_SHA256_MAC_X64" ;;
+            linux-x64) expected="$PDFIUM_SHA256_LINUX" ;;
+          esac
+          [[ "$expected" =~ ^[0-9a-fA-F]{64}$ ]] || { echo 'Verified platform PDFium hash not configured' >&2; exit 1; }
+          echo "PDFIUM_EXPECTED_SHA256=$expected" >> "$GITHUB_ENV"
+      - name: Build native Rust desktop
+        run: cargo build --locked --release -p researchweave-desktop
+      - name: Fetch verified native PDFium and stage executable
+        shell: bash
+        run: |
+          python3 packaging/rust/fetch-pdfium.py "$PLATFORM" "target/pdfium/$PLATFORM" --sha256 "$PDFIUM_EXPECTED_SHA256"
+          python3 packaging/rust/build-native.py --platform "$PLATFORM" --version "$RELEASE_VERSION"
+      - name: Fetch pinned AppImage tooling
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p target/appimage-tools
+          tool=target/appimage-tools/appimagetool-x86_64.AppImage
+          runtime=target/appimage-tools/runtime-x86_64
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            "https://github.com/AppImage/appimagetool/releases/download/$APPIMAGETOOL_VERSION/appimagetool-x86_64.AppImage" \
+            --output "$tool"
+          echo "$APPIMAGETOOL_SHA256  $tool" | sha256sum --check -
+          curl --fail --location --proto '=https' --tlsv1.2 \
+            "https://github.com/AppImage/type2-runtime/releases/download/$APPIMAGE_RUNTIME_VERSION/runtime-x86_64" \
+            --output "$runtime"
+          echo "$APPIMAGE_RUNTIME_SHA256  $runtime" | sha256sum --check -
+          chmod +x "$tool"
+          echo "APPIMAGETOOL=$PWD/$tool" >> "$GITHUB_ENV"
+          echo "APPIMAGETOOL_RUNTIME_FILE=$PWD/$runtime" >> "$GITHUB_ENV"
+      - name: Windows native installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          choco install innosetup --no-progress -y
+          $iscc = 'C:\Program Files (x86)\Inno Setup 6\ISCC.exe'
+          if (!(Test-Path $iscc)) { throw 'Inno Setup compiler unavailable' }
+          & $iscc "/DAppVersion=$env:RELEASE_VERSION" "/DSourceDir=$((Resolve-Path target/native-package/windows-x64).Path)" packaging/rust/windows.iss
+          if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
+      - name: Windows installed candidate smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $log = & packaging/rust/windows-installed-smoke.ps1 -Setup "dist/ResearchWeave-v$env:RELEASE_VERSION-windows-x64-setup.exe" -Fixture "docs/verification/rust-rewrite/pdfium-deterministic-fixture.pdf" -RunUIA
+          $log | ForEach-Object { Write-Output $_ }
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "Installed candidate smoke failed: $LASTEXITCODE" }
+          if (-not ($log | Where-Object { $_ -match '^PACKAGED_QA_OK pdfium_sha256=[A-F0-9]{64} exe_sha256=[A-F0-9]{64}$' })) {
+            throw 'Installed candidate did not complete verification and cleanup'
+          }
+      - name: macOS/Linux native packages
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash packaging/rust/package-unix.sh "$PLATFORM" "$RELEASE_VERSION"
+      - name: Smoke actual macOS/Linux native packages
+        if: runner.os != 'Windows'
+        shell: bash
+        run: bash packaging/rust/unix-package-smoke.sh "$PLATFORM" "$RELEASE_VERSION"
+      - name: macOS normal GUI launch, relaunch and native window acceptance
+        if: runner.os == 'macOS'
+        shell: bash
+        run: bash packaging/rust/macos-native-acceptance.sh "$PLATFORM" "$RELEASE_VERSION"
+      - name: Linux install, direct AppImage, AT-SPI and Secret Service acceptance
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        run: bash packaging/rust/linux-native-acceptance.sh "$RELEASE_VERSION"
+      - name: macOS Keychain round trip
+        if: runner.os == 'macOS'
+        shell: bash
+        run: cargo test --locked -p researchweave-cloud os_keyring_roundtrip_restart_and_delete -- --ignored --nocapture
+      - name: Verify candidate files
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$PLATFORM" in
+            windows-x64) suffixes=(windows-x64-setup.exe) ;;
+            macos-arm64) suffixes=(macos-arm64.dmg) ;;
+            macos-x64) suffixes=(macos-x64.dmg) ;;
+            linux-x64) suffixes=(linux-x86_64.AppImage linux-amd64.deb) ;;
+          esac
+          cd dist
+          for suffix in "${suffixes[@]}"; do test -s "ResearchWeave-v$RELEASE_VERSION-$suffix"; done
+          sha256sum ResearchWeave-v* > "SHA256SUMS-$PLATFORM.txt"
+          sha256sum --check "SHA256SUMS-$PLATFORM.txt"
+      - name: Record Windows Authenticode status from the built installer
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          $installer = "dist/ResearchWeave-v$env:RELEASE_VERSION-windows-x64-setup.exe"
+          $signature = Get-AuthenticodeSignature -LiteralPath $installer
+          $status = switch ($signature.Status) {
+            ([System.Management.Automation.SignatureStatus]::Valid) { 'valid'; break }
+            ([System.Management.Automation.SignatureStatus]::NotSigned) { 'unsigned'; break }
+            default { 'unverified'; break }
+          }
+          "WINDOWS_AUTHENTICODE=$status" | Set-Content -LiteralPath dist/SIGNING-windows-x64.txt -Encoding ascii
+          Write-Output "WINDOWS_AUTHENTICODE=$status"
+      - name: Record macOS code-signing and notarization status from the built DMG
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -euo pipefail
+          tmp="$(mktemp -d)"
+          mount="$tmp/mount"
+          mkdir -p "$mount"
+          cleanup() {
+            hdiutil detach "$mount" >/dev/null 2>&1 || true
+            rm -rf "$tmp"
+          }
+          trap cleanup EXIT
+          dmg="dist/ResearchWeave-v$RELEASE_VERSION-$PLATFORM.dmg"
+          hdiutil attach -nobrowse -readonly -mountpoint "$mount" "$dmg" >/dev/null
+          app="$mount/ResearchWeave.app"
+          test -d "$app"
+          if codesign --verify --deep --strict "$app" >/dev/null 2>&1; then
+            details="$(codesign -dv --verbose=4 "$app" 2>&1 || true)"
+            if grep -q '^Authority=Developer ID Application:' <<<"$details" && \
+               grep -Eq '^TeamIdentifier=[A-Z0-9]{5,}$' <<<"$details"; then
+              codesign_status=developer_id_valid
+            else
+              codesign_status=adhoc_or_non_developer_id
+            fi
+          else
+            codesign_status=unsigned_or_invalid
+          fi
+          if xcrun stapler validate "$dmg" >/dev/null 2>&1; then
+            notarization_status=dmg_staple_valid
+          else
+            notarization_status=dmg_unstapled_or_unverified
+          fi
+          if spctl --assess --type open --context context:primary-signature --verbose=2 "$dmg" >/dev/null 2>&1; then
+            gatekeeper_status=accepted
+          else
+            gatekeeper_status=rejected_or_unverified
+          fi
+          {
+            echo "MACOS_CODESIGN=$codesign_status"
+            echo "MACOS_NOTARIZATION=$notarization_status"
+            echo "MACOS_GATEKEEPER=$gatekeeper_status"
+          } > "dist/SIGNING-$PLATFORM.txt"
+          cat "dist/SIGNING-$PLATFORM.txt"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: native-${{ matrix.platform }}
+          path: dist/
           if-no-files-found: error
           retention-days: 7
 
-  macos-arm64:
-    name: macOS Apple Silicon DMG
-    runs-on: macos-15
-    timeout-minutes: 90
+  verify-complete:
+    needs: [security, cloud-acceptance, native]
+    runs-on: ubuntu-24.04
     steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up uv and Python
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
         with:
-          enable-cache: true
-          python-version: "3.12"
-      - name: Install locked dependencies
-        run: uv sync --locked --extra dev --extra formats --extra release
-      - name: Run release-relevant tests
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: uv run --no-sync pytest -q tests/unit tests/integration tests/ui/test_smoke.py
-      - name: Build Apple Silicon DMG
-        run: bash packaging/macos/build.sh
-      - name: Smoke-test Apple Silicon DMG
-        run: bash packaging/macos/smoke.sh
-      - name: Verify Apple Silicon release files
+          pattern: native-*
+          path: dist
+          merge-multiple: true
+      - name: Generate and verify complete digest manifest
         run: |
           set -euo pipefail
-          VERSION=$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
-          test -s "dist/ResearchWeave-v$VERSION-macos-arm64.dmg"
-          test -s "dist/SHA256SUMS-macos-arm64.txt"
-      - name: Upload Apple Silicon release files
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${GITHUB_REF_NAME#v}"
+          cd dist
+          sha256sum ResearchWeave-v* > SHA256SUMS.txt
+          cd ..
+          python3 packaging/rust/verify_release_assets.py dist "$version"
+      - uses: actions/upload-artifact@v4
         with:
-          name: release-macos-arm64
-          path: |
-            dist/ResearchWeave-v*-macos-arm64.dmg
-            dist/SHA256SUMS-macos-arm64.txt
-          if-no-files-found: error
-          retention-days: 7
-
-  macos-x64:
-    name: macOS Intel DMG
-    runs-on: macos-15-intel
-    timeout-minutes: 90
-    steps:
-      - name: Check out source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Set up uv and Python
-        uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
-        with:
-          enable-cache: true
-          python-version: "3.12"
-      - name: Install locked dependencies
-        run: uv sync --locked --extra dev --extra formats --extra release
-      - name: Run release-relevant tests
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: uv run --no-sync pytest -q tests/unit tests/integration tests/ui/test_smoke.py
-      - name: Build Intel DMG
-        run: bash packaging/macos/build.sh
-      - name: Smoke-test Intel DMG
-        run: bash packaging/macos/smoke.sh
-      - name: Verify Intel release files
-        run: |
-          set -euo pipefail
-          VERSION=$(python -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
-          test -s "dist/ResearchWeave-v$VERSION-macos-x64.dmg"
-          test -s "dist/SHA256SUMS-macos-x64.txt"
-      - name: Upload Intel release files
-        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
-        with:
-          name: release-macos-x64
-          path: |
-            dist/ResearchWeave-v*-macos-x64.dmg
-            dist/SHA256SUMS-macos-x64.txt
-          if-no-files-found: error
-          retention-days: 7
+          name: rust-complete-checksums
+          path: dist/SHA256SUMS.txt
 
   publish:
-    name: Publish GitHub Release
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [windows, linux, macos-arm64, macos-x64]
+    needs: [security, cloud-acceptance, native, verify-complete]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
+      actions: read
       contents: write
     steps:
-      - name: Check out tagged source
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - name: Download verified release files
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+      - uses: actions/checkout@v4
         with:
-          pattern: release-*
+          persist-credentials: false
+      - uses: actions/download-artifact@v4
+        with:
+          pattern: native-*
           path: dist
           merge-multiple: true
-      - name: Validate tag, files, and checksums
-        id: release
+      - uses: actions/download-artifact@v4
+        with:
+          name: rust-complete-checksums
+          path: dist
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-live-iranian-s3-evidence
+          path: target/live-s3-evidence
+      - name: Verify final release inputs and README links before publication
         shell: bash
+        env:
+          LIVE_S3_RUN_ID: ${{ needs.cloud-acceptance.outputs.run_id }}
+          LIVE_S3_RUN_ATTEMPT: ${{ needs.cloud-acceptance.outputs.run_attempt }}
         run: |
           set -euo pipefail
-          TAG="$GITHUB_REF_NAME"
-          VERSION="${TAG#v}"
-          PROJECT_VERSION=$(python3 -c 'import tomllib, pathlib; print(tomllib.loads(pathlib.Path("pyproject.toml").read_text())["project"]["version"])')
-          if [ "$VERSION" != "$PROJECT_VERSION" ]; then
-            echo "Tag $TAG does not match project version $PROJECT_VERSION" >&2
-            exit 1
-          fi
-
+          [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          version="${GITHUB_REF_NAME#v}"
+          actual="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;data=json.load(sys.stdin);print(next(package["version"] for package in data["packages"] if package["name"]=="researchweave-desktop"))')"
+          [[ "$version" == "$actual" ]]
+          python3 packaging/rust/verify_release_assets.py dist "$version"
+          python3 packaging/rust/verify_live_s3_acceptance.py \
+            target/live-s3-evidence/live-iranian-s3-acceptance.json \
+            --log target/live-s3-evidence/live-s3.log \
+            --expected-head-sha "$GITHUB_SHA" \
+            --expected-run-id "$LIVE_S3_RUN_ID" \
+            --expected-run-attempt "$LIVE_S3_RUN_ATTEMPT" \
+            --expected-workflow-path ".github/workflows/rust-live-iranian-s3-acceptance.yml"
+          endpoint_host="$(jq -er '.endpoint_host | strings' target/live-s3-evidence/live-iranian-s3-acceptance.json)"
+          python3 packaging/rust/verify_live_s3_gui_acceptance.py \
+            target/live-s3-evidence/live-s3-gui.log \
+            --expected-endpoint-host "$endpoint_host"
           expected=(
-            "ResearchWeave-v$VERSION-windows-x64-setup.exe"
-            "ResearchWeave-v$VERSION-windows-x64-portable.zip"
-            "ResearchWeave-v$VERSION-macos-arm64.dmg"
-            "ResearchWeave-v$VERSION-macos-x64.dmg"
-            "ResearchWeave-v$VERSION-linux-x86_64.AppImage"
-            "ResearchWeave-v$VERSION-linux-amd64.deb"
+            "ResearchWeave-v$version-windows-x64-setup.exe"
+            "ResearchWeave-v$version-macos-arm64.dmg"
+            "ResearchWeave-v$version-macos-x64.dmg"
+            "ResearchWeave-v$version-linux-x86_64.AppImage"
+            "ResearchWeave-v$version-linux-amd64.deb"
+            "SHA256SUMS.txt"
           )
           for name in "${expected[@]}"; do
-            test -s "dist/$name"
+            url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$name"
+            grep -Fq "$url" README.md || {
+              echo "README is missing final direct release URL: $url" >&2
+              exit 1
+            }
           done
-
-          (
-            cd dist
-            sha256sum "${expected[@]}" > SHA256SUMS.txt
-            sha256sum --check SHA256SUMS.txt
-          )
-          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-      - name: Prepare release notes
+      - name: Prepare Rust release notes
         shell: bash
+        env:
+          PROVIDER_NAME: ${{ needs.cloud-acceptance.outputs.provider_name }}
+          ENDPOINT_HOST: ${{ needs.cloud-acceptance.outputs.endpoint_host }}
+          LIVE_S3_RUN_ID: ${{ needs.cloud-acceptance.outputs.run_id }}
+          LIVE_S3_RUN_ATTEMPT: ${{ needs.cloud-acceptance.outputs.run_attempt }}
         run: |
           set -euo pipefail
-          VERSION="${{ steps.release.outputs.version }}"
+          version="${GITHUB_REF_NAME#v}"
+          windows_signing="$(cut -d= -f2 dist/SIGNING-windows-x64.txt)"
+          arm_codesign="$(grep '^MACOS_CODESIGN=' dist/SIGNING-macos-arm64.txt | cut -d= -f2)"
+          arm_notary="$(grep '^MACOS_NOTARIZATION=' dist/SIGNING-macos-arm64.txt | cut -d= -f2)"
+          arm_gatekeeper="$(grep '^MACOS_GATEKEEPER=' dist/SIGNING-macos-arm64.txt | cut -d= -f2)"
+          x64_codesign="$(grep '^MACOS_CODESIGN=' dist/SIGNING-macos-x64.txt | cut -d= -f2)"
+          x64_notary="$(grep '^MACOS_NOTARIZATION=' dist/SIGNING-macos-x64.txt | cut -d= -f2)"
+          x64_gatekeeper="$(grep '^MACOS_GATEKEEPER=' dist/SIGNING-macos-x64.txt | cut -d= -f2)"
+          [[ "$windows_signing" =~ ^(valid|unsigned|unverified)$ ]]
+          [[ "$arm_codesign" =~ ^(developer_id_valid|adhoc_or_non_developer_id|unsigned_or_invalid)$ ]]
+          [[ "$x64_codesign" =~ ^(developer_id_valid|adhoc_or_non_developer_id|unsigned_or_invalid)$ ]]
+          [[ "$arm_notary" =~ ^(dmg_staple_valid|dmg_unstapled_or_unverified)$ ]]
+          [[ "$x64_notary" =~ ^(dmg_staple_valid|dmg_unstapled_or_unverified)$ ]]
+          [[ "$arm_gatekeeper" =~ ^(accepted|rejected_or_unverified)$ ]]
+          [[ "$x64_gatekeeper" =~ ^(accepted|rejected_or_unverified)$ ]]
           {
-            echo "# ResearchWeave v$VERSION"
+            echo "# ResearchWeave v$version"
             echo
-            echo "ResearchWeave is a local-first PyQt6 research workspace for evidence, analysis, reproducibility, and controlled AI assistance."
+            echo "ResearchWeave is a native Rust/Slint local-first research workbench. This release replaces the legacy Python/PyQt desktop while preserving the archived Python recovery ref."
             echo
             echo "## Downloads"
             echo
-            echo "- Windows 10/11 x64: \`ResearchWeave-v$VERSION-windows-x64-setup.exe\`"
-            echo "- Windows portable x64: \`ResearchWeave-v$VERSION-windows-x64-portable.zip\`"
-            echo "- macOS Apple Silicon: \`ResearchWeave-v$VERSION-macos-arm64.dmg\`"
-            echo "- macOS Intel: \`ResearchWeave-v$VERSION-macos-x64.dmg\`"
-            echo "- Linux x86_64 AppImage: \`ResearchWeave-v$VERSION-linux-x86_64.AppImage\`"
-            echo "- Debian/Ubuntu amd64: \`ResearchWeave-v$VERSION-linux-amd64.deb\`"
+            echo "- Windows 10/11 x64: \`ResearchWeave-v$version-windows-x64-setup.exe\`"
+            echo "- macOS Apple Silicon: \`ResearchWeave-v$version-macos-arm64.dmg\`"
+            echo "- macOS Intel: \`ResearchWeave-v$version-macos-x64.dmg\`"
+            echo "- Linux x86_64 AppImage: \`ResearchWeave-v$version-linux-x86_64.AppImage\`"
+            echo "- Debian/Ubuntu amd64: \`ResearchWeave-v$version-linux-amd64.deb\`"
+            echo "- Combined checksums: \`SHA256SUMS.txt\`"
             echo
-            echo "Each artifact bundles the Python runtime and application dependencies; end users do not need Python or developer tooling."
+            echo "## Native acceptance"
             echo
-            echo "## Installation"
+            echo "Windows, Ubuntu 22.04, macOS arm64 and macOS x64 packages were built and exercised on native GitHub runners before publication. The packaged acceptance covers project create/reopen, deterministic CSV import, descriptives, export/hash verification, settings persistence, real GUI launch/relaunch, package removal and user-data retention. Windows UIA, Ubuntu AT-SPI/Secret Service and macOS Keychain checks run in their native jobs. macOS Accessibility enumeration is attempted only when hosted-runner TCC permits it; no AX pass is claimed when TCC blocks enumeration."
             echo
-            echo "- Windows: run the setup EXE. It installs for the current user and includes an uninstaller."
-            echo "- macOS: open the DMG and drag ResearchWeave to Applications."
-            echo "- Linux AppImage: mark it executable and run it."
-            echo "- Debian/Ubuntu: install the DEB with your package manager."
+            echo "## Iranian S3 acceptance"
+            echo
+            echo "Live acceptance passed against $PROVIDER_NAME ($ENDPOINT_HOST): conditional writes, encrypted push/pull, conflict preservation, history and second-device restore. Release gating re-verifies the marker-only machine-generated evidence from protected Actions run $LIVE_S3_RUN_ID attempt $LIVE_S3_RUN_ATTEMPT for this exact source commit; credentials and raw provider output are not included in the evidence artifact."
             echo
             echo "## Signing status"
             echo
-            echo "These release artifacts are checksum-verified but are not code-signed. The macOS builds are not Apple-notarized because signing/notarization credentials are not configured in this repository."
+            echo "The release artifacts are checksum-verified. Measured package status: Windows Authenticode=$windows_signing; macOS arm64 codesign=$arm_codesign, DMG notarization=$arm_notary, Gatekeeper=$arm_gatekeeper; macOS x64 codesign=$x64_codesign, DMG notarization=$x64_notary, Gatekeeper=$x64_gatekeeper."
             echo
             echo "## SHA-256"
             echo
-            echo '~~~text'
+            echo '```text'
             cat dist/SHA256SUMS.txt
-            echo '~~~'
-            echo
-            echo "Report problems at https://github.com/$GITHUB_REPOSITORY/issues."
+            echo '```'
           } > RELEASE_NOTES.md
       - name: Refuse duplicate release publication
         env:
           GH_TOKEN: ${{ github.token }}
+        shell: bash
         run: |
+          set -euo pipefail
           if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
             echo "Release $GITHUB_REF_NAME already exists; refusing to overwrite it." >&2
             exit 1
           fi
-      - name: Publish release with verified files
+      - name: Create draft Rust release with verified CI artifacts
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          VERSION="${{ steps.release.outputs.version }}"
+          version="${GITHUB_REF_NAME#v}"
           gh release create "$GITHUB_REF_NAME" \
-            "dist/ResearchWeave-v$VERSION-windows-x64-setup.exe" \
-            "dist/ResearchWeave-v$VERSION-windows-x64-portable.zip" \
-            "dist/ResearchWeave-v$VERSION-macos-arm64.dmg" \
-            "dist/ResearchWeave-v$VERSION-macos-x64.dmg" \
-            "dist/ResearchWeave-v$VERSION-linux-x86_64.AppImage" \
-            "dist/ResearchWeave-v$VERSION-linux-amd64.deb" \
+            "dist/ResearchWeave-v$version-windows-x64-setup.exe" \
+            "dist/ResearchWeave-v$version-macos-arm64.dmg" \
+            "dist/ResearchWeave-v$version-macos-x64.dmg" \
+            "dist/ResearchWeave-v$version-linux-x86_64.AppImage" \
+            "dist/ResearchWeave-v$version-linux-amd64.deb" \
             "dist/SHA256SUMS.txt" \
             --repo "$GITHUB_REPOSITORY" \
             --verify-tag \
-            --title "ResearchWeave v$VERSION" \
+            --draft \
+            --title "ResearchWeave v$version" \
             --notes-file RELEASE_NOTES.md
+      - name: Re-download and verify the draft before publication
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          rm -rf target/draft-release-verify
+          mkdir -p target/draft-release-verify
+          if ! gh release download "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --dir target/draft-release-verify; then
+            gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes || true
+            exit 1
+          fi
+          if ! python3 packaging/rust/verify_release_assets.py target/draft-release-verify "$version"; then
+            gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes || true
+            exit 1
+          fi
+          draft="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json isDraft --jq '.isDraft')"
+          [[ "$draft" == "true" ]]
+      - name: Publish verified draft without changing latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          release_id="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
+          [[ "$release_id" =~ ^[0-9]+$ ]]
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -F draft=false \
+            -f make_latest=false >/dev/null
+      - name: Verify public release anonymously before latest promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup_failed_release() {
+            status=$?
+            trap - EXIT
+            if [[ $status -ne 0 ]]; then
+              gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes || true
+            fi
+            exit $status
+          }
+          trap cleanup_failed_release EXIT
+          version="${GITHUB_REF_NAME#v}"
+          rm -rf target/public-release-verify
+          mkdir -p target/public-release-verify
+          curl --retry 8 --retry-delay 2 --retry-all-errors --fail --location --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            --output target/public-release.json \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/tags/$GITHUB_REF_NAME"
+          jq -e --arg tag "$GITHUB_REF_NAME" \
+            '.tag_name == $tag and .draft == false and .prerelease == false and (.body | contains("native Rust/Slint"))' \
+            target/public-release.json >/dev/null
+          expected=(
+            "ResearchWeave-v$version-windows-x64-setup.exe"
+            "ResearchWeave-v$version-macos-arm64.dmg"
+            "ResearchWeave-v$version-macos-x64.dmg"
+            "ResearchWeave-v$version-linux-x86_64.AppImage"
+            "ResearchWeave-v$version-linux-amd64.deb"
+            "SHA256SUMS.txt"
+          )
+          for name in "${expected[@]}"; do
+            url="https://github.com/$GITHUB_REPOSITORY/releases/download/$GITHUB_REF_NAME/$name"
+            curl --retry 8 --retry-delay 2 --retry-all-errors --fail --location --silent --show-error \
+              --output "target/public-release-verify/$name" "$url"
+            grep -Fq "$url" README.md
+          done
+          python3 packaging/rust/verify_release_assets.py target/public-release-verify "$version"
+          trap - EXIT
+      - name: Promote verified public release to latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup_failed_release() {
+            status=$?
+            trap - EXIT
+            if [[ $status -ne 0 ]]; then
+              gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes || true
+            fi
+            exit $status
+          }
+          trap cleanup_failed_release EXIT
+          release_id="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
+          [[ "$release_id" =~ ^[0-9]+$ ]]
+          gh api --method PATCH \
+            "repos/$GITHUB_REPOSITORY/releases/$release_id" \
+            -f make_latest=true >/dev/null
+          trap - EXIT
+      - name: Verify latest release anonymously
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          cleanup_failed_release() {
+            status=$?
+            trap - EXIT
+            if [[ $status -ne 0 ]]; then
+              gh release delete "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --yes || true
+            fi
+            exit $status
+          }
+          trap cleanup_failed_release EXIT
+          curl --retry 8 --retry-delay 2 --retry-all-errors --fail --location --silent --show-error \
+            -H 'Accept: application/vnd.github+json' \
+            -H 'X-GitHub-Api-Version: 2022-11-28' \
+            --output target/latest-release.json \
+            "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/latest"
+          jq -e --arg tag "$GITHUB_REF_NAME" \
+            '.tag_name == $tag and .draft == false and .prerelease == false and (.body | contains("native Rust/Slint"))' \
+            target/latest-release.json >/dev/null
+          trap - EXIT

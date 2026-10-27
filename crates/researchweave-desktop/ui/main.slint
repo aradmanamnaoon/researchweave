@@ -223,6 +223,13 @@ export component MainWindow inherits Window {
     in-out property <string> qualitative-results: "Inspect the codebook before editing; writes require the current content hash.";
     in-out property <string> backup-results: "Open a project, then choose an absolute archive path.";
     in-out property <string> recovery-results: "Restore always creates a new project directory.";
+    in-out property <string> cloud-results: "Cloud sync is opt-in. Save a profile and credentials before any network request.";
+    in-out property <string> cloud-connectivity: "Not checked";
+    in-out property <string> cloud-remote-revision: "None";
+    in-out property <string> cloud-last-sync: "Never";
+    in-out property <int> cloud-conflict-count: 0;
+    in-out property <bool> cloud-auto-sync: false;
+    in-out property <bool> cloud-busy: false;
     in-out property <string> command-results: "Search views, resources, settings and help";
 
     callback load-pdf(string, string);
@@ -303,6 +310,12 @@ export component MainWindow inherits Window {
     callback compute-qualitative-kappa(string, string);
     callback backup-action(string, string, string);
     callback restore-backup(bool, string, string, string);
+    callback cloud-save-profile(string, string, string, string, string, string, string);
+    callback cloud-save-credentials(string, string, string, string);
+    callback cloud-save-encryption(string);
+    callback cloud-local-action(string, string);
+    callback cloud-network-action(string, string, string, string, string, string);
+    callback set-cloud-auto-sync(bool, string, string);
 
     sync-widget-theme(dark) => {
         Palette.color-scheme = dark ? ColorScheme.dark : ColorScheme.light;
@@ -314,7 +327,7 @@ export component MainWindow inherits Window {
         "Analysis Results", "Qualitative", "Codebook", "Mixed Methods", "Manuscript", "References",
         "Notebook", "Publishing", "Agent", "Providers", "Privacy", "Integrations", "Exports",
         "Backups", "Recovery", "Diagnostics", "Jobs", "Notifications", "Tutorials", "Guidance",
-        "Shortcuts", "Preferences", "Activity", "About"
+        "Shortcuts", "Preferences", "Activity", "About", "Cloud Sync"
     ];
 
     // Activity roots are intentionally much smaller than the legacy 39-screen directory.
@@ -595,6 +608,7 @@ export component MainWindow inherits Window {
                             Button { text: root.page == 26 ? "› Integrations" : "Integrations"; accessible-label: "Integrations workspace screen"; clicked => { root.page = 26; } }
                             Button { text: root.page == 28 ? "› Backups" : "Backups"; accessible-label: "Backups workspace screen"; clicked => { root.page = 28; } }
                             Button { text: root.page == 29 ? "› Recovery" : "Recovery"; accessible-label: "Recovery workspace screen"; clicked => { root.page = 29; } }
+                            Button { text: root.page == 39 ? "› Cloud Sync" : "Cloud Sync"; accessible-label: "Cloud Sync workspace screen"; clicked => { root.page = 39; } }
                             Button { text: root.page == 30 ? "› Diagnostics" : "Diagnostics"; accessible-label: "Diagnostics workspace screen"; clicked => { root.page = 30; } }
                             Button { text: root.page == 36 ? "› Preferences" : "Preferences"; accessible-label: "Preferences workspace screen"; clicked => { root.page = 36; } }
                             Button { text: root.page == 35 ? "› Shortcuts" : "Shortcuts"; accessible-label: "Shortcuts workspace screen"; clicked => { root.page = 35; } }
@@ -1143,6 +1157,121 @@ export component MainWindow inherits Window {
                             }
                             Text { text: root.recovery-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Recovery result"; }
                             Rectangle { vertical-stretch: 1; }
+                        }
+                    }
+
+                    if root.page == 39: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 24px;
+                                spacing: 10px;
+                                Text { text: "Encrypted cloud sync"; color: Theme.ink; font-size: 24px * Theme.ui-scale / 100; font-weight: 700; }
+                                Text {
+                                    text: "Opt-in S3 sync encrypts the project locally before upload. Credentials and the project encryption passphrase are stored separately in the operating-system credential store.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    cloud-provider := LineEdit { text: "liara"; placeholder-text: "liara or generic-s3"; accessible-label: "Cloud provider kind"; }
+                                    cloud-profile-id := LineEdit { text: "liara"; placeholder-text: "Profile ID"; accessible-label: "Cloud profile ID"; }
+                                }
+                                cloud-endpoint := LineEdit { placeholder-text: "https://bucket.storage...liara.site"; accessible-label: "Cloud S3 endpoint"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    cloud-bucket := LineEdit { placeholder-text: "Bucket"; accessible-label: "Cloud S3 bucket"; }
+                                    cloud-region := LineEdit { text: "us-east-1"; placeholder-text: "Region"; accessible-label: "Cloud S3 region"; }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    cloud-prefix := LineEdit { text: "researchweave"; placeholder-text: "Prefix"; accessible-label: "Cloud S3 prefix"; }
+                                    cloud-path-style := LineEdit { text: "true"; placeholder-text: "true or false"; accessible-label: "Cloud S3 path style"; }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "Save profile";
+                                        enabled: !root.cloud-busy;
+                                        accessible-label: "Save cloud profile";
+                                        clicked => {
+                                            root.cloud-save-profile(cloud-provider.text, cloud-profile-id.text, cloud-endpoint.text, cloud-bucket.text, cloud-region.text, cloud-prefix.text, cloud-path-style.text);
+                                        }
+                                    }
+                                    Button { text: "Refresh profiles"; enabled: !root.cloud-busy; accessible-label: "Refresh cloud profiles"; clicked => { root.cloud-local-action("list-profiles", cloud-profile-id.text); } }
+                                    Button { text: "Disconnect"; enabled: !root.cloud-busy; accessible-label: "Disconnect cloud profile"; clicked => { root.cloud-local-action("disconnect", cloud-profile-id.text); } }
+                                }
+
+                                Text { text: "Credentials"; color: Theme.ink; font-weight: 650; }
+                                cloud-access-key := LineEdit { placeholder-text: "Access-key ID"; accessible-label: "Cloud access key ID"; }
+                                cloud-secret-key := LineEdit { placeholder-text: "Secret key"; input-type: password; accessible-label: "Cloud secret key"; }
+                                cloud-session-token := LineEdit { placeholder-text: "Optional session token"; input-type: password; accessible-label: "Cloud session token"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "Save securely";
+                                        enabled: !root.cloud-busy;
+                                        accessible-label: "Save cloud credentials securely";
+                                        clicked => {
+                                            root.cloud-save-credentials(cloud-profile-id.text, cloud-access-key.text, cloud-secret-key.text, cloud-session-token.text);
+                                            cloud-access-key.text = "";
+                                            cloud-secret-key.text = "";
+                                            cloud-session-token.text = "";
+                                        }
+                                    }
+                                    Button { text: "Forget credentials"; enabled: !root.cloud-busy; accessible-label: "Forget cloud credentials"; clicked => { root.cloud-local-action("forget-credentials", cloud-profile-id.text); } }
+                                }
+
+                                Text { text: "Project encryption"; color: Theme.ink; font-weight: 650; }
+                                cloud-passphrase := LineEdit { placeholder-text: "Project sync passphrase"; input-type: password; accessible-label: "Cloud project encryption passphrase"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "Save encryption key securely";
+                                        enabled: !root.cloud-busy;
+                                        accessible-label: "Save cloud encryption key securely";
+                                        clicked => {
+                                            root.cloud-save-encryption(cloud-passphrase.text);
+                                            cloud-passphrase.text = "";
+                                        }
+                                    }
+                                    Button { text: "Forget encryption key"; enabled: !root.cloud-busy; accessible-label: "Forget cloud encryption key"; clicked => { root.cloud-local-action("forget-encryption", cloud-profile-id.text); } }
+                                }
+
+                                Text { text: "Sync controls"; color: Theme.ink; font-weight: 650; }
+                                cloud-device := LineEdit { text: "desktop"; placeholder-text: "Device name"; accessible-label: "Cloud sync device name"; }
+                                cloud-expected-revision := LineEdit { placeholder-text: "Expected remote revision (empty for first push)"; accessible-label: "Cloud expected remote revision"; }
+                                cloud-selected-revision := LineEdit { placeholder-text: "Revision to restore"; accessible-label: "Cloud selected revision"; }
+                                cloud-restore-destination := LineEdit { placeholder-text: "Absolute new .rwproj destination"; accessible-label: "Cloud restore archive destination"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { text: "Test connection"; enabled: !root.cloud-busy; accessible-label: "Test cloud connection and conditional writes"; clicked => { root.cloud-network-action("test", cloud-profile-id.text, cloud-device.text, cloud-expected-revision.text, cloud-selected-revision.text, cloud-restore-destination.text); } }
+                                    Button { text: "Sync now"; enabled: !root.cloud-busy; accessible-label: "Push encrypted cloud sync now"; clicked => { root.cloud-network-action("push", cloud-profile-id.text, cloud-device.text, cloud-expected-revision.text, cloud-selected-revision.text, cloud-restore-destination.text); } }
+                                    Button { text: "Refresh tip"; enabled: !root.cloud-busy; accessible-label: "Refresh cloud remote tip"; clicked => { root.cloud-network-action("tip", cloud-profile-id.text, cloud-device.text, cloud-expected-revision.text, cloud-selected-revision.text, cloud-restore-destination.text); } }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button { text: "View history"; enabled: !root.cloud-busy; accessible-label: "View cloud sync history"; clicked => { root.cloud-network-action("history", cloud-profile-id.text, cloud-device.text, cloud-expected-revision.text, cloud-selected-revision.text, cloud-restore-destination.text); } }
+                                    Button { text: "Pull latest as copy"; enabled: !root.cloud-busy; accessible-label: "Pull latest cloud revision as copy"; clicked => { root.cloud-network-action("pull-latest", cloud-profile-id.text, cloud-device.text, cloud-expected-revision.text, cloud-selected-revision.text, cloud-restore-destination.text); } }
+                                    Button { text: "Restore revision as copy"; enabled: !root.cloud-busy; accessible-label: "Restore selected cloud revision as copy"; clicked => { root.cloud-network-action("restore", cloud-profile-id.text, cloud-device.text, cloud-expected-revision.text, cloud-selected-revision.text, cloud-restore-destination.text); } }
+                                }
+                                Button {
+                                    text: "Resolve conflict by retrying against reviewed remote revision";
+                                    enabled: !root.cloud-busy;
+                                    accessible-label: "Resolve cloud sync conflict with reviewed remote revision";
+                                    clicked => { root.cloud-network-action("resolve", cloud-profile-id.text, cloud-device.text, cloud-expected-revision.text, cloud-selected-revision.text, cloud-restore-destination.text); }
+                                }
+                                Button {
+                                    text: root.cloud-auto-sync ? "Automatic sync: on" : "Automatic sync: off";
+                                    enabled: !root.cloud-busy;
+                                    accessible-label: root.cloud-auto-sync ? "Disable automatic cloud sync" : "Enable automatic cloud sync";
+                                    clicked => { root.set-cloud-auto-sync(!root.cloud-auto-sync, cloud-profile-id.text, cloud-device.text); }
+                                }
+                                Text { text: "Connectivity: " + root.cloud-connectivity + " · remote revision: " + root.cloud-remote-revision; color: Theme.ink; wrap: word-wrap; accessible-label: "Cloud sync state"; }
+                                Text { text: "Last sync: " + root.cloud-last-sync + " · conflicts preserved: " + root.cloud-conflict-count; color: Theme.muted-ink; wrap: word-wrap; accessible-label: "Cloud sync history summary"; }
+                                Text { text: root.cloud-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Cloud sync result"; }
+                                Rectangle { min-height: 12px; }
+                            }
                         }
                     }
 

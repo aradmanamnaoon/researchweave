@@ -87,12 +87,7 @@ function Read-JsonRetry([string]$Path, [int]$Attempts = 20) {
         }
         try {
             return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json)
-        } catch {
-            # Preferences and recovery journals are replaced atomically. Between
-            # Test-Path and Get-Content a hosted runner can briefly observe the
-            # old path disappear, or read while the replacement is becoming
-            # visible. Retry any transient read/parse failure here, but keep the
-            # final read below strict so a persistently missing/corrupt file fails.
+        } catch [System.IO.IOException] {
             Start-Sleep -Milliseconds 20
         }
     }
@@ -974,23 +969,7 @@ try {
     if ($restoredManuscriptValue -ne $recoveredManuscript) {
         throw 'Abrupt-exit manuscript draft was not restored into the fresh process'
     }
-    # The UI status string is transient and may not remain exposed through UIA on
-    # slower hosted runners. Prove the stronger condition instead: the recovery
-    # timer completed a successful project revision write and then durably cleared
-    # the manuscript dirty flag in the crash-recovery journal.
-    $cleanRecoveredManuscript = $null
-    $recoveryDeadline = [DateTime]::UtcNow.AddSeconds(10)
-    do {
-        $draftFiles = @(Get-ChildItem (Join-Path $hostData 'writing-drafts') -Filter '*.json' -File)
-        $cleanRecoveredManuscript = $draftFiles | ForEach-Object { Read-JsonRetry $_.FullName } | Where-Object {
-            $_.body -eq $recoveredManuscript -and -not $_.manuscript_dirty
-        } | Select-Object -First 1
-        if ($cleanRecoveredManuscript) { break }
-        Start-Sleep -Milliseconds 50
-    } while ([DateTime]::UtcNow -lt $recoveryDeadline)
-    if (-not $cleanRecoveredManuscript) {
-        throw 'Recovered manuscript journal did not clear its dirty flag after revision persistence'
-    }
+    WaitForNameLike $window '*Recovered manuscript autosaved to project revisions*' 10000
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect manuscript').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $recoveredInspectNames = @($window.FindAll(
@@ -1051,19 +1030,7 @@ try {
     if ($restoredNotebookValue -ne $recoveredNotebook) {
         throw 'Abrupt-exit notebook draft was not restored into the fresh process'
     }
-    $cleanRecoveredNotebook = $null
-    $recoveryDeadline = [DateTime]::UtcNow.AddSeconds(10)
-    do {
-        $draftFiles = @(Get-ChildItem (Join-Path $hostData 'writing-drafts') -Filter '*.json' -File)
-        $cleanRecoveredNotebook = $draftFiles | ForEach-Object { Read-JsonRetry $_.FullName } | Where-Object {
-            $_.notebook -eq $recoveredNotebook -and -not $_.notebook_dirty
-        } | Select-Object -First 1
-        if ($cleanRecoveredNotebook) { break }
-        Start-Sleep -Milliseconds 50
-    } while ([DateTime]::UtcNow -lt $recoveryDeadline)
-    if (-not $cleanRecoveredNotebook) {
-        throw 'Recovered notebook journal did not clear its dirty flag after revision persistence'
-    }
+    WaitForNameLike $window '*Recovered notebook autosaved to project revisions*' 10000
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export notebook Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $recoveredNotebookExportNames = @($window.FindAll(
@@ -1247,6 +1214,83 @@ try {
         throw 'Provider validation did not announce its offline safety boundary'
     }
     Write-Output 'PASS: local Agent conversations/prompts persist with preview+approval and Providers validate offline without egress'
+
+    # Cloud Sync configuration and secret handling must be reachable through the
+    # real installed GUI without making any network request in the ordinary
+    # candidate suite. Use a localhost generic-S3 profile, save throwaway secrets
+    # through Windows Credential Manager, prove the password fields are cleared,
+    # then forget everything again.
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Cloud Sync')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 180
+    foreach ($pair in @(
+        @('Cloud provider kind','generic-s3'),
+        @('Cloud profile ID','uia-cloud'),
+        @('Cloud S3 endpoint','http://127.0.0.1:9000'),
+        @('Cloud S3 bucket','uia-bucket'),
+        @('Cloud S3 region','us-east-1'),
+        @('Cloud S3 prefix','researchweave'),
+        @('Cloud S3 path style','true'),
+        @('Cloud sync device name','uia-windows')
+    )) {
+        $element = Named $window ([System.Windows.Automation.ControlType]::Edit) $pair[0]
+        ([System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($pair[1])
+    }
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Save cloud profile').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 180
+    $profileFile = Join-Path $hostData 'cloud-profiles.json'
+    $savedProfiles = Read-JsonRetry $profileFile
+    if (-not ($savedProfiles.profiles | Where-Object { $_.profile_id -eq 'uia-cloud' })) {
+        throw 'Cloud profile was not persisted by the installed GUI'
+    }
+    $profileText = Get-Content -LiteralPath $profileFile -Raw
+    if ($profileText -match 'secret|session-token|uia-cloud-secret') {
+        throw 'Cloud profile file contains credential-like material'
+    }
+
+    $cloudAccess = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud access key ID'
+    $cloudSecret = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud secret key'
+    $cloudSession = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud session token'
+    ([System.Windows.Automation.ValuePattern]$cloudAccess.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud-access')
+    ([System.Windows.Automation.ValuePattern]$cloudSecret.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud-secret')
+    ([System.Windows.Automation.ValuePattern]$cloudSession.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud-session')
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Save cloud credentials securely').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 180
+    foreach ($secretControl in @($cloudAccess,$cloudSecret,$cloudSession)) {
+        $value = ([System.Windows.Automation.ValuePattern]$secretControl.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        if ($value) { throw 'Cloud credential field was not cleared after secure save' }
+    }
+    $visibleNames = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name })
+    if ($visibleNames | Where-Object { $_ -like '*uia-cloud-secret*' -or $_ -like '*uia-cloud-session*' }) {
+        throw 'Cloud credential material leaked into accessible UI text'
+    }
+
+    $cloudPassphrase = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud project encryption passphrase'
+    ([System.Windows.Automation.ValuePattern]$cloudPassphrase.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-project-sync-passphrase')
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Save cloud encryption key securely').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 180
+    $passphraseValue = ([System.Windows.Automation.ValuePattern]$cloudPassphrase.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($passphraseValue) { throw 'Cloud encryption passphrase field was not cleared after secure save' }
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Refresh cloud profiles').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 160
+    $visibleNames = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name })
+    if (-not ($visibleNames | Where-Object { $_ -like '*uia-cloud*' })) {
+        throw 'Cloud profile list did not expose the persisted profile ID'
+    }
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Enable automatic cloud sync').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 100
+    if (-not (Named $window ([System.Windows.Automation.ControlType]::Button) 'Disable automatic cloud sync')) {
+        throw 'Automatic cloud sync did not expose its enabled state through accessibility'
+    }
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Disable automatic cloud sync').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Forget cloud credentials').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Forget cloud encryption key').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Disconnect cloud profile').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 150
+    Write-Output 'PASS: Cloud Sync profile/credential/encryption/auto-sync controls work through installed UIA without network egress or secret leakage'
+
     # The redesigned shell uses six stable activity roots and a contextual sidebar
     # instead of a 39-item virtualized list. Verify the new information architecture.
     foreach ($activity in @('Home activity','Sources activity','Analyze activity','Synthesize activity','Automate activity','Manage activity')) {

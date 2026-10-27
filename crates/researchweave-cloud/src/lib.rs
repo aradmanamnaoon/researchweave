@@ -2072,6 +2072,281 @@ mod tests {
         ));
     }
 
+    fn cleanup_live_s3_prefix(backend: &S3Backend) -> Result<(), String> {
+        let prefix = format!("{}/", backend.profile.prefix);
+        for _ in 0..16 {
+            let objects = backend
+                .runtime
+                .block_on(
+                    backend
+                        .client
+                        .list_objects_v2()
+                        .bucket(&backend.profile.bucket)
+                        .prefix(&prefix)
+                        .max_keys(1000)
+                        .send(),
+                )
+                .map_err(|_| "live S3 cleanup list failed".to_owned())?;
+            if objects.contents().is_empty() {
+                return Ok(());
+            }
+            for object in objects.contents() {
+                let Some(key) = object.key() else { continue };
+                backend
+                    .runtime
+                    .block_on(
+                        backend
+                            .client
+                            .delete_object()
+                            .bucket(&backend.profile.bucket)
+                            .key(key)
+                            .send(),
+                    )
+                    .map_err(|_| "live S3 cleanup delete failed".to_owned())?;
+            }
+        }
+        Err("live S3 cleanup did not empty the acceptance namespace within the bounded retry budget".into())
+    }
+
+    #[test]
+    #[ignore = "stores an explicitly supplied real-provider credential in the host OS keyring"]
+    fn live_liara_seed_keyring_from_env() {
+        if std::env::var("RESEARCHWEAVE_LIVE_S3_ACCEPTANCE").as_deref() != Ok("1") {
+            panic!("live S3 acceptance was not explicitly authorized");
+        }
+        let profile_id = std::env::var("RESEARCHWEAVE_LIVE_S3_PROFILE_ID")
+            .expect("RESEARCHWEAVE_LIVE_S3_PROFILE_ID is required");
+        let credentials = CredentialBundle {
+            access_key: std::env::var("RESEARCHWEAVE_LIVE_S3_ACCESS_KEY")
+                .expect("RESEARCHWEAVE_LIVE_S3_ACCESS_KEY is required"),
+            secret_key: std::env::var("RESEARCHWEAVE_LIVE_S3_SECRET_KEY")
+                .expect("RESEARCHWEAVE_LIVE_S3_SECRET_KEY is required"),
+            session_token: std::env::var("RESEARCHWEAVE_LIVE_S3_SESSION_TOKEN")
+                .ok()
+                .filter(|value| !value.is_empty()),
+        };
+        OsKeyringStore
+            .put(&profile_id, &credentials)
+            .expect("failed to store live S3 credential in OS keyring");
+        drop(credentials);
+        OsKeyringStore
+            .get(&profile_id)
+            .expect("live S3 credential was not readable from a fresh keyring access");
+        println!("LIVE_S3_KEYRING_READY");
+    }
+
+    #[test]
+    #[ignore = "removes the temporary live-provider credential from the host OS keyring"]
+    fn live_liara_delete_keyring_credential() {
+        if std::env::var("RESEARCHWEAVE_LIVE_S3_ACCEPTANCE").as_deref() != Ok("1") {
+            panic!("live S3 acceptance was not explicitly authorized");
+        }
+        let profile_id = std::env::var("RESEARCHWEAVE_LIVE_S3_PROFILE_ID")
+            .expect("RESEARCHWEAVE_LIVE_S3_PROFILE_ID is required");
+        OsKeyringStore
+            .delete(&profile_id)
+            .expect("failed to remove live S3 credential from OS keyring");
+        assert!(matches!(
+            OsKeyringStore.get(&profile_id),
+            Err(CloudError::MissingCredential)
+        ));
+        println!("LIVE_S3_KEYRING_CLEANUP_OK");
+    }
+
+    #[test]
+    #[ignore = "requires an explicitly configured real Liara credential in the OS keyring"]
+    fn live_liara_encrypted_sync_acceptance_from_keyring() {
+        if std::env::var("RESEARCHWEAVE_LIVE_S3_ACCEPTANCE").as_deref() != Ok("1") {
+            panic!("set RESEARCHWEAVE_LIVE_S3_ACCEPTANCE=1 to authorize the live provider acceptance test");
+        }
+        let profile_id = std::env::var("RESEARCHWEAVE_LIVE_S3_PROFILE_ID")
+            .expect("RESEARCHWEAVE_LIVE_S3_PROFILE_ID is required");
+        let endpoint = std::env::var("RESEARCHWEAVE_LIVE_S3_ENDPOINT")
+            .expect("RESEARCHWEAVE_LIVE_S3_ENDPOINT is required");
+        let bucket = std::env::var("RESEARCHWEAVE_LIVE_S3_BUCKET")
+            .expect("RESEARCHWEAVE_LIVE_S3_BUCKET is required");
+        let run_token = std::env::var("RESEARCHWEAVE_LIVE_S3_RUN_TOKEN")
+            .expect("RESEARCHWEAVE_LIVE_S3_RUN_TOKEN is required");
+        if !safe_token(&run_token, 96) {
+            panic!("RESEARCHWEAVE_LIVE_S3_RUN_TOKEN is invalid");
+        }
+
+        let mut profile = S3Profile::liara(&profile_id, &endpoint, bucket);
+        profile.prefix = format!("researchweave/live-acceptance-{run_token}");
+        profile.validate().expect("live Liara profile is invalid");
+        let endpoint_host = Url::parse(&profile.endpoint)
+            .ok()
+            .and_then(|url| url.host_str().map(str::to_owned))
+            .expect("live Liara endpoint must contain a host");
+        let primary = S3Backend::connect(profile.clone(), &OsKeyringStore)
+            .expect("failed to construct live Liara backend from OS-keyring credential");
+
+        let exercise = (|| -> Result<(), String> {
+            primary
+                .test_connection()
+                .map_err(|error| format!("live connection check failed: {error}"))?;
+            println!("LIVE_S3_STAGE_OK stage=connection");
+            primary
+                .verify_conditional_writes()
+                .map_err(|error| format!("conditional-write probe failed: {error}"))?;
+            if !primary.conditional_writes_verified() {
+                return Err("conditional-write capability was not retained".into());
+            }
+            println!("LIVE_S3_STAGE_OK stage=conditional_write");
+
+            let workspace = tempfile::tempdir().map_err(|error| error.to_string())?;
+            let project_id = Uuid::new_v4();
+            let project_root = workspace.path().join("project");
+            let project = ProjectStore::create(
+                &project_root,
+                &ProjectInfo {
+                    id: project_id.to_string(),
+                    title: "Live S3 acceptance".into(),
+                    question: "Does the real provider preserve encrypted sync semantics?".into(),
+                    design: "acceptance".into(),
+                    locale: "en".into(),
+                    privacy: "private".into(),
+                    revision: 0,
+                    created_at: "2026-10-27T00:00:00Z".into(),
+                },
+            )
+            .map_err(|error| error.to_string())?;
+            let archive_path = workspace.path().join("device-a.rwproj");
+            archive_project(&project, &archive_path).map_err(|error| error.to_string())?;
+            let archive = fs::read(&archive_path).map_err(|error| error.to_string())?;
+            let passphrase = format!(
+                "rw-live-{}-{}",
+                Uuid::new_v4().simple(),
+                Uuid::new_v4().simple()
+            );
+
+            let pushed = push_project_archive(
+                &primary,
+                project_id,
+                0,
+                &archive,
+                &passphrase,
+                None,
+                "device-a",
+            )
+            .map_err(|error| format!("encrypted push failed: {error}"))?;
+            if pushed["advanced"] != true || pushed["conflict"] != false {
+                return Err("initial encrypted push did not advance the remote tip".into());
+            }
+            let revision = pushed["revision"]
+                .as_str()
+                .ok_or_else(|| "initial push omitted revision".to_owned())?
+                .to_owned();
+            let encrypted_sha = pushed["encrypted_sha256"]
+                .as_str()
+                .ok_or_else(|| "initial push omitted encrypted digest".to_owned())?;
+            let encrypted = primary
+                .get_immutable(
+                    &project_id.to_string(),
+                    &format!("blobs/{encrypted_sha}.rwenc"),
+                )
+                .map_err(|error| format!("encrypted object readback failed: {error}"))?;
+            if !encrypted.starts_with(b"RWPENC1\n") || encrypted == archive {
+                return Err("remote object was not the project encryption envelope".into());
+            }
+            println!("LIVE_S3_STAGE_OK stage=encrypted_push");
+
+            let secondary = S3Backend::connect(profile.clone(), &OsKeyringStore)
+                .map_err(|error| format!("second-device backend failed: {error}"))?;
+            secondary
+                .test_connection()
+                .map_err(|error| format!("second-device connection failed: {error}"))?;
+            secondary
+                .verify_conditional_writes()
+                .map_err(|error| format!("second-device conditional probe failed: {error}"))?;
+            let pulled = pull_project_archive(&secondary, project_id, &revision, &passphrase)
+                .map_err(|error| format!("encrypted pull failed: {error}"))?;
+            if pulled != archive {
+                return Err("decrypted pull did not match the verified project archive".into());
+            }
+            println!("LIVE_S3_STAGE_OK stage=encrypted_pull");
+
+            let restored_path = workspace.path().join("device-b.rwproj");
+            let restored = persist_verified_archive(project_id, &pulled, &restored_path)
+                .map_err(|error| format!("second-device restore failed: {error}"))?;
+            if restored["verified"] != true
+                || verify_archive(&restored_path)
+                    .map_err(|error| error.to_string())?
+                    .project_id
+                    != project_id.to_string()
+            {
+                return Err("second-device restore was not independently verified".into());
+            }
+            println!("LIVE_S3_STAGE_OK stage=second_device_restore");
+
+            let conflict = push_project_archive(
+                &secondary,
+                project_id,
+                0,
+                &archive,
+                &passphrase,
+                None,
+                "device-b",
+            )
+            .map_err(|error| format!("conflict-preservation push failed: {error}"))?;
+            if conflict["advanced"] != false
+                || conflict["conflict"] != true
+                || conflict["actual_revision"] != revision
+                || conflict["preserved_revision"].as_str().is_none()
+            {
+                return Err("stale second-device push was not preserved as a conflict".into());
+            }
+            let preserved = conflict["preserved_revision"]
+                .as_str()
+                .ok_or_else(|| "conflict omitted preserved revision".to_owned())?;
+            println!("LIVE_S3_STAGE_OK stage=conflict_preservation");
+
+            let history = primary
+                .list_revision_ids(&project_id.to_string(), 100)
+                .map_err(|error| format!("live history read failed: {error}"))?;
+            if !history.iter().any(|item| item == &revision)
+                || !history.iter().any(|item| item == preserved)
+            {
+                return Err("live history omitted advanced or preserved conflict revision".into());
+            }
+            println!("LIVE_S3_STAGE_OK stage=history");
+            Ok(())
+        })();
+
+        let cleanup = cleanup_live_s3_prefix(&primary);
+        if cleanup.is_ok() {
+            println!("LIVE_S3_STAGE_OK stage=cleanup");
+        }
+        exercise.expect("live Liara encrypted-sync acceptance failed");
+        cleanup.expect("live Liara acceptance cleanup failed");
+        println!("LIVE_S3_ACCEPTANCE_OK provider=liara endpoint_host={endpoint_host}");
+    }
+
+    #[test]
+    #[ignore = "best-effort cleanup for an explicitly authorized live Liara acceptance namespace"]
+    fn live_liara_cleanup_namespace_from_keyring() {
+        if std::env::var("RESEARCHWEAVE_LIVE_S3_ACCEPTANCE").as_deref() != Ok("1") {
+            panic!("live S3 acceptance was not explicitly authorized");
+        }
+        let profile_id = std::env::var("RESEARCHWEAVE_LIVE_S3_PROFILE_ID")
+            .expect("RESEARCHWEAVE_LIVE_S3_PROFILE_ID is required");
+        let endpoint = std::env::var("RESEARCHWEAVE_LIVE_S3_ENDPOINT")
+            .expect("RESEARCHWEAVE_LIVE_S3_ENDPOINT is required");
+        let bucket = std::env::var("RESEARCHWEAVE_LIVE_S3_BUCKET")
+            .expect("RESEARCHWEAVE_LIVE_S3_BUCKET is required");
+        let run_token = std::env::var("RESEARCHWEAVE_LIVE_S3_RUN_TOKEN")
+            .expect("RESEARCHWEAVE_LIVE_S3_RUN_TOKEN is required");
+        if !safe_token(&run_token, 96) {
+            panic!("RESEARCHWEAVE_LIVE_S3_RUN_TOKEN is invalid");
+        }
+        let mut profile = S3Profile::liara(&profile_id, endpoint, bucket);
+        profile.prefix = format!("researchweave/live-acceptance-{run_token}");
+        let backend = S3Backend::connect(profile, &OsKeyringStore)
+            .expect("failed to construct cleanup backend from OS-keyring credential");
+        cleanup_live_s3_prefix(&backend).expect("live S3 namespace cleanup failed");
+        println!("LIVE_S3_REMOTE_CLEANUP_OK");
+    }
+
     #[test]
     fn sync_passphrase_store_is_project_scoped_redacted_and_deletable() {
         let store = MemorySyncSecretStore::default();

@@ -6,7 +6,7 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-researchweave-core = { path = "../researchweave-core", version = "=0.1.0" }
+researchweave-core = { path = "../researchweave-core", version = "=0.2.0" }
 ambers = "=0.4.6"
 arrow-array-57 = { package = "arrow-array", version = "=57.1.0" }
 arrow-array-60 = { package = "arrow-array", version = "=60.0.0" }

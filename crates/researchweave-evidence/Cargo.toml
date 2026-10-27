@@ -6,8 +6,8 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-researchweave-core = { path = "../researchweave-core", version = "=0.1.0" }
-researchweave-project = { path = "../researchweave-project", version = "=0.1.0" }
+researchweave-core = { path = "../researchweave-core", version = "=0.2.0" }
+researchweave-project = { path = "../researchweave-project", version = "=0.2.0" }
 serde_json.workspace = true
 rusqlite = "0.38"
 sha2 = "0.10"

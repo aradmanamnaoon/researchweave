@@ -6,10 +6,10 @@ license.workspace = true
 rust-version.workspace = true
 
 [dependencies]
-researchweave-sync = { path = "../researchweave-sync", version = "=0.1.0" }
-researchweave-core = { path = "../researchweave-core", version = "=0.1.0" }
-researchweave-project = { path = "../researchweave-project", version = "=0.1.0" }
-researchweave-crypto = { path = "../researchweave-crypto", version = "=0.1.0" }
+researchweave-sync = { path = "../researchweave-sync", version = "=0.2.0" }
+researchweave-core = { path = "../researchweave-core", version = "=0.2.0" }
+researchweave-project = { path = "../researchweave-project", version = "=0.2.0" }
+researchweave-crypto = { path = "../researchweave-crypto", version = "=0.2.0" }
 aws-config = { version = "1", default-features = false, features = ["default-https-client", "rt-tokio"] }
 aws-credential-types = "1"
 aws-sdk-s3 = { version = "1", default-features = false, features = ["default-https-client", "http-1x", "rt-tokio"] }
