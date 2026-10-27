@@ -6424,7 +6424,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             "check" => "Manuscript readiness checks completed",
                             "bibliography" => "Bibliography generated from persisted references",
                             "draft-packet" => {
-                                "Draft submission ZIP generated locally; no submission performed"
+                                "Draft submission ZIP prepared in memory; no file was saved or submitted"
                             }
                             _ => "Publishing operation completed",
                         };
