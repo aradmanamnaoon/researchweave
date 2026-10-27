@@ -1162,7 +1162,7 @@ export component MainWindow inherits Window {
 
                     if root.page == 39: Rectangle {
                         background: Theme.raised;
-                        ScrollView {
+                        cloud-scroll := ScrollView {
                             VerticalLayout {
                                 padding: 24px;
                                 spacing: 10px;
@@ -1238,6 +1238,13 @@ export component MainWindow inherits Window {
                                     input-type: password;
                                     accessible-label: "Cloud session token";
                                     key-pressed(event) => {
+                                        if (event.text == Key.Tab && !event.modifiers.shift) {
+                                            // Slint omits off-screen fields from Tab traversal.
+                                            // Expose the next secret field before moving through
+                                            // the credential action buttons.
+                                            cloud-scroll.content-y = min(0px, cloud-scroll.visible-height - cloud-passphrase.y - cloud-passphrase.height - 32px);
+                                            return reject;
+                                        }
                                         if (event.text == Key.Tab && event.modifiers.shift) {
                                             cloud-secret-key.focus();
                                             return accept;
@@ -1262,7 +1269,19 @@ export component MainWindow inherits Window {
                                 }
 
                                 Text { text: "Project encryption"; color: Theme.ink; font-weight: 650; }
-                                cloud-passphrase := LineEdit { placeholder-text: "Project sync passphrase"; input-type: password; accessible-label: "Cloud project encryption passphrase"; }
+                                cloud-passphrase := LineEdit {
+                                    placeholder-text: "Project sync passphrase";
+                                    input-type: password;
+                                    accessible-label: "Cloud project encryption passphrase";
+                                    // A clipped password input is not reliably included in the
+                                    // platform's default Tab order; preserve forward/reverse access.
+                                    key-pressed(event) => {
+                                        if (event.text == Key.Tab && !event.modifiers.shift) {
+                                            cloud-scroll.content-y = min(0px, cloud-scroll.visible-height - cloud-device.y - cloud-device.height - 32px);
+                                        }
+                                        return reject;
+                                    }
+                                }
                                 HorizontalLayout {
                                     spacing: 8px;
                                     Button {
