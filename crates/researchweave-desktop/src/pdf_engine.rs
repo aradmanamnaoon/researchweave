@@ -11,11 +11,17 @@ pub struct SearchRect {
     pub page_rect: PageRect,
     pub pixel_rect: firecrawl_pdfium::PixelRect,
 }
+#[derive(Debug)]
 pub struct PdfRender {
+    /// Zero-based PDF page index shown by this render.
+    pub page_index: usize,
+    pub page_count: usize,
     pub width: u32,
     pub height: u32,
     pub rgba: Vec<u8>,
     pub extracted_text: String,
+    /// Exact number of search occurrences on this page. Rectangles are bounded.
+    pub match_count: usize,
     pub matches: Vec<SearchRect>,
 }
 
@@ -88,13 +94,34 @@ pub fn runtime_library() -> Result<PathBuf, String> {
 }
 
 pub fn render_search(pdf_path: &Path, query: &str) -> Result<PdfRender, String> {
+    render_search_at(pdf_path, query, 0)
+}
+
+/// Render and search one explicit page in a PDF. Page indexes are zero-based.
+/// The caller owns document navigation and never assumes that page zero is the
+/// only page. Invalid indexes fail without silently displaying a different page.
+pub fn render_search_at(
+    pdf_path: &Path,
+    query: &str,
+    page_index: usize,
+) -> Result<PdfRender, String> {
     let runtime = runtime_library()?;
     let pdfium = Pdfium::load_from_path(runtime).map_err(|e| e.to_string())?;
     let contents = std::fs::read(pdf_path).map_err(|e| e.to_string())?;
     let doc = pdfium
         .load_document(contents, None)
         .map_err(|e| e.to_string())?;
-    let page = doc.page(0).map_err(|e| e.to_string())?;
+    let page_count = doc.page_count();
+    if page_count == 0 {
+        return Err("PDF contains no pages".into());
+    }
+    if page_index >= page_count {
+        return Err(format!(
+            "PDF page {} is outside the valid range 1–{page_count}",
+            page_index.saturating_add(1)
+        ));
+    }
+    let page = doc.page(page_index).map_err(|e| e.to_string())?;
     let render = page
         .render(
             &RenderConfig::new()
@@ -105,28 +132,43 @@ pub fn render_search(pdf_path: &Path, query: &str) -> Result<PdfRender, String> 
         .map_err(|e| e.to_string())?;
     let text = page.text().map_err(|e| e.to_string())?;
     let mut hits = Vec::new();
-    for (byte_start, _) in text.text().match_indices(query) {
-        let byte_end = byte_start + query.len();
-        let start = text.text()[..byte_start].chars().count();
-        let end = text.text()[..byte_end].chars().count();
-        let glyphs = &text.chars()[start.min(text.chars().len())..end.min(text.chars().len())];
-        if glyphs.is_empty() {
-            continue;
+    let mut match_count = 0_usize;
+    let mut previous_byte_end = 0_usize;
+    let mut previous_char_end = 0_usize;
+    const MAX_PAGE_SEARCH_RECTS: usize = 256;
+    if !query.is_empty() {
+        for (byte_start, _) in text.text().match_indices(query) {
+            match_count = match_count.saturating_add(1);
+            if match_count > MAX_PAGE_SEARCH_RECTS {
+                continue;
+            }
+            let byte_end = byte_start + query.len();
+            // The match iterator yields non-overlapping UTF-8 ranges, so the
+            // unvisited prefix is counted once rather than O(N²) for many hits.
+            let start =
+                previous_char_end + text.text()[previous_byte_end..byte_start].chars().count();
+            let end = start + query.chars().count();
+            previous_byte_end = byte_end;
+            previous_char_end = end;
+            let glyphs = &text.chars()[start.min(text.chars().len())..end.min(text.chars().len())];
+            if glyphs.is_empty() {
+                continue;
+            }
+            let mut rect = glyphs[0].loose_bounds;
+            for glyph in &glyphs[1..] {
+                let b = glyph.loose_bounds;
+                rect.left = rect.left.min(b.left);
+                rect.bottom = rect.bottom.min(b.bottom);
+                rect.right = rect.right.max(b.right);
+                rect.top = rect.top.max(b.top);
+            }
+            hits.push(SearchRect {
+                byte_start,
+                byte_end,
+                page_rect: rect,
+                pixel_rect: render.transform().page_rect_to_pixel(rect),
+            });
         }
-        let mut rect = glyphs[0].loose_bounds;
-        for glyph in &glyphs[1..] {
-            let b = glyph.loose_bounds;
-            rect.left = rect.left.min(b.left);
-            rect.bottom = rect.bottom.min(b.bottom);
-            rect.right = rect.right.max(b.right);
-            rect.top = rect.top.max(b.top);
-        }
-        hits.push(SearchRect {
-            byte_start,
-            byte_end,
-            page_rect: rect,
-            pixel_rect: render.transform().page_rect_to_pixel(rect),
-        });
     }
     let (width, height) = (render.width(), render.height());
     let stride = render.stride();
@@ -143,10 +185,13 @@ pub fn render_search(pdf_path: &Path, query: &str) -> Result<PdfRender, String> 
         }
     }
     Ok(PdfRender {
+        page_index,
+        page_count,
         width,
         height,
         rgba,
         extracted_text: text.text().to_owned(),
+        match_count,
         matches: hits,
     })
 }
@@ -168,32 +213,41 @@ mod tests {
     use super::*;
     use lopdf::{dictionary, Object, Stream};
     fn fixture(path: &Path) {
+        fixture_pages(path, &["ResearchWeave PDFium anchor"]);
+    }
+    fn fixture_pages(path: &Path, contents_by_page: &[&str]) {
+        assert!(!contents_by_page.is_empty());
         let mut doc = lopdf::Document::with_version("1.5");
         let pages = doc.new_object_id();
         let font = doc.add_object(
             dictionary! { "Type" => "Font", "Subtype" => "Type1", "BaseFont" => "Helvetica" },
         );
         let resources = doc.add_object(dictionary! { "Font" => dictionary! { "F1" => font } });
-        let contents = lopdf::content::Content {
-            operations: vec![
-                lopdf::content::Operation::new("BT", vec![]),
-                lopdf::content::Operation::new("Tf", vec!["F1".into(), 24.into()]),
-                lopdf::content::Operation::new("Td", vec![50.into(), 175.into()]),
-                lopdf::content::Operation::new(
-                    "Tj",
-                    vec![Object::string_literal("ResearchWeave PDFium anchor")],
-                ),
-                lopdf::content::Operation::new("ET", vec![]),
-            ],
-        };
-        let stream = doc.add_object(Stream::new(dictionary! {}, contents.encode().unwrap()));
-        let page = doc.add_object(dictionary! {
-            "Type"=>"Page", "Parent"=>pages, "Resources"=>resources,
-            "Contents"=>stream, "MediaBox"=>vec![0.into(),0.into(),420.into(),260.into()]
-        });
+        let mut page_items = Vec::new();
+        for page_text in contents_by_page {
+            let contents = lopdf::content::Content {
+                operations: vec![
+                    lopdf::content::Operation::new("BT", vec![]),
+                    lopdf::content::Operation::new("Tf", vec!["F1".into(), 24.into()]),
+                    lopdf::content::Operation::new("Td", vec![50.into(), 175.into()]),
+                    lopdf::content::Operation::new("Tj", vec![Object::string_literal(*page_text)]),
+                    lopdf::content::Operation::new("ET", vec![]),
+                ],
+            };
+            let stream = doc.add_object(Stream::new(dictionary! {}, contents.encode().unwrap()));
+            let page = doc.add_object(dictionary! {
+                "Type"=>"Page", "Parent"=>pages, "Resources"=>resources,
+                "Contents"=>stream, "MediaBox"=>vec![0.into(),0.into(),420.into(),260.into()]
+            });
+            page_items.push(page.into());
+        }
         doc.objects.insert(
             pages,
-            dictionary! { "Type"=>"Pages", "Kids"=>vec![page.into()], "Count"=>1 }.into(),
+            dictionary! {
+                "Type"=>"Pages", "Kids"=>page_items,
+                "Count"=>i64::try_from(contents_by_page.len()).unwrap()
+            }
+            .into(),
         );
         let root = doc.add_object(dictionary! { "Type"=>"Catalog", "Pages"=>pages });
         doc.trailer.set("Root", root);
@@ -234,12 +288,48 @@ mod tests {
         );
         assert!(rendered.extracted_text.contains("PDFium"));
         assert_eq!(rendered.matches.len(), 1);
+        assert_eq!(rendered.match_count, 1);
+        let without_search = render_search_at(&input, "", 0).unwrap();
+        assert_eq!(without_search.match_count, 0);
+        assert!(without_search.matches.is_empty());
         let hit = &rendered.matches[0];
         assert!(hit.page_rect.width() > 0.0 && hit.page_rect.height() > 0.0);
         assert!(hit.pixel_rect.width > 0.0 && hit.pixel_rect.height > 0.0);
         if let Ok(destination) = std::env::var("RW_PDFIUM_RENDER_PNG") {
             save_png(&rendered, Path::new(&destination)).unwrap();
         }
+        std::fs::remove_file(input).unwrap();
+    }
+
+    #[test]
+    fn native_pdfium_renders_second_page_and_rejects_invalid_navigation() {
+        let input =
+            std::env::temp_dir().join(format!("rw-multipage-pdfium-{}.pdf", uuid::Uuid::new_v4()));
+        fixture_pages(
+            &input,
+            &["First page unrelated text", "Second page PDFium landmark"],
+        );
+        if let Ok(destination) = std::env::var("RW_PDFIUM_MULTIPAGE_FIXTURE") {
+            std::fs::copy(&input, destination).unwrap();
+        }
+        if runtime_library().is_err() {
+            eprintln!("PDFium runtime missing; download with packaging script");
+            std::fs::remove_file(input).unwrap();
+            return;
+        }
+        let first = render_search_at(&input, "PDFium", 0).unwrap();
+        assert_eq!((first.page_index, first.page_count), (0, 2));
+        assert!(first.matches.is_empty());
+        let second = render_search_at(&input, "PDFium", 1).unwrap();
+        assert_eq!((second.page_index, second.page_count), (1, 2));
+        assert!(second
+            .extracted_text
+            .contains("Second page PDFium landmark"));
+        assert_eq!(second.matches.len(), 1);
+        assert_eq!(second.match_count, 1);
+        assert!(render_search_at(&input, "PDFium", 2)
+            .unwrap_err()
+            .contains("valid range 1"));
         std::fs::remove_file(input).unwrap();
     }
 }

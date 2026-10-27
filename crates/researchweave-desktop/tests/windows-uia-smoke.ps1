@@ -381,6 +381,34 @@ try {
     }
     Write-Output 'PASS: Question preview is non-mutating, then separate approved record advances the project revision'
 
+    # Use the installed native PDFium binary, not an in-process mock, to
+    # navigate a deterministic two-page PDF with distinct searchable content.
+    $twoPagePdf = (Resolve-Path (Join-Path $PSScriptRoot '../../../docs/verification/rust-rewrite/pdfium-two-page-ui-fixture.pdf')).Path
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('PDF Reader')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 180
+    $pdfPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF file path'
+    $pdfSearch = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF search query'
+    ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($twoPagePdf)
+    ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('PDFium')
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open PDF').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*PDF page 1 of 2*' 20000
+    WaitForNameLike $window '*PDF search status: Rendered page 1 of 2*matches: 0*' 10000
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Next PDF page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*PDF page 2 of 2*' 20000
+    WaitForNameLike $window '*PDF search status: Rendered page 2 of 2*matches: 1*' 10000
+    if ((Named $window ([System.Windows.Automation.ControlType]::Button) 'Next PDF page').Current.IsEnabled) {
+        throw 'PDF reader Next button did not disable at final page'
+    }
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Previous PDF page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*PDF page 1 of 2*' 20000
+    if ((Named $window ([System.Windows.Automation.ControlType]::Button) 'Previous PDF page').Current.IsEnabled) {
+        throw 'PDF reader Previous button did not disable at first page'
+    }
+    Write-Output 'PASS: installed native PDFium reader navigates and searches two distinct pages with accessible controls'
+
     # Register a real project reference, then carry its generated ID into the
     # systematic-review workflow. This proves the redesigned References and
     # Review screens are backed by the same persisted project state rather than

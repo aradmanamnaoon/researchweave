@@ -185,6 +185,8 @@ export component MainWindow inherits Window {
     in-out property <image> pdf-image;
     in-out property <string> pdf-status: "Choose a local PDF file";
     in-out property <int> pdf-matches: 0;
+    in-out property <int> pdf-page-number: 1;
+    in-out property <int> pdf-page-count: 0;
     in-out property <float> pdf-highlight-x: 0;
     in-out property <float> pdf-highlight-y: 0;
     in-out property <float> pdf-highlight-w: 0;
@@ -233,7 +235,7 @@ export component MainWindow inherits Window {
     in-out property <bool> cloud-busy: false;
     in-out property <string> command-results: "Search views, resources, settings and help";
 
-    callback load-pdf(string, string);
+    callback load-pdf(string, string, int);
     callback create-project(string, string);
     callback create-default-project(string);
     callback open-project(string);
@@ -944,7 +946,7 @@ export component MainWindow inherits Window {
                                     spacing: 8px;
                                     pdf-query := LineEdit {
                                         text: "PDFium";
-                                        placeholder-text: "Search first page";
+                                        placeholder-text: "Search current page";
                                         accessible-label: "PDF search query";
                                     }
                                     Button {
@@ -954,7 +956,8 @@ export component MainWindow inherits Window {
                                         clicked => {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering PDF…";
-                                            root.load-pdf(pdf-path.text, pdf-query.text);
+                                            root.pdf-page-number = 1;
+                                            root.load-pdf(pdf-path.text, pdf-query.text, 1);
                                         }
                                     }
                                     Button {
@@ -963,7 +966,35 @@ export component MainWindow inherits Window {
                                         clicked => {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Searching PDF…";
-                                            root.load-pdf(pdf-path.text, pdf-query.text);
+                                            root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number);
+                                        }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "Previous";
+                                        accessible-label: "Previous PDF page";
+                                        enabled: root.pdf-page-number > 1;
+                                        clicked => {
+                                            root.pdf-job += 1;
+                                            root.pdf-status = "Rendering previous PDF page…";
+                                            root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number - 1);
+                                        }
+                                    }
+                                    Text {
+                                        text: "Page " + root.pdf-page-number + " of " + root.pdf-page-count;
+                                        accessible-label: "PDF page " + root.pdf-page-number + " of " + root.pdf-page-count;
+                                        color: Theme.ink;
+                                    }
+                                    Button {
+                                        text: "Next";
+                                        accessible-label: "Next PDF page";
+                                        enabled: root.pdf-page-count > 0 && root.pdf-page-number < root.pdf-page-count;
+                                        clicked => {
+                                            root.pdf-job += 1;
+                                            root.pdf-status = "Rendering next PDF page…";
+                                            root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number + 1);
                                         }
                                     }
                                 }
@@ -1010,7 +1041,7 @@ export component MainWindow inherits Window {
                                     spacing: 8px;
                                     Text { text: "Reader context"; color: Theme.ink; font-size: 15px * Theme.ui-scale / 100; font-weight: 600; }
                                     Text { text: "Current native scope"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
-                                    Text { text: "First-page render and search"; color: Theme.ink; font-size: 11px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                    Text { text: "Native per-page rendering and search with bounded page navigation"; color: Theme.ink; font-size: 11px * Theme.ui-scale / 100; wrap: word-wrap; }
                                     Text { text: "Selection and annotations remain pending."; color: Theme.warning; font-size: 11px * Theme.ui-scale / 100; }
                                     Text { text: "Evidence"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     Button { text: "Open evidence"; clicked => { root.page = 8; } }

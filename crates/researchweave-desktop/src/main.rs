@@ -7138,20 +7138,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let weak = app.as_weak();
         let activity = activity.clone();
         let activity_path = activity_path.clone();
-        move |path, query| {
+        move |path, query, page_number| {
             let kind = if query.is_empty() {
                 "PDF render"
             } else {
                 "PDF search"
             };
+            let job_id = weak.upgrade().map(|ui| ui.get_pdf_job()).unwrap_or_default();
             let kind = kind.to_owned();
             let weak = weak.clone();
             let activity = activity.clone();
             let activity_path = activity_path.clone();
             std::thread::spawn(move || {
-                let result = pdf_engine::render_search(Path::new(path.as_str()), query.as_str());
+                let result = usize::try_from(page_number)
+                    .ok()
+                    .filter(|number| *number > 0)
+                    .ok_or_else(|| "PDF page must be a positive number".to_string())
+                    .and_then(|number| {
+                        pdf_engine::render_search_at(
+                            Path::new(path.as_str()),
+                            query.as_str(),
+                            number - 1,
+                        )
+                    });
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak.upgrade() {
+                        // Opening another file or page invalidates any older
+                        // asynchronous render; never display the stale result.
+                        if ui.get_pdf_job() != job_id {
+                            return;
+                        }
                         let succeeded = result.is_ok();
                         let mut updated = activity.lock().unwrap().clone();
                         updated.record(&kind, succeeded);
@@ -7164,7 +7180,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         match result {
                             Ok(rendered) => {
-                                let count = rendered.matches.len() as i32;
+                                ui.set_pdf_page_number(
+                                    i32::try_from(rendered.page_index.saturating_add(1))
+                                        .unwrap_or(i32::MAX),
+                                );
+                                ui.set_pdf_page_count(
+                                    i32::try_from(rendered.page_count).unwrap_or(i32::MAX),
+                                );
+                                let count =
+                                    i32::try_from(rendered.match_count).unwrap_or(i32::MAX);
                                 if let Some(hit) = rendered.matches.first() {
                                     ui.set_pdf_highlight_x(
                                         (hit.pixel_rect.x / rendered.width as f64) as f32,
@@ -7191,7 +7215,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 ui.set_pdf_matches(count);
                                 ui.set_pdf_status(
                                     format!(
-                                        "Rendered {} × {} · {} extracted characters",
+                                        "Rendered page {} of {} ({} × {}) · {} extracted characters",
+                                        rendered.page_index + 1,
+                                        rendered.page_count,
                                         rendered.width,
                                         rendered.height,
                                         rendered.extracted_text.chars().count()
@@ -7201,6 +7227,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                             Err(e) => {
                                 ui.set_pdf_status(format!("PDF error: {}", e).into());
+                                ui.set_pdf_page_number(1);
+                                ui.set_pdf_page_count(0);
+                                ui.set_pdf_image(Image::default());
                                 ui.set_pdf_highlight_visible(false);
                                 ui.set_pdf_matches(0);
                             }

@@ -182,8 +182,20 @@ try {
     # The protected workflow seeded this profile's provider credential into the
     # Windows Credential Manager before launching the app. The GUI never receives
     # the provider credential as a command-line argument or environment value.
-    $passphrase = "rw-live-gui-$RunToken-32-byte-minimum-passphrase"
+    # The run token appears in public GitHub metadata and must never act as
+    # encryption key material. Generate an independent high-entropy secret for
+    # each protected live GUI run; do not echo it into logs or artifact metadata.
+    $secretBytes = New-Object byte[] 48
+    $generator = [System.Security.Cryptography.RandomNumberGenerator]::Create()
+    try {
+        $generator.GetBytes($secretBytes)
+    } finally {
+        $generator.Dispose()
+    }
+    $passphrase = [Convert]::ToBase64String($secretBytes)
+    [Array]::Clear($secretBytes, 0, $secretBytes.Length)
     Set-CloudValue $window 'Cloud project encryption passphrase' $passphrase
+    $passphrase = $null
     Invoke-CloudButton $window 'Save cloud encryption key securely'
     Wait-ForNameLike $window '*Project sync encryption key saved securely*' 10000 | Out-Null
     Set-CloudValue $window 'Cloud sync device name' 'github-windows-uia'
