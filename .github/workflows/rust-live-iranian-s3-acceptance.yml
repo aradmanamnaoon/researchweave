@@ -39,14 +39,16 @@ jobs:
 
       - name: Verify protected run is exact main source
         shell: pwsh
+        env:
+          EXPECTED_HEAD_SHA: ${{ inputs.head_sha }}
         run: |
           if ($env:GITHUB_REF -ne 'refs/heads/main') {
             throw 'Live provider acceptance may run only from the main branch'
           }
-          if ('${{ inputs.head_sha }}' -notmatch '^[0-9a-f]{40}$') {
+          if ($env:EXPECTED_HEAD_SHA -notmatch '^[0-9a-f]{40}$') {
             throw 'head_sha input must be an exact lowercase 40-character commit SHA'
           }
-          if ($env:GITHUB_SHA -ne '${{ inputs.head_sha }}') {
+          if ($env:GITHUB_SHA -ne $env:EXPECTED_HEAD_SHA) {
             throw 'workflow_dispatch source SHA does not match the requested final commit'
           }
           $head = (git rev-parse HEAD).Trim()
@@ -233,11 +235,4 @@ jobs:
             target/live-s3/live-s3.log
             target/live-s3/live-s3-gui.log
           if-no-files-found: error
-          retention-days: 14
-      - uses: actions/upload-artifact@v4
-        if: always()
-        with:
-          name: live-iranian-s3-gui-screenshot-${{ github.run_attempt }}
-          path: target/live-s3/live-cloud-gui.png
-          if-no-files-found: ignore
           retention-days: 14

@@ -235,9 +235,11 @@ jobs:
           path: dist
           merge-multiple: true
       - name: Generate and verify complete digest manifest
+        env:
+          VERSION: ${{ inputs.version }}
         run: |
           set -euo pipefail
-          version="${{ inputs.version }}"
+          version="$VERSION"
           if [[ -z "$version" ]]; then
             version="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;data=json.load(sys.stdin);print(next(package["version"] for package in data["packages"] if package["name"]=="researchweave-desktop"))')"
           fi
