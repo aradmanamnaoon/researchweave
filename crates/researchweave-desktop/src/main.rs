@@ -236,7 +236,7 @@ fn show_activity(ui: &MainWindow, state: &durable_activity::Activity) {
 
 slint::include_modules!();
 
-const PAGES: [&str; 40] = [
+const PAGES: [&str; 41] = [
     "Welcome",
     "Dashboard",
     "Question",
@@ -277,6 +277,7 @@ const PAGES: [&str; 40] = [
     "Activity",
     "About",
     "Cloud Sync",
+    "Project Metadata",
 ];
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -568,6 +569,13 @@ const COMMAND_REGISTRY: &[CommandEntry] = &[
         activity: "Manage",
         kind: "Settings",
         aliases: &["cloud", "sync", "s3", "object storage"],
+    },
+    CommandEntry {
+        label: "Project Metadata",
+        page: 40,
+        activity: "Home",
+        kind: "Project",
+        aliases: &["edit project metadata", "project details"],
     },
 ];
 
@@ -1198,6 +1206,121 @@ struct PendingEvidenceAction {
     surface: String,
     arguments: serde_json::Value,
     expected_revision: u64,
+}
+
+#[derive(Clone)]
+struct PendingProjectMetadata {
+    project_id: Uuid,
+    project_path: PathBuf,
+    arguments: serde_json::Value,
+    expected_revision: u64,
+}
+
+fn metadata_changes(
+    title: &str,
+    question: &str,
+    design: &str,
+    locale: &str,
+    privacy: &str,
+) -> Result<serde_json::Value, String> {
+    let mut changes = serde_json::Map::new();
+    for (name, value) in [
+        ("title", title),
+        ("question", question),
+        ("design", design),
+        ("locale", locale),
+        ("privacy", privacy),
+    ] {
+        if !value.trim().is_empty() {
+            changes.insert(name.into(), serde_json::json!(value.trim()));
+        }
+    }
+    if changes.is_empty() {
+        return Err("Enter at least one project metadata field to change".into());
+    }
+    Ok(serde_json::Value::Object(changes))
+}
+
+fn project_metadata_preview_at(
+    project_path: &Path,
+    mut arguments: serde_json::Value,
+    data_root: &Path,
+) -> Result<(PendingProjectMetadata, serde_json::Value), String> {
+    let (project_id, info) = active_project_identity(project_path)?;
+    arguments["project_id"] = serde_json::json!(info.id);
+    let expected_revision = u64::try_from(info.revision).map_err(|_| "Invalid project revision")?;
+    let router = project_router(
+        project_id,
+        project_path,
+        &data_root.join("operation-audit.sqlite"),
+    )?;
+    let mut command = Command::new(project_id, "project.update_metadata", arguments.clone());
+    command.actor = "desktop-user".into();
+    command.expected_revision = Some(expected_revision);
+    command.preview = true;
+    let preview = router
+        .dispatch(&command, None, now_seconds()?)
+        .map_err(|error| error.to_string())?;
+    if preview["status"] != "ok" {
+        return Err(preview
+            .pointer("/error/message")
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Project metadata preview failed")
+            .into());
+    }
+    Ok((
+        PendingProjectMetadata {
+            project_id,
+            project_path: project_path.to_path_buf(),
+            arguments,
+            expected_revision,
+        },
+        preview,
+    ))
+}
+
+fn project_metadata_execute_at(
+    pending: &PendingProjectMetadata,
+    active_project: &Path,
+    data_root: &Path,
+) -> Result<ProjectInfo, String> {
+    if active_project
+        .canonicalize()
+        .map_err(|_| "Active project is unavailable")?
+        != pending
+            .project_path
+            .canonicalize()
+            .map_err(|_| "Previewed project is unavailable")?
+    {
+        return Err("Project changed after preview; preview again".into());
+    }
+    let (project_id, info) = active_project_identity(active_project)?;
+    if project_id != pending.project_id
+        || u64::try_from(info.revision).map_err(|_| "Invalid project revision")?
+            != pending.expected_revision
+    {
+        return Err("Project revision changed after preview; preview again".into());
+    }
+    let router = project_router(
+        project_id,
+        active_project,
+        &data_root.join("operation-audit.sqlite"),
+    )?;
+    let mut command = Command::new(
+        project_id,
+        "project.update_metadata",
+        pending.arguments.clone(),
+    );
+    command.actor = "desktop-user".into();
+    command.expected_revision = Some(pending.expected_revision);
+    let now = now_seconds()?;
+    let approval = router
+        .issue_approval(&command, 30, now)
+        .map_err(|error| error.to_string())?;
+    let result = router
+        .dispatch(&command, Some(&approval), now)
+        .map_err(|error| error.to_string())?;
+    project_result(result)
 }
 
 #[derive(Clone)]
@@ -3172,6 +3295,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let active_project: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    let pending_project_metadata: Rc<RefCell<Option<PendingProjectMetadata>>> =
+        Rc::new(RefCell::new(None));
     let writing_drafts = Rc::new(RefCell::new(writing_autosave::Drafts::default()));
     let data_root = host_data_root()?;
     let cloud_runtime = cloud_router(&data_root)?;
@@ -5998,6 +6123,112 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_inspect_project_metadata({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a project first".to_owned())
+                    .and_then(|path| {
+                        ProjectStore::open(path)
+                            .and_then(|store| store.info())
+                            .map_err(|error| error.to_string())
+                    });
+                match result {
+                    Ok(info) => {
+                        ui.set_project_metadata_results(
+                            format!(
+                                "Current project (revision {}):\nTitle: {}\nQuestion: {}\nDesign: {}\nLocale: {}\nPrivacy: {}",
+                                info.revision, info.title, info.question, info.design, info.locale, info.privacy
+                            )
+                            .into(),
+                        );
+                        ui.set_status("Current project metadata loaded locally".into());
+                    }
+                    Err(error) => {
+                        ui.set_project_metadata_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_preview_project_metadata({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_project_metadata = pending_project_metadata.clone();
+        move |title, question, design, locale, privacy| {
+            if let Some(ui) = weak.upgrade() {
+                let result = metadata_changes(
+                    title.as_str(), question.as_str(), design.as_str(), locale.as_str(), privacy.as_str()
+                )
+                .and_then(|changes| {
+                    active_project
+                        .borrow()
+                        .as_ref()
+                        .ok_or_else(|| "Open a project first".to_owned())
+                        .and_then(|path| {
+                            let root = host_data_root()?;
+                            project_metadata_preview_at(path, changes, &root)
+                        })
+                });
+                match result {
+                    Ok((pending, preview)) => {
+                        *pending_project_metadata.borrow_mut() = Some(pending);
+                        ui.set_project_metadata_results(
+                            format!(
+                                "Preview only; no metadata changed. Recording is bound to these fields and the current project revision:\n{}",
+                                pretty_result_data(&preview)
+                            ).into()
+                        );
+                        ui.set_status("Project metadata preview ready; no changes saved".into());
+                    }
+                    Err(error) => {
+                        pending_project_metadata.borrow_mut().take();
+                        ui.set_project_metadata_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_apply_project_metadata({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_project_metadata = pending_project_metadata.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let pending = pending_project_metadata.borrow_mut().take();
+                let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                    (Some(path), Some(pending)) => host_data_root().and_then(|root| {
+                        project_metadata_execute_at(pending, path, &root)
+                    }),
+                    (None, _) => Err("Open a project first".into()),
+                    (_, None) => Err("Preview project metadata before recording it".into()),
+                };
+                match result {
+                    Ok(info) => {
+                        ui.set_project_title(info.title.clone().into());
+                        ui.set_project_revision(info.revision as i32);
+                        ui.set_project_metadata_results(
+                            format!(
+                                "Recorded project metadata at revision {}. Use Inspect to reload the current values.",
+                                info.revision
+                            ).into()
+                        );
+                        ui.set_status("Project metadata revision recorded and audited".into());
+                    }
+                    Err(error) => {
+                        ui.set_project_metadata_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
     app.on_preview_writing_section({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -8343,6 +8574,43 @@ mod tests {
         assert!(text.contains(&created.design));
         assert!(text.contains("Project revision: 0"));
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn project_metadata_editor_preview_is_nonmutating_and_commit_is_revision_bound() {
+        let root = std::env::temp_dir().join(format!("rw-project-editor-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("project");
+        let audit = root.join("operation-audit.sqlite");
+        load_project_with_audit(project.to_str().unwrap(), "Original project", true, &audit)
+            .unwrap();
+        let changes = metadata_changes("Updated پژوهش", "", "qualitative", "", "").unwrap();
+        assert!(changes.get("question").is_none());
+        assert!(metadata_changes("", "", "", "", "").is_err());
+        let (pending, preview) = project_metadata_preview_at(&project, changes, &root).unwrap();
+        assert_eq!(preview["status"], "ok");
+        assert_eq!(preview["data"]["preview"], true);
+        assert_eq!(
+            ProjectStore::open(&project).unwrap().info().unwrap().title,
+            "Original project"
+        );
+        let updated = project_metadata_execute_at(&pending, &project, &root).unwrap();
+        assert_eq!(updated.title, "Updated پژوهش");
+        assert_eq!(updated.design, "qualitative");
+        assert_eq!(updated.revision, 1);
+        assert!(project_metadata_execute_at(&pending, &project, &root).is_err());
+        let reopened = ProjectStore::open(&project).unwrap().info().unwrap();
+        assert_eq!(reopened.title, updated.title);
+        assert_eq!(reopened.revision, 1);
+        let events = AuditStore::open(&audit).unwrap().events().unwrap();
+        assert!(events
+            .iter()
+            .any(|event| event.operation == "project.update_metadata" && event.status == "ok"));
+
+        let other = root.join("other-project");
+        load_project_with_audit(other.to_str().unwrap(), "Other", true, &audit).unwrap();
+        assert!(project_metadata_execute_at(&pending, &other, &root).is_err());
+        std::fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

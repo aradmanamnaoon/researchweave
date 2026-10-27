@@ -1539,6 +1539,22 @@ try {
     Start-Sleep -Milliseconds 450
     if ($p.HasExited -or -not (Get-Process -Id $p.Id).Responding) { throw 'Application blocked during asynchronous job' }
     Write-Output 'PASS: window responsive during asynchronous progress'
+    # Project metadata is a user-facing, revision-guarded command, not a direct
+    # edit of project.sqlite. Preview must not write; record is a separate
+    # one-use approved gesture and the new title must survive process restart.
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open project metadata editor').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 160
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect current project metadata').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Current project (revision*'
+    $metadataTitle = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project metadata title change'
+    ([System.Windows.Automation.ValuePattern]$metadataTitle.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('UIA Updated Persian Project')
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview project metadata changes').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Project metadata preview ready*'
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Record previewed project metadata changes').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Project metadata revision recorded and audited*'
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect current project metadata').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Title: UIA Updated Persian Project*'
+    Write-Output 'PASS: project metadata editor previews separately, records approved revision and updates the project title'
     # Persisted display preferences: check the actual accessible control state,
     # stored JSON, and a fresh-process UIA reload (not pixel certification).
     $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
@@ -1583,6 +1599,23 @@ try {
         throw 'Persisted display preferences were not restored into accessible UI'
     }
     Write-Output 'PASS: dark, high-contrast, compact-density and 200% text scale persist and restore after native restart'
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Welcome')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 180
+    $path = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project path'
+    ([System.Windows.Automation.ValuePattern]$path.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($temporary)
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open project').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 180
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Project Metadata')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 160
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect current project metadata').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Title: UIA Updated Persian Project*'
+    Write-Output 'PASS: approved project metadata revision survives native process restart'
     Capture-WindowScreenshot $window $Screenshot
 } finally {
     if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force }

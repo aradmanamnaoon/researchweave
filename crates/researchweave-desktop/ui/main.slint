@@ -193,6 +193,7 @@ export component MainWindow inherits Window {
     in-out property <int> pdf-job: 0;
     in-out property <string> library-results: "Open a project, then refresh its sources.";
     in-out property <string> research-summary: "Open a project to inspect its recorded research question and design.";
+    in-out property <string> project-metadata-results: "Open a project, enter only fields you want to change, and preview before recording.";
     in-out property <string> question-results: "Preview a structured question before recording it.";
     in-out property <string> protocol-results: "Preview a protocol before recording it.";
     in-out property <string> reference-results: "Register or inspect project references.";
@@ -244,6 +245,9 @@ export component MainWindow inherits Window {
     callback update-ui-scale(int);
     callback library-action(string, string, string);
     callback refresh-research();
+    callback inspect-project-metadata();
+    callback preview-project-metadata(string, string, string, string, string);
+    callback apply-project-metadata();
     callback preview-question(string, string, string, string);
     callback preview-protocol(string, string, string, string);
     callback apply-evidence-preview();
@@ -327,13 +331,13 @@ export component MainWindow inherits Window {
         "Analysis Results", "Qualitative", "Codebook", "Mixed Methods", "Manuscript", "References",
         "Notebook", "Publishing", "Agent", "Providers", "Privacy", "Integrations", "Exports",
         "Backups", "Recovery", "Diagnostics", "Jobs", "Notifications", "Tutorials", "Guidance",
-        "Shortcuts", "Preferences", "Activity", "About", "Cloud Sync"
+        "Shortcuts", "Preferences", "Activity", "About", "Cloud Sync", "Project Metadata"
     ];
 
     // Activity roots are intentionally much smaller than the legacy 39-screen directory.
     // Legacy page ids remain stable for migration, automation and command aliases.
     private property <int> activity:
-        (root.page == 0 || root.page == 1 || root.page == 2 || root.page == 4) ? 0 :
+        (root.page == 0 || root.page == 1 || root.page == 2 || root.page == 4 || root.page == 40) ? 0 :
         (root.page == 3 || root.page == 5 || root.page == 6 || root.page == 7 || root.page == 8 ||
          root.page == 9 || root.page == 10 || root.page == 11 || root.page == 20) ? 1 :
         (root.page >= 12 && root.page <= 18) ? 2 :
@@ -362,7 +366,7 @@ export component MainWindow inherits Window {
         root.show-inspector = root.responsive-width >= 1180px * Theme.ui-scale / 100;
     }
     private property <string> object-kind:
-        (root.page == 0 || root.page == 1 || root.page == 2 || root.page == 4) ? "Project" :
+        (root.page == 0 || root.page == 1 || root.page == 2 || root.page == 4 || root.page == 40) ? "Project" :
         (root.page >= 3 && root.page <= 11) || root.page == 20 ? "Source" :
         (root.page == 12 || root.page == 13) ? "Dataset" :
         (root.page >= 14 && root.page <= 18) ? "Analysis" :
@@ -833,6 +837,11 @@ export component MainWindow inherits Window {
                                 Text { text: "Current project"; color: Theme.muted-ink; font-size: 11px * Theme.ui-scale / 100; }
                                 Text { text: root.project-title; color: Theme.ink; font-size: 18px * Theme.ui-scale / 100; font-weight: 600; }
                                 Text { text: "Revision " + root.project-revision + " · local workspace"; color: Theme.muted-ink; }
+                                Button {
+                                    text: "Edit project metadata";
+                                    accessible-label: "Open project metadata editor";
+                                    clicked => { root.page = 40; root.inspect-project-metadata(); }
+                                }
                                 Text { text: "Continue research"; color: Theme.muted-ink; font-size: 11px * Theme.ui-scale / 100; }
                                 HorizontalLayout {
                                     spacing: 8px;
@@ -2254,7 +2263,43 @@ export component MainWindow inherits Window {
                          }
                         }
                     }
-                    if root.page > 1 && root.page != 2 && root.page != 4 && root.page != 5 && root.page != 7 && root.page != 9 && root.page != 10 && root.page != 11 && root.page != 12 && root.page != 14 && root.page != 16 && root.page != 17 && root.page != 19 && root.page != 20 && root.page != 21 && root.page != 22 && root.page != 23 && root.page != 24 && root.page != 28 && root.page != 29 && root.page != 30 && root.page != 31 && root.page != 32 && root.page != 36 && root.page != 37: Rectangle {
+                    if root.page == 40: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 24px;
+                                spacing: 10px;
+                                Text { text: "Project metadata"; color: Theme.ink; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; }
+                                Text {
+                                    text: "Edit only the fields you enter. Empty fields keep their existing values. A preview never saves data; recording is revision-bound and approval-gated.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                Button { text: "Inspect current project metadata"; accessible-label: "Inspect current project metadata"; clicked => { root.inspect-project-metadata(); } }
+                                meta-title := LineEdit { placeholder-text: "New project title (optional)"; accessible-label: "Project metadata title change"; }
+                                meta-question := TextEdit { text: ""; accessible-label: "Project metadata research question change"; }
+                                meta-design := LineEdit { placeholder-text: "Research design (optional)"; accessible-label: "Project metadata design change"; }
+                                Text { text: "Design values: exploratory, observational, experimental, qualitative, mixed, mixed_methods, secondary_analysis, computational, systematic_review, replication, nonacademic."; color: Theme.muted-ink; wrap: word-wrap; }
+                                meta-locale := LineEdit { placeholder-text: "Locale, for example en or fa (optional)"; accessible-label: "Project metadata locale change"; }
+                                meta-privacy := LineEdit { placeholder-text: "Privacy: private, restricted or public (optional)"; accessible-label: "Project metadata privacy change"; }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "Preview metadata changes";
+                                        accessible-label: "Preview project metadata changes";
+                                        clicked => { root.preview-project-metadata(meta-title.text, meta-question.text, meta-design.text, meta-locale.text, meta-privacy.text); }
+                                    }
+                                    Button {
+                                        text: "Record previewed metadata";
+                                        accessible-label: "Record previewed project metadata changes";
+                                        clicked => { root.apply-project-metadata(); }
+                                    }
+                                }
+                                Text { text: root.project-metadata-results; accessible-label: "Project metadata result " + root.project-metadata-results; color: Theme.ink; wrap: word-wrap; }
+                            }
+                        }
+                    }
+                    if root.page > 1 && root.page != 2 && root.page != 4 && root.page != 5 && root.page != 7 && root.page != 9 && root.page != 10 && root.page != 11 && root.page != 12 && root.page != 14 && root.page != 16 && root.page != 17 && root.page != 19 && root.page != 20 && root.page != 21 && root.page != 22 && root.page != 23 && root.page != 24 && root.page != 28 && root.page != 29 && root.page != 30 && root.page != 31 && root.page != 32 && root.page != 36 && root.page != 37 && root.page != 40: Rectangle {
                         background: Theme.raised;
                         HorizontalLayout {
                             padding: 24px;
