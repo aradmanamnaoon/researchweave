@@ -747,7 +747,17 @@ mod tests {
             authority.consume(&command, Some(&approval), 21.0),
             Err(AuthorizationError::Expired)
         );
-        approval.signature.replace_range(0..2, "ff");
+        // Always change the HMAC. Replacing its prefix with a fixed string
+        // can accidentally preserve a genuine randomly generated signature
+        // (a 1-in-256 chance for the old "ff" replacement).
+        let original_signature = approval.signature.clone();
+        let replacement = if approval.signature.starts_with('0') {
+            "1"
+        } else {
+            "0"
+        };
+        approval.signature.replace_range(0..1, replacement);
+        assert_ne!(approval.signature, original_signature);
         assert_eq!(
             authority.consume(&command, Some(&approval), 12.0),
             Err(AuthorizationError::InvalidSignature)
