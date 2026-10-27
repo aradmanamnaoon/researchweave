@@ -43,7 +43,22 @@ dbus-run-session -- bash -c '
   synthetic_probe_secret="researchweave-ci-synthetic-secret"
   synthetic_probe_id="researchweave-ci-$$"
 
-  printf "%s" "$synthetic_login_passphrase" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>"$RW_KEYRING_TMP/gnome-keyring.log"
+  # Reproduce the normal PAM/session lifecycle without a graphical prompt.
+  # --login captures the synthetic login password and defers initialization;
+  # --start completes the session and creates/unlocks the login collection.
+  # Evaluate only daemon-produced environment assignments inside this isolated
+  # process; no secret material is printed or persisted in the command output.
+  login_env="$(printf "%s" "$synthetic_login_passphrase" | gnome-keyring-daemon --login --components=secrets 2>"$RW_KEYRING_TMP/gnome-keyring.log")"
+  if [[ -n "$login_env" ]]; then
+    eval "$login_env"
+  fi
+  start_env="$(gnome-keyring-daemon --start --components=secrets 2>>"$RW_KEYRING_TMP/gnome-keyring.log")"
+  if [[ -n "$start_env" ]]; then
+    eval "$start_env"
+  fi
+  # Explicitly unlock/create the login collection after session initialization.
+  # This stays noninteractive because the password is the synthetic CI fixture.
+  printf "%s" "$synthetic_login_passphrase" | gnome-keyring-daemon --unlock --components=secrets >/dev/null 2>>"$RW_KEYRING_TMP/gnome-keyring.log"
   printf "%s" "$synthetic_probe_secret" | secret-tool store --label="ResearchWeave synthetic native acceptance" application researchweave-ci profile "$synthetic_probe_id" >/dev/null
   secret-tool lookup application researchweave-ci profile "$synthetic_probe_id" >/dev/null
   secret-tool clear application researchweave-ci profile "$synthetic_probe_id"
