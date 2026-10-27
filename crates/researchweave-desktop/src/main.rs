@@ -7163,11 +7163,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak.upgrade() {
-                        // Opening another file or page invalidates any older
-                        // asynchronous render; never display the stale result.
-                        if ui.get_pdf_job() != job_id {
-                            return;
-                        }
                         let succeeded = result.is_ok();
                         let mut updated = activity.lock().unwrap().clone();
                         updated.record(&kind, succeeded);
@@ -7177,6 +7172,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 show_activity(&ui, &activity.lock().unwrap());
                             }
                             Err(error) => ui.set_status(error.into()),
+                        }
+                        // Every completed job is recorded, but a superseded
+                        // request must not replace the latest displayed page.
+                        if ui.get_pdf_job() != job_id {
+                            return;
                         }
                         match result {
                             Ok(rendered) => {

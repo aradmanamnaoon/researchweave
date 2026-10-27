@@ -957,6 +957,8 @@ export component MainWindow inherits Window {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering PDF…";
                                             root.pdf-page-number = 1;
+                                            root.pdf-page-count = 0;
+                                            root.pdf-highlight-visible = false;
                                             root.load-pdf(pdf-path.text, pdf-query.text, 1);
                                         }
                                     }
@@ -966,6 +968,7 @@ export component MainWindow inherits Window {
                                         clicked => {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Searching PDF…";
+                                            root.pdf-highlight-visible = false;
                                             root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number);
                                         }
                                     }
@@ -979,6 +982,7 @@ export component MainWindow inherits Window {
                                         clicked => {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering previous PDF page…";
+                                            root.pdf-highlight-visible = false;
                                             root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number - 1);
                                         }
                                     }
@@ -994,6 +998,7 @@ export component MainWindow inherits Window {
                                         clicked => {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering next PDF page…";
+                                            root.pdf-highlight-visible = false;
                                             root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number + 1);
                                         }
                                     }
