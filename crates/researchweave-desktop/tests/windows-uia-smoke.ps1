@@ -40,6 +40,15 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
     ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName + ' :: ' + $_.Current.Name })
     throw "UIA element missing: $type '$name'. Available: $($available -join ' | ')"
 }
+function Invoke-AccessibleButton([System.Windows.Automation.AutomationElement]$parent, [string]$name) {
+    $button = Named $parent ([System.Windows.Automation.ControlType]::Button) $name
+    $scroll = $null
+    if ($button.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$scroll)) {
+        ([System.Windows.Automation.ScrollItemPattern]$scroll).ScrollIntoView()
+    }
+    $button.SetFocus()
+    $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+}
 function WindowFor($process, [string]$failureMessage) {
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $process.Id)
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
@@ -929,6 +938,52 @@ try {
     if (-not ($writingExportNames | Where-Object { $_ -like '*## Results*Persisted UIA result supported by the registered reference.*' })) {
         throw 'Manuscript Markdown export was not generated from persisted section revisions'
     }
+    $physicalMarkdown = Join-Path $hostData ('uia-physical-' + [guid]::NewGuid().ToString('N') + '.md')
+    $markdownPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path'
+    ([System.Windows.Automation.ValuePattern]$markdownPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($physicalMarkdown)
+    Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
+    Start-Sleep -Milliseconds 220
+    if (-not (Test-Path -LiteralPath $physicalMarkdown -PathType Leaf)) {
+        throw 'Manuscript Save button did not create the real Markdown file'
+    }
+    $physicalMarkdownText = [System.IO.File]::ReadAllText($physicalMarkdown)
+    if (-not $physicalMarkdownText.Contains('Persisted UIA result supported by the registered reference.')) {
+        throw 'Physically exported manuscript does not contain the persisted Results section'
+    }
+    $markdownHash = (Get-FileHash -LiteralPath $physicalMarkdown -Algorithm SHA256).Hash.ToLowerInvariant()
+    $markdownReceipt = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($markdownReceipt | Where-Object { $_ -like "*$markdownHash*" })) {
+        throw 'Physical Markdown SHA-256 is not the displayed verified receipt'
+    }
+    Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
+    Start-Sleep -Milliseconds 160
+    if ([System.IO.File]::ReadAllText($physicalMarkdown) -ne $physicalMarkdownText) {
+        throw 'Repeated physical export modified an existing manuscript file'
+    }
+    $overwriteResult = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($overwriteResult | Where-Object { $_ -like '*Prepare a manuscript or draft ZIP before saving*' })) {
+        throw 'Repeated Save was not rejected after consuming its prepared artifact'
+    }
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 150
+    Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
+    Start-Sleep -Milliseconds 150
+    $existingFileResult = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($existingFileResult | Where-Object { $_ -like '*existing files are never replaced*' })) {
+        throw 'An already-existing physical destination was not explicitly rejected'
+    }
+    if ([System.IO.File]::ReadAllText($physicalMarkdown) -ne $physicalMarkdownText) {
+        throw 'Physical export overwrote a pre-existing file after a fresh preparation'
+    }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript DOCX').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $writingDocxNames = @($window.FindAll(
@@ -941,6 +996,19 @@ try {
     if (-not ($writingDocxNames | Where-Object { $_ -like '*semantic_heading_styles*page_number_footer*unicode_utf8*' })) {
         throw 'Manuscript DOCX export did not expose the verified structural feature receipt'
     }
+    $physicalDocx = Join-Path $hostData ('uia-physical-' + [guid]::NewGuid().ToString('N') + '.docx')
+    $markdownPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path'
+    ([System.Windows.Automation.ValuePattern]$markdownPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($physicalDocx)
+    Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
+    Start-Sleep -Milliseconds 220
+    if (-not (Test-Path -LiteralPath $physicalDocx -PathType Leaf)) {
+        throw 'DOCX Save button did not create the physical OOXML artifact'
+    }
+    $docxBytes = [System.IO.File]::ReadAllBytes($physicalDocx)
+    if ($docxBytes.Length -lt 4 -or $docxBytes[0] -ne 80 -or $docxBytes[1] -ne 75) {
+        throw 'Saved manuscript DOCX has no ZIP/OOXML signature'
+    }
+    Write-Output 'PASS: Markdown and structured DOCX were physically saved through the native manuscript UI with verified digest and no overwrite'
     Write-Output 'PASS: Manuscript preview -> approved save -> inspect -> Markdown + structured DOCX export works through native UI'
 
     $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
@@ -1001,6 +1069,33 @@ try {
     if (-not ($publishingPacketNames | Where-Object { $_ -like '*base64_omitted_from_ui*true*' })) {
         throw 'Draft submission packet leaked raw artifact base64 into the visible UI'
     }
+    $physicalPacket = Join-Path $hostData ('uia-draft-' + [guid]::NewGuid().ToString('N') + '.rw-submission.zip')
+    $packetDestination = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Draft submission ZIP destination path'
+    ([System.Windows.Automation.ValuePattern]$packetDestination.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($physicalPacket)
+    Invoke-AccessibleButton $window 'Save prepared draft submission ZIP without overwrite'
+    Start-Sleep -Milliseconds 260
+    if (-not (Test-Path -LiteralPath $physicalPacket -PathType Leaf)) {
+        throw 'Draft submission ZIP was not written to its explicit destination'
+    }
+    Add-Type -AssemblyName System.IO.Compression.FileSystem
+    $archive = [System.IO.Compression.ZipFile]::OpenRead($physicalPacket)
+    try {
+        $entries = @($archive.Entries | ForEach-Object { $_.FullName })
+        foreach ($required in @('manifest.json','manuscript.md','manuscript.docx','bibliography.txt')) {
+            if ($required -notin $entries) { throw "Physical submission ZIP is missing $required" }
+        }
+    } finally {
+        $archive.Dispose()
+    }
+    $packetHash = (Get-FileHash -LiteralPath $physicalPacket -Algorithm SHA256).Hash.ToLowerInvariant()
+    $packetReceipt = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($packetReceipt | Where-Object { $_ -like "*$packetHash*" -and $_ -like '*submission_performed*false*' })) {
+        throw 'Physical ZIP receipt failed SHA-256 or no-submission verification'
+    }
+    Write-Output 'PASS: Real draft ZIP includes all expected physical entries and a checked digest; no journal submission occurred'
     Write-Output 'PASS: Publishing readiness -> bibliography -> local draft ZIP with DOCX works without claiming submission'
 
     $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'

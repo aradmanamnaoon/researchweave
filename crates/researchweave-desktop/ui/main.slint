@@ -288,6 +288,7 @@ export component MainWindow inherits Window {
     callback preview-writing-section(string, string, string, string);
     callback inspect-manuscript(string);
     callback export-manuscript(string, string);
+    callback save-prepared-export(string, string);
     callback publishing-action(string, string, string);
     callback preview-conversation-create(string, string);
     callback preview-assistant-message(string, string, string);
@@ -2067,6 +2068,24 @@ export component MainWindow inherits Window {
                                 Button { text: "HTML"; accessible-label: "Export manuscript HTML"; clicked => { root.export-manuscript(manuscript-id.text, "html"); } }
                                 Button { text: "PDF"; accessible-label: "Export manuscript PDF"; clicked => { root.export-manuscript(manuscript-id.text, "pdf"); } }
                             }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                manuscript-save-path := LineEdit {
+                                    horizontal-stretch: 1;
+                                    accessible-label: "Manuscript export destination path";
+                                    placeholder-text: "Absolute destination including extension, e.g. C:\\Users\\...\\paper.docx";
+                                }
+                                Button {
+                                    text: "Save prepared artifact";
+                                    accessible-label: "Save prepared manuscript artifact without overwrite";
+                                    clicked => { root.save-prepared-export(manuscript-save-path.text, "writing.manuscript_export"); }
+                                }
+                            }
+                            Text {
+                                text: "Prepare the format first, then confirm a file path. Saves locally; will never replace an existing file or submit online.";
+                                color: Theme.muted-ink;
+                                wrap: word-wrap;
+                            }
                             Rectangle {
                                 min-height: 110px;
                                 preferred-height: 160px;
@@ -2133,6 +2152,19 @@ export component MainWindow inherits Window {
                                     accessible-label: "Build incomplete draft submission ZIP";
                                     accessible-description: "Creates a local review packet even when readiness checks report missing sections. No submission occurs.";
                                     clicked => { root.publishing-action("draft-packet", publishing-manuscript-id.text, publishing-journal.text); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                packet-save-path := LineEdit {
+                                    horizontal-stretch: 1;
+                                    accessible-label: "Draft submission ZIP destination path";
+                                    placeholder-text: "Absolute destination filename ending in .zip";
+                                }
+                                Button {
+                                    text: "Save prepared ZIP";
+                                    accessible-label: "Save prepared draft submission ZIP without overwrite";
+                                    clicked => { root.save-prepared-export(packet-save-path.text, "writing.submission_export"); }
                                 }
                             }
                             Rectangle {

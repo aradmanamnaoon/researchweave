@@ -37,6 +37,7 @@ use uuid::Uuid;
 mod display_contrast;
 mod durable_activity;
 mod pdf_engine;
+mod physical_export;
 mod writing_autosave;
 
 fn flush_writing_drafts(
@@ -3484,6 +3485,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let pending_evidence: Rc<RefCell<Option<PendingEvidenceAction>>> = Rc::new(RefCell::new(None));
+    let pending_physical_export: Rc<RefCell<Option<physical_export::PreparedPhysicalExport>>> =
+        Rc::new(RefCell::new(None));
     let pending_library: Rc<RefCell<Option<PendingLibraryAction>>> = Rc::new(RefCell::new(None));
     let pending_analysis: Rc<RefCell<Option<PendingAnalysisAction>>> = Rc::new(RefCell::new(None));
     let pending_analysis_command: Rc<RefCell<Option<PendingAnalysisCommand>>> =
@@ -6466,6 +6469,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_export_manuscript({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
         move |manuscript_id, format| {
             if let Some(ui) = weak.upgrade() {
                 let format = format.as_str().trim().to_ascii_lowercase();
@@ -6475,7 +6479,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .ok_or_else(|| "Open a project first".to_string())
                     .and_then(|path| {
                         let root = host_data_root()?;
-                        evidence_read_at(
+                        physical_export::prepare(
                             path,
                             "writing.manuscript_export",
                             serde_json::json!({
@@ -6486,7 +6490,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         )
                     });
                 match result {
-                    Ok(result) => {
+                    Ok((pending, result)) => {
+                        *pending_physical_export.borrow_mut() = Some(pending);
                         let mut visible = result.clone();
                         if let Some(object) = visible
                             .get_mut("data")
@@ -6504,16 +6509,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                             }
                         }
-                        ui.set_writing_results(pretty_result_data(&visible).into());
+                        ui.set_writing_results(format!("Artifact prepared, NOT saved. Enter an absolute destination ending in the correct extension and click Save prepared artifact. Existing files are never overwritten.\n{}", pretty_result_data(&visible)).into());
                         ui.set_status(
                             format!(
-                                "Manuscript {} generated from persisted revisions",
+                                "Manuscript {} prepared; no file saved yet",
                                 format.to_ascii_uppercase()
                             )
                             .into(),
                         );
                     }
                     Err(error) => {
+                        pending_physical_export.borrow_mut().take();
                         ui.set_writing_results(error.clone().into());
                         ui.set_status(error.into());
                     }
@@ -6524,11 +6530,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_publishing_action({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
         move |action, manuscript_id, journal| {
             if let Some(ui) = weak.upgrade() {
                 let action = action.as_str().trim().to_ascii_lowercase();
                 let manuscript_id = manuscript_id.as_str().trim().to_owned();
                 let journal = journal.as_str().trim().to_owned();
+                if action != "draft-packet" {
+                    pending_physical_export.borrow_mut().take();
+                }
                 let result = active_project
                     .borrow()
                     .as_ref()
@@ -6551,16 +6561,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 }),
                                 &root,
                             ),
-                            "draft-packet" => evidence_read_at(
-                                path,
-                                "writing.submission_export",
-                                serde_json::json!({
-                                    "manuscript_id":manuscript_id,
-                                    "journal":journal,
-                                    "allow_incomplete":true
-                                }),
+                            "draft-packet" => physical_export::prepare(
+                                path, "writing.submission_export",
+                                serde_json::json!({"manuscript_id":manuscript_id,"journal":journal,"allow_incomplete":true}),
                                 &root,
-                            ),
+                            ).map(|(pending, receipt)| {
+                                *pending_physical_export.borrow_mut() = Some(pending);
+                                receipt
+                            }),
                             _ => Err("Unsupported publishing action".into()),
                         }
                     });
@@ -6593,6 +6601,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             _ => "Publishing operation completed",
                         };
                         ui.set_status(status.into());
+                    }
+                    Err(error) => {
+                        pending_physical_export.borrow_mut().take();
+                        ui.set_writing_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_save_prepared_export({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        move |destination, screen_operation| {
+            if let Some(ui) = weak.upgrade() {
+                let result = match (
+                    active_project.borrow().as_ref(),
+                    pending_physical_export.borrow().as_ref(),
+                ) {
+                    (Some(project), Some(pending)) => host_data_root().and_then(|root| {
+                        physical_export::save_for_screen(
+                            pending,
+                            project,
+                            destination.as_str(),
+                            &root,
+                            screen_operation.as_str(),
+                        )
+                    }),
+                    (None, _) => Err("Open a project first".into()),
+                    (_, None) => Err("Prepare a manuscript or draft ZIP before saving".into()),
+                };
+                match result {
+                    Ok(receipt) => {
+                        pending_physical_export.borrow_mut().take();
+                        ui.set_writing_results(
+                            format!(
+                                "Local file saved and SHA-256 verified (no submission):\n{}",
+                                serde_json::to_string_pretty(&receipt).unwrap_or_default()
+                            )
+                            .into(),
+                        );
+                        ui.set_status("Local artifact saved, verified and never submitted".into());
                     }
                     Err(error) => {
                         ui.set_writing_results(error.clone().into());
