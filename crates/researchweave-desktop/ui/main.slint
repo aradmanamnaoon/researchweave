@@ -983,8 +983,8 @@ export component MainWindow inherits Window {
                                         }
                                     }
                                     Text {
-                                        text: "Page " + root.pdf-page-number + " of " + root.pdf-page-count;
-                                        accessible-label: "PDF page " + root.pdf-page-number + " of " + root.pdf-page-count;
+                                        text: root.pdf-page-count > 0 ? "Page " + root.pdf-page-number + " of " + root.pdf-page-count : "No page loaded";
+                                        accessible-label: root.pdf-page-count > 0 ? "PDF page " + root.pdf-page-number + " of " + root.pdf-page-count : "No PDF page loaded";
                                         color: Theme.ink;
                                     }
                                     Button {
