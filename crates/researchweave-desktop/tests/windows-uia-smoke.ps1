@@ -969,7 +969,23 @@ try {
     if ($restoredManuscriptValue -ne $recoveredManuscript) {
         throw 'Abrupt-exit manuscript draft was not restored into the fresh process'
     }
-    WaitForNameLike $window '*Recovered manuscript autosaved to project revisions*' 10000
+    # The UI status string is transient and may not remain exposed through UIA on
+    # slower hosted runners. Prove the stronger condition instead: the recovery
+    # timer completed a successful project revision write and then durably cleared
+    # the manuscript dirty flag in the crash-recovery journal.
+    $cleanRecoveredManuscript = $null
+    $recoveryDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $draftFiles = @(Get-ChildItem (Join-Path $hostData 'writing-drafts') -Filter '*.json' -File)
+        $cleanRecoveredManuscript = $draftFiles | ForEach-Object { Read-JsonRetry $_.FullName } | Where-Object {
+            $_.body -eq $recoveredManuscript -and -not $_.manuscript_dirty
+        } | Select-Object -First 1
+        if ($cleanRecoveredManuscript) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $recoveryDeadline)
+    if (-not $cleanRecoveredManuscript) {
+        throw 'Recovered manuscript journal did not clear its dirty flag after revision persistence'
+    }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect manuscript').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $recoveredInspectNames = @($window.FindAll(
@@ -1030,7 +1046,19 @@ try {
     if ($restoredNotebookValue -ne $recoveredNotebook) {
         throw 'Abrupt-exit notebook draft was not restored into the fresh process'
     }
-    WaitForNameLike $window '*Recovered notebook autosaved to project revisions*' 10000
+    $cleanRecoveredNotebook = $null
+    $recoveryDeadline = [DateTime]::UtcNow.AddSeconds(10)
+    do {
+        $draftFiles = @(Get-ChildItem (Join-Path $hostData 'writing-drafts') -Filter '*.json' -File)
+        $cleanRecoveredNotebook = $draftFiles | ForEach-Object { Read-JsonRetry $_.FullName } | Where-Object {
+            $_.notebook -eq $recoveredNotebook -and -not $_.notebook_dirty
+        } | Select-Object -First 1
+        if ($cleanRecoveredNotebook) { break }
+        Start-Sleep -Milliseconds 50
+    } while ([DateTime]::UtcNow -lt $recoveryDeadline)
+    if (-not $cleanRecoveredNotebook) {
+        throw 'Recovered notebook journal did not clear its dirty flag after revision persistence'
+    }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export notebook Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $recoveredNotebookExportNames = @($window.FindAll(
