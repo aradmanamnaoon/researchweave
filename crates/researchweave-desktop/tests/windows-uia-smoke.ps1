@@ -81,12 +81,16 @@ function Capture-WindowScreenshot([System.Windows.Automation.AutomationElement]$
 }
 function Read-JsonRetry([string]$Path, [int]$Attempts = 20) {
     for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
-        if (-not (Test-Path -LiteralPath $Path)) {
-            Start-Sleep -Milliseconds 20
-            continue
-        }
         try {
+            if (-not (Test-Path -LiteralPath $Path)) {
+                Start-Sleep -Milliseconds 20
+                continue
+            }
             return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json)
+        } catch [System.Management.Automation.ItemNotFoundException] {
+            # An atomic preference save may replace the file after Test-Path
+            # but before Get-Content opens it. Retry that specific race.
+            Start-Sleep -Milliseconds 20
         } catch [System.IO.IOException] {
             Start-Sleep -Milliseconds 20
         }
@@ -94,7 +98,13 @@ function Read-JsonRetry([string]$Path, [int]$Attempts = 20) {
     if (-not (Test-Path -LiteralPath $Path)) {
         return $null
     }
-    return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json)
+    try {
+        return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json)
+    } catch [System.Management.Automation.ItemNotFoundException] {
+        # Keep the caller's explicit durability assertion responsible for
+        # rejecting a persistently missing preferences file.
+        return $null
+    }
 }
 function WaitForNameLike(
     [System.Windows.Automation.AutomationElement]$Window,
