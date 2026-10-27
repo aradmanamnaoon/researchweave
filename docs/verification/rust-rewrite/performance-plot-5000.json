@@ -1,0 +1,76 @@
+﻿{
+  "fixture": {
+    "csv_bytes": 72493,
+    "height": 480,
+    "kind": "scatter",
+    "points": 5000,
+    "source_sha256": "ff7529866d15f381853dd4da42fbc068006a8be35221041adbb6447dedc73b13",
+    "width": 720
+  },
+  "iterations": 20,
+  "notes": [
+    "Fixture import is outside timed regions",
+    "Each timed render loads the immutable dataset revision through AnalysisService",
+    "One SVG and one PNG warm-up execution are excluded",
+    "5000 points is the current enforced renderer resource ceiling"
+  ],
+  "png": {
+    "max_ms": 14.5221,
+    "min_ms": 12.9216,
+    "n": 20,
+    "p50_ms": 13.5556,
+    "p95_ms": 14.5148,
+    "samples_ms": [
+      13.5691,
+      13.5556,
+      13.2405,
+      13.1703,
+      13.4452,
+      14.0464,
+      13.1198,
+      13.0072,
+      12.9216,
+      13.9955,
+      13.0552,
+      13.448,
+      14.1053,
+      14.5221,
+      13.6993,
+      14.3327,
+      13.063,
+      14.1635,
+      14.5148,
+      13.7322
+    ]
+  },
+  "schema": 1,
+  "svg": {
+    "max_ms": 16.120800000000003,
+    "min_ms": 13.8491,
+    "n": 20,
+    "p50_ms": 14.7963,
+    "p95_ms": 15.604099999999999,
+    "samples_ms": [
+      15.385100000000001,
+      16.120800000000003,
+      15.3313,
+      14.3902,
+      14.7963,
+      15.0982,
+      13.8491,
+      15.5417,
+      15.3702,
+      15.3044,
+      14.2964,
+      14.455300000000001,
+      14.822099999999999,
+      15.2516,
+      15.604099999999999,
+      14.0217,
+      14.4283,
+      14.484,
+      14.406,
+      14.0223
+    ]
+  }
+}

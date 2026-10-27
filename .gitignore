@@ -11,6 +11,9 @@ __pycache__/
 htmlcov/
 dist/
 build/
+/target/
+crates/*/target/
+crates/*/*.cdx.json
 *.egg-info/
 .idea/
 .vscode/

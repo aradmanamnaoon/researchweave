@@ -1,0 +1,9 @@
+# Native desktop Jobs and Notifications — persisted PDF outcomes
+
+The existing PDF Reader actually launches a native asynchronous PDF render/search. Successful and failed completions now append a bounded local result (`PDF render` or `PDF search`, succeeded/failed, random ID) to both durable Jobs and Notifications, using `desktop-activity.json` in the private host data directory. Records contain **no** PDF path, search string, document title, extracted text or error details. History reloads on restart; invalid/oversized persisted data fail closed to an empty UI state, rather than displaying untrusted content. Each collection is capped at 30 entries and its persisted file to 32 KiB on load.
+
+The Jobs page includes Clear job history; Notifications includes Dismiss notifications. Both are user-triggered persisted state transitions. The bottom tray retains existing navigation and progress semantics. No simulated responsiveness-check job is recorded as real work and no background service or scheduler is advertised.
+
+Writes use a temporary file and an on-disk backup around replacement, including Windows rename compatibility and rollback on replacement error. The UI only changes retained state after a successful write. The atomic replacement is best-effort across unexpected process or power interruption (not a database transaction). Activity records are local application diagnostics, not project audit events.
+
+Validation: desktop focused unit tests 17/17 passed, including durable restart/retention/dismissal. `cargo fmt --package researchweave-desktop` and `cargo clippy -p researchweave-desktop --bin researchweave-desktop -- -D warnings` passed. The existing real Windows UIA smoke should additionally be run against the rebuilt executable when available. The UIA smoke does not exercise PDF completion persistence; this requires a separate UI automation fixture.

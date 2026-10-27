@@ -3,6 +3,9 @@
 *.jpg binary
 *.ico binary
 *.pdf binary
+*.rwenc binary
+*.rwproj binary
+*.rwproj.enc binary
 *.svg text eol=lf
 *.sh text eol=lf
 *.desktop text eol=lf

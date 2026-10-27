@@ -1,0 +1,23 @@
+# Desktop §40.84 / §40.85 / §40.86 Windows acceptance
+
+Scope: `crates/researchweave-desktop/**`, desktop-specific UIA only. This report does not certify the broad Windows UIA harness, network connectivity, scientific validity, or authenticated actor identity.
+
+## Native operations
+
+- **Diagnostics (§40.84):** Accessible **Run project diagnostics** dispatches `project.diagnostics` through the project command router, preserving the project identity and command/audit scope. The desktop shows only bounded status, numerical findings summary, up to 50 finding **codes and severities**, checked categories and unavailable categories. It does **not** render finding location, message, recovery text, source bodies, or raw JSON. The structural audit cannot certify scientific validity or external sources.
+- **Activity (§40.85):** Accessible exact operation filter plus decimal offset and limit (1–50, offset 0–1000), **Load project activity**, and **Clear project activity view**. The router reads verified `project.activity`; the UI renders only sequence/operation/timestamp and capped counts, explicitly displaying `actor_authenticated=false` and `source=project_event_chain`. No event payload, changed-field data, authenticated-identity claim, or destructive event deletion. Clear-view updates only current UI text.
+- **Provider profiles (§40.86):** `ai_router` attaches `ProfileStore::open(<host_data_root>/ai-profiles.json)`. Configure, update, and disconnect dispatch `ai.profile.configure/update/disconnect` first through `ai_preview_at`, and only **Record profile change** invokes the existing exact-scoped `ai_execute_pending` approval path. **List profiles** uses `ai_read_at(ai.profile.list)`, showing IDs/kind/model/local flags and `health=not_checked`, not endpoint secrets or credentials. No API-key field or network request. URL query/fragment/userinfo (including credential-bearing URLs) are rejected before preview/audit; backend still validates provider kind, endpoint and metadata. The local host store is bounded and restarts persist profiles.
+- The new Providers, Diagnostics, and Activity panes have independent vertical scrolling; provider action buttons are stacked rather than made horizontally inaccessible at 200% scaling. This does not change the existing display preferences, writing autosave, or broad UIA harness.
+- **Durable activity:** The desktop's Jobs/Notifications activity uses the same tested Windows atomic `ReplaceFileW` path as writing recovery, with temporary-file cleanup on failure. Invalid on-disk history no longer silently resets to default at startup; the application reports recovery required rather than overwriting it.
+
+## Observed validation (Windows, 2026-10-26)
+
+`cargo fmt --package researchweave-desktop -- --check`, `cargo test -p researchweave-desktop --locked` (**24 passed**), `cargo build -p researchweave-desktop --locked`, and `cargo clippy -p researchweave-desktop --locked --all-targets -- -D warnings` all exited 0.
+
+Dedicated `crates/researchweave-desktop/tests/windows-uia-project-ops.ps1` ran **twice consecutively**, both exit 0. Each run created an isolated project and host root, verified structural diagnostic categories without leaking a private-title sentinel, queried filtered/paginated project activity and clear-view, rejected invalid profile inputs, configured and approved a provider profile, listed redacted metadata, forcibly restarted and reopened the project, verified persistence, updated and disconnected the provider, and checked credential-bearing URL sentinel did not appear in host metadata/audit or accessible output. UIA uses accessible control names and real Invoke/Value patterns.
+
+Slint responsive visibility uses imperative `changed responsive-width` and `changed responsive-scale` updates to avoid feeding layout metrics back into width-derived bindings. Desktop recompilation observed no `binding loop` warning; this is compile evidence, not comprehensive visual/reflow certification.
+
+`powershell.exe -NoProfile -ExecutionPolicy Bypass -File crates/researchweave-desktop/tests/check-slint-binding-loops.ps1` also exited 0 after touching the Slint source, capturing build output and rejecting any compiler `binding loop` diagnosis. As with any incremental compiler-output check, a no-op build alone is insufficient to establish that a later source edit is warning-free.
+
+**Limitations:** This is a focused UIA acceptance slice. It does not replace the broad suite's Assistant/Sources checks, measure screen-reader behavior, prove network connectivity, or verify provider credentials. No commit, push, other-crate edit, root Cargo/lock edit, or acceptance-ledger change was performed.

@@ -56,6 +56,8 @@ jobs:
           cargo deny check
       - name: SBOM
         run: cargo cyclonedx --format json --all
+      - name: Deterministic dependency license report
+        run: python3 packaging/rust/build_license_report.py target/security/CARGO_LICENSES.json
       - name: Secret scan
         shell: bash
         run: |
@@ -75,11 +77,13 @@ jobs:
             --config .gitleaks.toml \
             --gitleaks-ignore-path .gitleaksignore \
             --log-opts='--all'
-      - name: Archive SBOM
+      - name: Archive SBOM and license report
         uses: actions/upload-artifact@v4
         with:
           name: rust-sbom
-          path: '**/*.cdx.json'
+          path: |
+            **/*.cdx.json
+            target/security/CARGO_LICENSES.json
           if-no-files-found: error
 
   cloud-acceptance:

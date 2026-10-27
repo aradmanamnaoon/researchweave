@@ -1,37 +1,38 @@
-name: Quality
+name: Rust quality
 
 on:
   push:
   pull_request:
   workflow_dispatch:
 
+permissions:
+  contents: read
+
 jobs:
   test:
     strategy:
       fail-fast: false
       matrix:
-        os: [windows-latest, ubuntu-24.04, macos-latest]
+        os: [windows-2022, ubuntu-24.04, macos-15, macos-15-intel]
     runs-on: ${{ matrix.os }}
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      - uses: astral-sh/setup-uv@07a047e608db84b3d8c06cd9a7c7dcc9c355c18e # v10.3.2
+      - uses: actions/checkout@v4
         with:
-          enable-cache: true
-          python-version: "3.12"
-      - name: Install Linux Qt runtime libraries
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os == 'Linux'
+        with:
+          components: rustfmt, clippy
+      - uses: dtolnay/rust-toolchain@stable
+        if: runner.os != 'Linux'
+        with:
+          components: rustfmt, clippy
+      - name: Install Linux Rust desktop prerequisites
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y libegl1 libgl1 libopengl0 libxkbcommon0 libxkbcommon-x11-0 libxcb-cursor0
-      - name: Install locked dependencies
-        run: uv sync --locked --extra dev --extra formats
-      - name: Lint
-        run: uv run --extra dev --extra formats python scripts/tasks.py lint
-      - name: Type check
-        run: uv run --extra dev --extra formats python scripts/tasks.py types
-      - name: Validate skills
-        run: uv run --extra dev --extra formats python scripts/tasks.py skills
-      - name: Test
-        env:
-          QT_QPA_PLATFORM: offscreen
-        run: uv run --extra dev --extra formats python scripts/tasks.py test
+          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev
+      - run: cargo fmt --all -- --check
+      - run: cargo check --workspace --locked --all-targets
+      - run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
+      - run: cargo test --workspace --locked --all-features

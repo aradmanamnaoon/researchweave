@@ -1,17 +1,14 @@
-# Next integration action
+﻿# Next integration action
 
-All locally feasible implementation, Windows release work, Gate C promotion, and post-promotion validation
-identified by the final integration prompt are complete. The validated source is now under
-`D:\coding\codex\researchweave\src\researchweave`, and the original checkout still preserves its untracked
-`prompts/`, recovery bundle, and legacy tracked-file manifest. The original `v0.1.0` release was
-subsequently published on 2026-10-24. The current checkout also contains post-release local AI
-hardening; this continuation does not push, tag, or publish that newer local state.
+The repository is being converted from the additive Rust candidate into the tracked Rust-only v0.2.0 source shape. Historical Python app/runtime/test/package files are removed in that replacement commit while `archive/python-final-c84cdf1`, Git history, migration fixtures, and historical verification records remain available.
 
-External/native verification that cannot be completed on this host remains explicit in the integration ledger:
-live AI/provider credentials and quotas, Zotero/WebDAV/S3 services, Linux/macOS native packaging, native
-keyboard/screen-reader/performance/visual-regression harnesses, and native installer uninstall/reinstall.
+Next mandatory gates, in order:
 
-The remaining work is limited to validation and documentation for the new local hardening plus any
-new defect demonstrated by that validation. Do not repeat already completed transformation work, do
-not represent unobserved external/native scenarios as verified, and stop before another push, tag, or
-remote release.
+1. Run the nonpublishing hosted candidate workflow on the exact repository-replacement SHA and require security, Windows, Ubuntu 22.04, macOS arm64, macOS Intel, and `verify-complete` all green. GUI/package testing stays on isolated hosted runners, not the user's active desktop.
+2. Fast-forward the existing `origin/main` normally to that verified Rust source; do not create a new repository or force-push.
+3. Configure the protected `live-iranian-s3-acceptance` environment with real Liara profile/endpoint/bucket variables and access-key/secret credentials. The environment exists and is restricted to `main`, but the last query on 2026-10-27 found zero variables and zero secrets.
+4. Run the dedicated live acceptance with `head_sha` equal to the frozen final `main` SHA. Any source change after that requires rerunning provider acceptance.
+5. Only after exact-SHA live acceptance, create/push annotated `v0.2.0`, let the release workflow build all native packages, and require its draft/hash/public/anonymous/latest verification chain to succeed.
+6. Preserve old Python GitHub Releases until the Rust release is genuinely public and verified; never remove `archive/python-final-c84cdf1`.
+
+No live Liara compatibility or public Rust release is claimed before those external gates succeed.

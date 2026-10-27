@@ -1,0 +1,14 @@
+# ResearchWeave Rust CycloneDX SBOM SHA-256
+# Generated 2026-10-26 from cargo-cyclonedx 0.5.7 --format json --all
+
+bc64549e031c8fee1a3bb23476c666fda76211c2f1a90515506bf92806512de0  crates/researchweave-ai/researchweave-ai.cdx.json
+985b1e9e011a4c78fcf6dabbf8e90dd37189c3851b60ebf5a80ab92e483f602e  crates/researchweave-analysis/researchweave-analysis.cdx.json
+4c0cbf6304d8931d7c23c8e7413dbec4e11a413e07bfa390f8cc92aee77b0cc2  crates/researchweave-cli/researchweave-cli.cdx.json
+fd0edde3ba1d661c5f79f3dc05630d58fce963fe9250f7cff819b8d7fa09066d  crates/researchweave-cloud/researchweave-cloud.cdx.json
+4e9d328debcf327477ffda41caf25606acc21e32821f22097a7754f4cb5eb42c  crates/researchweave-core/researchweave-core.cdx.json
+ce3f523e06b6cd2f0fa68715ab0dc0cbb9cc1d31d2037ebef54ac5759f04f889  crates/researchweave-crypto/researchweave-crypto.cdx.json
+bb8b40ece31b0ccdd79ba58176cd323429fbc1a689603f042465d9205c4d8a98  crates/researchweave-desktop/researchweave-desktop.cdx.json
+f78c71b25f739d7d5dbc1273144d25056bfc05b848fd7a2f15b298676094766e  crates/researchweave-evidence/researchweave-evidence.cdx.json
+1fb8c594f275174da820464396704b48a50ec391b5f94320e60c254b058e3afb  crates/researchweave-library/researchweave-library.cdx.json
+e9bd3714017a780ff2836342f29d23cf3d39f15e732ae8d89cb3679226e51e9a  crates/researchweave-project/researchweave-project.cdx.json
+3d40333f6fda9951033998c1ddd3e22861e5fd43684ee03d50a8cbe562a57dd5  crates/researchweave-sync/researchweave-sync.cdx.json

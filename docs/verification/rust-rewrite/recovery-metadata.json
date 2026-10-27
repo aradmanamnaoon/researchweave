@@ -1,0 +1,11 @@
+{
+  "bundle": {
+    "exists": true,
+    "path": "D:\\coding\\codex\\researchweave-recovery\\researchweave-python-final-c84cdf1.bundle",
+    "sha256": "e132f60351b7c49154dd019d51bc3d6c1a7369ab5ee02ecd253ae7b0fdff06b1",
+    "size_bytes": 7235780
+  },
+  "note": "Observed local artifacts only; bundle integrity and restore require separate verification.",
+  "tag": "archive/python-final-c84cdf1",
+  "tag_commit": "c84cdf1442f45e0a73e5e6cdfe7b3716d9a1450b"
+}

@@ -1,13 +1,17 @@
-# Architectural boundaries
+﻿# Architectural boundaries
 
-`app/main.py` composes the PyQt6 application. `app/` owns launch/configuration and trusted desktop
-bridges; `core/` owns typed commands, authorization, and integration audit boundaries; `ui/` owns
-desktop workflow and presentation; `evidence/` owns project, source, review, writing, portability,
-and provenance workflows; `analysis/` owns scientific/statistical methods independently of Qt; and
-`ai/` owns optional provider, retrieval, agent, privacy, and sync capabilities.
+ResearchWeave v0.2 is a Rust workspace with explicit domain boundaries:
 
-Scientific analysis remains independent of UI imports. Persistence is versioned, remote providers
-are opt-in, methods retain reproducibility metadata, and non-read agent actions require explicit
-authorization. The shared command bus is the integration boundary rather than direct cross-domain UI
-coupling. See [`../verification/INTEGRATION_LEDGER.md`](../verification/INTEGRATION_LEDGER.md) and
-the root [`README.md`](../../README.md) for the current subsystem map and verified behavior.
+- `researchweave-core`: typed command routing, approvals and durable audit contracts.
+- `researchweave-project`: project schema, revisions, recovery, migration and archives.
+- `researchweave-library`: sources, references, collections, relations and search.
+- `researchweave-evidence`: research question/protocol/review/extraction/qualitative/writing/publishing workflows.
+- `researchweave-analysis`: immutable data revisions, statistical methods, plots and native tabular formats.
+- `researchweave-ai`: provider profiles, local/hosted model boundaries, retrieval, conversations and agent actions.
+- `researchweave-crypto`: authenticated encryption primitives and interoperability fixtures.
+- `researchweave-sync`: encrypted sync state, compare-and-swap history and conflict preservation.
+- `researchweave-cloud`: S3-compatible provider transport, OS-keyring integration and Liara acceptance helpers.
+- `researchweave-desktop`: Slint native desktop shell and trusted host bridges.
+- `researchweave-cli`: native command-line surface.
+
+Scientific/domain crates do not depend on Slint widgets. Remote behavior is opt-in, credentials are resolved through the OS credential service, non-read effects require explicit authority, and project/revision identity is carried through the command boundary. See the root README and `docs/verification/rust-rewrite/` for implementation and acceptance evidence.

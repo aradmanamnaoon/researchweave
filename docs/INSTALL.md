@@ -1,43 +1,35 @@
-# Install, build and uninstall
+﻿# Install and run
 
-## Development install
+## Development
 
-Windows PowerShell:
-
-```powershell
-uv sync --locked --extra dev --extra formats
-uv run researchweave
-```
-
-macOS/Linux shell:
-
-```sh
-uv sync --locked --extra dev --extra formats
-uv run researchweave
-```
-
-The first dependency synchronization requires package availability unless the uv cache is already populated. Normal core desktop use does not require internet access, an AI account or an R installation.
-
-## Windows portable build
+ResearchWeave requires a Rust toolchain; the shipped desktop does not require Python.
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
-powershell -ExecutionPolicy Bypass -File packaging\windows\smoke-portable.ps1
+rustup toolchain install 1.94.1 --profile minimal
+cargo run --locked -p researchweave-desktop
 ```
 
-The build creates `dist\ResearchWeave\` and a ZIP. The observed package is unsigned, so Windows reputation/SmartScreen warnings are possible. Code signing is not claimed.
+For the native PDF reader on Windows, fetch the pinned PDFium runtime first:
 
-## Linux/macOS builds
-
-```sh
-sh packaging/linux/build.sh
-sh packaging/macos/build.sh
+```powershell
+powershell -ExecutionPolicy Bypass -File packaging/rust/fetch-pdfium-win-x64.ps1
 ```
 
-These produce portable tarballs using PyInstaller. They must be built and smoke-tested on the target operating system; a Windows build does not validate Qt plugins, glibc compatibility or macOS signing/notarization.
+Linux and macOS require the native libraries/toolchains documented in `docs/BUILDING.md` and the candidate workflow.
 
-## Uninstall / portable removal
+## Release packages
 
-The portable package is removed by deleting its application directory. User project/data directories live outside that package. The Windows release smoke test explicitly verifies that deleting the extracted package does not remove a simulated user-profile sentinel.
+The v0.2.0 Rust packages are published only after all mandatory native and live-provider gates pass. Expected artifacts are:
 
-ResearchWeave does not currently provide a destructive “remove all user data” uninstall action. Users should back up projects before deleting their application data directory manually.
+- `ResearchWeave-v0.2.0-windows-x64-setup.exe`
+- `ResearchWeave-v0.2.0-macos-arm64.dmg`
+- `ResearchWeave-v0.2.0-macos-x64.dmg`
+- `ResearchWeave-v0.2.0-linux-x86_64.AppImage`
+- `ResearchWeave-v0.2.0-linux-amd64.deb`
+- `SHA256SUMS.txt`
+
+Until the release workflow publishes and anonymously verifies those assets, use source builds or the previously published legacy release as explicitly described in the README.
+
+## Data and uninstall
+
+User projects/data live outside application package directories. Native package acceptance verifies that package removal does not delete the test user-data root. ResearchWeave does not provide a destructive "remove all research data" uninstall action; back up projects before manually deleting application data.

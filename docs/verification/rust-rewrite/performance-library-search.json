@@ -1,0 +1,46 @@
+{
+  "fixture": {
+    "expected_match": "source-09999",
+    "logical_sha256": "b12859e2c81002be621ac2554344e12b46ebf678ef155257c18089ce6ef36bae",
+    "placement": "single match in lexicographically final source; forces full bounded 10000-source scan",
+    "query": "needle-final-9999",
+    "sources": 10000
+  },
+  "iterations": 20,
+  "notes": [
+    "Fixture construction and one warm-up search are outside the timed region",
+    "Timed calls use LibraryHandler::execute(\"search.query\") and therefore reopen/validate the project and verify the event chain before scanning",
+    "Search is literal Unicode lowercase substring matching, not semantic ranking or SQLite FTS",
+    "The benchmark preserves the live 10000-source scan cap"
+  ],
+  "schema": 1,
+  "search_query": {
+    "max_ms": 85.5639,
+    "min_ms": 38.919000000000004,
+    "n": 20,
+    "p50_ms": 42.4603,
+    "p95_ms": 51.0371,
+    "samples_ms": [
+      40.840799999999994,
+      39.7279,
+      39.456199999999995,
+      85.5639,
+      47.023700000000005,
+      40.0909,
+      38.919000000000004,
+      40.965,
+      39.2933,
+      43.3571,
+      43.168400000000005,
+      48.7945,
+      42.6337,
+      41.0263,
+      51.0371,
+      42.8411,
+      41.4287,
+      42.4603,
+      46.1516,
+      47.9455
+    ]
+  }
+}

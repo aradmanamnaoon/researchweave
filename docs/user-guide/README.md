@@ -1,12 +1,9 @@
-# Current user guide
+﻿# Current user guide
 
-After dependencies are installed, run `uv run researchweave`. ResearchWeave opens the integrated
-PyQt6 desktop workspace with project creation/reopening, evidence/library workflows, data import,
-statistics and analysis, systematic-review tools, qualitative workflows, exports, recovery, and
-optional AI assistance.
+ResearchWeave v0.2 is a native Rust/Slint local-first research workbench. Core project, evidence, analysis, writing and export workflows do not require an account or hosted AI service.
 
-Core research workflows work offline without an account or model. Configure an optional local or
-hosted model under **Providers**; project-scoped assistance is available under **Agent**. Non-read
-assistant tools require explicit host approval. See the root [`README.md`](../../README.md),
-[`docs/INSTALL.md`](../INSTALL.md), and [`docs/INTEGRATIONS.md`](../INTEGRATIONS.md) for setup,
-supported integrations, and current limitations.
+For a source build, run `cargo run --locked -p researchweave-desktop`. Create or reopen a project from the start screen, then use the activity rail to move through Question/Protocol, Sources/Library, Review/Extraction, Data/Statistics, Qualitative/Mixed Methods, Writing/Publishing and project management surfaces.
+
+Optional AI configuration lives under **Providers** and project-scoped assistance under **Agent**. Remote providers are opt-in; non-read tool actions require explicit approval. **Cloud Sync** is also opt-in: credentials remain in the operating-system credential store, project content is encrypted locally, and push/pull/conflict/history actions are project-scoped.
+
+See the root README, `docs/INSTALL.md`, `docs/INTEGRATIONS.md`, and the verification material under `docs/verification/rust-rewrite/` for current support levels and limitations.

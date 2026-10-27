@@ -1,0 +1,1941 @@
+﻿[
+    {
+        "description":  "Request assistant text and inert tool proposals; remote access requires approval and egress consent",
+        "domain":  "ai",
+        "effect":  "external-network",
+        "operation":  "ai.chat.propose"
+    },
+    {
+        "description":  "Durable non-secret AI provider metadata; no connectivity assertions",
+        "domain":  "ai",
+        "effect":  "local-write",
+        "operation":  "ai.profile.configure"
+    },
+    {
+        "description":  "Durable non-secret AI provider metadata; no connectivity assertions",
+        "domain":  "ai",
+        "effect":  "local-write",
+        "operation":  "ai.profile.disconnect"
+    },
+    {
+        "description":  "Durable non-secret AI provider metadata; no connectivity assertions",
+        "domain":  "ai",
+        "effect":  "read",
+        "operation":  "ai.profile.list"
+    },
+    {
+        "description":  "Durable non-secret AI provider metadata; no connectivity assertions",
+        "domain":  "ai",
+        "effect":  "local-write",
+        "operation":  "ai.profile.update"
+    },
+    {
+        "description":  "Validate an AI provider profile without accessing a network or resolving credentials",
+        "domain":  "ai",
+        "effect":  "read",
+        "operation":  "ai.profile.validate"
+    },
+    {
+        "description":  "List validated configured provider profiles and declared capabilities; does not check connectivity or resolve credentials",
+        "domain":  "ai",
+        "effect":  "read",
+        "operation":  "ai.providers.list"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "analysis.report.render",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "analysis.result.load",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "analysis.result.save",
+        "risk":  "local-write",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "analysis.script.export",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "description":  "Project-scoped inert retrieval or agent planning; no tools execute",
+        "domain":  "ai",
+        "effect":  "read",
+        "operation":  "assistant.agent.plan"
+    },
+    {
+        "description":  "Project-scoped durable conversation operation; host must configure a conversation store",
+        "domain":  "ai",
+        "effect":  "read",
+        "operation":  "assistant.context"
+    },
+    {
+        "description":  "Project-scoped durable conversation operation; host must configure a conversation store",
+        "domain":  "ai",
+        "effect":  "local-write",
+        "operation":  "assistant.conversation.create"
+    },
+    {
+        "description":  "Project-scoped durable conversation operation; host must configure a conversation store",
+        "domain":  "ai",
+        "effect":  "read",
+        "operation":  "assistant.conversation.list"
+    },
+    {
+        "description":  "Project-scoped durable conversation operation; host must configure a conversation store",
+        "domain":  "ai",
+        "effect":  "read",
+        "operation":  "assistant.history"
+    },
+    {
+        "description":  "Project-scoped durable conversation operation; host must configure a conversation store",
+        "domain":  "ai",
+        "effect":  "local-write",
+        "operation":  "assistant.message.append"
+    },
+    {
+        "description":  "Project-scoped inert retrieval or agent planning; no tools execute",
+        "domain":  "ai",
+        "effect":  "local-write",
+        "operation":  "assistant.retrieval.index"
+    },
+    {
+        "description":  "Project-scoped inert retrieval or agent planning; no tools execute",
+        "domain":  "ai",
+        "effect":  "local-write",
+        "operation":  "assistant.retrieval.revoke_source"
+    },
+    {
+        "description":  "Project-scoped inert retrieval or agent planning; no tools execute",
+        "domain":  "ai",
+        "effect":  "read",
+        "operation":  "assistant.retrieval.search"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "external-network",
+        "operation":  "cloud.conditional.probe",
+        "project_scoped":  false,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "external-network",
+        "operation":  "cloud.connection.verify",
+        "project_scoped":  false,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "local-write",
+        "operation":  "cloud.credentials.delete",
+        "project_scoped":  false,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "local-write",
+        "operation":  "cloud.credentials.store",
+        "project_scoped":  false,
+        "sensitive_arguments":  [
+                                    "access_key",
+                                    "secret_key",
+                                    "session_token"
+                                ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "local-write",
+        "operation":  "cloud.encryption.delete",
+        "project_scoped":  true,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "local-write",
+        "operation":  "cloud.encryption.store",
+        "project_scoped":  true,
+        "sensitive_arguments":  [
+                                    "passphrase"
+                                ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "local-write",
+        "operation":  "cloud.profile.configure",
+        "project_scoped":  false,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "local-write",
+        "operation":  "cloud.profile.disconnect",
+        "project_scoped":  false,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "cloud",
+        "effect":  "read",
+        "operation":  "cloud.profile.list",
+        "project_scoped":  false,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "cloud",
+        "effect":  "read",
+        "operation":  "cloud.profile.validate",
+        "project_scoped":  false,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "external-network",
+        "operation":  "cloud.sync.history",
+        "project_scoped":  true,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "external-network",
+        "operation":  "cloud.sync.pull",
+        "project_scoped":  true,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "external-network",
+        "operation":  "cloud.sync.push",
+        "project_scoped":  true,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "cloud",
+        "effect":  "external-network",
+        "operation":  "cloud.sync.tip",
+        "project_scoped":  true,
+        "sensitive_arguments":  [
+
+                                ]
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "dataset.complete_case",
+        "risk":  "local-write",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "sensitive-export",
+        "offline":  true,
+        "operation":  "dataset.export_csv",
+        "risk":  "sensitive-export",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "dataset.import",
+        "risk":  "local-write",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "dataset.inspect",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "dataset.missingness",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "dataset.page",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "dataset.quality",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "dataset.scan_parquet",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "dataset.select",
+        "risk":  "local-write",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "dataset.simple_impute",
+        "risk":  "local-write",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "dataset.transform",
+        "risk":  "local-write",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "dataset.user_missing",
+        "risk":  "local-write",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "dataset.variable",
+        "risk":  "local-write",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "dataset.view",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "evidence.anchor",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "source_id",
+                                   "quote",
+                                   "start",
+                                   "end"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "evidence.highlight_create",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "source_id",
+                                   "page_number",
+                                   "start",
+                                   "end",
+                                   "quote"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "evidence.highlight_history",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "highlight_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "evidence.highlight_relocate",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "highlight_id",
+                                   "target_source_id"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "evidence.note",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "source_id",
+                                   "title",
+                                   "body"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "evidence.note_delete",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "note_id",
+                                   "actor",
+                                   "reason"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "evidence.note_history",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "note_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "evidence.note_revise",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "note_id",
+                                   "title",
+                                   "body",
+                                   "actor",
+                                   "rationale"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "evidence.notebook_export",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "evidence.notebook_history",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "library.bibliography_import",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "library.bibliography_preview",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "library.collection_add",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "library.collection_create",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "library.collection_export",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "library.collection_remove",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "library.collection_search",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "library.collection_tree",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "library.list",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "library.reference_add",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "library.reference_export",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "library.reference_tag",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "library.references",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "library.source_add",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "library.source_get",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "mixed.joint_display",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "sensitive-export",
+        "offline":  true,
+        "operation":  "mixed.joint_display_sensitive",
+        "risk":  "sensitive-export",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "plot.render",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.activity",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "project",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "project.archive",
+        "project_scoped":  true,
+        "revision_guarded":  true,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "project",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "project.archive_encrypted",
+        "project_scoped":  true,
+        "revision_guarded":  true,
+        "sensitive_arguments":  [
+                                    "password"
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.archive_encrypted_verify",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+                                    "password"
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.archive_verify",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "project",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "project.create",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.diagnostics",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.integrity",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "project",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "project.migrate",
+        "project_scoped":  true,
+        "revision_guarded":  true,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.migration_preview",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.open",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.profile",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.recovery_journal",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.recovery_list",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "project",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "project.recovery_restore",
+        "project_scoped":  true,
+        "revision_guarded":  true,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "project",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "project.recovery_snapshot",
+        "project_scoped":  true,
+        "revision_guarded":  true,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.recovery_status",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "project",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "project.restore",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "project",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "project.restore_encrypted",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+                                    "password"
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.timeline",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  false,
+        "domain":  "project",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "project.timeline_export",
+        "project_scoped":  true,
+        "revision_guarded":  false,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "project",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "project.update_metadata",
+        "project_scoped":  true,
+        "revision_guarded":  true,
+        "sensitive_arguments":  [
+
+                                ],
+        "version":  "1.0.0"
+    },
+    {
+        "description":  "Add a durable versioned project-scoped prompt template",
+        "domain":  "ai",
+        "effect":  "local-write",
+        "operation":  "prompt.add"
+    },
+    {
+        "description":  "Render untrusted project text exclusively into a user-role prompt",
+        "domain":  "ai",
+        "effect":  "read",
+        "operation":  "prompt.render"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "protocol.amend",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "protocol_id",
+                                   "author",
+                                   "rationale",
+                                   "body"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "protocol.create",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "title",
+                                   "author",
+                                   "body"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "protocol.diff",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "protocol_id",
+                                   "from_version",
+                                   "to_version"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "protocol.export",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "protocol_id"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "protocol.history",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "protocol_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "qualitative.add_code",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "expected_content_hash",
+                                   "code_id",
+                                   "name",
+                                   "actor"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "qualitative.annotate",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "expected_content_hash",
+                                   "source_id",
+                                   "start",
+                                   "end",
+                                   "code_id",
+                                   "coder",
+                                   "unit_id"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "qualitative.delete_code",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "expected_content_hash",
+                                   "code_id",
+                                   "actor"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "qualitative.inspect",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "qualitative.kappa",
+        "project_scoped":  false,
+        "required_arguments":  [
+                                   "first",
+                                   "second"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "qualitative.mixed_provenance",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "qualitative.transcript_register",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "expected_content_hash",
+                                   "source_id",
+                                   "case_id",
+                                   "confidential",
+                                   "expected_body_hash"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "qualitative.transcript_update",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "expected_content_hash",
+                                   "source_id",
+                                   "case_id",
+                                   "confidential",
+                                   "expected_body_hash"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "qualitative.transcripts",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "qualitative.update_code",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "expected_content_hash",
+                                   "code_id",
+                                   "actor"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "question.amend",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "question_id",
+                                   "question",
+                                   "framework",
+                                   "fields",
+                                   "author",
+                                   "rationale"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "question.create",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "question",
+                                   "framework",
+                                   "fields",
+                                   "author"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "question.feedback",
+        "project_scoped":  false,
+        "required_arguments":  [
+                                   "question",
+                                   "framework",
+                                   "fields"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "question.history",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "question_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "reference.citation_add",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "reference.citation_graph",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "reference.citation_graphml",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "reference.citation_link",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "reference.citation_revoke",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "reference.identity_history",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "reference.identity_record",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "reference.merge",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "reference.resolve",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  true,
+        "domain":  "library",
+        "effect":  "local-write",
+        "offline":  true,
+        "operation":  "reference.unmerge",
+        "project_scoped":  true,
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "reference.validate",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "review.adjudicate",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id",
+                                   "record_id",
+                                   "stage",
+                                   "decision",
+                                   "reason",
+                                   "adjudicator"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "review.adjudications",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id",
+                                   "record_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "review.advance",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id",
+                                   "record_id"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "review.extract",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id",
+                                   "record_id",
+                                   "field_name",
+                                   "value",
+                                   "reviewer"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "review.extractions",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id",
+                                   "record_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "review.form_create",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "name",
+                                   "fields",
+                                   "author"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "review.form_history",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "form_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "review.form_record",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "form_id",
+                                   "record_id",
+                                   "values",
+                                   "reviewer"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "review.form_revise",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "form_id",
+                                   "fields",
+                                   "author",
+                                   "rationale",
+                                   "migration"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "review.form_values",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "form_id"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "review.prisma",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "review.record_add",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id",
+                                   "reference_id"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "review.records",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "review.screen",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id",
+                                   "record_id",
+                                   "reviewer",
+                                   "stage",
+                                   "decision",
+                                   "reason"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "review.status",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id",
+                                   "record_id",
+                                   "stage"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "review.vote",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id",
+                                   "record_id",
+                                   "reviewer",
+                                   "stage",
+                                   "decision",
+                                   "reason"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "review.votes",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "review_id",
+                                   "record_id"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "search.query",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "approval_required":  false,
+        "domain":  "library",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "source.full_text",
+        "project_scoped":  true,
+        "revision_guarded":  false
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.adjust",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.correlate",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.describe",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.did",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.frequency",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.gee",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.hierarchical",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.item_total",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.kmeans",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.logistic",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.logrank",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.meta",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.model",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.pca",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.poisson",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.power",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.power_one_sample",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.power_proportion",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.psychometric",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.required_n",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.required_n_precision",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.required_n_proportion",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.score_scale",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.survey_mean",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.survey_proportions",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.survival",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.test",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "domain":  "analysis",
+        "effect":  "read",
+        "offline":  true,
+        "operation":  "statistics.time_series",
+        "risk":  "read",
+        "version":  "1.0.0"
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "ui.notebook.save",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "notebook"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "writing.bibliography",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "manuscript_id"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "writing.check",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "manuscript_id"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "writing.claim_add",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "statement",
+                                   "interpretation"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "writing.claim_check",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "claim_id"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "writing.inspect",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "manuscript_id"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "writing.manuscript_export",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "manuscript_id"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "writing.section_history",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "manuscript_id",
+                                   "section"
+                               ]
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "writing.section_restore",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "manuscript_id",
+                                   "section",
+                                   "source_revision"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  true,
+        "domain":  "evidence",
+        "effect":  "local-write",
+        "operation":  "writing.section_save",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "manuscript_id",
+                                   "section",
+                                   "body",
+                                   "citations"
+                               ],
+        "revision_guarded":  true
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "writing.submission_export",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "manuscript_id",
+                                   "journal"
+                               ]
+    },
+    {
+        "approval_required":  false,
+        "domain":  "evidence",
+        "effect":  "read",
+        "operation":  "writing.submission_packet",
+        "project_scoped":  true,
+        "required_arguments":  [
+                                   "project_id",
+                                   "manuscript_id",
+                                   "journal"
+                               ]
+    }
+]

@@ -1,0 +1,92 @@
+{
+  "docx_2400_paragraphs": {
+    "docx_sha256": "1e00b80b9fb0fc1a8f4730977185c39133c4accc7e7dce4180965734b4ee02f4",
+    "paragraphs": 2400,
+    "timing": {
+      "max_ms": 10.8207,
+      "min_ms": 9.5843,
+      "n": 20,
+      "p50_ms": 10.2431,
+      "p95_ms": 10.7223,
+      "samples_ms": [
+        10.208200000000001,
+        10.4513,
+        10.2431,
+        10.586699999999999,
+        10.3666,
+        10.3024,
+        10.8207,
+        10.158999999999999,
+        10.351799999999999,
+        10.6395,
+        10.198,
+        9.7586,
+        9.8007,
+        10.0137,
+        9.5843,
+        9.856300000000001,
+        9.863999999999999,
+        10.360100000000001,
+        10.357,
+        10.7223
+      ]
+    }
+  },
+  "docx_400_paragraphs": {
+    "docx_sha256": "44f9232203205667aa6e61c1f882cef681267115b2bb5c7b5af3b5958cd34696",
+    "paragraphs": 400,
+    "timing": {
+      "max_ms": 17.1024,
+      "min_ms": 3.7832,
+      "n": 20,
+      "p50_ms": 4.7762,
+      "p95_ms": 6.2875,
+      "samples_ms": [
+        3.7832,
+        4.222799999999999,
+        5.3163,
+        4.4467,
+        6.2875,
+        5.250699999999999,
+        4.6486,
+        4.9943,
+        4.8613,
+        5.009399999999999,
+        4.7762,
+        5.050800000000001,
+        4.6749,
+        5.2278,
+        4.5981,
+        17.1024,
+        4.0915,
+        5.7081,
+        3.9896999999999996,
+        3.9309000000000003
+      ]
+    }
+  },
+  "fixture": {
+    "documents": [
+      {
+        "manuscript_id": "paper-400",
+        "paragraphs": 400
+      },
+      {
+        "manuscript_id": "paper-2400",
+        "paragraphs": 2400
+      }
+    ],
+    "logical_sha256": "67c08a1628cfd46223bdb273841e12523ed91e39522039f87e5679cf9e9f81b4",
+    "persisted_latest_revisions": true,
+    "unicode": true
+  },
+  "iterations_per_document": 20,
+  "notes": [
+    "Fixture creation and one warm-up export per document are outside the timed region",
+    "Timed calls execute EvidenceHandler::execute(\"writing.manuscript_export\") with format=docx and re-read persisted latest manuscript revisions",
+    "The deterministic DOCX bytes are hashed and compared across every timed iteration",
+    "The long fixture is described by paragraph count rather than an invented page count because the current exporter does not run a pagination/layout engine",
+    "Export includes DOCX generation plus receipt/base64 generation and the live 16 MiB output guard"
+  ],
+  "schema": 1
+}

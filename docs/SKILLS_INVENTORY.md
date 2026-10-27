@@ -42,18 +42,20 @@ This index lists every `.agents/skills/*/SKILL.md` currently present in the repo
 
 ## Regeneration and validation
 
+These repository-maintenance helpers require PyYAML. Install the small tool-only dependency set with `python -m pip install -r scripts/requirements-tools.txt`.
+
 Run after skills are added, removed, renamed, or edited:
 
 ```powershell
-uv run --extra dev python scripts/generate_skills_inventory.py
+python scripts/generate_skills_inventory.py
 ```
 
 To make CI or local checks fail on a stale index without modifying files:
 
 ```powershell
-uv run --extra dev python scripts/generate_skills_inventory.py --check
+python scripts/generate_skills_inventory.py --check
 ```
 
 While parallel workers are adding skills, use `--watch` to regenerate on changes; stop it with Ctrl+C. The process observes local skill and provenance files only and makes no network calls.
 
-Run `uv run --extra dev python scripts/validate_skills.py` separately to check skill metadata and local references. Inventory counts measure document coverage, not evidence of implementation or skill quality.
+Run `python scripts/validate_skills.py` separately to check skill metadata and local references. Inventory counts measure document coverage, not evidence of implementation or skill quality.

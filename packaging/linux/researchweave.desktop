@@ -1,9 +1,0 @@
-[Desktop Entry]
-Type=Application
-Name=ResearchWeave
-Comment=Local-first research workspace
-Exec=researchweave
-Icon=researchweave
-Terminal=false
-Categories=Science;Education;
-StartupNotify=true

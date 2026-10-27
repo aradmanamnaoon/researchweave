@@ -1,0 +1,47 @@
+{
+  "fixture": {
+    "matching_passages": 22,
+    "passages": 2048,
+    "query": "target resonance",
+    "returned_limit": 20,
+    "snapshot_bytes": 434578,
+    "snapshot_sha256": "2f99a744f591d1e536bfb90199235474a544569759285a11c6b2bc4688ea9f4f"
+  },
+  "grounding_search": {
+    "max_ms": 0.1603,
+    "min_ms": 0.1168,
+    "n": 20,
+    "p50_ms": 0.1192,
+    "p95_ms": 0.1572,
+    "samples_ms": [
+      0.1425,
+      0.1603,
+      0.12329999999999999,
+      0.12010000000000001,
+      0.1192,
+      0.1187,
+      0.1188,
+      0.1194,
+      0.11900000000000001,
+      0.1202,
+      0.1198,
+      0.1198,
+      0.1183,
+      0.1572,
+      0.1214,
+      0.118,
+      0.1185,
+      0.1168,
+      0.1175,
+      0.1181
+    ]
+  },
+  "iterations": 20,
+  "notes": [
+    "The 2048-passage fixture is the current enforced per-project capacity; the previous 10k/100k target would contradict the live resource guard",
+    "Fixture serialization, fsync, GroundingStore::open, and one warm-up query are outside the timed region",
+    "Timed calls execute the live deterministic local lexical GroundingStore::search path; this is not semantic/vector RAG",
+    "The byte budget remains at the live 32000-byte maximum"
+  ],
+  "schema": 1
+}

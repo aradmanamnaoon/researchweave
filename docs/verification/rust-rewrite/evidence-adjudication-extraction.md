@@ -1,0 +1,11 @@
+# Evidence adjudication, stage transitions and extraction values
+
+Built on the existing native `review.record_add` and `review.vote` capabilities, the Rust evidence handler now exposes real `review.adjudicate`, `review.advance`, `review.extract`, `review.adjudications`, and `review.extractions` operations.
+
+Adjudication requires two or more disagreeing screening votes for the current stage, records the decision, reason and adjudicator in the existing `adjudications` table, and forbids a second adjudication for that record/stage. Advancing from title/abstract to full text requires an include adjudication. Votes are restricted to the record's current stage, and duplicates are rejected. Structured JSON extraction values, optional units, optional existing source anchors and reviewer attribution persist in the existing `extractions` table, limited to records at the full-text stage; retrieval returns decoded JSON. The extraction operation currently persists field/value observations and does not claim versioned extraction form schemas, cross-field validation, or full Python facade parity.
+
+Every write requires an explicit expected revision, uses the existing evidence `mutate` transaction and project-scoped handler, and therefore inherits request replay denial, SHA-256 event chaining, revision advancement and approval-required capabilities. Handler previews use an isolated snapshot. Bounded extraction retrieval limits output to 500 records.
+
+Windows validation: `cargo fmt --package researchweave-evidence`, `cargo test -p researchweave-evidence` (**7 passed**) and `cargo clippy -p researchweave-evidence --all-targets -- -D warnings` passed. The added integration test runs against a persisted SQLite project, attempts premature stage advancement, records disagreeing votes, previews and persists adjudication, advances the record, persists an extracted numeric value and reads it back; it verifies exactly six committed project revisions and six audit events.
+
+Remaining work includes an independent blinded reviewer workflow, proper stage inclusion rules beyond explicit adjudication, complete extraction schema/versioning and validation, review search/retrieval integrations, evidence-to-anchor cross-validation, and paginated list APIs.

@@ -1,0 +1,2 @@
+RWENC1
+{"version":1,"cipher":"AES-256-GCM","kdf":"scrypt","kdf_n":32768,"kdf_r":8,"kdf_p":1,"salt":"pq6wECuVcsIU/J61E+1dPA==","nonce":"1gzTgmZfJxZGJVK8","ciphertext":"4B6OV6RSMQKEmcJA7TD8eLAaFHIl/D3k76TS9lf1w/1Nuk6Emyn9T5beIm6MbZsyAgB3XbyF/hfIjg=="}

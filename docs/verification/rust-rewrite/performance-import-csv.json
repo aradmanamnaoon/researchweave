@@ -1,0 +1,58 @@
+﻿{
+  "fixtures": {
+    "10_mib": {
+      "bytes": 10485730,
+      "rows": 87463,
+      "sha256": "745eba5fedf086adf04c47ef3621b1bafb7f89d4506d31857343c7225d5f4e8c"
+    },
+    "45_mib": {
+      "bytes": 47185849,
+      "rows": 390833,
+      "sha256": "f5a7acc5ffc7ff077e8906fbd3f85d818be7fa14ba6c19596ba3273fd9087023"
+    }
+  },
+  "import_10_mib": {
+    "max_ms": 476.8043,
+    "min_ms": 451.4844,
+    "n": 10,
+    "p50_ms": 462.07120000000003,
+    "p95_ms": 476.8043,
+    "samples_ms": [
+      476.8043,
+      455.6238,
+      462.07120000000003,
+      474.751,
+      464.7075,
+      451.4844,
+      473.50179999999995,
+      465.61429999999996,
+      458.3178,
+      456.2478
+    ]
+  },
+  "import_45_mib": {
+    "max_ms": 2171.6856,
+    "min_ms": 2073.1741,
+    "n": 5,
+    "p50_ms": 2095.0934,
+    "p95_ms": 2171.6856,
+    "samples_ms": [
+      2120.7007,
+      2095.0934,
+      2073.1741,
+      2171.6856,
+      2085.6762999999996
+    ]
+  },
+  "limits": {
+    "max_input_bytes": 52428800,
+    "max_rows": 500000
+  },
+  "notes": [
+    "Fixture generation and warm-up imports are outside timed regions",
+    "Each timed run uses a fresh DatasetStore and includes parse, immutable revision construction, validation, durable JSON write, sync_all, and rename",
+    "Each store is deleted only after the timed operation completes",
+    "45 MiB is intentionally below the current 50 MiB import ceiling"
+  ],
+  "schema": 1
+}

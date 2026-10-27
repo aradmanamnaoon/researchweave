@@ -1,0 +1,11 @@
+# Native analysis: complete-case dataset transformation (2026-10-25)
+
+Python `AnalysisFacade.capability_manifest()` includes dataset quality, complete-case, imputation, joins, aggregation, export and many statistical operations. Rust previously registered 21 operations, including immutable imports, selection, user-missing metadata and missingness diagnostics. This slice adds a 22nd registered operation: `dataset.complete_case` (`local-write`). Unsupported capabilities remain unregistered.
+
+The operation requires `dataset_id` and immutable `revision`; optional `columns` is an array of unique existing column names. Omission or an empty array selects **all** dataset columns. A row is retained if and only if every selected value is non-null and is not included in that variable's declared `missing_values` set (using the crate's existing `value_to_text` convention). Unselected columns may remain missing. This is deterministic listwise deletion over the selected variables: there is no statistical imputation or silent value conversion.
+
+The returned dataset is saved as a new content-addressed immutable revision with unchanged dataset identity, variables and all column values in retained rows, a parent revision reference, and operation metadata containing selected columns and excluded row count. The result returns dataset ID, revision, parent revision, retained `n`, and `excluded`. It does not mutate its source revision or export data externally.
+
+The golden fixture has five observations with one system-missing score, one user-missing `999` score, and one missing group. Selecting only `score` retains IDs 1, 4 and 5; selecting every column retains IDs 1 and 5. Tests verify exact operation metadata, content-addressed repeatability, lineage integrity and rejection of unknown or duplicate columns. The grouped/user-missing conventions are shared with `dataset.missingness`.
+
+Local verification: `cargo fmt -p researchweave-analysis`; `cargo test --locked -p researchweave-analysis` **15/15 passed**; `cargo clippy --locked -p researchweave-analysis --all-targets -- -D warnings` **passed**. No Python code, other crate or release files were changed. Live GUI integration and broader Python analysis parity are separate acceptance tasks.

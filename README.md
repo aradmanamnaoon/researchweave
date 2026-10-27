@@ -37,20 +37,20 @@
 ![ResearchWeave Rust/Slint welcome screen with the six-section activity rail](assets/screenshots/rust-welcome-activity-rail.png)
 
 > [!IMPORTANT]
-> **Rust release candidate status — 2026-10-26.** The current `main` workspace is the native Rust/Slint rewrite. The exact Windows candidate now has local source/security/SBOM, installed-package, PDFium, UIA, uninstall, hash-equivalence and performance evidence. The final public Rust release is intentionally blocked until the remaining native macOS/Linux, live Iranian S3 sync, platform-keyring and public release gates are supported by real evidence. The GitHub Releases page may still contain the legacy Python release until those gates pass.
+> **Rust v0.2.0 release-candidate status — 2026-10-27.** The native Rust/Slint rewrite is under final hosted package/GUI validation. Earlier hosted candidate runs have independently exercised Windows, Ubuntu, macOS Apple Silicon and macOS Intel paths, but the final source commit must pass the complete matrix again. Publication remains fail-closed until the same final `main` SHA also passes the protected real-Liara acceptance workflow. The GitHub Releases page therefore continues to expose the legacy Python release until the Rust release is genuinely public and verified.
 
 ## Downloads and release status
 
-The final README contract is to put verified Rust downloads here. They are **not published yet**, because ResearchWeave does not label an artifact “release-ready” from source inspection alone.
+The v0.2.0 asset names and direct URLs are reserved below so the release workflow can verify the README against the exact published filenames. **They intentionally return no Rust artifact until v0.2.0 is published and anonymously verified.**
 
 | Platform | Planned Rust artifact | Current evidence | Public Rust download |
 | --- | --- | --- | --- |
-| Windows x64 | Native installer (`.exe`) | Exact installed candidate, verified PDFium runtime, project/PDF smoke, UIA, uninstall, hashes and local security/SBOM evidence are green | **Pending public release after cross-platform/provider gates** |
-| macOS Apple Silicon | `.app` inside `.dmg` | Packaging implementation exists | **Pending native build + launch + GUI QA** |
-| macOS Intel | `.app` inside `.dmg` | Packaging implementation exists | **Pending native build + launch + GUI QA** |
-| Linux x86_64 | AppImage + Debian package | Packaging implementation exists | **Pending native package execution + GUI QA** |
+| Windows x64 | Native installer (`.exe`) | Hosted installed-package/UIA acceptance exists on candidate SHAs; final exact-source matrix still required | [v0.2.0 Windows x64](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-windows-x64-setup.exe) |
+| macOS Apple Silicon | `.app` inside `.dmg` | Hosted native package/launch/Keychain evidence exists on candidate SHAs; final exact-source matrix still required | [v0.2.0 macOS arm64](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-macos-arm64.dmg) |
+| macOS Intel | `.app` inside `.dmg` | Hosted native package/launch/Keychain evidence exists on candidate SHAs; final exact-source matrix still required | [v0.2.0 macOS x64](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-macos-x64.dmg) |
+| Linux x86_64 | AppImage + Debian package | Hosted native package/GUI/AT-SPI evidence exists on candidate SHAs; final exact-source matrix still required | [v0.2.0 AppImage](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-linux-x86_64.AppImage) · [v0.2.0 DEB](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-linux-amd64.deb) |
 
-When the Rust release is published, verified direct artifact links will replace the pending cells above. The repository release page is: <https://github.com/aradmanamnaoon/researchweave/releases>.
+Checksum manifest: [SHA256SUMS.txt](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/SHA256SUMS.txt). The repository release page is <https://github.com/aradmanamnaoon/researchweave/releases>. The release workflow refuses to call these links verified until anonymous public downloads and hashes succeed.
 
 ## What ResearchWeave is
 
@@ -323,7 +323,7 @@ cargo run --locked -p researchweave-cli -- --help
 
 ResearchWeave intentionally distinguishes **implemented**, **tested**, **locally verified**, and **release verified**.
 
-Freshly observed during the current Rust completion pass includes a full **26/26 desktop Rust test pass**, strict desktop Clippy with warnings denied, a successful desktop build, and a complete broad Windows UIA smoke against the rebuilt executable. That UIA run covers project creation/open, Unicode editing, question/protocol/review/extraction, immutable data import, progressive-disclosure Statistics (descriptives, frequency, Pearson, Welch t and HC3 OLS), Variable View, persisted Analysis Results/report replay, Qualitative transcript→case controls, the trusted Mixed Methods route, manuscript persistence/export, abrupt-exit recovery, publishing, local Agent state, responsive navigation, high contrast and 200% scaling. Diagnostics, payload-free Activity history and provider-profile CRUD/restart/privacy also have a fresh dedicated Windows UIA pass.
+The current Rust completion pass has observed locked all-features workspace tests and strict workspace Clippy locally, plus hosted native-package/GUI evidence across the four target runner families on candidate commits. Windows UIA coverage includes project creation/open, Unicode editing, question/protocol/review/extraction, data/statistics, persisted results, qualitative/mixed methods, manuscript/notebook recovery, publishing, Agent approval/deny behavior, provider profiles, responsive navigation, high contrast and scaling. Exact run IDs and commit-scoped limitations are recorded in the Rust verification ledgers rather than generalized across later source changes.
 
 The current exact worktree has freshly passed the full source gates below; they remain the required commands for any later candidate-changing source edit:
 
@@ -334,20 +334,18 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --locked
 ```
 
-Local exact-candidate security/supply-chain verification also passed `cargo audit`, `cargo deny`, a complete Git-visible + history Gitleaks scan, CycloneDX generation, dependency/license/source policy, exact package hashes and installed Windows package smoke/UIA. These local results do **not** substitute for the missing macOS/Linux native matrix or live provider acceptance. See [`docs/verification/REGRESSION_RESULTS.md`](docs/verification/REGRESSION_RESULTS.md) and [`docs/verification/rust-rewrite/release-candidate-gates.md`](docs/verification/rust-rewrite/release-candidate-gates.md).
+Candidate security/supply-chain verification includes `cargo audit`, `cargo deny`, a Git-history Gitleaks scan, CycloneDX generation, a deterministic Cargo license inventory, dependency/license/source policy, and package hash verification. Those checks do **not** substitute for an exact-source native matrix or real provider acceptance. See [`docs/verification/REGRESSION_RESULTS.md`](docs/verification/REGRESSION_RESULTS.md) and [`docs/verification/rust-rewrite/release-candidate-gates.md`](docs/verification/rust-rewrite/release-candidate-gates.md).
 
 ### Remaining release-blocking evidence
 
 The project does **not** fabricate evidence for environments or services that were not exercised. The final public Rust release remains blocked on:
 
-- native macOS arm64/x64 package build, launch and rendered GUI QA;
-- native Linux AppImage/DEB execution and rendered GUI QA;
-- live Iranian S3 conditional-write behavior;
-- encrypted sync push/pull/conflict/history and second-device restore;
-- macOS/Linux OS-keyring evidence;
-- GitHub-hosted/native cross-platform candidate verification before publication;
-- signing/notarization where credentials are available;
-- final README artifact links and native-platform Rust screenshots.
+- a fully green hosted native/security matrix for the final exact source commit;
+- protected exact-SHA real Liara conditional-write and encrypted sync acceptance, including Cloud Sync UI acceptance;
+- final tag-triggered native release jobs and checksum aggregation;
+- anonymous public download/hash/README/latest verification after publication.
+
+Signing/notarization is conditional on real credentials being configured. If they are absent, the release publishes checksums and states unsigned/unnotarized status rather than blocking or inventing signing evidence.
 
 ## Repository map
 

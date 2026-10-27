@@ -1,54 +1,43 @@
-# Building ResearchWeave
+﻿# Building ResearchWeave
 
-ResearchWeave is a Python 3.12 / PyQt6 desktop application packaged with PyInstaller. Release artifacts are built on the operating system they target; cross-compiling the final installers is not supported.
+ResearchWeave's shipped desktop runtime is native Rust/Slint. Python is not embedded in the application; a small number of Python scripts remain only for packaging or verification.
 
 ## Prerequisites
 
-- Git
-- uv
-- Python 3.12 managed by uv
-- Windows: Inno Setup 6
-- macOS: Xcode command-line tools supplied by the GitHub-hosted runner
-- Linux: curl, dpkg-deb, file, and standard GNU utilities
+- Git.
+- Rust 1.94.1 with `rustfmt` and `clippy`.
+- Native build tools for the target operating system.
+- Platform packages required by Slint and the OS credential store.
+- PDFium when exercising the native PDF reader.
 
-The Python dependency graph is locked in uv.lock. Build scripts install the locked dev, formats, and release extras before packaging.
+## Build and test
 
-## Windows
+```powershell
+rustup toolchain install 1.94.1 --profile minimal
+cargo build --workspace --locked
+cargo fmt --all -- --check
+cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
+cargo test --workspace --locked --all-features
+```
 
-Run from the repository root:
+Run the desktop during development with:
 
-    powershell -ExecutionPolicy Bypass -File packaging\windows\build.ps1
-    powershell -ExecutionPolicy Bypass -File packaging\windows\smoke-portable.ps1
-    powershell -ExecutionPolicy Bypass -File packaging\windows\smoke-installer.ps1
+```powershell
+cargo run --locked -p researchweave-desktop
+```
 
-The build emits a per-user setup executable, a portable ZIP, and a Windows checksum manifest under dist/.
+On Windows, `packaging/rust/fetch-pdfium-win-x64.ps1` fetches the pinned PDFium runtime and verifies its SHA-256 before use. Unix packaging uses `packaging/rust/fetch-pdfium.py` through the native packaging workflow.
 
-## macOS
+## Native packages
 
-Run on the target macOS architecture:
+Release packages are built and exercised on native GitHub-hosted runners by `.github/workflows/rust-release-candidate.yml` and `.github/workflows/release.yml`:
 
-    bash packaging/macos/build.sh
-    bash packaging/macos/smoke.sh
+- Windows x64: Inno Setup installer plus installed-package/UIA smoke.
+- macOS arm64 and Intel: DMG containing `ResearchWeave.app`, native launch/relaunch checks and Keychain acceptance.
+- Linux x86_64: Debian package and AppImage, native launch/relaunch, AT-SPI and Secret Service acceptance.
 
-The build emits a DMG containing ResearchWeave.app. Apple Silicon and Intel are built on separate GitHub-hosted runners so the architecture is observed rather than inferred.
+`packaging/rust/build-native.py`, `package-unix.sh`, `windows-installed-smoke.ps1`, `macos-native-acceptance.sh`, and `linux-native-acceptance.sh` are the canonical packaging/acceptance helpers. Generated packages belong in CI artifacts/GitHub Releases, not Git.
 
-## Linux
+## Release integrity
 
-Run on x86_64 Linux:
-
-    bash packaging/linux/build.sh
-    bash packaging/linux/smoke.sh
-
-The build emits an x86_64 AppImage and an amd64 Debian package. The AppImage builder and type-2 runtime are downloaded from pinned upstream releases and verified against pinned SHA-256 digests before use.
-
-## Verification levels
-
-The packaging scripts distinguish three checks:
-
-1. Build verification: the expected installer exists, is non-empty, and carries the expected version/architecture metadata.
-2. Runtime smoke verification: the packaged application starts and remains alive long enough to detect immediate loader/runtime failures.
-3. Installer verification: where supported, CI installs and removes the package and confirms simulated user-profile data survives uninstall.
-
-GUI smoke tests use Qt's offscreen platform because GitHub-hosted runners do not provide an interactive desktop session suitable for human UI validation.
-
-Generated installers, build directories, caches, and temporary package roots stay outside Git. Release binaries belong on GitHub Releases.
+A release must pass the security, native package, exact-SHA live Liara, checksum, public-download and release-link gates described in `docs/release/RELEASE_READINESS.md`. Signing is verified when credentials exist; otherwise release notes must state unsigned/unnotarized status.

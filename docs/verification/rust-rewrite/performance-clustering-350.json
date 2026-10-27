@@ -1,0 +1,76 @@
+{
+  "fixture": {
+    "columns": 3,
+    "dataset_id": "9e115c2fc54429c01ff461c3",
+    "groups": 5,
+    "revision": "fd8f45b92c6910efb7a95ec1d79424df977118306947817ac4f9223a9a7f4fbc",
+    "rows": 350,
+    "source_sha256": "892844c7857f0cb367af2dffbe471c573dc08b53ece81be1e53b629115ff678a"
+  },
+  "hierarchical_ward": {
+    "max_ms": 28.4379,
+    "min_ms": 26.7215,
+    "n": 20,
+    "p50_ms": 27.3748,
+    "p95_ms": 28.4069,
+    "samples_ms": [
+      27.1953,
+      28.4069,
+      27.477999999999998,
+      27.545099999999998,
+      27.5562,
+      28.4379,
+      28.3302,
+      28.1414,
+      27.8621,
+      27.136400000000002,
+      27.3748,
+      27.500500000000002,
+      27.2365,
+      26.7458,
+      26.7215,
+      27.0436,
+      27.915,
+      26.8316,
+      27.1435,
+      27.3097
+    ]
+  },
+  "iterations": 20,
+  "kmeans_seed_42": {
+    "max_ms": 1.1823000000000001,
+    "min_ms": 1.0135999999999998,
+    "n": 20,
+    "p50_ms": 1.0714,
+    "p95_ms": 1.1821,
+    "samples_ms": [
+      1.1823000000000001,
+      1.1023999999999998,
+      1.0768,
+      1.0687,
+      1.0315999999999999,
+      1.1628,
+      1.1374,
+      1.0861,
+      1.0714,
+      1.042,
+      1.0555,
+      1.0378,
+      1.1821,
+      1.1641,
+      1.0627,
+      1.0794000000000001,
+      1.0431,
+      1.072,
+      1.0375,
+      1.0135999999999998
+    ]
+  },
+  "notes": [
+    "Fixture generation/import and one warm-up execution per operation are outside timed regions",
+    "Timed calls go through AnalysisService and reload the immutable dataset revision",
+    "Hierarchical clustering runs at the live 350-row O(n^3) resource ceiling",
+    "K-means uses deterministic SplitMix64 seed 42, n_init=8 and the live convergence controls"
+  ],
+  "schema": 1
+}
