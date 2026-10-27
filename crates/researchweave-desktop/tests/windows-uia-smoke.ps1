@@ -134,6 +134,22 @@ function ReachByTab(
 ) {
     $Anchor.SetFocus()
     for ($attempt = 0; $attempt -le $MaxTabs; $attempt++) {
+        foreach ($item in (Children $Window $Type)) {
+            if ($item.Current.Name -eq $Name) { return $item }
+        }
+        [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
+        Start-Sleep -Milliseconds 120
+    }
+    throw "UIA element was not reachable by keyboard traversal: $Type '$Name'"
+}
+function FocusByTab(
+    [System.Windows.Automation.AutomationElement]$Anchor,
+    [System.Windows.Automation.ControlType]$Type,
+    [string]$Name,
+    [int]$MaxTabs = 8
+) {
+    $Anchor.SetFocus()
+    for ($attempt = 0; $attempt -le $MaxTabs; $attempt++) {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         if ($focused) {
             try {
@@ -151,7 +167,7 @@ function ReachByTab(
     }
     $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
     $focusedName = if ($focused) { $focused.Current.Name } else { '<none>' }
-    throw "UIA element was not reachable by keyboard traversal: $Type '$Name' (focused='$focusedName')"
+    throw "UIA element did not receive keyboard focus: $Type '$Name' (focused='$focusedName')"
 }
 try {
     $window = WindowFor $p 'Native window missing from UIA tree'
@@ -1294,12 +1310,12 @@ try {
     # Use real keyboard traversal so lower controls are brought into view instead
     # of assuming off-screen descendants are present in the accessibility tree.
     $cloudAccess = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud access key ID'
-    $cloudSecret = ReachByTab $window $cloudAccess ([System.Windows.Automation.ControlType]::Edit) 'Cloud secret key' 4
-    $cloudSession = ReachByTab $window $cloudSecret ([System.Windows.Automation.ControlType]::Edit) 'Cloud session token' 4
+    $cloudSecret = FocusByTab $cloudAccess ([System.Windows.Automation.ControlType]::Edit) 'Cloud secret key' 4
+    $cloudSession = FocusByTab $cloudSecret ([System.Windows.Automation.ControlType]::Edit) 'Cloud session token' 4
     ([System.Windows.Automation.ValuePattern]$cloudAccess.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud-access')
     ([System.Windows.Automation.ValuePattern]$cloudSecret.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud-secret')
     ([System.Windows.Automation.ValuePattern]$cloudSession.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud-session')
-    $saveCloudCredentials = ReachByTab $window $cloudSession ([System.Windows.Automation.ControlType]::Button) 'Save cloud credentials securely' 6
+    $saveCloudCredentials = FocusByTab $cloudSession ([System.Windows.Automation.ControlType]::Button) 'Save cloud credentials securely' 6
     $saveCloudCredentials.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 180
     foreach ($secretControl in @($cloudAccess,$cloudSecret,$cloudSession)) {
@@ -1311,16 +1327,16 @@ try {
         throw 'Cloud credential material leaked into accessible UI text'
     }
 
-    $cloudPassphrase = ReachByTab $window $saveCloudCredentials ([System.Windows.Automation.ControlType]::Edit) 'Cloud project encryption passphrase' 8
+    $cloudPassphrase = FocusByTab $saveCloudCredentials ([System.Windows.Automation.ControlType]::Edit) 'Cloud project encryption passphrase' 8
     ([System.Windows.Automation.ValuePattern]$cloudPassphrase.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-project-sync-passphrase')
-    $saveCloudEncryption = ReachByTab $window $cloudPassphrase ([System.Windows.Automation.ControlType]::Button) 'Save cloud encryption key securely' 4
+    $saveCloudEncryption = FocusByTab $cloudPassphrase ([System.Windows.Automation.ControlType]::Button) 'Save cloud encryption key securely' 4
     $saveCloudEncryption.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 180
     $passphraseValue = ([System.Windows.Automation.ValuePattern]$cloudPassphrase.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
     if ($passphraseValue) { throw 'Cloud encryption passphrase field was not cleared after secure save' }
-    $cloudDevice = ReachByTab $window $saveCloudEncryption ([System.Windows.Automation.ControlType]::Edit) 'Cloud sync device name' 6
+    $cloudDevice = FocusByTab $saveCloudEncryption ([System.Windows.Automation.ControlType]::Edit) 'Cloud sync device name' 6
     ([System.Windows.Automation.ValuePattern]$cloudDevice.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-windows')
-    $enableCloudAutoSync = ReachByTab $window $cloudDevice ([System.Windows.Automation.ControlType]::Button) 'Enable automatic cloud sync' 16
+    $enableCloudAutoSync = FocusByTab $cloudDevice ([System.Windows.Automation.ControlType]::Button) 'Enable automatic cloud sync' 16
     $enableCloudAutoSync.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $disableCloudAutoSync = $null
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
@@ -1353,10 +1369,10 @@ try {
     ([System.Windows.Automation.ValuePattern]$cloudProfileId.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud')
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Disconnect cloud profile').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $cloudAccess = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud access key ID'
-    $forgetCloudCredentials = ReachByTab $window $cloudAccess ([System.Windows.Automation.ControlType]::Button) 'Forget cloud credentials' 8
+    $forgetCloudCredentials = FocusByTab $cloudAccess ([System.Windows.Automation.ControlType]::Button) 'Forget cloud credentials' 8
     $forgetCloudCredentials.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    $cloudPassphrase = ReachByTab $window $forgetCloudCredentials ([System.Windows.Automation.ControlType]::Edit) 'Cloud project encryption passphrase' 5
-    $forgetCloudEncryption = ReachByTab $window $cloudPassphrase ([System.Windows.Automation.ControlType]::Button) 'Forget cloud encryption key' 4
+    $cloudPassphrase = FocusByTab $forgetCloudCredentials ([System.Windows.Automation.ControlType]::Edit) 'Cloud project encryption passphrase' 5
+    $forgetCloudEncryption = FocusByTab $cloudPassphrase ([System.Windows.Automation.ControlType]::Button) 'Forget cloud encryption key' 4
     $forgetCloudEncryption.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 150
     Write-Output 'PASS: Cloud Sync profile/credential/encryption/auto-sync controls work through installed UIA without network egress or secret leakage'
