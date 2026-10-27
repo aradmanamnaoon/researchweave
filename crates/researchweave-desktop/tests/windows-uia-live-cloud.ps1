@@ -45,6 +45,54 @@ function Invoke-Button([System.Windows.Automation.AutomationElement]$Window, [st
     $button = Named $Window ([System.Windows.Automation.ControlType]::Button) $Name
     ([System.Windows.Automation.InvokePattern]$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
 }
+function Focus-CloudControl(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [System.Windows.Automation.ControlType]$Type,
+    [string]$Name,
+    [ValidateSet('Forward', 'Backward')] [string]$Direction = 'Forward',
+    [int]$MaxTabs = 35
+) {
+    # Only the visible part of Slint's Cloud Sync ScrollView is exposed through
+    # UIA. Tab moves and scrolls the actual focus; resolve a fresh node each time.
+    $key = if ($Direction -eq 'Backward') { '+{TAB}' } else { '{TAB}' }
+    for ($attempt = 0; $attempt -le $MaxTabs; $attempt++) {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($focused) {
+            try {
+                if ($focused.Current.ProcessId -ne $Window.Current.ProcessId) {
+                    throw 'Cloud Sync keyboard focus left the ResearchWeave window'
+                }
+                if ($focused.Current.ControlType -eq $Type -and
+                    $focused.Current.Name -eq $Name) {
+                    return $focused
+                }
+            } catch [System.Windows.Automation.ElementNotAvailableException] {
+                # UI nodes can be rebuilt when a control enters the viewport.
+            }
+        }
+        if ($attempt -eq $MaxTabs) { break }
+        [System.Windows.Forms.SendKeys]::SendWait($key)
+        Start-Sleep -Milliseconds 100
+    }
+    throw "Cloud Sync control did not receive keyboard focus: $Name ($Direction)"
+}
+function Set-CloudValue(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Name,
+    [string]$Value,
+    [string]$Direction = 'Forward'
+) {
+    $edit = Focus-CloudControl $Window ([System.Windows.Automation.ControlType]::Edit) $Name $Direction
+    ([System.Windows.Automation.ValuePattern]$edit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($Value)
+}
+function Invoke-CloudButton(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Name,
+    [string]$Direction = 'Forward'
+) {
+    $button = Focus-CloudControl $Window ([System.Windows.Automation.ControlType]::Button) $Name $Direction
+    ([System.Windows.Automation.InvokePattern]$button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
+}
 
 function Wait-ForNameLike([System.Windows.Automation.AutomationElement]$Window, [string]$Pattern, [int]$TimeoutMs = 30000) {
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMs)
@@ -110,8 +158,8 @@ $p = $null
 try {
     $p = Start-Process -FilePath $exePath -PassThru
     $window = WindowFor $p 'Live cloud GUI window did not appear'
-    Set-Value $window 'Managed project title' "Live Liara GUI $RunToken"
-    Invoke-Button $window 'Create managed project'
+    Set-Value $window 'Project title' "Live Liara GUI $RunToken"
+    Invoke-Button $window 'Create default project'
     Wait-ForNameLike $window '*Project created in managed local storage*' 10000 | Out-Null
 
     $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
@@ -120,33 +168,44 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 200
 
-    Set-Value $window 'Cloud provider kind' 'liara'
-    Set-Value $window 'Cloud profile ID' $ProfileId
-    Set-Value $window 'Cloud S3 endpoint' $Endpoint
-    Set-Value $window 'Cloud S3 bucket' $Bucket
-    Set-Value $window 'Cloud S3 region' 'us-east-1'
-    Set-Value $window 'Cloud S3 prefix' "researchweave/live-acceptance-$RunToken"
-    Set-Value $window 'Cloud S3 path style' 'true'
-    Set-Value $window 'Cloud sync device name' 'github-windows-uia'
-    Invoke-Button $window 'Save cloud profile'
+    (Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud provider kind').SetFocus()
+    Set-CloudValue $window 'Cloud provider kind' 'liara'
+    Set-CloudValue $window 'Cloud profile ID' $ProfileId
+    Set-CloudValue $window 'Cloud S3 endpoint' $Endpoint
+    Set-CloudValue $window 'Cloud S3 bucket' $Bucket
+    Set-CloudValue $window 'Cloud S3 region' 'us-east-1'
+    Set-CloudValue $window 'Cloud S3 prefix' "researchweave/live-acceptance-$RunToken"
+    Set-CloudValue $window 'Cloud S3 path style' 'true'
+    Invoke-CloudButton $window 'Save cloud profile'
     Wait-ForNameLike $window '*Cloud profile saved locally*' 10000 | Out-Null
 
     # The protected workflow seeded this profile's provider credential into the
     # Windows Credential Manager before launching the app. The GUI never receives
     # the provider credential as a command-line argument or environment value.
     $passphrase = "rw-live-gui-$RunToken-32-byte-minimum-passphrase"
-    Set-Value $window 'Cloud project encryption passphrase' $passphrase
-    Invoke-Button $window 'Save cloud encryption key securely'
+    Set-CloudValue $window 'Cloud project encryption passphrase' $passphrase
+    Invoke-CloudButton $window 'Save cloud encryption key securely'
     Wait-ForNameLike $window '*Project sync encryption key saved securely*' 10000 | Out-Null
-    Invoke-Button $window 'Enable automatic cloud sync'
-    Start-Sleep -Milliseconds 150
+    Set-CloudValue $window 'Cloud sync device name' 'github-windows-uia'
+    Set-CloudValue $window 'Cloud restore archive destination' $restorePath
+    Invoke-CloudButton $window 'Enable automatic cloud sync'
+    $statePath = Join-Path $hostData 'cloud-auto-sync.json'
+    $autoSyncEnabled = $false
+    for ($attempt = 0; $attempt -lt 50; $attempt++) {
+        $state = Read-JsonRetry $statePath
+        if ($state.enabled -eq $true -and $state.profile_id -eq $ProfileId) {
+            $autoSyncEnabled = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $autoSyncEnabled) { throw 'Automatic cloud sync was not enabled for the test profile' }
 
-    Invoke-Button $window 'Test cloud connection and conditional writes'
+    Invoke-CloudButton $window 'Test cloud connection and conditional writes' 'Backward'
     Wait-ForNameLike $window '*Cloud operation completed*' | Out-Null
     Write-Output 'LIVE_S3_GUI_STAGE_OK stage=connection'
 
-    Invoke-Button $window 'Push encrypted cloud sync now'
-    $statePath = Join-Path $hostData 'cloud-auto-sync.json'
+    Invoke-CloudButton $window 'Push encrypted cloud sync now'
     $revision1 = $null
     for ($attempt = 0; $attempt -lt 300; $attempt++) {
         $state1 = Read-JsonRetry $statePath
@@ -157,8 +216,8 @@ try {
     if ($revision1 -notmatch '^[A-Za-z0-9._-]{1,128}$') { throw 'First GUI push did not persist a valid remote revision' }
     Write-Output 'LIVE_S3_GUI_STAGE_OK stage=encrypted_push'
 
-    Set-Value $window 'Cloud expected remote revision' $revision1
-    Invoke-Button $window 'Push encrypted cloud sync now'
+    Set-CloudValue $window 'Cloud expected remote revision' $revision1 'Backward'
+    Invoke-CloudButton $window 'Push encrypted cloud sync now'
     Wait-ForNameLike $window '*Cloud operation completed*' | Out-Null
     $revision2 = $null
     for ($attempt = 0; $attempt -lt 160; $attempt++) {
@@ -169,17 +228,16 @@ try {
     }
     if (-not $revision2 -or $revision2 -eq $revision1) { throw 'Second GUI push did not advance the remote revision' }
 
-    Set-Value $window 'Cloud expected remote revision' $revision1
-    Invoke-Button $window 'Push encrypted cloud sync now'
+    Set-CloudValue $window 'Cloud expected remote revision' $revision1 'Backward'
+    Invoke-CloudButton $window 'Push encrypted cloud sync now'
     Wait-ForNameLike $window '*Cloud conflict preserved; no remote winner was chosen*' | Out-Null
     Write-Output 'LIVE_S3_GUI_STAGE_OK stage=conflict_preservation'
 
-    Invoke-Button $window 'View cloud sync history'
+    Invoke-CloudButton $window 'View cloud sync history'
     Wait-ForNameLike $window '*Cloud operation completed*' | Out-Null
     Write-Output 'LIVE_S3_GUI_STAGE_OK stage=history'
 
-    Set-Value $window 'Cloud restore archive destination' $restorePath
-    Invoke-Button $window 'Pull latest cloud revision as copy'
+    Invoke-CloudButton $window 'Pull latest cloud revision as copy'
     for ($attempt = 0; $attempt -lt 300; $attempt++) {
         if ((Test-Path -LiteralPath $restorePath -PathType Leaf) -and (Get-Item -LiteralPath $restorePath).Length -gt 0) { break }
         Start-Sleep -Milliseconds 100
@@ -190,9 +248,12 @@ try {
     Write-Output 'LIVE_S3_GUI_STAGE_OK stage=encrypted_pull'
     Capture-WindowScreenshot $window $Screenshot
 
-    Invoke-Button $window 'Disable automatic cloud sync'
-    Invoke-Button $window 'Forget cloud encryption key'
-    Invoke-Button $window 'Disconnect cloud profile'
+    Invoke-CloudButton $window 'Disable automatic cloud sync'
+    if ((Read-JsonRetry $statePath).enabled -ne $false) {
+        throw 'Automatic cloud sync remained enabled after cleanup'
+    }
+    Invoke-CloudButton $window 'Forget cloud encryption key' 'Backward'
+    Invoke-CloudButton $window 'Disconnect cloud profile' 'Backward'
     Write-Output 'LIVE_S3_GUI_STAGE_OK stage=local_cleanup'
     Write-Output "LIVE_S3_GUI_ACCEPTANCE_OK provider=liara endpoint_host=$($endpointUri.Host)"
 }

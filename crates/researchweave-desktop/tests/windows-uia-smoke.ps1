@@ -169,6 +169,30 @@ function FocusByTab(
     $focusedName = if ($focused) { $focused.Current.Name } else { '<none>' }
     throw "UIA element did not receive keyboard focus: $Type '$Name' (focused='$focusedName')"
 }
+function FocusByShiftTab(
+    [System.Windows.Automation.AutomationElement]$Anchor,
+    [System.Windows.Automation.ControlType]$Type,
+    [string]$Name,
+    [int]$MaxTabs = 8
+) {
+    $Anchor.SetFocus()
+    for ($attempt = 0; $attempt -le $MaxTabs; $attempt++) {
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($focused) {
+            try {
+                if ($focused.Current.ControlType -eq $Type -and $focused.Current.Name -eq $Name) {
+                    return $focused
+                }
+            } catch [System.Windows.Automation.ElementNotAvailableException] {
+                # A scrolled Slint accessibility node can be replaced.
+            }
+        }
+        if ($attempt -eq $MaxTabs) { break }
+        [System.Windows.Forms.SendKeys]::SendWait('+{TAB}')
+        Start-Sleep -Milliseconds 120
+    }
+    throw "UIA element was not reachable by reverse keyboard traversal: $Type '$Name'"
+}
 try {
     $window = WindowFor $p 'Native window missing from UIA tree'
     $edits = Children $window ([System.Windows.Automation.ControlType]::Edit)
@@ -1310,47 +1334,70 @@ try {
     # Use real keyboard traversal so lower controls are brought into view instead
     # of assuming off-screen descendants are present in the accessibility tree.
     $cloudAccess = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud access key ID'
-    $cloudSecret = FocusByTab $cloudAccess ([System.Windows.Automation.ControlType]::Edit) 'Cloud secret key' 4
-    $cloudSession = FocusByTab $cloudSecret ([System.Windows.Automation.ControlType]::Edit) 'Cloud session token' 4
     ([System.Windows.Automation.ValuePattern]$cloudAccess.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud-access')
+    $cloudSecret = FocusByTab $cloudAccess ([System.Windows.Automation.ControlType]::Edit) 'Cloud secret key' 4
     ([System.Windows.Automation.ValuePattern]$cloudSecret.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud-secret')
+    $cloudSession = FocusByTab $cloudSecret ([System.Windows.Automation.ControlType]::Edit) 'Cloud session token' 4
     ([System.Windows.Automation.ValuePattern]$cloudSession.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud-session')
     $saveCloudCredentials = FocusByTab $cloudSession ([System.Windows.Automation.ControlType]::Button) 'Save cloud credentials securely' 6
     $saveCloudCredentials.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 180
-    foreach ($secretControl in @($cloudAccess,$cloudSecret,$cloudSession)) {
-        $value = ([System.Windows.Automation.ValuePattern]$secretControl.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
-        if ($value) { throw 'Cloud credential field was not cleared after secure save' }
+    WaitForNameLike $window '*Cloud credentials saved securely*' 5000
+    # Reacquire each cleared field while traversing back up the virtualized
+    # form. Handles collected before the save/scroll may no longer exist.
+    $savedCredentialButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Save cloud credentials securely'
+    $clearedSession = FocusByShiftTab $savedCredentialButton ([System.Windows.Automation.ControlType]::Edit) 'Cloud session token' 4
+    if (([System.Windows.Automation.ValuePattern]$clearedSession.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value) {
+        throw 'Cloud session token field was not cleared after secure save'
+    }
+    $clearedSecret = FocusByShiftTab $clearedSession ([System.Windows.Automation.ControlType]::Edit) 'Cloud secret key' 4
+    if (([System.Windows.Automation.ValuePattern]$clearedSecret.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value) {
+        throw 'Cloud secret key field was not cleared after secure save'
+    }
+    $clearedAccess = FocusByShiftTab $clearedSecret ([System.Windows.Automation.ControlType]::Edit) 'Cloud access key ID' 4
+    if (([System.Windows.Automation.ValuePattern]$clearedAccess.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value) {
+        throw 'Cloud access key field was not cleared after secure save'
     }
     $visibleNames = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,[System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name })
     if ($visibleNames | Where-Object { $_ -like '*uia-cloud-secret*' -or $_ -like '*uia-cloud-session*' }) {
         throw 'Cloud credential material leaked into accessible UI text'
     }
 
-    $cloudPassphrase = FocusByTab $saveCloudCredentials ([System.Windows.Automation.ControlType]::Edit) 'Cloud project encryption passphrase' 8
+    $cloudPassphrase = FocusByTab $clearedAccess ([System.Windows.Automation.ControlType]::Edit) 'Cloud project encryption passphrase' 10
     ([System.Windows.Automation.ValuePattern]$cloudPassphrase.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-project-sync-passphrase')
     $saveCloudEncryption = FocusByTab $cloudPassphrase ([System.Windows.Automation.ControlType]::Button) 'Save cloud encryption key securely' 4
     $saveCloudEncryption.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 180
-    $passphraseValue = ([System.Windows.Automation.ValuePattern]$cloudPassphrase.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    WaitForNameLike $window '*Project sync encryption key saved securely*' 5000
+    $savedEncryptionButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Save cloud encryption key securely'
+    $clearedPassphrase = FocusByShiftTab $savedEncryptionButton ([System.Windows.Automation.ControlType]::Edit) 'Cloud project encryption passphrase' 4
+    $passphraseValue = ([System.Windows.Automation.ValuePattern]$clearedPassphrase.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
     if ($passphraseValue) { throw 'Cloud encryption passphrase field was not cleared after secure save' }
-    $cloudDevice = FocusByTab $saveCloudEncryption ([System.Windows.Automation.ControlType]::Edit) 'Cloud sync device name' 6
+    $cloudDevice = FocusByTab $clearedPassphrase ([System.Windows.Automation.ControlType]::Edit) 'Cloud sync device name' 8
     ([System.Windows.Automation.ValuePattern]$cloudDevice.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-windows')
     $enableCloudAutoSync = FocusByTab $cloudDevice ([System.Windows.Automation.ControlType]::Button) 'Enable automatic cloud sync' 16
     $enableCloudAutoSync.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    $disableCloudAutoSync = $null
+    $autoSyncStatePath = Join-Path $hostData 'cloud-auto-sync.json'
+    $enabledStatePersisted = $false
     for ($attempt = 0; $attempt -lt 30; $attempt++) {
-        Start-Sleep -Milliseconds 50
-        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        if ($focused -and $focused.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $focused.Current.Name -eq 'Disable automatic cloud sync') {
-            $disableCloudAutoSync = $focused
+        Start-Sleep -Milliseconds 100
+        if ((Read-JsonRetry $autoSyncStatePath).enabled -eq $true) {
+            $enabledStatePersisted = $true
             break
         }
     }
-    if (-not $disableCloudAutoSync) {
-        throw 'Automatic cloud sync did not expose its enabled state through accessibility'
+    if (-not $enabledStatePersisted) {
+        throw 'Automatic cloud sync was not enabled in persisted state'
     }
+    $disableCloudAutoSync = Named $window ([System.Windows.Automation.ControlType]::Button) 'Disable automatic cloud sync'
     $disableCloudAutoSync.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $disabledStatePersisted = $false
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        Start-Sleep -Milliseconds 100
+        if ((Read-JsonRetry $autoSyncStatePath).enabled -eq $false) {
+            $disabledStatePersisted = $true
+            break
+        }
+    }
+    if (-not $disabledStatePersisted) { throw 'Automatic cloud sync was not disabled in persisted state' }
 
     # Recreate the Cloud Sync page so its ScrollView returns to the top before
     # cleanup. This keeps the synthetic keyring lifecycle exercised through UIA
@@ -1371,6 +1418,7 @@ try {
     $cloudAccess = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud access key ID'
     $forgetCloudCredentials = FocusByTab $cloudAccess ([System.Windows.Automation.ControlType]::Button) 'Forget cloud credentials' 8
     $forgetCloudCredentials.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $forgetCloudCredentials = Named $window ([System.Windows.Automation.ControlType]::Button) 'Forget cloud credentials'
     $cloudPassphrase = FocusByTab $forgetCloudCredentials ([System.Windows.Automation.ControlType]::Edit) 'Cloud project encryption passphrase' 5
     $forgetCloudEncryption = FocusByTab $cloudPassphrase ([System.Windows.Automation.ControlType]::Button) 'Forget cloud encryption key' 4
     $forgetCloudEncryption.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
