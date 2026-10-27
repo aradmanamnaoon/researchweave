@@ -87,7 +87,12 @@ function Read-JsonRetry([string]$Path, [int]$Attempts = 20) {
         }
         try {
             return (Get-Content -LiteralPath $Path -Raw -ErrorAction Stop | ConvertFrom-Json)
-        } catch [System.IO.IOException] {
+        } catch {
+            # Preferences and recovery journals are replaced atomically. Between
+            # Test-Path and Get-Content a hosted runner can briefly observe the
+            # old path disappear, or read while the replacement is becoming
+            # visible. Retry any transient read/parse failure here, but keep the
+            # final read below strict so a persistently missing/corrupt file fails.
             Start-Sleep -Milliseconds 20
         }
     }
