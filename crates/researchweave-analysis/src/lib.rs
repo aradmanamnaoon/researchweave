@@ -309,6 +309,32 @@ pub fn import_tsv(path: &Path) -> Result<Dataset, AnalysisError> {
     import_delimited(path, b'\t')
 }
 
+/// Parse a supported tabular file using the same default options as the
+/// project-scoped `dataset.import` operation, without persisting a dataset.
+///
+/// Desktop import previews use this parser before issuing a revision-bound
+/// command. It must not write to a project store or weaken the command's
+/// independent source-hash and authorization checks.
+pub fn import_with_defaults(path: &Path) -> Result<Dataset, AnalysisError> {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .map(str::to_ascii_lowercase);
+    match extension.as_deref() {
+        Some("csv") => import_csv(path),
+        Some("tsv") => import_tsv(path),
+        Some(format @ ("xlsx" | "ods")) => {
+            import_workbook(path, format, &WorkbookImportOptions::default())
+        }
+        Some("parquet") => native_formats::import_parquet(path),
+        Some(format @ ("sav" | "zsav")) => native_formats::import_spss(path, format),
+        Some("dta") => native_formats::import_stata(path),
+        _ => Err(AnalysisError::InvalidInput(
+            "supported import formats are CSV, TSV, XLSX, ODS, Parquet, SAV, ZSAV and DTA".into(),
+        )),
+    }
+}
+
 #[derive(Debug, Clone)]
 pub struct WorkbookImportOptions {
     pub sheet: Option<Value>,

@@ -135,6 +135,18 @@ function WaitForNameLike(
     }
     throw "UIA result missing: $Pattern"
 }
+function AssertImplementedPageHasNoFallback(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Page
+) {
+    $names = @($Window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if ($names | Where-Object { $_ -like '*This capability remains reachable while its native Rust workflow is integrated*' }) {
+        throw "Implemented $Page screen also displays the unfinished-workflow fallback"
+    }
+}
 function ReachByTab(
     [System.Windows.Automation.AutomationElement]$Window,
     [System.Windows.Automation.AutomationElement]$Anchor,
@@ -557,6 +569,28 @@ try {
         throw 'Imported immutable dataset rows were not visible through Data View'
     }
 
+    # Installed desktop parity: these native Rust parsers must be reachable from
+    # the same user-facing preview -> approved, exact-source-hash import flow.
+    $nativeFixtures = (Resolve-Path (Join-Path $PSScriptRoot '../../researchweave-analysis/tests/fixtures')).Path
+    foreach ($nativeName in @('nullable.parquet','labelled.sav','labelled.zsav','labelled.dta')) {
+        $nativeSource = Join-Path $nativeFixtures $nativeName
+        $nativePath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+        ([System.Windows.Automation.ValuePattern]$nativePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($nativeSource)
+        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        WaitForNameLike $window '*Analysis import preview ready*' 5000
+        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Import previewed analysis data').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        WaitForNameLike $window '*Analysis dataset imported and audited*' 5000
+        $nativeNames = @($window.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition
+        ) | ForEach-Object { $_.Current.Name })
+        $nativeResult = $nativeNames | Where-Object { $_ -like 'Analysis operation result*' } | Select-Object -First 1
+        if (-not ([regex]::Match([string]$nativeResult, '"dataset_id": "([0-9a-f]{24})"')).Success) {
+            throw "Native data import $nativeName did not persist an immutable dataset identity"
+        }
+    }
+    Write-Output 'PASS: native Parquet/SPSS SAV/ZSAV/Stata DTA imports preview and persist via installed GUI'
+
     $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
     ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Statistics')
     $command.SetFocus()
@@ -661,6 +695,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
+    AssertImplementedPageHasNoFallback $window 'Variable View'
     foreach ($pair in @(
         @('Variable View dataset ID',$datasetId),
         @('Variable View dataset revision',$datasetRevision)
@@ -711,6 +746,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
+    AssertImplementedPageHasNoFallback $window 'Analysis Results'
     foreach ($pair in @(
         @('Analysis Results dataset ID',$datasetId),
         @('Analysis Results dataset revision',$datasetRevision),
@@ -789,6 +825,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
+    AssertImplementedPageHasNoFallback $window 'Mixed Methods'
     foreach ($pair in @(
         @('Mixed methods dataset ID',$datasetId),
         @('Mixed methods dataset revision',$datasetRevision),
@@ -1342,6 +1379,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
+    AssertImplementedPageHasNoFallback $window 'Cloud Sync'
     foreach ($pair in @(
         @('Cloud provider kind','generic-s3'),
         @('Cloud profile ID','uia-cloud'),

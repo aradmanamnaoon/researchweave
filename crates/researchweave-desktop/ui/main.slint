@@ -1563,7 +1563,7 @@ export component MainWindow inherits Window {
                             padding: 24px;
                             spacing: 10px;
                             Text { text: "Data view"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
-                            Text { text: "Import CSV, TSV, XLSX or ODS into an immutable project-local dataset revision. The file hash is bound to Preview → Import."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Text { text: "Import CSV, TSV, XLSX, ODS, Parquet, SPSS SAV/ZSAV or Stata DTA into an immutable project-local dataset revision. The file hash is bound to Preview → Import."; color: Theme.muted-ink; wrap: word-wrap; }
                             analysis-import-path := LineEdit { placeholder-text: "Absolute data file path"; accessible-label: "Analysis import path"; }
                             HorizontalLayout {
                                 spacing: 8px;
@@ -2303,7 +2303,7 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
-                    if root.page > 1 && root.page != 2 && root.page != 4 && root.page != 5 && root.page != 7 && root.page != 9 && root.page != 10 && root.page != 11 && root.page != 12 && root.page != 14 && root.page != 16 && root.page != 17 && root.page != 19 && root.page != 20 && root.page != 21 && root.page != 22 && root.page != 23 && root.page != 24 && root.page != 28 && root.page != 29 && root.page != 30 && root.page != 31 && root.page != 32 && root.page != 36 && root.page != 37 && root.page != 40: Rectangle {
+                    if root.page > 1 && root.page != 2 && root.page != 4 && root.page != 5 && root.page != 7 && root.page != 9 && root.page != 10 && root.page != 11 && root.page != 12 && root.page != 13 && root.page != 14 && root.page != 15 && root.page != 16 && root.page != 17 && root.page != 18 && root.page != 19 && root.page != 20 && root.page != 21 && root.page != 22 && root.page != 23 && root.page != 24 && root.page != 28 && root.page != 29 && root.page != 30 && root.page != 31 && root.page != 32 && root.page != 36 && root.page != 37 && root.page != 39 && root.page != 40: Rectangle {
                         background: Theme.raised;
                         HorizontalLayout {
                             padding: 24px;

@@ -1837,7 +1837,7 @@ fn analysis_preview_import_at(
 ) -> Result<(PendingAnalysisAction, serde_json::Value), String> {
     let source = PathBuf::from(source_path.trim());
     if !source.is_absolute() {
-        return Err("Enter an absolute CSV, TSV, XLSX or ODS path".into());
+        return Err("Enter an absolute CSV, TSV, XLSX, ODS, Parquet, SAV, ZSAV or DTA path".into());
     }
     let source = source
         .canonicalize()
@@ -1850,22 +1850,8 @@ fn analysis_preview_import_at(
         .and_then(|value| value.to_str())
         .ok_or("Import filename must be valid Unicode")?;
     let source_sha256 = file_sha256(&source)?;
-    let preview_dataset = match source
-        .extension()
-        .and_then(|value| value.to_str())
-        .map(str::to_ascii_lowercase)
-        .as_deref()
-    {
-        Some("csv") => researchweave_analysis::import_csv(&source),
-        Some("tsv") => researchweave_analysis::import_tsv(&source),
-        Some(format @ ("xlsx" | "ods")) => researchweave_analysis::import_workbook(
-            &source,
-            format,
-            &researchweave_analysis::WorkbookImportOptions::default(),
-        ),
-        _ => return Err("Supported imports are CSV, TSV, XLSX and ODS".into()),
-    }
-    .map_err(|error| error.to_string())?;
+    let preview_dataset =
+        researchweave_analysis::import_with_defaults(&source).map_err(|error| error.to_string())?;
     if preview_dataset.source_hash != source_sha256 {
         return Err("Import source changed while it was being previewed".into());
     }
@@ -8064,6 +8050,53 @@ mod tests {
         assert_eq!(described["data"]["n_valid"], 3);
         assert_eq!(described["data"]["mean"], 3.0);
         std::fs::remove_dir_all(host).unwrap();
+    }
+
+    #[test]
+    fn native_tabular_imports_preview_without_mutation_and_commit_by_exact_hash() {
+        let fixtures = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .join("../researchweave-analysis/tests/fixtures");
+        for filename in [
+            "nullable.parquet",
+            "labelled.sav",
+            "labelled.zsav",
+            "labelled.dta",
+        ] {
+            let host = std::env::temp_dir().join(format!("rw-native-import-ui-{}", Uuid::new_v4()));
+            std::fs::create_dir_all(&host).unwrap();
+            let project = host.join("Native data project");
+            load_project_with_audit(
+                project.to_str().unwrap(),
+                "Native format preview",
+                true,
+                &host.join("create-audit.sqlite"),
+            )
+            .unwrap();
+            let source = host.join(filename);
+            std::fs::copy(fixtures.join(filename), &source).unwrap();
+            let data_root = host.join("domain-host");
+            let (pending, preview) =
+                analysis_preview_import_at(&project, source.to_str().unwrap(), &data_root).unwrap();
+            assert_eq!(preview["data"]["preview"], true, "{filename}");
+            assert!(
+                preview["data"]["would_import"]["rows"].as_u64().unwrap() > 0,
+                "{filename}"
+            );
+            assert_eq!(
+                preview["data"]["source_sha256"],
+                file_sha256(&source).unwrap(),
+                "{filename}"
+            );
+            assert!(!project.join("data/analysis").exists(), "{filename}");
+            let persisted = analysis_execute_pending(&pending, &project, &data_root).unwrap();
+            assert_eq!(persisted["status"], "ok", "{filename}: {persisted}");
+            assert_eq!(
+                persisted["data"]["source_hash"], preview["data"]["source_sha256"],
+                "{filename}"
+            );
+            assert!(project.join("data/analysis").is_dir(), "{filename}");
+            std::fs::remove_dir_all(host).unwrap();
+        }
     }
 
     #[test]
