@@ -1203,9 +1203,48 @@ export component MainWindow inherits Window {
                                 }
 
                                 Text { text: "Credentials"; color: Theme.ink; font-weight: 650; }
-                                cloud-access-key := LineEdit { placeholder-text: "Access-key ID"; accessible-label: "Cloud access key ID"; }
-                                cloud-secret-key := LineEdit { placeholder-text: "Secret key"; input-type: password; accessible-label: "Cloud secret key"; }
-                                cloud-session-token := LineEdit { placeholder-text: "Optional session token"; input-type: password; accessible-label: "Cloud session token"; }
+                                cloud-access-key := LineEdit {
+                                    placeholder-text: "Access-key ID";
+                                    accessible-label: "Cloud access key ID";
+                                    // Password inputs inside a clipped ScrollView may be skipped by
+                                    // Slint's default Tab traversal. Focus explicitly so the
+                                    // destination is scrolled into view and remains editable.
+                                    key-pressed(event) => {
+                                        if (event.text == Key.Tab && !event.modifiers.shift) {
+                                            cloud-secret-key.focus();
+                                            return accept;
+                                        }
+                                        return reject;
+                                    }
+                                }
+                                cloud-secret-key := LineEdit {
+                                    placeholder-text: "Secret key";
+                                    input-type: password;
+                                    accessible-label: "Cloud secret key";
+                                    key-pressed(event) => {
+                                        if (event.text == Key.Tab && !event.modifiers.shift) {
+                                            cloud-session-token.focus();
+                                            return accept;
+                                        }
+                                        if (event.text == Key.Tab && event.modifiers.shift) {
+                                            cloud-access-key.focus();
+                                            return accept;
+                                        }
+                                        return reject;
+                                    }
+                                }
+                                cloud-session-token := LineEdit {
+                                    placeholder-text: "Optional session token";
+                                    input-type: password;
+                                    accessible-label: "Cloud session token";
+                                    key-pressed(event) => {
+                                        if (event.text == Key.Tab && event.modifiers.shift) {
+                                            cloud-secret-key.focus();
+                                            return accept;
+                                        }
+                                        return reject;
+                                    }
+                                }
                                 HorizontalLayout {
                                     spacing: 8px;
                                     Button {
