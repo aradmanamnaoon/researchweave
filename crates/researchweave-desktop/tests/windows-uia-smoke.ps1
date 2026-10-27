@@ -1553,7 +1553,9 @@ try {
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Record previewed project metadata changes').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*Project metadata revision recorded and audited*'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect current project metadata').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    WaitForNameLike $window '*Title: UIA Updated Persian Project*'
+    # Result text can be clipped by the scroll viewport. Read the stable
+    # accessible identity exposed on the containing metadata panel instead.
+    WaitForNameLike $window '*Project metadata title UIA Updated Persian Project revision*'
     Write-Output 'PASS: project metadata editor previews separately, records approved revision and updates the project title'
     # Persisted display preferences: check the actual accessible control state,
     # stored JSON, and a fresh-process UIA reload (not pixel certification).
@@ -1614,7 +1616,7 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 160
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect current project metadata').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    WaitForNameLike $window '*Title: UIA Updated Persian Project*'
+    WaitForNameLike $window '*Project metadata title UIA Updated Persian Project revision*'
     Write-Output 'PASS: approved project metadata revision survives native process restart'
     Capture-WindowScreenshot $window $Screenshot
 } finally {

@@ -2265,6 +2265,10 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 40: Rectangle {
                         background: Theme.raised;
+                        // Accessible metadata identity remains present even when
+                        // the result text is clipped inside this long ScrollView.
+                        accessible-role: complementary;
+                        accessible-label: "Project metadata title " + root.project-title + " revision " + root.project-revision;
                         ScrollView {
                             VerticalLayout {
                                 padding: 24px;
