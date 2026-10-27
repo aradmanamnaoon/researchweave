@@ -149,10 +149,12 @@ function FocusByTab(
     [int]$MaxTabs = 8
 ) {
     $Anchor.SetFocus()
+    $visited = New-Object System.Collections.Generic.List[string]
     for ($attempt = 0; $attempt -le $MaxTabs; $attempt++) {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         if ($focused) {
             try {
+                $visited.Add("$($focused.Current.ControlType.ProgrammaticName):$($focused.Current.Name)")
                 if ($focused.Current.ControlType -eq $Type -and $focused.Current.Name -eq $Name) {
                     return $focused
                 }
@@ -167,7 +169,7 @@ function FocusByTab(
     }
     $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
     $focusedName = if ($focused) { $focused.Current.Name } else { '<none>' }
-    throw "UIA element did not receive keyboard focus: $Type '$Name' (focused='$focusedName')"
+    throw "UIA element did not receive keyboard focus: $Type '$Name' (focused='$focusedName'; tab_trace='$($visited -join ' -> ')')"
 }
 function FocusByShiftTab(
     [System.Windows.Automation.AutomationElement]$Anchor,
@@ -1333,7 +1335,10 @@ try {
     # Slint exposes only the visible portion of a ScrollView through Windows UIA.
     # Use real keyboard traversal so lower controls are brought into view instead
     # of assuming off-screen descendants are present in the accessibility tree.
-    $cloudAccess = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud access key ID'
+    # Start at the previous visible button. A direct UIA SetFocus() on a field
+    # found near the viewport boundary may not establish keyboard focus.
+    $refreshCloudProfiles = Named $window ([System.Windows.Automation.ControlType]::Button) 'Refresh cloud profiles'
+    $cloudAccess = FocusByTab $refreshCloudProfiles ([System.Windows.Automation.ControlType]::Edit) 'Cloud access key ID' 6
     ([System.Windows.Automation.ValuePattern]$cloudAccess.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud-access')
     $cloudSecret = FocusByTab $cloudAccess ([System.Windows.Automation.ControlType]::Edit) 'Cloud secret key' 4
     ([System.Windows.Automation.ValuePattern]$cloudSecret.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud-secret')
@@ -1415,7 +1420,8 @@ try {
     $cloudProfileId = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud profile ID'
     ([System.Windows.Automation.ValuePattern]$cloudProfileId.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-cloud')
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Disconnect cloud profile').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    $cloudAccess = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Cloud access key ID'
+    $disconnectCloudProfile = Named $window ([System.Windows.Automation.ControlType]::Button) 'Disconnect cloud profile'
+    $cloudAccess = FocusByTab $disconnectCloudProfile ([System.Windows.Automation.ControlType]::Edit) 'Cloud access key ID' 5
     $forgetCloudCredentials = FocusByTab $cloudAccess ([System.Windows.Automation.ControlType]::Button) 'Forget cloud credentials' 8
     $forgetCloudCredentials.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $forgetCloudCredentials = Named $window ([System.Windows.Automation.ControlType]::Button) 'Forget cloud credentials'
