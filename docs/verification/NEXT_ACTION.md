@@ -2,7 +2,9 @@
 
 The repository is being converted from the additive Rust candidate into the tracked Rust-only v0.2.0 source shape. Historical Python app/runtime/test/package files are removed in that replacement commit while `archive/python-final-c84cdf1`, Git history, migration fixtures, and historical verification records remain available.
 
-The original Rust-only candidate `324a24ba0171cad02203e327004766b660ffccd7` passed hosted native security/Windows installed UIA/Ubuntu 22.04/macOS arm64/macOS Intel/`verify-complete` in GitHub Actions run `40516514442`. Existing `main` was safely fast-forwarded to that SHA with Python recovery history preserved. A subsequent project metadata UI parity improvement is under review and must pass its own exact-SHA hosted matrix before updating `main` again.
+The original Rust-only candidate `324a24ba0171cad02203e327004766b660ffccd7` passed native acceptance in run `40516514442` and was safely fast-forwarded to existing `main`. Project metadata editor parity then passed full native and quality acceptance at `a55d35611d4f9bf7f8dc2971ba19cddf0355a6a0` (native run `40535669061`, PR #3 merged). Scientific Parquet/SPSS/Stata import UI, protocol amendments/Markdown preview and screen placeholder corrections passed full native/security/artifact and quality acceptance at `7dcc91cf5834430eec5f2db93d73cce43902f039` (native run `40543483451`, PR #4 merged). Each source update to `main` was a normal fast-forward with Python recovery ancestry intact.
+
+The next isolated candidate `rust-pdf-multipage-parity-20261027` improves multi-page PDFium reader navigation, deterministic Windows installed UIAutomation, live GUI test-passphrase entropy and preservation of unspecified protocol amendment fields. Its Rust checks are local only until its own exact-source hosted native matrix and quality runs finish. **Do not** treat the earlier PR #3/#4 green runs as acceptance of this candidate.
 
 Next mandatory gates, in order:
 
