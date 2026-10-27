@@ -250,9 +250,11 @@ export component MainWindow inherits Window {
     callback apply-project-metadata();
     callback preview-question(string, string, string, string);
     callback preview-protocol(string, string, string, string);
+    callback preview-protocol-amend(string, string, string, string, string);
     callback apply-evidence-preview();
     callback load-question-history(string);
     callback load-protocol-history(string);
+    callback load-protocol-export(string);
     callback preview-reference(string, string, string, string, string, string, string);
     callback apply-library-preview();
     callback refresh-references();
@@ -1382,11 +1384,12 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 4: Rectangle {
                         background: Theme.raised;
-                        VerticalLayout {
+                        ScrollView {
+                          VerticalLayout {
                             padding: 24px;
                             spacing: 10px;
                             Text { text: "Research protocol"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
-                            Text { text: "Create a versioned protocol through the shared approval and audit path."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Text { text: "Create or amend a versioned protocol through the shared approval and audit path. Export previews are read-only and shown here; no file is written."; color: Theme.muted-ink; wrap: word-wrap; }
                             protocol-title := LineEdit { placeholder-text: "Protocol title"; accessible-label: "Protocol title"; }
                             HorizontalLayout {
                                 spacing: 8px;
@@ -1409,11 +1412,20 @@ export component MainWindow inherits Window {
                             }
                             HorizontalLayout {
                                 spacing: 8px;
-                                protocol-id := LineEdit { placeholder-text: "Protocol ID for history"; accessible-label: "Protocol history ID"; }
+                                protocol-id := LineEdit { placeholder-text: "Existing protocol ID for history/amendment/export"; accessible-label: "Protocol history ID"; }
                                 Button { text: "Load history"; accessible-label: "Load protocol history"; clicked => { root.load-protocol-history(protocol-id.text); } }
+                                Button { text: "View Markdown export"; accessible-label: "View protocol Markdown export"; clicked => { root.load-protocol-export(protocol-id.text); } }
                             }
+                            protocol-rationale := LineEdit { placeholder-text: "Amendment rationale (required for amendments)"; accessible-label: "Protocol amendment rationale"; }
+                            Button {
+                                text: "Preview amendment";
+                                accessible-label: "Preview protocol amendment";
+                                clicked => { root.preview-protocol-amend(protocol-id.text, protocol-design.text, protocol-objective.text, protocol-author.text, protocol-rationale.text); }
+                            }
+                            Text { text: "Amendments replace the complete protocol body (design and objective) with a new version. Preview before recording; the original version is preserved."; color: Theme.muted-ink; wrap: word-wrap; }
                             Text { text: root.protocol-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Protocol operation result"; }
                             Rectangle { vertical-stretch: 1; }
+                          }
                         }
                     }
                     if root.page == 20: Rectangle {

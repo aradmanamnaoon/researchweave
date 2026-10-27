@@ -3513,6 +3513,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_preview_protocol_amend({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        move |protocol_id, design, objective, author, rationale| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a project first".to_string())
+                    .and_then(|path| {
+                        let root = host_data_root()?;
+                        evidence_preview_at(
+                            path,
+                            "protocol.amend",
+                            "protocol",
+                            serde_json::json!({
+                                "protocol_id":protocol_id.as_str().trim(),
+                                "author":author.as_str().trim(),
+                                "rationale":rationale.as_str().trim(),
+                                "body":{
+                                    "design":design.as_str().trim().to_lowercase(),
+                                    "objective":objective.as_str()
+                                }
+                            }),
+                            &root,
+                        )
+                    });
+                match result {
+                    Ok((pending, preview)) => {
+                        *pending_evidence.borrow_mut() = Some(pending);
+                        ui.set_protocol_results(
+                            format!(
+                                "Amendment preview only. This will preserve previous protocol versions and requires exact approved recording:\n{}",
+                                pretty_result_data(&preview)
+                            )
+                            .into(),
+                        );
+                        ui.set_status("Protocol amendment preview ready; no data changed".into());
+                    }
+                    Err(error) => {
+                        pending_evidence.borrow_mut().take();
+                        ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
     app.on_apply_evidence_preview({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -3664,6 +3713,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(result) => {
                         ui.set_protocol_results(pretty_result_data(&result).into());
                         ui.set_status("Protocol history loaded".into());
+                    }
+                    Err(error) => {
+                        ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_load_protocol_export({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |protocol_id| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a project first".to_string())
+                    .and_then(|path| {
+                        let root = host_data_root()?;
+                        evidence_read_at(
+                            path,
+                            "protocol.export",
+                            serde_json::json!({"protocol_id":protocol_id.as_str().trim()}),
+                            &root,
+                        )
+                    });
+                match result {
+                    Ok(result) => {
+                        let markdown = result
+                            .pointer("/data/text")
+                            .and_then(serde_json::Value::as_str)
+                            .unwrap_or_default();
+                        ui.set_protocol_results(markdown.into());
+                        ui.set_status("Read-only protocol Markdown rendered; no file saved".into());
                     }
                     Err(error) => {
                         ui.set_protocol_results(error.clone().into());
@@ -7706,6 +7790,90 @@ mod tests {
         assert!(!audit[1].preview);
         assert_eq!(audit[2].operation, "question.history");
         assert_eq!(audit[1].effect, "local-write");
+        std::fs::remove_dir_all(host).unwrap();
+    }
+
+    #[test]
+    fn protocol_amendment_preview_is_pure_revision_bound_and_export_reloads() {
+        let host = std::env::temp_dir().join(format!("rw-protocol-ui-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&host).unwrap();
+        let project = host.join("Protocol project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Protocol parity",
+            true,
+            &host.join("create-audit.sqlite"),
+        )
+        .unwrap();
+        let data_root = host.join("evidence-host");
+        let (create, _) = evidence_preview_at(
+            &project,
+            "protocol.create",
+            "protocol",
+            serde_json::json!({
+                "title":"Clinical methods",
+                "author":"Researcher",
+                "body":{"design":"observational","objective":"Review cohorts"}
+            }),
+            &data_root,
+        )
+        .unwrap();
+        let (created, _) = evidence_execute_pending(&create, &project, &data_root).unwrap();
+        let id = created["data"]["protocol_id"].as_str().unwrap();
+        let (pending, preview) = evidence_preview_at(
+            &project,
+            "protocol.amend",
+            "protocol",
+            serde_json::json!({
+                "protocol_id":id,
+                "author":"Researcher 2",
+                "rationale":"Clarify research question",
+                "body":{"design":"experimental","objective":"Compare groups"}
+            }),
+            &data_root,
+        )
+        .unwrap();
+        assert_eq!(preview["status"], "ok");
+        assert_eq!(preview["data"]["preview"], true);
+        let before = evidence_read_at(
+            &project,
+            "protocol.history",
+            serde_json::json!({"protocol_id":id}),
+            &data_root,
+        )
+        .unwrap();
+        assert_eq!(before["data"]["history"].as_array().unwrap().len(), 1);
+        let (amended, _) = evidence_execute_pending(&pending, &project, &data_root).unwrap();
+        assert_eq!(amended["data"]["protocol_version"], 2);
+        assert!(evidence_execute_pending(&pending, &project, &data_root).is_err());
+        let history = evidence_read_at(
+            &project,
+            "protocol.history",
+            serde_json::json!({"protocol_id":id}),
+            &data_root,
+        )
+        .unwrap();
+        assert_eq!(history["data"]["history"].as_array().unwrap().len(), 2);
+        let exported = evidence_read_at(
+            &project,
+            "protocol.export",
+            serde_json::json!({"protocol_id":id}),
+            &data_root,
+        )
+        .unwrap();
+        let text = exported["data"]["text"].as_str().unwrap();
+        assert!(text.contains("# Clinical methods"));
+        assert!(text.contains("### Version 1"));
+        assert!(text.contains("### Version 2"));
+        assert!(text.contains("Clarify research question"));
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            2
+        );
         std::fs::remove_dir_all(host).unwrap();
     }
 
