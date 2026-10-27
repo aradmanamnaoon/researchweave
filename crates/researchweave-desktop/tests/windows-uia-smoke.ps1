@@ -134,13 +134,24 @@ function ReachByTab(
 ) {
     $Anchor.SetFocus()
     for ($attempt = 0; $attempt -le $MaxTabs; $attempt++) {
-        foreach ($item in (Children $Window $Type)) {
-            if ($item.Current.Name -eq $Name) { return $item }
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($focused) {
+            try {
+                if ($focused.Current.ControlType -eq $Type -and $focused.Current.Name -eq $Name) {
+                    return $focused
+                }
+            } catch [System.Windows.Automation.ElementNotAvailableException] {
+                # Slint may replace an accessibility node while scrolling. The
+                # next Tab iteration reacquires the live focused element.
+            }
         }
+        if ($attempt -eq $MaxTabs) { break }
         [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
         Start-Sleep -Milliseconds 120
     }
-    throw "UIA element was not reachable by keyboard traversal: $Type '$Name'"
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    $focusedName = if ($focused) { $focused.Current.Name } else { '<none>' }
+    throw "UIA element was not reachable by keyboard traversal: $Type '$Name' (focused='$focusedName')"
 }
 try {
     $window = WindowFor $p 'Native window missing from UIA tree'
@@ -1311,11 +1322,19 @@ try {
     ([System.Windows.Automation.ValuePattern]$cloudDevice.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-windows')
     $enableCloudAutoSync = ReachByTab $window $cloudDevice ([System.Windows.Automation.ControlType]::Button) 'Enable automatic cloud sync' 16
     $enableCloudAutoSync.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 100
-    if (-not (Named $window ([System.Windows.Automation.ControlType]::Button) 'Disable automatic cloud sync')) {
+    $disableCloudAutoSync = $null
+    for ($attempt = 0; $attempt -lt 30; $attempt++) {
+        Start-Sleep -Milliseconds 50
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if ($focused -and $focused.Current.ControlType -eq [System.Windows.Automation.ControlType]::Button -and $focused.Current.Name -eq 'Disable automatic cloud sync') {
+            $disableCloudAutoSync = $focused
+            break
+        }
+    }
+    if (-not $disableCloudAutoSync) {
         throw 'Automatic cloud sync did not expose its enabled state through accessibility'
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Disable automatic cloud sync').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $disableCloudAutoSync.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 
     # Recreate the Cloud Sync page so its ScrollView returns to the top before
     # cleanup. This keeps the synthetic keyring lifecycle exercised through UIA
@@ -1325,6 +1344,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 150
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
     ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Cloud Sync')
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
