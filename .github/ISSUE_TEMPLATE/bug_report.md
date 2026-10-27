@@ -6,7 +6,7 @@ labels: bug
 assignees: ""
 ---
 
-**Environment:** OS, Python, app version.
+**Environment:** OS/version, ResearchWeave version or commit, and package/source-build type.
 
 **Steps to reproduce:** Provide a minimal sample without private research data or secrets.
 
