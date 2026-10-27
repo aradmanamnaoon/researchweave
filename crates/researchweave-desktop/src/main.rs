@@ -2399,17 +2399,36 @@ fn protocol_amendment_arguments_at(
     author: &str,
     rationale: &str,
     data_root: &Path,
-) -> Result<serde_json::Value, String> {
+) -> Result<(serde_json::Value, u64), String> {
     let protocol_id = protocol_id.trim();
     if protocol_id.is_empty() {
         return Err("Enter a protocol ID to amend".into());
     }
+    let revision_before = u64::try_from(
+        ProjectStore::open(project)
+            .map_err(|error| error.to_string())?
+            .info()
+            .map_err(|error| error.to_string())?
+            .revision,
+    )
+    .map_err(|_| "Invalid project revision")?;
     let history = evidence_read_at(
         project,
         "protocol.history",
         serde_json::json!({"protocol_id":protocol_id}),
         data_root,
     )?;
+    let revision_after = u64::try_from(
+        ProjectStore::open(project)
+            .map_err(|error| error.to_string())?
+            .info()
+            .map_err(|error| error.to_string())?
+            .revision,
+    )
+    .map_err(|_| "Invalid project revision")?;
+    if revision_after != revision_before {
+        return Err("Project changed while reading the protocol; load history again".into());
+    }
     let previous = history
         .pointer("/data/history")
         .and_then(serde_json::Value::as_array)
@@ -2430,12 +2449,15 @@ fn protocol_amendment_arguments_at(
             serde_json::Value::String(objective.to_owned()),
         );
     }
-    Ok(serde_json::json!({
-        "protocol_id":protocol_id,
-        "author":author.trim(),
-        "rationale":rationale.trim(),
-        "body":body
-    }))
+    Ok((
+        serde_json::json!({
+            "protocol_id":protocol_id,
+            "author":author.trim(),
+            "rationale":rationale.trim(),
+            "body":body
+        }),
+        revision_after,
+    ))
 }
 
 fn evidence_read_at(
@@ -3578,7 +3600,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .ok_or_else(|| "Open a project first".to_string())
                     .and_then(|path| {
                         let root = host_data_root()?;
-                        let arguments = protocol_amendment_arguments_at(
+                        let (arguments, source_revision) = protocol_amendment_arguments_at(
                             path,
                             protocol_id.as_str(),
                             design.as_str(),
@@ -3587,13 +3609,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             rationale.as_str(),
                             &root,
                         )?;
-                        evidence_preview_at(
+                        let (pending, preview) = evidence_preview_at(
                             path,
                             "protocol.amend",
                             "protocol",
                             arguments,
                             &root,
-                        )
+                        )?;
+                        if pending.expected_revision != source_revision {
+                            return Err("Project changed while preparing this protocol amendment; preview again".into());
+                        }
+                        Ok((pending, preview))
                     });
                 match result {
                     Ok((pending, preview)) => {
@@ -7908,7 +7934,7 @@ mod tests {
         .unwrap();
         let (created, _) = evidence_execute_pending(&create, &project, &data_root).unwrap();
         let id = created["data"]["protocol_id"].as_str().unwrap();
-        let arguments = protocol_amendment_arguments_at(
+        let (arguments, source_revision) = protocol_amendment_arguments_at(
             &project,
             id,
             "",
@@ -7918,6 +7944,7 @@ mod tests {
             &data_root,
         )
         .unwrap();
+        assert_eq!(source_revision, 1);
         assert_eq!(arguments["body"]["design"], "observational");
         assert_eq!(arguments["body"]["population"], "Farsi speakers");
         assert_eq!(arguments["body"]["data_dictionary"]["score"], "validated");
@@ -7930,6 +7957,7 @@ mod tests {
             &data_root,
         )
         .unwrap();
+        assert_eq!(pending.expected_revision, source_revision);
         assert_eq!(preview["status"], "ok");
         assert_eq!(preview["data"]["preview"], true);
         let before = evidence_read_at(
