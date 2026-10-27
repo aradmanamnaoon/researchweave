@@ -3808,6 +3808,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_load_protocol_export({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
         move |protocol_id| {
             if let Some(ui) = weak.upgrade() {
                 let result = active_project
@@ -3816,7 +3817,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .ok_or_else(|| "Open a project first".to_string())
                     .and_then(|path| {
                         let root = host_data_root()?;
-                        evidence_read_at(
+                        physical_export::prepare(
                             path,
                             "protocol.export",
                             serde_json::json!({"protocol_id":protocol_id.as_str().trim()}),
@@ -3824,15 +3825,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         )
                     });
                 match result {
-                    Ok(result) => {
+                    Ok((pending, result)) => {
+                        *pending_physical_export.borrow_mut() = Some(pending);
                         let markdown = result
                             .pointer("/data/text")
                             .and_then(serde_json::Value::as_str)
                             .unwrap_or_default();
                         ui.set_protocol_results(markdown.into());
-                        ui.set_status("Read-only protocol Markdown rendered; no file saved".into());
+                        ui.set_status("Protocol Markdown prepared, not saved. Enter an absolute .md destination and click Save.".into());
                     }
                     Err(error) => {
+                        pending_physical_export.borrow_mut().take();
                         ui.set_protocol_results(error.clone().into());
                         ui.set_status(error.into());
                     }

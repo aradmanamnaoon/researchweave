@@ -1426,7 +1426,7 @@ export component MainWindow inherits Window {
                             padding: 24px;
                             spacing: 10px;
                             Text { text: "Research protocol"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
-                            Text { text: "Create or amend a versioned protocol through the shared approval and audit path. Export previews are read-only and shown here; no file is written."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Text { text: "Create or amend a versioned protocol through the shared approval and audit path. Preview the persisted Markdown before explicitly saving to disk without overwrite."; color: Theme.muted-ink; wrap: word-wrap; }
                             protocol-title := LineEdit { placeholder-text: "Protocol title"; accessible-label: "Protocol title"; }
                             HorizontalLayout {
                                 spacing: 8px;
@@ -1453,6 +1453,20 @@ export component MainWindow inherits Window {
                                 Button { text: "Load history"; accessible-label: "Load protocol history"; clicked => { root.load-protocol-history(protocol-id.text); } }
                                 Button { text: "View Markdown export"; accessible-label: "View protocol Markdown export"; clicked => { root.load-protocol-export(protocol-id.text); } }
                             }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                protocol-save-path := LineEdit {
+                                    horizontal-stretch: 1;
+                                    accessible-label: "Protocol Markdown destination path";
+                                    placeholder-text: "Absolute path including .md extension";
+                                }
+                                Button {
+                                    text: "Save protocol Markdown";
+                                    accessible-label: "Save prepared protocol Markdown without overwrite";
+                                    clicked => { root.save-prepared-export(protocol-save-path.text, "protocol.export"); }
+                                }
+                            }
+                            Text { text: "The explicit save is approval-audited, checks the source revision and SHA-256, never overwrites an existing file, and does not upload anything."; color: Theme.muted-ink; wrap: word-wrap; }
                             protocol-rationale := LineEdit { placeholder-text: "Amendment rationale (required for amendments)"; accessible-label: "Protocol amendment rationale"; }
                             Button {
                                 text: "Preview amendment";

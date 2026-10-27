@@ -8,6 +8,8 @@ PR #5 (`rust-pdf-multipage-parity-20261027`) has **also passed** native/security
 
 The subsequent isolated branch `rust-physical-export-parity-20261028` adds explicit, checksum-checked, non-overwriting physical manuscript (Markdown/HTML/DOCX/PDF) and incomplete submission ZIP export behind a host `SensitiveExport` approval/audit router, plus installed-Windows UIAutomation test assertions. It is **not yet accepted, merged or released**. Its own final-source local Rust checks, hosted native matrix and UIA package tests are required. Retain partial §40–42 acceptance labels for features without independent evidence.
 
+The dependent worktree `rust-protocol-physical-export-parity-20261028` extends that exact audited host file writer to persisted protocol Markdown and tests the physical protocol path. It is separate from PR #6 and must not be merged, published or counted as accepted before its own clean commit and exact-SHA hosted acceptance after PR #6 integration.
+
 Next mandatory gates, in order:
 
 1. Finish physical-export branch local checks and audit. Require its exact-SHA nonpublishing hosted security/Windows installed UIAutomation/Ubuntu 22.04/macOS arm64/macOS Intel/`verify-complete`, alongside quality workflows. GUI/package testing stays on isolated hosted runners, not the user's active desktop.
