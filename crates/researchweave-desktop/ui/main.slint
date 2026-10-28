@@ -950,8 +950,7 @@ export component MainWindow inherits Window {
                                 HorizontalLayout {
                                     spacing: 8px;
                                     pdf-path := LineEdit {
-                                        text: root.pdf-local-path;
-                                        edited => { root.pdf-local-path = self.text; }
+                                        text <=> root.pdf-local-path;
                                         horizontal-stretch: 1;
                                         placeholder-text: "Absolute path to a local PDF";
                                         accessible-label: "PDF file path";
@@ -1684,8 +1683,7 @@ export component MainWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 8px;
                                 analysis-import-path := LineEdit {
-                                    text: root.data-local-path;
-                                    edited => { root.data-local-path = self.text; }
+                                    text <=> root.data-local-path;
                                     horizontal-stretch: 1;
                                     placeholder-text: "Absolute data file path";
                                     accessible-label: "Analysis import path";

@@ -3364,11 +3364,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 if let Some(ui) = weak_task.upgrade() {
                     if let Some(selected) = selected {
                         match chosen_local_file_path(selected.path()) {
-                            Ok(path) if kind == "pdf" => ui.set_pdf_local_path(path.into()),
-                            Ok(path) if kind == "data" => ui.set_data_local_path(path.into()),
+                            Ok(path) if kind == "pdf" => {
+                                ui.set_pdf_local_path(path.into());
+                                ui.set_status("PDF selected from native file dialog".into());
+                            }
+                            Ok(path) if kind == "data" => {
+                                ui.set_data_local_path(path.into());
+                                ui.set_status("Dataset selected from native file dialog".into());
+                            }
                             Ok(_) => ui.set_status("Unrecognized file picker destination".into()),
                             Err(error) => ui.set_status(error.into()),
                         }
+                    } else {
+                        ui.set_status("Native file selection canceled".into());
                     }
                     // Cancel leaves the manual path untouched. The ongoing
                     // imported revision/preview/approval is never modified.
