@@ -198,6 +198,7 @@ export component MainWindow inherits Window {
     in-out property <string> project-metadata-results: "Open a project, enter only fields you want to change, and preview before recording.";
     in-out property <string> question-results: "Preview a structured question before recording it.";
     in-out property <string> protocol-results: "Preview a protocol before recording it.";
+    in-out property <string> protocol-export-receipt: "";
     in-out property <string> protocol-export-id: "";
     in-out property <string> reference-results: "Register or inspect project references.";
     in-out property <string> review-results: "Use persisted references to build and screen a review.";
@@ -1473,6 +1474,13 @@ export component MainWindow inherits Window {
                                 }
                             }
                             Text { text: "The explicit save is approval-audited, checks the source revision and SHA-256, never overwrites an existing file, and does not upload anything."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Text {
+                                text: root.protocol-export-receipt;
+                                visible: root.protocol-export-receipt != "";
+                                color: Theme.ink;
+                                wrap: word-wrap;
+                                accessible-label: root.protocol-export-receipt;
+                            }
                             protocol-rationale := LineEdit { placeholder-text: "Amendment rationale (required for amendments)"; accessible-label: "Protocol amendment rationale"; }
                             Button {
                                 text: "Preview amendment";
