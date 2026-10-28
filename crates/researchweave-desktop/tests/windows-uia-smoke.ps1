@@ -49,6 +49,57 @@ function Invoke-AccessibleButton([System.Windows.Automation.AutomationElement]$p
     $button.SetFocus()
     $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
+function Select-FileThroughNativeDialog(
+    [System.Windows.Automation.AutomationElement]$window,
+    [string]$buttonName,
+    [string]$selectedPath,
+    [int]$processId
+) {
+    # Exercise the Windows Common Item Dialog itself. The File name edit uses
+    # automation ID 1148 independently of the runner's display language.
+    if (-not [System.IO.File]::Exists($selectedPath)) {
+        throw "Native picker fixture does not exist: $selectedPath"
+    }
+    $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+    $existing = @($desktop.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.NativeWindowHandle })
+    Invoke-AccessibleButton $window $buttonName
+    $dialog = $null
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        foreach ($candidate in $desktop.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )) {
+            $current = $candidate.Current
+            if ($current.ControlType -eq [System.Windows.Automation.ControlType]::Window -and
+                $current.NativeWindowHandle -ne 0 -and
+                $existing -notcontains $current.NativeWindowHandle -and
+                ($current.ProcessId -eq $processId -or $current.ClassName -eq '#32770') -and
+                -not $current.IsOffscreen) {
+                $dialog = $candidate
+                break
+            }
+        }
+        if ($dialog) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $dialog) { throw "Native picker did not open an observable dialog: $buttonName" }
+    $filename = $null
+    foreach ($edit in (Children $dialog ([System.Windows.Automation.ControlType]::Edit))) {
+        if ($edit.Current.AutomationId -eq '1148') {
+            $filename = $edit
+            break
+        }
+    }
+    if (-not $filename) { throw 'Native file dialog has no UIA File name edit (ID 1148)' }
+    $filename.SetFocus()
+    ([System.Windows.Automation.ValuePattern]$filename.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+    )).SetValue($selectedPath)
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+}
 function WindowFor($process, [string]$failureMessage) {
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $process.Id)
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
@@ -510,6 +561,20 @@ try {
     }
     if (-not $chooserRestored) { throw 'Native PDF dialog cancellation changed the manually typed path or did not restore the UI' }
     Write-Output 'PASS: installed native Windows PDF picker opened, cancelled and preserved the manual path'
+    ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue((Join-Path $hostData 'not-selected.pdf'))
+    Select-FileThroughNativeDialog $window 'Choose local PDF with native file picker' $twoPagePdf $p.Id
+    $pdfSelected = $false
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        $value = ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose local PDF with native file picker').Current.IsEnabled
+        if ($value -eq $twoPagePdf -and $ready) {
+            $pdfSelected = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $pdfSelected) { throw 'Native PDF selection did not replace the manual path and restore the UI' }
+    Write-Output 'PASS: native Windows PDF selection updates the path without importing'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open PDF').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF page 1 of 2*' 20000
     WaitForNameLike $window '*PDF search status: Rendered page 1 of 2*matches: 0*' 10000
@@ -689,7 +754,20 @@ try {
     if (-not (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled) {
         throw 'Scientific import native file picker is not exposed as an enabled accessible button'
     }
-    ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($analysisInput)
+    ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue((Join-Path $hostData 'not-selected.csv'))
+    Select-FileThroughNativeDialog $window 'Choose scientific dataset with native file picker' $analysisInput $p.Id
+    $dataSelected = $false
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        $value = ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled
+        if ($value -eq $analysisInput -and $ready) {
+            $dataSelected = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $dataSelected) { throw 'Native scientific dataset selection did not update the path and restore the UI' }
+    Write-Output 'PASS: native Windows dataset selection updates the path before preview/import'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 260
     $analysisPreviewNames = @($window.FindAll(
