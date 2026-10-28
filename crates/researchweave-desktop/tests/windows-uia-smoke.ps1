@@ -87,13 +87,26 @@ function Select-FileThroughNativeDialog(
     }
     if (-not $dialog) { throw "Native picker did not open an observable dialog: $buttonName" }
     $filename = $null
+    # Common Item Dialog variants put ID 1148 on either the editable control
+    # or its parent combo box. Find the edit within that identified control.
     foreach ($edit in (Children $dialog ([System.Windows.Automation.ControlType]::Edit))) {
         if ($edit.Current.AutomationId -eq '1148') {
             $filename = $edit
             break
         }
     }
-    if (-not $filename) { throw 'Native file dialog has no UIA File name edit (ID 1148)' }
+    if (-not $filename) {
+        foreach ($combo in (Children $dialog ([System.Windows.Automation.ControlType]::ComboBox))) {
+            if ($combo.Current.AutomationId -eq '1148') {
+                foreach ($edit in (Children $combo ([System.Windows.Automation.ControlType]::Edit))) {
+                    $filename = $edit
+                    break
+                }
+                if ($filename) { break }
+            }
+        }
+    }
+    if (-not $filename) { throw 'Native file dialog has no editable File name field (ID 1148)' }
     $filename.SetFocus()
     ([System.Windows.Automation.ValuePattern]$filename.GetCurrentPattern(
         [System.Windows.Automation.ValuePattern]::Pattern
