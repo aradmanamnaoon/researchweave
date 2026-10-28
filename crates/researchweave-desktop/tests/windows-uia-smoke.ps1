@@ -476,6 +476,16 @@ try {
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open PDF').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF page 1 of 2*' 20000
     WaitForNameLike $window '*PDF search status: Rendered page 1 of 2*matches: 0*' 10000
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Find next PDF matching page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*PDF page 2 of 2*' 20000
+    WaitForNameLike $window '*PDF search status: Rendered page 2 of 2*matches: 1*' 10000
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Previous PDF page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*PDF page 1 of 2*' 20000
+    ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('not-present-in-any-pdf-page')
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Find next PDF matching page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*PDF search status: No matching page in PDF; current page is unchanged*matches: 0*' 20000
+    WaitForNameLike $window '*PDF page 1 of 2*' 10000
+    ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('PDFium')
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Next PDF page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF page 2 of 2*' 20000
     WaitForNameLike $window '*PDF search status: Rendered page 2 of 2*matches: 1*' 10000
@@ -487,7 +497,7 @@ try {
     if ((Named $window ([System.Windows.Automation.ControlType]::Button) 'Previous PDF page').Current.IsEnabled) {
         throw 'PDF reader Previous button did not disable at first page'
     }
-    Write-Output 'PASS: installed native PDFium reader navigates and searches two distinct pages with accessible controls'
+    Write-Output 'PASS: installed native PDFium reader finds matches across pages, preserves current page on miss, navigates bounds and exposes accessible controls'
 
     # Register a real project reference, then carry its generated ID into the
     # systematic-review workflow. This proves the redesigned References and

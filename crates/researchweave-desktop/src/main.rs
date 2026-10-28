@@ -7369,6 +7369,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 ui.set_pdf_page_count(
                                     i32::try_from(rendered.page_count).unwrap_or(i32::MAX),
                                 );
+                                ui.set_pdf_render_width(rendered.width as f32);
+                                ui.set_pdf_render_height(rendered.height as f32);
                                 let count =
                                     i32::try_from(rendered.match_count).unwrap_or(i32::MAX);
                                 if let Some(hit) = rendered.matches.first() {
@@ -7411,9 +7413,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 ui.set_pdf_status(format!("PDF error: {}", e).into());
                                 ui.set_pdf_page_number(1);
                                 ui.set_pdf_page_count(0);
+                                ui.set_pdf_render_width(0.0);
+                                ui.set_pdf_render_height(0.0);
                                 ui.set_pdf_image(Image::default());
                                 ui.set_pdf_highlight_visible(false);
                                 ui.set_pdf_matches(0);
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    });
+    app.on_find_next_pdf({
+        let weak = app.as_weak();
+        move |path, query, current_page_number| {
+            let job_id = weak
+                .upgrade()
+                .map(|ui| ui.get_pdf_job())
+                .unwrap_or_default();
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                let result = usize::try_from(current_page_number)
+                    .ok()
+                    .filter(|number| *number > 0)
+                    .ok_or_else(|| "Open a PDF page before finding the next match".to_string())
+                    .and_then(|number| {
+                        pdf_engine::find_next_matching_page(
+                            Path::new(path.as_str()),
+                            query.as_str(),
+                            number - 1,
+                        )
+                    });
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        if ui.get_pdf_job() != job_id {
+                            return;
+                        }
+                        match result {
+                            Ok(Some(next_index)) => {
+                                let next_page =
+                                    i32::try_from(next_index.saturating_add(1)).unwrap_or(i32::MAX);
+                                ui.set_pdf_status(
+                                    format!("Found matching PDF page {next_page}; rendering…")
+                                        .into(),
+                                );
+                                // Reuse the normal page render + stale-result guard.
+                                // Never render intermediate search-only pages.
+                                ui.invoke_load_pdf(path, query, next_page);
+                            }
+                            Ok(None) => {
+                                ui.set_pdf_matches(0);
+                                ui.set_pdf_status(
+                                    "No matching page in PDF; current page is unchanged".into(),
+                                );
+                            }
+                            Err(error) => {
+                                ui.set_pdf_matches(0);
+                                ui.set_pdf_status(format!("PDF find-next error: {error}").into());
                             }
                         }
                     }

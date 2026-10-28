@@ -192,6 +192,8 @@ export component MainWindow inherits Window {
     in-out property <float> pdf-highlight-w: 0;
     in-out property <float> pdf-highlight-h: 0;
     in-out property <bool> pdf-highlight-visible: false;
+    in-out property <float> pdf-render-width: 0;
+    in-out property <float> pdf-render-height: 0;
     in-out property <int> pdf-job: 0;
     in-out property <string> library-results: "Open a project, then refresh its sources.";
     in-out property <string> research-summary: "Open a project to inspect its recorded research question and design.";
@@ -237,6 +239,7 @@ export component MainWindow inherits Window {
     in-out property <string> command-results: "Search views, resources, settings and help";
 
     callback load-pdf(string, string, int);
+    callback find-next-pdf(string, string, int);
     callback choose-local-file(string) -> string;
     callback create-project(string, string);
     callback create-default-project(string);
@@ -987,6 +990,17 @@ export component MainWindow inherits Window {
                                             root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number);
                                         }
                                     }
+                                    Button {
+                                        text: "Find next page";
+                                        accessible-label: "Find next PDF matching page";
+                                        enabled: root.pdf-page-count > 0 && pdf-query.text != "";
+                                        clicked => {
+                                            root.pdf-job += 1;
+                                            root.pdf-status = "Finding next matching PDF page…";
+                                            root.pdf-highlight-visible = false;
+                                            root.find-next-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number);
+                                        }
+                                    }
                                 }
                                 HorizontalLayout {
                                     spacing: 8px;
@@ -1026,21 +1040,31 @@ export component MainWindow inherits Window {
                                 Rectangle {
                                     background: Theme.reader-canvas;
                                     clip: true;
-                                    pdf-view := Image {
-                                        source: root.pdf-image;
-                                        width: parent.width;
-                                        height: parent.height;
-                                        image-fit: contain;
-                                        accessible-label: "Rendered PDF page";
-                                    }
-                                    if root.pdf-highlight-visible: Rectangle {
-                                        x: root.pdf-highlight-x * pdf-view.width;
-                                        y: root.pdf-highlight-y * pdf-view.height;
-                                        width: root.pdf-highlight-w * pdf-view.width;
-                                        height: root.pdf-highlight-h * pdf-view.height;
-                                        background: Theme.accent-subtle;
-                                        border-color: Theme.warning;
-                                        border-width: 2px;
+                                    pdf-fit := Rectangle {
+                                        width: root.pdf-render-width > 0 && root.pdf-render-height > 0
+                                            ? min(parent.width, parent.height * root.pdf-render-width / root.pdf-render-height)
+                                            : parent.width;
+                                        height: root.pdf-render-width > 0 && root.pdf-render-height > 0
+                                            ? min(parent.height, parent.width * root.pdf-render-height / root.pdf-render-width)
+                                            : parent.height;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        pdf-view := Image {
+                                            source: root.pdf-image;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            image-fit: contain;
+                                            accessible-label: "Rendered PDF page";
+                                        }
+                                        if root.pdf-highlight-visible: Rectangle {
+                                            x: root.pdf-highlight-x * parent.width;
+                                            y: root.pdf-highlight-y * parent.height;
+                                            width: root.pdf-highlight-w * parent.width;
+                                            height: root.pdf-highlight-h * parent.height;
+                                            background: Theme.accent-subtle;
+                                            border-color: Theme.warning;
+                                            border-width: 2px;
+                                        }
                                     }
                                 }
                             }
@@ -1061,7 +1085,7 @@ export component MainWindow inherits Window {
                                     spacing: 8px;
                                     Text { text: "Reader context"; color: Theme.ink; font-size: 15px * Theme.ui-scale / 100; font-weight: 600; }
                                     Text { text: "Current native scope"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
-                                    Text { text: "Native per-page rendering and search with bounded page navigation"; color: Theme.ink; font-size: 11px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                    Text { text: "Native rendering, per-page search and bounded Find next page (wraps once)."; color: Theme.ink; font-size: 11px * Theme.ui-scale / 100; wrap: word-wrap; }
                                     Text { text: "Selection and annotations remain pending."; color: Theme.warning; font-size: 11px * Theme.ui-scale / 100; }
                                     Text { text: "Evidence"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     Button { text: "Open evidence"; clicked => { root.page = 8; } }

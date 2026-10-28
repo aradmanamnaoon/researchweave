@@ -12,6 +12,8 @@ PR #7 (`rust-protocol-physical-export-parity-20261028`) adds persisted, versione
 
 The separate, unmerged `rust-native-file-picker-20261028` candidate adds opt-in OS PDF/data file dialogs without changing preview, source hash, import approval or explicit typed-path workflows. It requires its own dependency-security, cross-platform compiled GUI and native dialog acceptance. Linux dialog availability depends on an installed XDG portal backend or Zenity; no dialog-interaction pass is claimed by static button checks.
 
+The further isolated `rust-pdf-find-next-20261028` candidate (stacked only after the file-picker head, not merged) adds a bounded, read-only cross-page Find Next command and fixes letterboxed PDF search-highlight geometry. It has separate deterministic PDFium unit tests and installed Windows UIAutomation assertions; full exact-SHA hosted/native verification is still mandatory. This does NOT establish persisted PDF evidence-anchor/highlight workflows.
+
 Next mandatory gates, in order:
 
 1. Finish PR #7's exact-SHA hosted security/Windows installed UIAutomation/Ubuntu 22.04/macOS arm64/macOS Intel/`verify-complete` plus quality workflows, fix any genuine failure and merge normally if green. GUI/package testing stays on isolated hosted runners, not the user's active desktop.
