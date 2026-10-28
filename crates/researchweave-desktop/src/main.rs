@@ -3695,6 +3695,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ui.set_question_results(message.into());
                         } else if surface == "protocol" {
                             ui.set_protocol_results(message.into());
+                            if let Some(id) = executed
+                                .pointer("/data/protocol_id")
+                                .and_then(serde_json::Value::as_str)
+                            {
+                                ui.set_protocol_export_id(id.into());
+                            }
                         } else if surface == "writing" {
                             ui.set_writing_results(message.into());
                         } else if surface == "extraction" {
@@ -7376,6 +7382,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |path, title| {
@@ -7384,6 +7391,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(info) => {
                         timer.stop();
+                        pending_physical_export.borrow_mut().take();
+                        ui.set_protocol_export_id("".into());
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
                         if let Err(error) =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
@@ -7410,6 +7419,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_default_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |title| {
@@ -7418,6 +7428,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(info) => {
                         timer.stop();
+                        pending_physical_export.borrow_mut().take();
+                        ui.set_protocol_export_id("".into());
                         *active_project.borrow_mut() = find_managed_project(&info.id).ok();
                         if let Some(project) = active_project.borrow().as_ref() {
                             if let Err(error) = restore_writing_drafts(&ui, project, &drafts) {
@@ -7444,6 +7456,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_open_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |path| {
@@ -7452,6 +7465,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(info) => {
                         timer.stop();
+                        pending_physical_export.borrow_mut().take();
+                        ui.set_protocol_export_id("".into());
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
                         if let Err(error) =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)

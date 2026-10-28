@@ -415,14 +415,15 @@ try {
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
     ) | ForEach-Object { $_.Current.Name })
-    $protocolResultText = $protocolNames -join "`n"
-    $protocolIdMatch = [regex]::Match($protocolResultText, '(?i)"protocol_id"\s*:\s*"([0-9a-f-]{36})"')
-    if (-not $protocolIdMatch.Success) {
-        throw 'Approved protocol create did not disclose its exact persisted protocol_id for export'
+    if (-not ($protocolNames | Where-Object { $_ -like '*Previewed evidence operation recorded and audited*' })) {
+        throw 'Protocol creation did not report an approved and audited record operation'
     }
-    $protocolId = $protocolIdMatch.Groups[1].Value
     $protocolHistoryId = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Protocol history ID'
-    ([System.Windows.Automation.ValuePattern]$protocolHistoryId.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($protocolId)
+    $protocolId = ([System.Windows.Automation.ValuePattern]$protocolHistoryId.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    $parsedProtocolId = [guid]::Empty
+    if (-not [guid]::TryParse($protocolId, [ref]$parsedProtocolId) -or $parsedProtocolId -eq [guid]::Empty) {
+        throw "Approved protocol was not automatically selected for export; Protocol history ID='$protocolId'"
+    }
     Invoke-AccessibleButton $window 'View protocol Markdown export'
     Start-Sleep -Milliseconds 200
     $protocolFile = Join-Path $hostData ('uia-protocol-' + [guid]::NewGuid().ToString('N') + '.md')
