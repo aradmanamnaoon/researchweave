@@ -467,6 +467,49 @@ try {
     $pdfSearch = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF search query'
     ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($twoPagePdf)
     ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('PDFium')
+    # Exercise the *real* installed Windows native dialog, not merely the
+    # presence of a Browse button. Cancellation must preserve the typed path
+    # and return control to the Slint event loop without starting an import.
+    $rootWindows = [System.Windows.Automation.AutomationElement]::RootElement
+    $existingHandles = @($rootWindows.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.NativeWindowHandle })
+    Invoke-AccessibleButton $window 'Choose local PDF with native file picker'
+    $nativeDialog = $null
+    for ($dialogAttempt = 0; $dialogAttempt -lt 100; $dialogAttempt++) {
+        foreach ($candidate in $rootWindows.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )) {
+            $info = $candidate.Current
+            if ($info.ControlType -eq [System.Windows.Automation.ControlType]::Window -and
+                $info.NativeWindowHandle -ne 0 -and
+                $existingHandles -notcontains $info.NativeWindowHandle -and
+                ($info.ProcessId -eq $p.Id -or $info.ClassName -eq '#32770') -and
+                -not $info.IsOffscreen) {
+                $nativeDialog = $candidate
+                break
+            }
+        }
+        if ($nativeDialog) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $nativeDialog) { throw 'Native PDF Browse did not open an observable Windows file dialog' }
+    $nativeDialog.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+    $chooserRestored = $false
+    for ($dialogAttempt = 0; $dialogAttempt -lt 100; $dialogAttempt++) {
+        $value = ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $browseReady = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose local PDF with native file picker').Current.IsEnabled
+        if ($value -eq $twoPagePdf -and $browseReady) {
+            $chooserRestored = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $chooserRestored) { throw 'Native PDF dialog cancellation changed the manually typed path or did not restore the UI' }
+    Write-Output 'PASS: installed native Windows PDF picker opened, cancelled and preserved the manual path'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open PDF').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF page 1 of 2*' 20000
     WaitForNameLike $window '*PDF search status: Rendered page 1 of 2*matches: 0*' 10000

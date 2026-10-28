@@ -3277,21 +3277,12 @@ fn native_chooser_filter(kind: &str) -> Result<(&'static str, &'static [&'static
     }
 }
 
-fn choose_local_file(kind: &str) -> Result<Option<String>, String> {
-    let (label, extensions) = native_chooser_filter(kind)?;
-    // This is called only by an explicit user button. Dialog cancel preserves
-    // the previously typed path and never initiates any import or network call.
-    let selected = rfd::FileDialog::new()
-        .add_filter(label, extensions)
-        .pick_file();
-    let Some(path) = selected else {
-        return Ok(None);
-    };
+fn chosen_local_file_path(path: &Path) -> Result<String, String> {
     if !path.is_absolute() {
         return Err("Native chooser did not return an absolute file path".into());
     }
     path.to_str()
-        .map(|path| Some(path.to_owned()))
+        .map(str::to_owned)
         .ok_or_else(|| "Selected file path cannot be represented as Unicode".into())
 }
 
@@ -3344,14 +3335,49 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let app = MainWindow::new()?;
     app.on_choose_local_file({
         let weak = app.as_weak();
-        move |kind| match choose_local_file(kind.as_str()) {
-            Ok(Some(path)) => path.into(),
-            Ok(None) => "".into(),
-            Err(error) => {
-                if let Some(ui) = weak.upgrade() {
+        move |kind| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            if ui.get_local_file_dialog_busy() {
+                return;
+            }
+            let (label, extensions) = match native_chooser_filter(kind.as_str()) {
+                Ok(filter) => filter,
+                Err(error) => {
                     ui.set_status(error.into());
+                    return;
                 }
-                "".into()
+            };
+            // AsyncFileDialog is polled by Slint's UI event loop instead of
+            // blocking it on Linux's portal, while retaining macOS main-thread
+            // dialog requirements. An explicit click starts this read-only
+            // chooser; it never imports a file or authorizes network egress.
+            ui.set_local_file_dialog_busy(true);
+            let weak_task = weak.clone();
+            let kind = kind.to_string();
+            let task = async move {
+                let selected = rfd::AsyncFileDialog::new()
+                    .add_filter(label, extensions)
+                    .pick_file()
+                    .await;
+                if let Some(ui) = weak_task.upgrade() {
+                    if let Some(selected) = selected {
+                        match chosen_local_file_path(selected.path()) {
+                            Ok(path) if kind == "pdf" => ui.set_pdf_local_path(path.into()),
+                            Ok(path) if kind == "data" => ui.set_data_local_path(path.into()),
+                            Ok(_) => ui.set_status("Unrecognized file picker destination".into()),
+                            Err(error) => ui.set_status(error.into()),
+                        }
+                    }
+                    // Cancel leaves the manual path untouched. The ongoing
+                    // imported revision/preview/approval is never modified.
+                    ui.set_local_file_dialog_busy(false);
+                }
+            };
+            if let Err(error) = slint::spawn_local(task) {
+                ui.set_local_file_dialog_busy(false);
+                ui.set_status(format!("Native file chooser unavailable: {error}").into());
             }
         }
     });
@@ -7745,6 +7771,12 @@ mod tests {
         for mode in ["", "save", "cloud", "credentials", "../pdf", "PDF"] {
             assert!(native_chooser_filter(mode).is_err());
         }
+        assert!(chosen_local_file_path(Path::new("relative.pdf")).is_err());
+        let absolute = std::env::temp_dir().join("nonexistent-picker-fixture.pdf");
+        assert_eq!(
+            chosen_local_file_path(&absolute).unwrap(),
+            absolute.to_str().unwrap()
+        );
     }
 
     #[test]

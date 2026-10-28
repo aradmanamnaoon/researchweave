@@ -10,7 +10,7 @@ PR #6 (`rust-physical-export-parity-20261028`) adds explicit, checksum-checked, 
 
 PR #7 (`rust-protocol-physical-export-parity-20261028`) adds persisted, versioned protocol Markdown delivery through the audited host export and its own installed-Windows UIA. Its first hosted Windows check at `71e1b3b` failed to discover the protocol ID from formatted result text. The new `027cb0ce364d5da3f55aeb9736cb62ef25f11bfc` candidate auto-selects the approved protocol ID in an accessible field, with fresh hosted security/native and quality checks pending. Do not merge until all are green at the exact final head.
 
-The separate, unmerged `rust-native-file-picker-20261028` candidate adds opt-in OS PDF/data file dialogs without changing preview, source hash, import approval or explicit typed-path workflows. It requires its own dependency-security, cross-platform compiled GUI and native dialog acceptance. Linux dialog availability depends on an installed XDG portal backend or Zenity; no dialog-interaction pass is claimed by static button checks.
+The separate, unmerged `rust-native-file-picker-20261028` candidate adds opt-in asynchronous OS PDF/data file dialogs without changing preview, source hash, import approval or explicit typed-path workflows. It avoids blocking Slint's UI event loop while an XDG portal dialog is open; selecting a file changes only the matching path field, and cancellation preserves manual paths. An installed-Windows UIAutomation dialog-open/cancel/path-preservation assertion is scripted but must pass its final hosted head; native macOS/Linux dialog interaction is still unverified. Linux dialog availability depends on an installed XDG portal backend or Zenity.
 
 Next mandatory gates, in order:
 
