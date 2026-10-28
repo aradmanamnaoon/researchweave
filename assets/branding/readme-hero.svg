@@ -1,0 +1,54 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1360" height="316" viewBox="0 0 1360 316" role="img" aria-labelledby="title desc">
+  <title id="title">ResearchWeave: research, connected</title>
+  <desc id="desc">A conceptual overview of local research: a project moves through Sources, Analyze and Synthesize, supported by Home, Automate and Manage.</desc>
+  <defs>
+    <linearGradient id="background" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#172438"/>
+      <stop offset=".62" stop-color="#1d334b"/>
+      <stop offset="1" stop-color="#244c58"/>
+    </linearGradient>
+    <linearGradient id="divider" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#147a75"/>
+      <stop offset=".5" stop-color="#7564b5"/>
+      <stop offset="1" stop-color="#9a5b3a"/>
+    </linearGradient>
+    <marker id="arrow" viewBox="0 0 10 10" refX="8" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+      <path d="M 0 0 L 10 5 L 0 10 z" fill="#a8c8d2"/>
+    </marker>
+  </defs>
+  <rect width="1360" height="316" rx="22" fill="url(#background)"/>
+  <circle cx="1365" cy="-82" r="250" fill="#147a75" fill-opacity=".13"/>
+  <circle cx="24" cy="312" r="165" fill="#7564b5" fill-opacity=".10"/>
+  <rect x="62" y="63" width="7" height="130" rx="3.5" fill="url(#divider)"/>
+  <g fill="#f6f5f1" font-family="Arial, Helvetica, sans-serif">
+    <text x="98" y="112" font-weight="700" font-size="44">Research, connected.</text>
+    <text x="99" y="155" font-size="23" fill="#c8e4e3">From question to verifiable evidence.</text>
+    <text x="100" y="200" font-size="17" fill="#e1e9ef">Local projects  ·  Reproducible analysis</text>
+    <text x="100" y="227" font-size="17" fill="#e1e9ef">Versioned writing  ·  Optional AI and sync</text>
+  </g>
+  <rect x="722" y="34" width="600" height="248" rx="22" fill="#eff9f8" fill-opacity=".06" stroke="#cee9e5" stroke-opacity=".28"/>
+  <text x="751" y="67" font-family="Arial, Helvetica, sans-serif" font-size="15" font-weight="700" fill="#c8e4e3" letter-spacing="1.5">ONE PROJECT, LINKED WORKFLOWS</text>
+  <path d="M926 129 H943 M1112 129 H1129" stroke="#a8c8d2" stroke-width="3" marker-end="url(#arrow)" fill="none"/>
+  <path d="M844 166 V190 M1027 166 V190 M1210 166 V190" stroke="#8daab7" stroke-opacity=".65" stroke-width="2" stroke-dasharray="4 6" fill="none"/>
+  <g font-family="Arial, Helvetica, sans-serif" text-anchor="middle">
+    <rect x="752" y="92" width="175" height="74" rx="13" fill="#e5f4f1" stroke="#3d9f96"/>
+    <text x="839" y="124" font-size="21" font-weight="700" fill="#173c43">Sources</text>
+    <text x="839" y="147" font-size="14" fill="#45636c">PDF · Evidence</text>
+    <rect x="944" y="92" width="168" height="74" rx="13" fill="#e5f4f1" stroke="#3d9f96"/>
+    <text x="1028" y="124" font-size="21" font-weight="700" fill="#173c43">Analyze</text>
+    <text x="1028" y="147" font-size="14" fill="#45636c">Data · Methods</text>
+    <rect x="1129" y="92" width="166" height="74" rx="13" fill="#f0eaf8" stroke="#9584c9"/>
+    <text x="1212" y="124" font-size="21" font-weight="700" fill="#3b3159">Synthesize</text>
+    <text x="1212" y="147" font-size="14" fill="#5f5682">Writing · Export</text>
+    <rect x="752" y="190" width="175" height="62" rx="12" fill="#eef1f7" stroke="#afc0cf"/>
+    <text x="839" y="217" font-size="18" font-weight="700" fill="#172438">Home</text>
+    <text x="839" y="237" font-size="13" fill="#45636c">Question · Protocol</text>
+    <rect x="944" y="190" width="168" height="62" rx="12" fill="#f0eaf8" stroke="#9584c9"/>
+    <text x="1028" y="217" font-size="18" font-weight="700" fill="#3b3159">Automate</text>
+    <text x="1028" y="237" font-size="13" fill="#5f5682">Controlled AI</text>
+    <rect x="1129" y="190" width="166" height="62" rx="12" fill="#f8eee7" stroke="#c99167"/>
+    <text x="1212" y="217" font-size="18" font-weight="700" fill="#6a3f27">Manage</text>
+    <text x="1212" y="237" font-size="13" fill="#805b49">Audit · Backup · Sync</text>
+  </g>
+  <rect x="0" y="302" width="1360" height="14" rx="7" fill="url(#divider)" opacity=".9"/>
+</svg>
