@@ -828,6 +828,10 @@ try {
     Select-FileThroughNativeDialog $window 'Choose scientific dataset with native file picker' $analysisInput $p.Id
     $dataSelected = $false
     for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        # The Slint accessibility provider may replace the LineEdit node when
+        # the asynchronous native chooser completes. Never poll the pre-dialog
+        # AutomationElement: it can retain the manually entered sentinel.
+        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
         $value = ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
         $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled
         if ($value -eq $analysisInput -and $ready) {
@@ -836,7 +840,15 @@ try {
         }
         Start-Sleep -Milliseconds 100
     }
-    if (-not $dataSelected) { throw 'Native scientific dataset selection did not update the path and restore the UI' }
+    if (-not $dataSelected) {
+        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+        $observed = ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled
+        $statuses = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
+            Where-Object { $_ -like 'Status: *' })
+        throw "Native scientific dataset selection did not update the path and restore the UI (value=$observed, ready=$ready, status=$($statuses -join ' | '))"
+    }
     Write-Output 'PASS: native Windows dataset selection updates the path before preview/import'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 260
