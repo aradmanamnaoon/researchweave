@@ -19,7 +19,7 @@
 <p align="center">
   <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/quality.yml"><img alt="Rust quality workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/quality.yml/badge.svg?branch=main" /></a>
   <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml"><img alt="Rust release candidate workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml/badge.svg" /></a>
-  <img alt="Rust v0.2.0 release awaiting verification" src="https://img.shields.io/badge/v0.2.0-release%20gated-9A5B3A?style=flat-square" />
+  <a href="https://github.com/aradmanamnaoon/researchweave/releases"><img alt="Rust v0.2.0 release status" src="https://img.shields.io/badge/v0.2.0-native%20Rust-147A75?style=flat-square" /></a>
 </p>
 
 <p align="center">
@@ -44,26 +44,26 @@
 <p align="center"><em>Actual Rust desktop capture. The banner above is a conceptual illustration, not an application screenshot.</em></p>
 
 > [!IMPORTANT]
-> **Rust v0.2.0 status — 2026-10-28: release verification in progress.** Native Rust/Slint implementation and candidate package/GUI evidence exist across Windows, Linux and both macOS architectures. The revised local-only source must pass the final exact-source native/security matrix before publication. **The [latest published release (v0.1.2)](https://github.com/aradmanamnaoon/researchweave/releases/latest) is the older Python application.** The Rust v0.2.0 installers below are future release targets, not available downloads.
+> **Rust v0.2.0 is local-first and does not require a cloud storage account.** Check the [latest published release](https://github.com/aradmanamnaoon/researchweave/releases/latest) for the current downloadable version and its verification status. The historical [Python v0.1.2 edition](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.1.2) remains available for recovery. Rust release assets are considered published only after native/security checks and public hash verification succeed.
 
 ## Downloads and release status
 
-**Available today:** [ResearchWeave v0.1.2 (legacy Python release)](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.1.2). Check that release's platform assets and checksums before installation.
+**Current download:** [Latest verified GitHub release](https://github.com/aradmanamnaoon/researchweave/releases/latest). Older [Python v0.1.2](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.1.2) remains available separately. Check each release's assets and checksums before installation.
 
-**Rust v0.2.0 (pending):** The exact URLs below are required by the release workflow's README verification. **They will return 404 until the release is published.** Do not treat a successful candidate build as a published artifact.
+**Rust v0.2.0 assets:** The exact URLs below are checked by the release workflow. They become available after that GitHub release is publicly published and verified; a missing link indicates that the release has not been published successfully.
 
-| Platform | Planned Rust artifact | Current evidence | Public Rust download |
+| Platform | Native Rust artifact | Verification required | Public Rust download |
 | --- | --- | --- | --- |
-| Windows x64 | Native installer (`.exe`) | Hosted installed-package/UIA acceptance exists on candidate SHAs; final exact-source matrix still required | [v0.2.0 Windows x64](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-windows-x64-setup.exe) |
-| macOS Apple Silicon | `.app` inside `.dmg` | Hosted native package/launch/Keychain evidence exists on candidate SHAs; final exact-source matrix still required | [v0.2.0 macOS arm64](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-macos-arm64.dmg) |
-| macOS Intel | `.app` inside `.dmg` | Hosted native package/launch/Keychain evidence exists on candidate SHAs; final exact-source matrix still required | [v0.2.0 macOS x64](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-macos-x64.dmg) |
-| Linux x86_64 | AppImage + Debian package | Hosted native package/GUI/AT-SPI evidence exists on candidate SHAs; final exact-source matrix still required | [v0.2.0 AppImage](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-linux-x86_64.AppImage) · [v0.2.0 DEB](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-linux-amd64.deb) |
+| Windows x64 | Native installer (`.exe`) | Installed-package launch and Windows UI Automation | [v0.2.0 Windows x64](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-windows-x64-setup.exe) |
+| macOS Apple Silicon | `.app` inside `.dmg` | Mounted-app launch and relaunch on ARM64 | [v0.2.0 macOS arm64](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-macos-arm64.dmg) |
+| macOS Intel | `.app` inside `.dmg` | Mounted-app launch and relaunch on x64 | [v0.2.0 macOS x64](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-macos-x64.dmg) |
+| Linux x86_64 | AppImage + Debian package | Installed-package launch and AT-SPI accessibility | [v0.2.0 AppImage](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-linux-x86_64.AppImage) · [v0.2.0 DEB](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-linux-amd64.deb) |
 
 Checksum manifest: [SHA256SUMS.txt](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/SHA256SUMS.txt). The repository release page is <https://github.com/aradmanamnaoon/researchweave/releases>. The release workflow refuses to call these links verified until anonymous public downloads and hashes succeed.
 
 ## Quick start
 
-**Already using the released Python edition?** Install from the [current release page](https://github.com/aradmanamnaoon/researchweave/releases/latest). To explore the Rust implementation from source, install [Rustup](https://rustup.rs/) and the native build tools for your OS. The Rust-native source is already tracked on the default [`main` branch](https://github.com/aradmanamnaoon/researchweave/tree/main); additional reviewed features are merged only after their native acceptance checks pass:
+**Installing ResearchWeave?** Use the [latest verified release](https://github.com/aradmanamnaoon/researchweave/releases/latest). To build the Rust desktop from source, install [Rustup](https://rustup.rs/) and the native build tools for your OS. The Rust source is tracked on the default [`main` branch](https://github.com/aradmanamnaoon/researchweave/tree/main); reviewed changes are merged after their native acceptance checks pass:
 
 ```sh
 git clone https://github.com/aradmanamnaoon/researchweave.git

@@ -19,7 +19,7 @@ Linux and macOS require the native libraries/toolchains documented in `docs/BUIL
 
 ## Release packages
 
-The v0.2.0 Rust packages are published only after all mandatory native and live-provider gates pass. Expected artifacts are:
+The v0.2.0 Rust packages are published only after source-matched security, native installed-package/GUI and release artifact verification pass. Expected artifacts are:
 
 - `ResearchWeave-v0.2.0-windows-x64-setup.exe`
 - `ResearchWeave-v0.2.0-macos-arm64.dmg`
@@ -28,7 +28,7 @@ The v0.2.0 Rust packages are published only after all mandatory native and live-
 - `ResearchWeave-v0.2.0-linux-amd64.deb`
 - `SHA256SUMS.txt`
 
-Until the release workflow publishes and anonymously verifies those assets, use source builds or the previously published legacy release as explicitly described in the README.
+See the [latest published release](https://github.com/aradmanamnaoon/researchweave/releases/latest) for verified downloads. If the v0.2.0 assets are unavailable, use a source build or the archived Python v0.1.2 release as documented in the README.
 
 ## Data and uninstall
 
