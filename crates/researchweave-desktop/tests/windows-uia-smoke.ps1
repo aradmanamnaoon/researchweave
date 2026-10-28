@@ -49,6 +49,35 @@ function Invoke-AccessibleButton([System.Windows.Automation.AutomationElement]$p
     $button.SetFocus()
     $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
+function Test-SelectedFixturePath([string]$observedPath, [string]$fixturePath) {
+    if ([string]::IsNullOrWhiteSpace($observedPath) -or [string]::IsNullOrWhiteSpace($fixturePath)) {
+        return $false
+    }
+    try {
+        $actual = [System.IO.Path]::GetFullPath($observedPath)
+        $fixture = [System.IO.Path]::GetFullPath($fixturePath)
+        if ([string]::Equals($actual, $fixture, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+        # Windows native dialogs can return a different spelling of the same
+        # physical file (for example, a resolved/aliased user-profile path).
+        # When strings differ, require a real readable file with the identical
+        # filename, length and SHA256, not a loose substring/path-tail match.
+        if (-not [System.IO.File]::Exists($actual) -or -not [System.IO.File]::Exists($fixture)) {
+            return $false
+        }
+        $actualInfo = [System.IO.FileInfo]::new($actual)
+        $fixtureInfo = [System.IO.FileInfo]::new($fixture)
+        if (-not [string]::Equals($actualInfo.Name, $fixtureInfo.Name, [StringComparison]::OrdinalIgnoreCase) -or
+            $actualInfo.Length -ne $fixtureInfo.Length) {
+            return $false
+        }
+        return (Get-FileHash -LiteralPath $actual -Algorithm SHA256).Hash -eq
+            (Get-FileHash -LiteralPath $fixture -Algorithm SHA256).Hash
+    } catch {
+        return $false
+    }
+}
 function Select-FileThroughNativeDialog(
     [System.Windows.Automation.AutomationElement]$window,
     [string]$buttonName,
@@ -834,7 +863,7 @@ try {
         $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
         $value = ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
         $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled
-        if ($value -eq $analysisInput -and $ready) {
+        if ((Test-SelectedFixturePath $value $analysisInput) -and $ready) {
             $dataSelected = $true
             break
         }
@@ -847,7 +876,7 @@ try {
         $statuses = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
             [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
             Where-Object { $_ -like 'Status: *' })
-        throw "Native scientific dataset selection did not update the path and restore the UI (value=$observed, ready=$ready, status=$($statuses -join ' | '))"
+        throw "Native scientific dataset selection did not update the path and restore the UI (value=$observed, expected=$analysisInput, observed_length=$($observed.Length), expected_length=$($analysisInput.Length), ready=$ready, status=$($statuses -join ' | '))"
     }
     Write-Output 'PASS: native Windows dataset selection updates the path before preview/import'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
