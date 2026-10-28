@@ -1,8 +1,9 @@
 from __future__ import annotations
 
 import argparse
-import re
 from pathlib import Path
+
+from verify_live_s3_acceptance import is_liara_endpoint_host
 
 
 STAGES = (
@@ -16,7 +17,7 @@ STAGES = (
 
 
 def validate(log_path: Path, expected_endpoint_host: str) -> None:
-    if not re.fullmatch(r"[A-Za-z0-9.-]+\.liara\.site", expected_endpoint_host):
+    if not is_liara_endpoint_host(expected_endpoint_host):
         raise ValueError("expected endpoint host is not a Liara hostname")
     raw = log_path.read_bytes()
     if len(raw) > 32 * 1024:

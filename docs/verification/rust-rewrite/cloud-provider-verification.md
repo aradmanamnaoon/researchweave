@@ -16,6 +16,11 @@ Liara's current Go/AWS SDK example documents the following SDK configuration:
 
 - the bucket-specific endpoint is supplied by the Liara bucket settings
   (example: `https://storage.c2.liara.site`);
+- Liara's S3-compatible legacy endpoint `https://storage.iran.liara.space`
+  is also documented by the rclone Liara provider. Protected acceptance
+  allows both Liara DNS suffixes and rejects arbitrary S3 domains;
+
+  Reference: https://rclone.org/s3/#liara-cloud
 - region `us-east-1`;
 - path-style S3 access enabled;
 - static access-key and secret-key credentials created for the bucket.

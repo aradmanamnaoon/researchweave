@@ -10,7 +10,12 @@ from pathlib import Path
 import re
 from urllib.parse import urlparse
 
-from verify_live_s3_acceptance import PRODUCER, REQUIRED_STAGES, WORKFLOW_PATH
+from verify_live_s3_acceptance import (
+    PRODUCER,
+    REQUIRED_STAGES,
+    WORKFLOW_PATH,
+    is_liara_endpoint_host,
+)
 
 
 def main() -> int:
@@ -28,7 +33,7 @@ def main() -> int:
     text = raw.decode("utf-8")
     parsed = urlparse(args.endpoint)
     host = parsed.hostname or ""
-    if parsed.scheme != "https" or not host.lower().endswith(".liara.site"):
+    if parsed.scheme != "https" or not is_liara_endpoint_host(host):
         raise SystemExit("live acceptance endpoint is not an HTTPS Liara hostname")
     if not re.fullmatch(r"[0-9a-f]{40}", args.head_sha):
         raise SystemExit("head SHA is invalid")

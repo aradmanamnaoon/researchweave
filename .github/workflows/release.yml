@@ -46,6 +46,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --locked --all-features
+      - name: Verify both documented Liara hostnames and reject endpoint spoofing
+        run: python3 -m unittest discover -s packaging/rust -p test_liara_hostname_validation.py
       - name: Install pinned cargo security commands
         run: |
           cargo install --locked cargo-audit --version 0.22.0
