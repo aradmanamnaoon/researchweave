@@ -17,8 +17,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-quality.yml"><img alt="Rust quality workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-quality.yml/badge.svg?branch=rust-liara-hostname-release-gate-20261028" /></a>
-  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml"><img alt="Rust release candidate workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml/badge.svg?branch=rust-liara-hostname-release-gate-20261028" /></a>
+  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-quality.yml"><img alt="Rust quality workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-quality.yml/badge.svg?branch=main" /></a>
+  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml"><img alt="Rust release candidate workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml/badge.svg?branch=main" /></a>
   <img alt="Rust v0.2.0 release awaiting verification" src="https://img.shields.io/badge/v0.2.0-release%20gated-9A5B3A?style=flat-square" />
 </p>
 
@@ -63,12 +63,12 @@ Checksum manifest: [SHA256SUMS.txt](https://github.com/aradmanamnaoon/researchwe
 
 ## Quick start
 
-**Already using the released Python edition?** Install from the [current release page](https://github.com/aradmanamnaoon/researchweave/releases/latest). To explore the Rust implementation from source, install [Rustup](https://rustup.rs/) and the native build tools for your OS. While the Rust rewrite is still in review, check out its [candidate branch](https://github.com/aradmanamnaoon/researchweave/tree/rust-liara-hostname-release-gate-20261028); after the replacement merges, use the default branch instead:
+**Already using the released Python edition?** Install from the [current release page](https://github.com/aradmanamnaoon/researchweave/releases/latest). To explore the Rust implementation from source, install [Rustup](https://rustup.rs/) and the native build tools for your OS. The Rust-native source is already tracked on the default [`main` branch](https://github.com/aradmanamnaoon/researchweave/tree/main); additional reviewed features are merged only after their native acceptance checks pass:
 
 ```sh
 git clone https://github.com/aradmanamnaoon/researchweave.git
 cd researchweave
-git switch rust-liara-hostname-release-gate-20261028
+git switch main
 rustup toolchain install 1.94.1
 cargo +1.94.1 run --locked -p researchweave-desktop
 ```
