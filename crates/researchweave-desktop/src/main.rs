@@ -3875,6 +3875,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok((pending, result)) => {
                         *pending_physical_export.borrow_mut() = Some(pending);
+                        ui.set_protocol_export_receipt("".into());
                         let markdown = result
                             .pointer("/data/text")
                             .and_then(serde_json::Value::as_str)
@@ -3884,6 +3885,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                     Err(error) => {
                         pending_physical_export.borrow_mut().take();
+                        ui.set_protocol_export_receipt("".into());
                         ui.set_protocol_results(error.clone().into());
                         ui.set_status(error.into());
                     }
@@ -6687,17 +6689,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(receipt) => {
                         pending_physical_export.borrow_mut().take();
-                        ui.set_writing_results(
-                            format!(
-                                "Local file saved and SHA-256 verified (no submission):\n{}",
-                                serde_json::to_string_pretty(&receipt).unwrap_or_default()
-                            )
-                            .into(),
+                        let message = format!(
+                            "Local file saved and SHA-256 verified (no submission):\n{}",
+                            serde_json::to_string_pretty(&receipt).unwrap_or_default()
                         );
+                        if screen_operation.as_str() == "protocol.export" {
+                            let digest = receipt["sha256"].as_str().unwrap_or_default();
+                            ui.set_protocol_export_receipt(
+                                format!("Protocol saved SHA-256: {digest}").into(),
+                            );
+                            ui.set_protocol_results(message.into());
+                        } else {
+                            ui.set_writing_results(message.into());
+                        }
                         ui.set_status("Local artifact saved, verified and never submitted".into());
                     }
                     Err(error) => {
-                        ui.set_writing_results(error.clone().into());
+                        if screen_operation.as_str() == "protocol.export" {
+                            ui.set_protocol_export_receipt("".into());
+                            ui.set_protocol_results(error.clone().into());
+                        } else {
+                            ui.set_writing_results(error.clone().into());
+                        }
                         ui.set_status(error.into());
                     }
                 }
@@ -7492,6 +7505,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         timer.stop();
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
+                        ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
                         if let Err(error) =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
@@ -7529,6 +7543,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         timer.stop();
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
+                        ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = find_managed_project(&info.id).ok();
                         if let Some(project) = active_project.borrow().as_ref() {
                             if let Err(error) = restore_writing_drafts(&ui, project, &drafts) {
@@ -7566,6 +7581,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         timer.stop();
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
+                        ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
                         if let Err(error) =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
