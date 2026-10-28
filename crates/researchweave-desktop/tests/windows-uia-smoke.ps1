@@ -390,6 +390,68 @@ try {
     }
     Write-Output 'PASS: Question preview is non-mutating, then separate approved record advances the project revision'
 
+    # Native, revision-bound protocol Markdown physical export. The protocol
+    # must first be persisted through Preview -> approved Record, not merely
+    # typed in an uncommitted draft.
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Protocol')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 170
+    foreach ($pair in @(
+        @('Protocol title','UIA verified clinical protocol'),
+        @('Protocol design','observational'),
+        @('Protocol author','UIA researcher'),
+        @('Protocol objective','Measure memory outcomes safely.')
+    )) {
+        $field = Named $window ([System.Windows.Automation.ControlType]::Edit) $pair[0]
+        ([System.Windows.Automation.ValuePattern]$field.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($pair[1])
+    }
+    Invoke-AccessibleButton $window 'Preview protocol'
+    Start-Sleep -Milliseconds 180
+    Invoke-AccessibleButton $window 'Record previewed protocol'
+    Start-Sleep -Milliseconds 240
+    $protocolNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($protocolNames | Where-Object { $_ -like '*Previewed evidence operation recorded and audited*' })) {
+        throw 'Protocol creation did not report an approved and audited record operation'
+    }
+    $protocolHistoryId = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Protocol history ID'
+    $protocolId = ([System.Windows.Automation.ValuePattern]$protocolHistoryId.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    $parsedProtocolId = [guid]::Empty
+    if (-not [guid]::TryParse($protocolId, [ref]$parsedProtocolId) -or $parsedProtocolId -eq [guid]::Empty) {
+        throw "Approved protocol was not automatically selected for export; Protocol history ID='$protocolId'"
+    }
+    Invoke-AccessibleButton $window 'View protocol Markdown export'
+    Start-Sleep -Milliseconds 200
+    $protocolFile = Join-Path $hostData ('uia-protocol-' + [guid]::NewGuid().ToString('N') + '.md')
+    $protocolDestination = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Protocol Markdown destination path'
+    ([System.Windows.Automation.ValuePattern]$protocolDestination.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($protocolFile)
+    Invoke-AccessibleButton $window 'Save prepared protocol Markdown without overwrite'
+    Start-Sleep -Milliseconds 190
+    if (-not (Test-Path -LiteralPath $protocolFile -PathType Leaf)) {
+        throw 'Approved protocol Markdown was not physically saved'
+    }
+    $protocolBytes = [System.IO.File]::ReadAllBytes($protocolFile)
+    $protocolContents = [System.Text.Encoding]::UTF8.GetString($protocolBytes)
+    if (-not ($protocolContents.Contains('# UIA verified clinical protocol') -and
+        $protocolContents.Contains('### Version 1') -and
+        $protocolContents.Contains('Measure memory outcomes safely.'))) {
+        throw 'Physically exported protocol is missing persisted Markdown/version content'
+    }
+    $protocolHash = (Get-FileHash -LiteralPath $protocolFile -Algorithm SHA256).Hash.ToLowerInvariant()
+    WaitForNameLike $window "*Protocol saved SHA-256: $protocolHash*" 10000
+    Invoke-AccessibleButton $window 'View protocol Markdown export'
+    Start-Sleep -Milliseconds 160
+    Invoke-AccessibleButton $window 'Save prepared protocol Markdown without overwrite'
+    Start-Sleep -Milliseconds 150
+    if ([System.IO.File]::ReadAllText($protocolFile) -ne $protocolContents) {
+        throw 'Protocol physical export overwrote an existing destination'
+    }
+    Write-Output 'PASS: Approved persisted Protocol -> physical Markdown with version history, digest and no overwrite'
+
     # Use the installed native PDFium binary, not an in-process mock, to
     # navigate a deterministic two-page PDF with distinct searchable content.
     $twoPagePdf = (Resolve-Path (Join-Path $PSScriptRoot '../../../docs/verification/rust-rewrite/pdfium-two-page-ui-fixture.pdf')).Path

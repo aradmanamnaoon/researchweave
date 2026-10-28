@@ -56,15 +56,35 @@ print(hasher.hexdigest())
 PY
 }
 
+detach_dmg() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if hdiutil detach "$mount" -quiet; then
+      mounted=0
+      return 0
+    fi
+    sleep 1
+  done
+  if hdiutil detach "$mount" -force -quiet; then
+    mounted=0
+    return 0
+  fi
+  return 1
+}
+
 cleanup() {
+  local status=$?
+  trap - EXIT
   if [[ -n "$app_pid" ]]; then
     kill "$app_pid" >/dev/null 2>&1 || true
     wait "$app_pid" >/dev/null 2>&1 || true
   fi
-  if [[ "$mounted" == 1 ]]; then
-    hdiutil detach "$mount" -quiet || true
+  if [[ "$mounted" == 1 ]] && ! detach_dmg; then
+    echo "Cannot detach macOS acceptance DMG; preserving mounted volume: $mount" >&2
+    exit 1
   fi
   rm -rf "$tmp"
+  exit "$status"
 }
 trap cleanup EXIT
 
@@ -72,8 +92,7 @@ hdiutil attach "$dmg" -readonly -nobrowse -mountpoint "$mount" -quiet
 mounted=1
 test -d "$mount/ResearchWeave.app"
 ditto "$mount/ResearchWeave.app" "$installed"
-hdiutil detach "$mount" -quiet
-mounted=0
+detach_dmg
 
 executable="$installed/Contents/MacOS/researchweave-desktop"
 frameworks="$installed/Contents/Frameworks"

@@ -40,8 +40,44 @@ fn export_extension(operation: &str, arguments: &Value) -> Result<&'static str, 
             _ => Err("Unsupported manuscript artifact format".into()),
         },
         "writing.submission_export" => Ok("zip"),
-        _ => Err("Only manuscript and draft submission artifacts can be saved".into()),
+        "protocol.export" => Ok("md"),
+        _ => Err("Only protocol, manuscript and draft submission artifacts can be saved".into()),
     }
+}
+
+fn render_artifact(
+    project: &Path,
+    operation: &str,
+    arguments: Value,
+    root: &Path,
+) -> Result<Value, String> {
+    let mut result = evidence_read_at(project, operation, arguments, root)?;
+    if operation == "protocol.export" {
+        // The existing read-only protocol endpoint returns verified persisted
+        // Markdown text rather than the binary receipt used by publishing.
+        // Adapt only at the trusted desktop boundary; do not change its API.
+        let body = result
+            .pointer("/data/text")
+            .and_then(Value::as_str)
+            .ok_or("Protocol export did not return Markdown")?
+            .as_bytes();
+        if body.is_empty() || body.len() > MAX_EXPORT_BYTES {
+            return Err("Protocol Markdown is empty or exceeds export limit".into());
+        }
+        let length = body.len();
+        let digest = hex::encode(Sha256::digest(body));
+        let encoded = STANDARD.encode(body);
+        let object = result
+            .get_mut("data")
+            .and_then(Value::as_object_mut)
+            .ok_or("Protocol export receipt is malformed")?;
+        object.insert("base64".into(), Value::String(encoded));
+        object.insert("sha256".into(), Value::String(digest));
+        object.insert("byte_length".into(), json!(length));
+        object.insert("written_to_disk".into(), Value::Bool(false));
+        object.insert("submission_performed".into(), Value::Bool(false));
+    }
+    Ok(result)
 }
 
 fn checked_bytes(receipt: &Value) -> Result<(Vec<u8>, String), String> {
@@ -84,7 +120,7 @@ pub(super) fn prepare(
         .map_err(|error| error.to_string())?
         .info()
         .map_err(|error| error.to_string())?;
-    let result = evidence_read_at(project, operation, arguments.clone(), root)?;
+    let result = render_artifact(project, operation, arguments.clone(), root)?;
     let after = ProjectStore::open(project)
         .map_err(|error| error.to_string())?
         .info()
@@ -258,7 +294,7 @@ fn write_verified(
     }
     // Re-read the authoritative persisted content at the same project revision.
     // The prepared bytes themselves are never written without this revalidation.
-    let receipt = evidence_read_at(
+    let receipt = render_artifact(
         active_project,
         &pending.operation,
         pending.arguments.clone(),
@@ -453,5 +489,98 @@ mod tests {
         let receipt = json!({"data":{"base64":"dGVzdA==","byte_length":5,
             "sha256":hex::encode(Sha256::digest(b"test"))}});
         assert!(checked_bytes(&receipt).is_err());
+    }
+
+    #[test]
+    fn approved_protocol_markdown_file_is_versioned_audited_and_never_overwritten() {
+        let root = std::env::temp_dir().join(format!("rw-protocol-export-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let project = root.join("protocol-project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Protocol export",
+            true,
+            &root.join("create-audit.sqlite"),
+        )
+        .unwrap();
+        let host = root.join("host");
+        let (create, _) = evidence_preview_at(
+            &project,
+            "protocol.create",
+            "protocol",
+            json!({"title":"Clinical methods","author":"Researcher",
+                "body":{"design":"observational","objective":"Study outcomes"}}),
+            &host,
+        )
+        .unwrap();
+        let (created, _) = evidence_execute_pending(&create, &project, &host).unwrap();
+        let id = created["data"]["protocol_id"].as_str().unwrap();
+        let (prepared, generated) = prepare(
+            &project,
+            "protocol.export",
+            json!({"protocol_id":id}),
+            &host,
+        )
+        .unwrap();
+        assert!(generated["data"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("# Clinical methods"));
+        assert_eq!(generated["data"]["written_to_disk"], false);
+        let file = root.join("clinical-methods.md");
+        assert!(!file.exists());
+        let saved = save_for_screen(
+            &prepared,
+            &project,
+            file.to_str().unwrap(),
+            &host,
+            "protocol.export",
+        )
+        .unwrap();
+        assert_eq!(saved["sha256"], prepared.sha256);
+        assert_eq!(saved["submission_performed"], false);
+        let body = fs::read_to_string(&file).unwrap();
+        assert!(body.contains("# Clinical methods"));
+        assert!(body.contains("### Version 1"));
+        assert_eq!(
+            hex::encode(Sha256::digest(body.as_bytes())),
+            prepared.sha256
+        );
+        assert!(save(&prepared, &project, file.to_str().unwrap(), &host).is_err());
+        assert_eq!(fs::read_to_string(&file).unwrap(), body);
+
+        let (amend, _) = evidence_preview_at(
+            &project,
+            "protocol.amend",
+            "protocol",
+            json!({"protocol_id":id,"author":"Researcher",
+                "rationale":"Refine outcomes",
+                "body":{"design":"observational","objective":"Refined outcomes"}}),
+            &host,
+        )
+        .unwrap();
+        evidence_execute_pending(&amend, &project, &host).unwrap();
+        let stale_target = root.join("stale-protocol.md");
+        assert!(save(&prepared, &project, stale_target.to_str().unwrap(), &host).is_err());
+        assert!(!stale_target.exists());
+        let (updated, _) = prepare(
+            &project,
+            "protocol.export",
+            json!({"protocol_id":id}),
+            &host,
+        )
+        .unwrap();
+        assert_ne!(prepared.sha256, updated.sha256);
+        save(&updated, &project, stale_target.to_str().unwrap(), &host).unwrap();
+        assert!(fs::read_to_string(&stale_target)
+            .unwrap()
+            .contains("### Version 2"));
+        {
+            let audit = AuditStore::open(host.join("operation-audit.sqlite")).unwrap();
+            assert!(audit.events().unwrap().iter().any(|record| {
+                record.operation == "export.file_save" && record.effect == "sensitive-export"
+            }));
+        }
+        fs::remove_dir_all(root).unwrap();
     }
 }
