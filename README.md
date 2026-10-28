@@ -17,8 +17,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-quality.yml"><img alt="Rust quality workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-quality.yml/badge.svg?branch=main" /></a>
-  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml"><img alt="Rust release candidate workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml/badge.svg?branch=main" /></a>
+  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/quality.yml"><img alt="Rust quality workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/quality.yml/badge.svg?branch=main" /></a>
+  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml"><img alt="Rust release candidate workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml/badge.svg" /></a>
   <img alt="Rust v0.2.0 release awaiting verification" src="https://img.shields.io/badge/v0.2.0-release%20gated-9A5B3A?style=flat-square" />
 </p>
 
