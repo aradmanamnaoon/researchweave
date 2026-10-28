@@ -158,6 +158,4 @@ appimage_retained_after="$(tree_sha256 "$appimage_data")"
 test "$appimage_retained_before" = "$appimage_retained_after"
 echo "LINUX_USER_DATA_RETENTION_OK package=appimage sha256=$appimage_retained_after"
 
-bash packaging/rust/linux-secret-service-acceptance.sh
-
 echo "LINUX_NATIVE_ACCEPTANCE_OK installed_sha256=$installed_sha"

@@ -883,10 +883,10 @@ mod tests {
         let mut router = CommandRouter::new(authority, Arc::clone(&audit));
         router
             .register(
-                "sync",
+                "network",
                 Arc::new(RecordingHandler::new()),
                 [Capability::new(
-                    "sync.push",
+                    "network.submit",
                     Effect::ExternalNetwork,
                     json!({}),
                 )],
@@ -894,7 +894,7 @@ mod tests {
             .unwrap();
         let command = Command::new(
             Uuid::new_v4(),
-            "sync.push",
+            "network.submit",
             json!({"credential":"never-store-me"}),
         );
         let result = router.dispatch(&command, None, 1.0).unwrap();

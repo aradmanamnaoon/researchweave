@@ -1,8 +1,8 @@
-# Rust native release candidate status (updated 2026-10-27)
+# Rust native release candidate status (updated 2026-10-28)
 
-ResearchWeave's existing Python release remains the public recovery path. `.github/workflows/rust-release-candidate.yml` is a **nonpublishing** Rust candidate pipeline: it creates no tag, commit or GitHub Release. The hashes and local measurements below are historical evidence for the commits/artifacts explicitly named; they are not silently reassigned to later builds.
+ResearchWeave's existing Python release remains the public recovery path. For Rust v0.2.0 the user retired cloud storage and project sync, including the former Liara release gate. Historical results below do not assert that the final local-only revision has passed. `.github/workflows/rust-release-candidate.yml` is a **nonpublishing** Rust candidate pipeline: it creates no tag, commit or GitHub Release. The hashes and local measurements below are historical evidence for the commits/artifacts explicitly named; they are not silently reassigned to later builds.
 
-Hosted predecessor evidence has now exercised every native runner family, but not yet on the final repository-replacement SHA. Run `40458111494` (`a24ac75`) passed security, Ubuntu 22.04 including Secret Service, and both macOS architectures including native package/GUI and Keychain acceptance; Windows failed only on a transient recovery status-label assertion. Run `40465876664` (`3ad57dc`) then passed security, Windows installed UIA with the durable recovery assertion, and both macOS architectures; Ubuntu exposed a headless Secret Service session-initialization defect. Those complementary passes are useful defect evidence, not a waiver: the final exact source commit must pass the whole matrix in one candidate run.
+Hosted predecessor evidence has now exercised every native runner family, but not yet on the final repository-replacement SHA. Run `40458111494` (`a24ac75`) passed security, Ubuntu 22.04 including former Secret Service, and both macOS architectures including native package/GUI and former Keychain acceptance; Windows failed only on a transient recovery status-label assertion. Run `40465876664` (`3ad57dc`) then passed security, Windows installed UIA with the durable recovery assertion, and both macOS architectures; Ubuntu exposed a headless Secret Service session-initialization defect. Those complementary passes are useful defect evidence, not a waiver: the final exact source commit must pass the whole matrix in one candidate run.
 
 ## Exact Windows candidate
 
@@ -28,7 +28,7 @@ Fresh local gates on the current source tree:
 - `cargo fmt --all -- --check` — **PASS**.
 - `cargo +1.94.1-x86_64-pc-windows-msvc check --workspace --locked` — **PASS**. The workspace uses standard Cargo `rust-version = "1.94.1"`; this is an MSRV compile check, not a claim that every native package was built with the MSRV toolchain.
 - `cargo clippy --workspace --locked --all-targets --all-features -- -D warnings` — **PASS**.
-- `cargo test --workspace --locked --all-features` — **PASS** for all executed unit/doc tests. The cloud OS credential-manager mutation test remains intentionally ignored in this suite; separate Windows keyring evidence exists.
+- `cargo test --workspace --locked --all-features` — **PASS** for all executed unit/doc tests. The previous cloud credential-manager mutation test was ignored in this historical run; the local-only release drops that provider gate.
 - `cargo build --workspace --locked` — **PASS** before the final release rebuild.
 
 The exact release executable used for the accepted Windows package was subsequently rebuilt with `cargo build --locked --release -p researchweave-desktop` and has the SHA-256 recorded above.
@@ -100,16 +100,16 @@ On 2026-10-26 the live Rust tree was mirrored onto the WSL2 Linux filesystem and
 - normal packaged AppImage GUI under Xvfb with AT-SPI enabled: **PASS**. The native accessibility tree exposed 56 nodes including the ResearchWeave frame, activity rail, six activity buttons, command palette, project path/title controls, Create/Open project actions, job/notification controls and workbench status.
 - rendered packaged-AppImage screenshot: `linux-appimage-wsl.png`, 1440x1000, SHA-256 `9053641ed3c256802a969edd83cd06270e31112974186265bd8d60d645c2cfdf`.
 
-Linux OS-keyring acceptance now passes locally against a **real Secret Service** in a clean isolated user state. The earlier failure was a headless-session harness defect: merely starting `gnome-keyring-daemon` did not initialize/unlock a default collection. The corrected gate creates a temporary HOME/XDG state, initializes the GNOME keyring with a synthetic session-only passphrase, proves `secret-tool` store/lookup/delete, and then runs the exact ignored `tests::os_keyring_roundtrip_restart_and_delete` test. That test passed provider credentials plus the separate sync secret across fresh store instances, cleanup, and post-delete missing checks. `packaging/rust/linux-secret-service-acceptance.sh` encodes the procedure without printing secret payloads, and `linux-native-acceptance.sh` now composes it. This is real WSL2 Ubuntu 26.04 Secret Service evidence; the Ubuntu 22.04/glibc compatibility and the same gate on the pinned workflow runner remain mandatory. Headless Xvfb/WSLg keyboard injection could focus the top-level window but did not transfer Slint child focus, so Linux-specific keyboard navigation is **not** claimed from those synthetic attempts; Windows installed UIA remains the current runtime keyboard-navigation evidence.
+Historical provider-only acceptance: the former Linux `linux-secret-service-acceptance.sh` tested GNOME Keyring with synthetic S3/sync credentials on WSL2 Ubuntu 26.04. That test and the provider credential checks are removed from the local-only release matrix. Its old result documents the retired implementation, not current capabilities. Linux-specific keyboard navigation is still not claimed from failed synthetic Xvfb/WSLg attempts; installed Windows UIA remains the historical keyboard evidence.
 
 ## Release blockers that remain
 
 The predecessor evidence above does **not** make the overall Rust release ready. Remaining mandatory gates are:
 
-1. **Final exact-source native matrix:** after the Rust-only repository replacement is committed, its exact SHA must pass security plus Windows, Ubuntu 22.04, macOS arm64, macOS Intel, and `verify-complete` in the hosted candidate workflow. A later source change invalidates that exact-SHA result.
-2. **Iranian S3 live acceptance:** the protected main-only workflow must run on the same frozen `main` SHA with real Liara credentials and prove connection, all four conditional-write semantics, encrypted push/pull, conflict preservation, history, second-device restore, cleanup, and the real Cloud Sync GUI flow. No such run exists yet.
-3. **Provider configuration:** the GitHub environment `live-iranian-s3-acceptance` exists with a `main` deployment-branch policy, but as last queried on 2026-10-27 it contained zero environment variables and zero secrets. This is an external fail-closed blocker, not provider evidence.
-4. **Signing truth:** no repository/environment signing credentials were observed. Signing is therefore not claimed; if credentials are later configured the release workflow must verify them, otherwise release notes/checksums must state unsigned/unnotarized status.
-5. **Final public release verification:** no Rust `v0.2.0` tag or GitHub Release exists yet. Publication must anonymously verify every native asset, `SHA256SUMS.txt`, README direct URLs, release body, and `/releases/latest` before the Rust release is called verified.
+1. **Final exact-source native matrix:** final v0.2.0 source must pass security, Windows installed UIA, Ubuntu 22.04 native packages/AT-SPI, both macOS DMG/GUI platforms, and the combined checksum verifier on one exact candidate SHA.
+2. **Signing truth:** verify measured signing/notarization; if credentials are missing, release notes accurately say unsigned/unnotarized.
+3. **Final public release verification:** the tag must point to the current main SHA; the final release must anonymously verify all five native assets, `SHA256SUMS.txt`, README direct URLs, release body and latest-release endpoint.
+
+Cloud storage/sync and Liara provider acceptance are retired from this release. No cloud credentials or live provider proof are required or claimed.
 
 The Python recovery tag `archive/python-final-c84cdf1`, Git history, and existing Python Release objects remain required until the Rust release is genuinely public and verified.

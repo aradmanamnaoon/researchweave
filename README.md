@@ -17,8 +17,8 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-quality.yml"><img alt="Rust quality workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-quality.yml/badge.svg?branch=main" /></a>
-  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml"><img alt="Rust release candidate workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml/badge.svg?branch=main" /></a>
+  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/quality.yml"><img alt="Rust quality workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/quality.yml/badge.svg?branch=main" /></a>
+  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml"><img alt="Rust release candidate workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml/badge.svg" /></a>
   <img alt="Rust v0.2.0 release awaiting verification" src="https://img.shields.io/badge/v0.2.0-release%20gated-9A5B3A?style=flat-square" />
 </p>
 
@@ -44,7 +44,7 @@
 <p align="center"><em>Actual Rust desktop capture. The banner above is a conceptual illustration, not an application screenshot.</em></p>
 
 > [!IMPORTANT]
-> **Rust v0.2.0 status — 2026-10-28: release gated.** Native Rust/Slint implementation and candidate package/GUI evidence exist across Windows, Linux and both macOS architectures. The final exact-source matrix and real Liara S3 acceptance must still pass before publication. **The [latest published release (v0.1.2)](https://github.com/aradmanamnaoon/researchweave/releases/latest) is the older Python application.** The Rust v0.2.0 installers below are future release targets, not available downloads.
+> **Rust v0.2.0 status — 2026-10-28: release verification in progress.** Native Rust/Slint implementation and candidate package/GUI evidence exist across Windows, Linux and both macOS architectures. The revised local-only source must pass the final exact-source native/security matrix before publication. **The [latest published release (v0.1.2)](https://github.com/aradmanamnaoon/researchweave/releases/latest) is the older Python application.** The Rust v0.2.0 installers below are future release targets, not available downloads.
 
 ## Downloads and release status
 
@@ -81,7 +81,7 @@ The native PDF reader additionally needs the platform PDFium library; see [build
 | **Import and inspect a dataset** | Run a descriptive or regression analysis with provenance | **Analyze → Statistics** |
 | **Write and review a manuscript** | Save revisions and generate a DOCX export | **Synthesize → Manuscript** |
 
-You can use local research workflows without enabling cloud sync or AI. Remote services require explicit configuration and consent.
+Research projects and encrypted portable archives work entirely offline. Optional remote AI requests require explicit configuration and consent.
 
 ## What ResearchWeave is
 
@@ -93,7 +93,7 @@ ResearchWeave is designed as a **research workbench rather than a collection of 
 | 🧬 **One research object graph** | Sources, references, review records, extraction, datasets, codebooks, writing, and provenance are linked instead of copied between apps. |
 | 🔬 **Scientific traceability** | Immutable dataset revisions, hashes, assumptions, complete-case accounting, bounded algorithms, and deterministic tests are first-class concerns. |
 | 🤖 **AI with boundaries** | AI proposes and assists; sensitive writes/tool actions remain inspectable and approval-gated. |
-| 🔐 **Privacy by architecture** | Private text and credentials are not dumped into audit logs or provider profile metadata. Cloud sync is opt-in and encrypts content locally before upload. |
+| 🔐 **Privacy by architecture** | Private text and credentials are not dumped into audit logs or AI provider profile metadata. Project data stays local; encrypted project archives are optional. |
 | ⚡ **Native desktop** | The application runtime is Rust. Python is not hidden inside the shipped desktop app; Python helpers are limited to build/verification tooling where used. |
 
 ## The research workbench
@@ -107,7 +107,7 @@ The Rust UI uses six persistent activity roots. Each has its own original icon a
 | **Analyze** | <img src="assets/icons/analyze.svg" width="24" alt="Analyze icon"/> | Data import, immutable datasets, statistics, plots, qualitative coding and mixed methods |
 | **Synthesize** | <img src="assets/icons/synthesize.svg" width="24" alt="Synthesize icon"/> | Notebook, manuscript, bibliography, publishing checks and research outputs |
 | **Automate** | <img src="assets/icons/automate.svg" width="24" alt="Automate icon"/> | Assistant conversations, retrieval, agent proposals and controlled tool execution |
-| **Manage** | <img src="assets/icons/manage.svg" width="24" alt="Manage icon"/> | Providers, diagnostics, activity history, backups, recovery, encrypted Cloud Sync and preferences |
+| **Manage** | <img src="assets/icons/manage.svg" width="24" alt="Manage icon"/> | AI provider configuration, diagnostics, activity history, local backups, recovery and preferences |
 
 The shell also provides a global `Ctrl+K` command path, persistent status context, Jobs/Notifications surfaces, responsive collapse behavior, dark/light/high-contrast modes, compact density, reduced motion, and 80–200% application text scaling.
 
@@ -127,7 +127,7 @@ The current design system uses **Deep Ink** (`#172438`), **Research Teal** (`#14
 
 ## What ResearchWeave does
 
-The current Rust workspace is split into 11 focused crates and exposes project-scoped capabilities through the shared command router. The high-level product surface is summarized below; detailed implementation status lives in [`docs/verification/FEATURE_EXPANSION.md`](docs/verification/FEATURE_EXPANSION.md).
+The current Rust workspace is split into nine focused crates and exposes project-scoped capabilities through the shared command router. The high-level product surface is summarized below; detailed implementation status lives in [`docs/verification/FEATURE_EXPANSION.md`](docs/verification/FEATURE_EXPANSION.md).
 
 ### Projects, integrity and recovery
 
@@ -216,11 +216,9 @@ Important boundaries:
 
 See [`docs/verification/AI_CAPABILITIES.md`](docs/verification/AI_CAPABILITIES.md) for the evidence-backed capability matrix and open evaluation work.
 
-## Cloud sync, encryption and portability
+## Offline backups, encryption and portability
 
-ResearchWeave contains a generic S3-compatible cloud/sync layer with locally encrypted content, conflict-aware semantics, history/restore infrastructure and credential indirection. The native desktop now exposes a dedicated **Cloud Sync** screen for profile setup, OS-credential-store secrets, connection/conditional-write checks, encrypted push/pull, history, restore-as-copy, conflict review and optional automatic sync. Automatic sync is fail-closed: if the remote revision no longer matches the last reviewed/successful revision, it disables itself and preserves the conflict rather than silently choosing a winner. Cloud use is opt-in; no cloud credential is hardcoded into the repository or profile JSON.
-
-The final release still requires live evidence for an Iranian S3-compatible provider, including real conditional-write behavior, encrypted push/pull, conflict/history handling and second-device restore. **Liara is the preferred documented target, but the README does not present live provider acceptance as complete until those tests are actually observed.** ArvanCloud remains non-authoritative unless its exact semantics are freshly verified.
+ResearchWeave stores research projects locally and provides portable project archives. Optional password-protected archives use authenticated encryption and verify project identity, revision and content integrity during recovery. Keep copies of your archives in a location you trust, and protect archive passwords: the app does not operate an online backup service.
 
 ## Research lifecycle
 
@@ -230,7 +228,7 @@ flowchart LR
     S --> A[Analyze<br/>Data · Statistics · Qualitative]
     A --> Y[Synthesize<br/>Notebook · Manuscript · Publishing]
     Y --> T[Automate<br/>Retrieval · Assistant · Agent proposals]
-    T --> M[Manage<br/>Diagnostics · Activity · Backup · Sync]
+    T --> M[Manage<br/>Diagnostics · Activity · Backup · Recovery]
     M -. project context .-> H
 
     classDef ink fill:#172438,color:#F4F6F8,stroke:#172438,stroke-width:2px;
@@ -257,7 +255,6 @@ flowchart TB
     EVID[Evidence / review / writing]
     ANALYSIS[Immutable datasets / analysis]
     AI[AI / retrieval / agent actions]
-    CLOUD[Cloud / encrypted sync]
 
     UI --> ROUTER
     CLI --> ROUTER
@@ -268,7 +265,6 @@ flowchart TB
     ROUTER --> EVID
     ROUTER --> ANALYSIS
     ROUTER --> AI
-    ROUTER --> CLOUD
 
     classDef ink fill:#172438,color:#F4F6F8,stroke:#172438;
     classDef teal fill:#DDEDEA,color:#172438,stroke:#147A75;
@@ -277,7 +273,7 @@ flowchart TB
     class UI,CLI,ROUTER ink;
     class PROJECT,LIB,ANALYSIS teal;
     class EVID,AI violet;
-    class CLOUD,AUTH,AUDIT copper;
+    class AUTH,AUDIT copper;
 ```
 
 The command envelope binds operation, project, request identity, arguments, actor and revision context. Read operations can run without a write approval. Mutating/sensitive operations use effect-aware approval semantics; local writes remain revision-guarded where the domain contract requires it. Higher-level desktop composition routes can combine trusted domain reads without accepting provenance objects from untrusted caller arguments.
@@ -289,8 +285,7 @@ ResearchWeave is not “secure because it is offline.” Security behavior is im
 - project mutations use revision/CAS checks rather than last-write-wins assumptions;
 - event integrity is hash-chained and diagnostics report structural failures without dumping raw private text;
 - provider metadata is bounded/redacted and credential-bearing URLs are rejected;
-- cloud content is encrypted before upload;
-- sync must not silently overwrite conflicts;
+- optional encrypted local project archives authenticate content and project identity;
 - sensitive exports/tools require the appropriate router effect/approval path;
 - audit records avoid private operation payloads;
 - recovery and archive paths verify hashes rather than trusting filenames;
@@ -364,14 +359,13 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --locked
 ```
 
-Candidate security/supply-chain verification includes `cargo audit`, `cargo deny`, a Git-history Gitleaks scan, CycloneDX generation, a deterministic Cargo license inventory, dependency/license/source policy, and package hash verification. Those checks do **not** substitute for an exact-source native matrix or real provider acceptance. See [`docs/verification/REGRESSION_RESULTS.md`](docs/verification/REGRESSION_RESULTS.md) and [`docs/verification/rust-rewrite/release-candidate-gates.md`](docs/verification/rust-rewrite/release-candidate-gates.md).
+Candidate security/supply-chain verification includes `cargo audit`, `cargo deny`, a Git-history Gitleaks scan, CycloneDX generation, a deterministic Cargo license inventory, dependency/license/source policy, and package hash verification. Those checks do **not** substitute for an exact-source native matrix. See [`docs/verification/REGRESSION_RESULTS.md`](docs/verification/REGRESSION_RESULTS.md) and [`docs/verification/rust-rewrite/release-candidate-gates.md`](docs/verification/rust-rewrite/release-candidate-gates.md).
 
 ### Remaining release-blocking evidence
 
 The project does **not** fabricate evidence for environments or services that were not exercised. The final public Rust release remains blocked on:
 
 - a fully green hosted native/security matrix for the final exact source commit;
-- protected exact-SHA real Liara conditional-write and encrypted sync acceptance, including Cloud Sync UI acceptance;
 - final tag-triggered native release jobs and checksum aggregation;
 - anonymous public download/hash/README/latest verification after publication.
 
@@ -388,8 +382,6 @@ crates/
   researchweave-analysis/   immutable datasets, statistics, plots, native formats
   researchweave-ai/         providers, conversations, retrieval, agent actions
   researchweave-crypto/     cryptographic primitives
-  researchweave-cloud/      S3-compatible provider layer
-  researchweave-sync/       encrypted sync/conflict/history behavior
   researchweave-desktop/    Slint desktop workbench
   researchweave-cli/        native CLI surface
 
@@ -428,7 +420,7 @@ For scientific code, include deterministic fixtures or independent numerical ora
 
 For desktop changes, exercise the real rendered UI, keyboard/accessibility semantics and responsive states. A control existing in Slint source is not sufficient GUI acceptance.
 
-Do not commit credentials, private manuscripts, participant data, unpublished research material, API secrets, local cloud profiles, disposable QA workspaces or generated native binaries unless the release process explicitly requires them.
+Do not commit credentials, private manuscripts, participant data, unpublished research material, API secrets, disposable QA workspaces or generated native binaries unless the release process explicitly requires them.
 
 ## Security
 

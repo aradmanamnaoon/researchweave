@@ -1,26 +1,19 @@
-﻿# Next integration action
+# Next action — local-only Rust v0.2.0
 
-The repository has already transitioned to the tracked Rust-only v0.2.0 source shape. Historical Python app/runtime/test/package files were removed from the Rust-only source in the replacement commit, while `archive/python-final-c84cdf1`, Git history, the local recovery bundle, migration fixtures and historical verification records remain available. Do not repeat the transition.
+Updated 2026-10-28. The user removed all cloud storage and synchronization features and the previously required Liara provider acceptance. The supported v0.2.0 product is a local-first native Rust/Slint desktop research environment. Password-protected local project archives and offline recovery remain supported. Optional AI providers retain their own explicit egress controls.
 
-The original Rust-only candidate `324a24ba0171cad02203e327004766b660ffccd7` passed native acceptance in run `40516514442` and was safely fast-forwarded to existing `main`. Project metadata editor parity then passed full native and quality acceptance at `a55d35611d4f9bf7f8dc2971ba19cddf0355a6a0` (native run `40535669061`, PR #3 merged). Scientific Parquet/SPSS/Stata import UI, protocol amendments/Markdown preview and screen placeholder corrections passed full native/security/artifact and quality acceptance at `7dcc91cf5834430eec5f2db93d73cce43902f039` (native run `40543483451`, PR #4 merged). Each source update to `main` was a normal fast-forward with Python recovery ancestry intact.
+## Current source
 
-PR #5 (`rust-pdf-multipage-parity-20261027`) passed native/security/Windows installed UIAutomation/Ubuntu/macOS Intel/macOS ARM64/`verify-complete` at exact commit `3676f7c60c2c86d008327c2f3ba05f114ffb0153` (run `40558069673`), with both quality runs `40558056762` and `40558069662` green, and was merged normally.
+- The last verified pre-removal source was `91371050eb71a1a7ba10796531d5203ef5acc4ea` on `main`. Its four-platform quality run `40689901036` and native candidate run `40690111676` passed; these results **do not** validate the subsequent local-only changes.
+- Work on `rust-local-only-v020-20261028` in the isolated `target/local-only-worktree` checkout. Preserve the heavily modified original root, Git history, and `archive/python-final-c84cdf1` recovery tag.
+- The local-only branch removes cloud/sync crates, CLI and desktop routing, UI and remote-provider release workflow/evidence. Historical Python and superseded Rust release evidence is not transferable to this source.
 
-PR #6 (`rust-physical-export-parity-20261028`) adds explicit, checksum-checked, non-overwriting physical manuscript (Markdown/HTML/DOCX/PDF) and incomplete submission ZIP export behind host `SensitiveExport` approval/audit, plus installed-Windows UIAutomation. Its exact source `9b2ec9066c701bd9e360e03973513ad3edd3e79a` passed native/security/all four OSes/`verify-complete` in `40601369862` and quality in `40601360836`/`40601369533`. It was fast-forwarded normally and GitHub confirmed PR #6 **MERGED** at `9b2ec90`, now `origin/main`. This is not a public v0.2.0 release.
+## Required final gates
 
-PR #7 (`rust-protocol-physical-export-parity-20261028`) adds persisted, versioned protocol Markdown delivery through the audited host export and its own installed-Windows UIA. Its first hosted Windows check at `71e1b3b` failed to discover the protocol ID from formatted result text. The new `027cb0ce364d5da3f55aeb9736cb62ef25f11bfc` candidate auto-selects the approved protocol ID in an accessible field, with fresh hosted security/native and quality checks pending. Do not merge until all are green at the exact final head.
+1. Validate source removal, regenerate the current local-only CLI capability snapshot and update README/changelog/security/product guidance accordingly.
+2. Run `cargo fmt --all -- --check`, strict all-features Clippy, locked workspace tests, security/supply-chain checks, and native installed-package/GUI acceptance for Windows x64, macOS arm64 and Intel, Ubuntu AppImage and DEB from the **same candidate SHA**.
+3. Push the branch and use a reviewed PR to merge into existing `main`, avoiding force pushes and preserving unrelated work. Reconfirm exact main SHA and quality CI success.
+4. Push annotated `v0.2.0` only from the final verified main tip. Require the tag release workflow to build five native artifacts and SHA256SUMS, verify draft assets, publish, then anonymously download/hash every public asset before promoting it to latest.
+5. Independently confirm README direct downloads, anonymous `/releases/latest`, tag and source SHA, checksums and documented signing status. Keep the legacy Python release and recovery tag intact.
 
-The separate, unmerged `rust-native-file-picker-20261028` candidate adds opt-in asynchronous OS PDF/data file dialogs without changing preview, source hash, import approval or explicit typed-path workflows. It avoids blocking Slint's UI event loop while an XDG portal dialog is open; selecting a file changes only the matching path field, and cancellation preserves manual paths. An installed-Windows UIAutomation dialog-open/cancel/path-preservation assertion is scripted but must pass its final hosted head; native macOS/Linux dialog interaction is still unverified. Linux dialog availability depends on an installed XDG portal backend or Zenity.
-
-The further isolated `rust-pdf-find-next-20261028` candidate (stacked only after the file-picker head, not merged) adds a bounded, read-only cross-page Find Next command and fixes letterboxed PDF search-highlight geometry. It has separate deterministic PDFium unit tests and installed Windows UIAutomation assertions; full exact-SHA hosted/native verification is still mandatory. This does NOT establish persisted PDF evidence-anchor/highlight workflows.
-
-Next mandatory gates, in order:
-
-1. Finish PR #7's exact-SHA hosted security/Windows installed UIAutomation/Ubuntu 22.04/macOS arm64/macOS Intel/`verify-complete` plus quality workflows, fix any genuine failure and merge normally if green. GUI/package testing stays on isolated hosted runners, not the user's active desktop.
-2. Finish the native-picker follow-on with Rust/dependency security/native packaging and real dialog UI proof. Merge only a verified source patch into existing `origin/main` without rewriting history or force-pushing.
-3. Configure the protected `live-iranian-s3-acceptance` environment with real Liara profile/endpoint/bucket variables and access-key/secret credentials. The environment exists and is restricted to `main`, but the recheck on 2026-10-28 found zero variables and zero secrets.
-4. Run the dedicated live acceptance with `head_sha` equal to the frozen final `main` SHA. Any source change after that requires rerunning provider acceptance.
-5. Only after exact-SHA live acceptance, create/push annotated `v0.2.0`, let the release workflow build all native packages, and require its draft/hash/public/anonymous/latest verification chain to succeed.
-6. Preserve old Python GitHub Releases until the Rust release is genuinely public and verified; never remove `archive/python-final-c84cdf1`.
-
-No live Liara compatibility or public Rust release is claimed before those external gates succeed.
+No third-party storage account, credentials or Liara acceptance is required for the local-only release. Do not claim a published Rust release until the final public checks have actually succeeded.

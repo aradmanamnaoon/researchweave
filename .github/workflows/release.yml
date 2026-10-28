@@ -59,8 +59,6 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --locked --all-features
-      - name: Verify both documented Liara hostnames and reject endpoint spoofing
-        run: python3 -m unittest discover -s packaging/rust -p test_liara_hostname_validation.py
       - name: Install pinned cargo security commands
         run: |
           cargo install --locked cargo-audit --version 0.22.0
@@ -104,133 +102,8 @@ jobs:
             target/security/CARGO_LICENSES.json
           if-no-files-found: error
 
-  cloud-acceptance:
-    needs: security
-    runs-on: ubuntu-24.04
-    timeout-minutes: 15
-    permissions:
-      actions: read
-      contents: read
-    outputs:
-      run_id: ${{ steps.provenance.outputs.run_id }}
-      run_attempt: ${{ steps.provenance.outputs.run_attempt }}
-      provider_name: ${{ steps.provenance.outputs.provider_name }}
-      endpoint_host: ${{ steps.provenance.outputs.endpoint_host }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Locate and verify exact-source protected Liara acceptance
-        id: provenance
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          workflow_file="rust-live-iranian-s3-acceptance.yml"
-          workflow_path=".github/workflows/$workflow_file"
-          mkdir -p target/live-s3-evidence
-
-          workflow_json="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_file")"
-          workflow_id="$(jq -er '.id | select(type == "number")' <<<"$workflow_json")"
-          workflow_api_path="$(jq -er '.path | strings' <<<"$workflow_json")"
-          workflow_api_path="${workflow_api_path%%@*}"
-          [[ "$workflow_api_path" == "$workflow_path" ]]
-
-          runs_json="$(gh api --paginate --slurp \
-            "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow_id/runs?event=workflow_dispatch&branch=main&per_page=100")"
-          jq -er \
-            --arg sha "$GITHUB_SHA" \
-            --arg repo "$GITHUB_REPOSITORY" \
-            --argjson wid "$workflow_id" \
-            '[.[] | .workflow_runs[]? |
-              select(.head_sha == $sha and
-                     .head_branch == "main" and
-                     .event == "workflow_dispatch" and
-                     .workflow_id == $wid and
-                     .status == "completed" and
-                     .conclusion == "success" and
-                     .head_repository.full_name == $repo and
-                     (.run_attempt | type) == "number" and
-                     .run_attempt >= 1)] |
-             sort_by(.run_started_at) | reverse | .[0] // error("No successful exact-SHA live Liara acceptance run")' \
-            <<<"$runs_json" > target/live-s3-evidence/selected-run.json
-
-          run_id="$(jq -er '.id | tostring' target/live-s3-evidence/selected-run.json)"
-          run_attempt="$(jq -er '.run_attempt | tostring' target/live-s3-evidence/selected-run.json)"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" > target/live-s3-evidence/observed-run.json
-          jq -e \
-            --arg sha "$GITHUB_SHA" \
-            --arg repo "$GITHUB_REPOSITORY" \
-            --argjson id "$run_id" \
-            --argjson attempt "$run_attempt" \
-            --argjson wid "$workflow_id" \
-            '.id == $id and
-             .run_attempt == $attempt and
-             .workflow_id == $wid and
-             .head_sha == $sha and
-             .head_branch == "main" and
-             .event == "workflow_dispatch" and
-             .status == "completed" and
-             .conclusion == "success" and
-             .head_repository.full_name == $repo' \
-            target/live-s3-evidence/observed-run.json >/dev/null
-          observed_path="$(jq -er '.path | strings' target/live-s3-evidence/observed-run.json)"
-          observed_path="${observed_path%%@*}"
-          [[ "$observed_path" == "$workflow_path" ]]
-
-          artifact_name="live-iranian-s3-evidence-$run_attempt"
-          artifacts_json="$(gh api --paginate --slurp \
-            "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100")"
-          artifact_count="$(jq -r \
-            --arg name "$artifact_name" \
-            --argjson run "$run_id" \
-            '[.[] | .artifacts[]? |
-              select(.name == $name and .expired == false and .workflow_run.id == $run)] | length' \
-            <<<"$artifacts_json")"
-          [[ "$artifact_count" == "1" ]]
-
-          gh run download "$run_id" \
-            --repo "$GITHUB_REPOSITORY" \
-            --name "$artifact_name" \
-            --dir target/live-s3-evidence/download
-          test -f target/live-s3-evidence/download/live-iranian-s3-acceptance.json
-          test -f target/live-s3-evidence/download/live-s3.log
-          test -f target/live-s3-evidence/download/live-s3-gui.log
-          [[ "$(find target/live-s3-evidence/download -maxdepth 1 -type f | wc -l | tr -d ' ')" == "3" ]]
-
-          python3 packaging/rust/verify_live_s3_acceptance.py \
-            target/live-s3-evidence/download/live-iranian-s3-acceptance.json \
-            --log target/live-s3-evidence/download/live-s3.log \
-            --expected-head-sha "$GITHUB_SHA" \
-            --expected-run-id "$run_id" \
-            --expected-run-attempt "$run_attempt" \
-            --expected-workflow-path "$workflow_path"
-          endpoint_host="$(jq -er '.endpoint_host | strings' target/live-s3-evidence/download/live-iranian-s3-acceptance.json)"
-          python3 packaging/rust/verify_live_s3_gui_acceptance.py \
-            target/live-s3-evidence/download/live-s3-gui.log \
-            --expected-endpoint-host "$endpoint_host"
-
-          provider_name="$(jq -er '.provider_name | strings' target/live-s3-evidence/download/live-iranian-s3-acceptance.json)"
-          echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
-          echo "run_attempt=$run_attempt" >> "$GITHUB_OUTPUT"
-          echo "provider_name=$provider_name" >> "$GITHUB_OUTPUT"
-          echo "endpoint_host=$endpoint_host" >> "$GITHUB_OUTPUT"
-      - uses: actions/upload-artifact@v4
-        with:
-          name: verified-live-iranian-s3-evidence
-          path: |
-            target/live-s3-evidence/download/live-iranian-s3-acceptance.json
-            target/live-s3-evidence/download/live-s3.log
-            target/live-s3-evidence/download/live-s3-gui.log
-          if-no-files-found: error
-          retention-days: 14
-
   native:
-    needs: [security, cloud-acceptance]
+    needs: security
     strategy:
       fail-fast: false
       matrix:
@@ -264,7 +137,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfuse2 xvfb xauth dbus-x11 at-spi2-core python3-pyatspi gnome-keyring libsecret-tools
+          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfuse2 xvfb xauth dbus-x11 at-spi2-core python3-pyatspi
       - name: Resolve version and PDFium expected digest
         shell: bash
         run: |
@@ -339,14 +212,10 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: bash packaging/rust/macos-native-acceptance.sh "$PLATFORM" "$RELEASE_VERSION"
-      - name: Linux install, direct AppImage, AT-SPI and Secret Service acceptance
+      - name: Linux install, direct AppImage and AT-SPI acceptance
         if: matrix.platform == 'linux-x64'
         shell: bash
         run: bash packaging/rust/linux-native-acceptance.sh "$RELEASE_VERSION"
-      - name: macOS Keychain round trip
-        if: runner.os == 'macOS'
-        shell: bash
-        run: cargo test --locked -p researchweave-cloud os_keyring_roundtrip_restart_and_delete -- --ignored --nocapture
       - name: Verify candidate files
         shell: bash
         run: |
@@ -426,7 +295,7 @@ jobs:
           retention-days: 7
 
   verify-complete:
-    needs: [security, cloud-acceptance, native]
+    needs: [security, native]
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v4
@@ -450,7 +319,7 @@ jobs:
           path: dist/SHA256SUMS.txt
 
   publish:
-    needs: [security, cloud-acceptance, native, verify-complete]
+    needs: [security, native, verify-complete]
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -469,15 +338,8 @@ jobs:
         with:
           name: rust-complete-checksums
           path: dist
-      - uses: actions/download-artifact@v4
-        with:
-          name: verified-live-iranian-s3-evidence
-          path: target/live-s3-evidence
       - name: Verify final release inputs and README links before publication
         shell: bash
-        env:
-          LIVE_S3_RUN_ID: ${{ needs.cloud-acceptance.outputs.run_id }}
-          LIVE_S3_RUN_ATTEMPT: ${{ needs.cloud-acceptance.outputs.run_attempt }}
         run: |
           set -euo pipefail
           [[ "$GITHUB_REF_NAME" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]
@@ -485,17 +347,6 @@ jobs:
           actual="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;data=json.load(sys.stdin);print(next(package["version"] for package in data["packages"] if package["name"]=="researchweave-desktop"))')"
           [[ "$version" == "$actual" ]]
           python3 packaging/rust/verify_release_assets.py dist "$version"
-          python3 packaging/rust/verify_live_s3_acceptance.py \
-            target/live-s3-evidence/live-iranian-s3-acceptance.json \
-            --log target/live-s3-evidence/live-s3.log \
-            --expected-head-sha "$GITHUB_SHA" \
-            --expected-run-id "$LIVE_S3_RUN_ID" \
-            --expected-run-attempt "$LIVE_S3_RUN_ATTEMPT" \
-            --expected-workflow-path ".github/workflows/rust-live-iranian-s3-acceptance.yml"
-          endpoint_host="$(jq -er '.endpoint_host | strings' target/live-s3-evidence/live-iranian-s3-acceptance.json)"
-          python3 packaging/rust/verify_live_s3_gui_acceptance.py \
-            target/live-s3-evidence/live-s3-gui.log \
-            --expected-endpoint-host "$endpoint_host"
           expected=(
             "ResearchWeave-v$version-windows-x64-setup.exe"
             "ResearchWeave-v$version-macos-arm64.dmg"
@@ -513,11 +364,6 @@ jobs:
           done
       - name: Prepare Rust release notes
         shell: bash
-        env:
-          PROVIDER_NAME: ${{ needs.cloud-acceptance.outputs.provider_name }}
-          ENDPOINT_HOST: ${{ needs.cloud-acceptance.outputs.endpoint_host }}
-          LIVE_S3_RUN_ID: ${{ needs.cloud-acceptance.outputs.run_id }}
-          LIVE_S3_RUN_ATTEMPT: ${{ needs.cloud-acceptance.outputs.run_attempt }}
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
@@ -538,7 +384,7 @@ jobs:
           {
             echo "# ResearchWeave v$version"
             echo
-            echo "ResearchWeave is a native Rust/Slint local-first research workbench. This release replaces the legacy Python/PyQt desktop while preserving the archived Python recovery ref."
+            echo "ResearchWeave is a native Rust/Slint research workbench built around local project files, desktop workflows and explicit exports. The historical Python release remains available for recovery."
             echo
             echo "## Downloads"
             echo
@@ -549,13 +395,13 @@ jobs:
             echo "- Debian/Ubuntu amd64: \`ResearchWeave-v$version-linux-amd64.deb\`"
             echo "- Combined checksums: \`SHA256SUMS.txt\`"
             echo
+            echo "## Local-first research workflows"
+            echo
+            echo "Manage and reopen research projects locally; read PDFs, import and inspect datasets, run analysis, organize review and extraction work, and prepare manuscript and export artifacts. Local project revisions and recovery preserve research work between sessions. Cloud project storage and device sync are not included."
+            echo
             echo "## Native acceptance"
             echo
-            echo "Windows, Ubuntu 22.04, macOS arm64 and macOS x64 packages were built and exercised on native GitHub runners before publication. The packaged acceptance covers project create/reopen, deterministic CSV import, descriptives, export/hash verification, settings persistence, real GUI launch/relaunch, package removal and user-data retention. Windows UIA, Ubuntu AT-SPI/Secret Service and macOS Keychain checks run in their native jobs. macOS Accessibility enumeration is attempted only when hosted-runner TCC permits it; no AX pass is claimed when TCC blocks enumeration."
-            echo
-            echo "## Iranian S3 acceptance"
-            echo
-            echo "Live acceptance passed against $PROVIDER_NAME ($ENDPOINT_HOST): conditional writes, encrypted push/pull, conflict preservation, history and second-device restore. Release gating re-verifies the marker-only machine-generated evidence from protected Actions run $LIVE_S3_RUN_ID attempt $LIVE_S3_RUN_ATTEMPT for this exact source commit; credentials and raw provider output are not included in the evidence artifact."
+            echo "Windows, Ubuntu 22.04, macOS arm64 and macOS x64 packages were built and exercised on native GitHub runners before publication. The packaged acceptance covers project create/reopen, deterministic CSV import, descriptives, export/hash verification, settings persistence, real GUI launch/relaunch, package removal and user-data retention. Windows UIA, Ubuntu AT-SPI and macOS GUI checks run in their native jobs. macOS Accessibility enumeration is attempted only when hosted-runner TCC permits it; no AX pass is claimed when TCC blocks enumeration."
             echo
             echo "## Signing status"
             echo

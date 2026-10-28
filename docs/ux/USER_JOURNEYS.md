@@ -93,14 +93,12 @@ For PDFs, page/search/annotation features must degrade honestly until full PDF s
 5. Local/network/sensitive effects require the existing host approval path.
 6. Completion links to produced artifacts/audit entry; rejected proposals do nothing.
 
-## Journey 9 — Sync, conflict and recovery
+## Journey 9 — Local backup and recovery
 
-1. Manage > Sync shows Local only until explicitly configured.
-2. Provider profile is validated; credentials go to OS keyring and never to project/profile JSON.
-3. Safe sync remains disabled until a live conditional-write probe succeeds for that exact connection.
-4. Push/pull shows immutable revision history and device origin.
-5. Divergence becomes an explicit conflict with both branches preserved.
-6. Recovery uses restore-as-copy by default; existing active project is not silently overwritten.
+1. Manage > Backups / Recovery opens the local project recovery controls.
+2. Export an archive to a user-selected filesystem location, optionally protecting it with a password.
+3. Confirm the archive receipt and keep a separate copy for recovery.
+4. Restore from an archive through the verified local recovery flow, preserving the active project unless the user explicitly selects another destination.
 
 ## Journey 10 — Keyboard-only expert workflow
 

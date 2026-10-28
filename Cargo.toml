@@ -3,8 +3,6 @@ members = [
     "crates/researchweave-core",
     "crates/researchweave-crypto",
     "crates/researchweave-project",
-    "crates/researchweave-sync",
-    "crates/researchweave-cloud",
     "crates/researchweave-desktop",
     "crates/researchweave-analysis",
     "crates/researchweave-evidence",

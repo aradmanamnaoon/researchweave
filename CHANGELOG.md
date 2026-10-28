@@ -5,10 +5,9 @@
 ## 0.2.0 - Unreleased
 
 - Replaced the shipped Python/PyQt6 desktop runtime with a native Rust workspace and Slint desktop application while preserving the Python release in Git history/recovery artifacts.
-- Added native project, evidence, library, analysis, AI, encrypted archive, sync and cloud crates behind a shared typed command/approval boundary.
+- Added native project, evidence, library, analysis, AI and encrypted local archive crates behind a shared typed command/approval boundary.
 - Added native Windows, macOS arm64/x64, AppImage and Debian packaging with installed/mounted package smoke, real GUI/accessibility acceptance and platform credential-store verification gates.
-- Added opt-in encrypted S3-compatible Cloud Sync with Liara profile support, operating-system credential storage, conditional-write verification, encrypted push/pull, conflict preservation, revision history, restore-as-copy and fail-closed automatic sync.
-- Added protected exact-SHA live-provider acceptance and sanitized evidence verification so a Rust release cannot claim Iranian S3 support from static configuration or committed evidence alone.
+- Kept project archives and encrypted local recovery while removing the cloud storage and synchronization subsystems and their provider-specific release gates.
 - Expanded deterministic scientific-analysis coverage, native document/PDF flows, structured writing/publishing workflows, local-first AI/provider controls and durable approval/audit behavior.
 - Hardened release publication with security/supply-chain checks, SBOM/checksum verification, draft-first publication, native artifact completeness checks and post-publication download/hash verification.
 

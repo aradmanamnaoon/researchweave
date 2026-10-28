@@ -50,8 +50,6 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --locked --all-features
-      - name: Verify both documented Liara hostnames and reject endpoint spoofing
-        run: python3 -m unittest discover -s packaging/rust -p test_liara_hostname_validation.py
       - name: Install pinned cargo security commands
         run: |
           cargo install --locked cargo-audit --version 0.22.0
@@ -137,7 +135,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfuse2 xvfb xauth dbus-x11 at-spi2-core python3-pyatspi gnome-keyring libsecret-tools
+          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfuse2 xvfb xauth dbus-x11 at-spi2-core python3-pyatspi
       - name: Resolve version and PDFium expected digest
         shell: bash
         run: |
@@ -213,14 +211,10 @@ jobs:
         if: runner.os == 'macOS'
         shell: bash
         run: bash packaging/rust/macos-native-acceptance.sh "$PLATFORM" "$RELEASE_VERSION"
-      - name: Linux install, direct AppImage, AT-SPI and Secret Service acceptance
+      - name: Linux install, direct AppImage and AT-SPI acceptance
         if: matrix.platform == 'linux-x64'
         shell: bash
         run: bash packaging/rust/linux-native-acceptance.sh "$RELEASE_VERSION"
-      - name: macOS Keychain round trip
-        if: runner.os == 'macOS'
-        shell: bash
-        run: cargo test --locked -p researchweave-cloud os_keyring_roundtrip_restart_and_delete -- --ignored --nocapture
       - name: Verify candidate files
         shell: bash
         run: |

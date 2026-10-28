@@ -16,11 +16,10 @@ Support labels are intentionally narrow: **native verified**, **file import/expo
 | Remote AI providers | limited/conditional | Provider adapters exist behind egress policy and explicit approval. No consumer-subscription credential reuse is supported. |
 | Durable local AI agents | native verified | Retrieval-backed planning/execution is covered by AI tests and integrated command-bus tests. |
 | Encrypted local archive | native verified | Evidence/AI cryptographic paths use `cryptography`; wrong-key/tamper behavior is tested in worker suites. |
-| Remote encrypted sync | experimental | Backend sync abstraction and conflict handling exist but `build_services` does not configure a live remote transport by default. |
 | R runtime | limited/conditional | Optional subprocess path is present. Local Windows verification observed the graceful missing-R path only. |
 | Linux portable build | experimental | Build script and CI runner definition exist; not observed in this Windows session. |
 | macOS portable build | experimental | Build script and CI runner definition exist; not observed in this Windows session. |
 
 ## Desktop AI caveat
 
-The desktop Provider/Agent/Privacy screens currently maintain UI-side provider metadata and proposal state. Advanced AI facade operations such as provider completion, retrieval answer, durable agent execution and remote sync are available through the shared backend command bus and tests, but not all are wired to direct desktop controls yet. This is a release-completeness gap, not a backend availability claim.
+The desktop Provider/Agent/Privacy screens expose optional provider configuration and proposal controls. Advanced AI facade operations such as provider completion, retrieval answers and durable agent execution are available through the shared backend command bus, but not all are wired to direct desktop controls yet. This is a release-completeness gap, not a backend availability claim.

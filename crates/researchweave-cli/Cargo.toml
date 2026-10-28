@@ -9,7 +9,6 @@ rust-version.workspace = true
 researchweave-core = { path = "../researchweave-core", version = "=0.2.0" }
 researchweave-analysis = { path = "../researchweave-analysis", version = "=0.2.0" }
 researchweave-ai = { path = "../researchweave-ai", version = "=0.2.0" }
-researchweave-cloud = { path = "../researchweave-cloud", version = "=0.2.0" }
 researchweave-evidence = { path = "../researchweave-evidence", version = "=0.2.0" }
 researchweave-library = { path = "../researchweave-library", version = "=0.2.0" }
 researchweave-project = { path = "../researchweave-project", version = "=0.2.0" }

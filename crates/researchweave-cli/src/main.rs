@@ -8,7 +8,6 @@ use researchweave_ai::{
     EgressPolicy, NativeHttpTransport,
 };
 use researchweave_analysis::AnalysisService;
-use researchweave_cloud::{CloudOperationHandler, OsKeyringStore, OsSyncSecretStore};
 use researchweave_core::{AuditStore, Authority, CommandRouter};
 use researchweave_evidence::EvidenceHandler;
 use researchweave_library::LibraryHandler;
@@ -139,22 +138,6 @@ impl Services {
             )
             .map_err(|error| error.to_string())?;
 
-        let cloud_handler = Arc::new(
-            CloudOperationHandler::with_profile_path(
-                Arc::new(OsKeyringStore),
-                Arc::new(OsSyncSecretStore),
-                root.join("cloud-profiles.json"),
-            )
-            .map_err(|error| error.to_string())?,
-        );
-        router
-            .register(
-                "cloud",
-                cloud_handler,
-                CloudOperationHandler::capabilities(),
-            )
-            .map_err(|error| error.to_string())?;
-
         let ai_transport = NativeHttpTransport::new(std::time::Duration::from_secs(25))
             .map_err(|error| error.to_string())?;
         let conversations = Arc::new(
@@ -218,7 +201,6 @@ impl Services {
                 "library": {"status":"ok","operations":count("library")},
                 "analysis": {"status":"ok","operations":count("analysis")},
                 "ai": {"status":"implemented","registered_operations":count("ai"),"transport":"native-rust","offline_default":true,"durable_agent_action_store":agent_action_store_attached},
-                "cloud": {"status":"implemented","registered_operations":count("cloud"),"safe_sync_requires_live_conditional_write_probe":true},
                 "desktop": {"status":"implemented","registered_operations":0,"gui_framework":"slint"}
             },
             "operations": capabilities.len()
@@ -423,22 +405,6 @@ mod tests {
             .any(|item| item["operation"] == "project.timeline"));
         assert!(capabilities
             .iter()
-            .any(|item| item["operation"] == "cloud.conditional.probe"
-                && item["effect"] == "external-network"));
-        assert!(capabilities
-            .iter()
-            .any(|item| item["operation"] == "cloud.credentials.store"
-                && item["effect"] == "local-write"));
-        assert!(capabilities
-            .iter()
-            .any(|item| item["operation"] == "cloud.sync.tip"
-                && item["effect"] == "external-network"));
-        assert!(capabilities
-            .iter()
-            .any(|item| item["operation"] == "cloud.sync.history"
-                && item["effect"] == "external-network"));
-        assert!(capabilities
-            .iter()
             .any(|item| item["operation"] == "ai.profile.validate" && item["effect"] == "read"));
         assert!(capabilities
             .iter()
@@ -466,14 +432,6 @@ mod tests {
         assert!(capabilities
             .iter()
             .any(|item| item["operation"] == "assistant.agent.plan" && item["effect"] == "read"));
-        assert!(capabilities
-            .iter()
-            .any(|item| item["operation"] == "cloud.sync.push"
-                && item["effect"] == "external-network"));
-        assert!(capabilities
-            .iter()
-            .any(|item| item["operation"] == "cloud.sync.pull"
-                && item["effect"] == "external-network"));
         assert!(capabilities
             .iter()
             .any(|item| item["operation"] == "project.archive" && item["effect"] == "local-write"));

@@ -63,7 +63,7 @@ Replace the 39-item global sidebar with six stable activity roots. The old names
 ### Manage
 
 - Providers
-- Cloud Sync / Integrations
+- Local backups / recovery
 - Privacy & approvals
 - Backups
 - Recovery

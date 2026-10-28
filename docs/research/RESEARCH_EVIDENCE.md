@@ -101,5 +101,5 @@ Primary public sources consulted during that research:
 | Local model interoperability | OpenAI-compatible local contract and safe connection-failure path pass | Real Ollama/LM Studio/vLLM model endpoint when user supplies one |
 | Cross-platform desktop behavior | Windows native QA and Windows package evidence exist | Linux/macOS native runner verification |
 | Accessibility | Accessible names, focus/contrast tests, Windows interaction evidence | Dedicated screen-reader and full keyboard-only audit |
-| Remote sync/connectors | Deterministic protocol tests pass | Live Zotero/WebDAV/S3 interoperability with user-owned services |
+| Local archive portability | Encrypted local archive and project recovery tests exist | Real cross-device import/recovery under final package acceptance |
 | Research-duration gate | Reference/pattern evidence exists | Timestamped active-time log still missing; do not claim 120 minutes |

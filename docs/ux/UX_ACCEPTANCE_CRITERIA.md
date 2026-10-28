@@ -69,9 +69,8 @@ These criteria are additive to the Rust rewrite/master release specification. Pa
 - [ ] UI effect labels correspond exactly to core effect classification.
 - [ ] Operations requiring approval show an exact preview/scope before approval.
 - [ ] AI tool proposals are inert until dispatched through the same host authority.
-- [ ] Remote provider/cloud UI makes network egress explicit.
+- [ ] Optional remote AI provider requests make network egress explicit.
 - [ ] Credentials are never echoed into normal UI, logs, project content or screenshots.
-- [ ] Cloud sync is not shown as safe/enabled until conditional-write verification succeeds for the active connection.
 
 ## I. Visual/design-system quality
 
@@ -101,7 +100,7 @@ Record before/after measurements in a verification report for at least:
 5. Import a dataset and inspect variables/quality.
 6. Run/reopen one statistical analysis and inspect provenance.
 7. Perform representative review screening/adjudication when native review is implemented.
-8. Configure/check cloud sync state without exposing credentials.
+8. Export and recover a local project archive without overwriting an existing project.
 9. Use contextual AI to generate an inert action proposal and approve/reject it through host policy.
 
 For each task record: action count, success/failure, navigation depth, keyboard-only success, observed blocking latency and recovery from one representative error. Time measurements are optional unless collected with a repeatable method.

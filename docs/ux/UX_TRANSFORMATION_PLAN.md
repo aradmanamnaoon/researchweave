@@ -100,12 +100,10 @@ Deliver after native review semantics are sufficiently complete:
 - Contextual assistant drawer using inert proposals and exact approval boundary.
 - Publishing/export validation.
 
-## Stage 7 — Manage, sync, recovery and diagnostics
+## Stage 7 — Manage, recovery and diagnostics
 
 - Providers/credentials status without exposing secrets.
-- Cloud safe-CAS verification state.
-- Sync history/conflict/restore-as-copy.
-- Backups/recovery.
+- Local backups, encrypted archives and recovery.
 - Settings, accessibility, shortcuts, themes, density.
 - Redacted diagnostics and audit/activity timeline.
 

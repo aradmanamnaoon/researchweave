@@ -7,7 +7,7 @@ ResearchWeave's shipped desktop runtime is native Rust/Slint. Python is not embe
 - Git.
 - Rust 1.94.1 with `rustfmt` and `clippy`.
 - Native build tools for the target operating system.
-- Platform packages required by Slint and the OS credential store.
+- Platform packages required by Slint.
 - PDFium when exercising the native PDF reader.
 
 ## Build and test
@@ -33,11 +33,11 @@ On Windows, `packaging/rust/fetch-pdfium-win-x64.ps1` fetches the pinned PDFium 
 Release packages are built and exercised on native GitHub-hosted runners by `.github/workflows/rust-release-candidate.yml` and `.github/workflows/release.yml`:
 
 - Windows x64: Inno Setup installer plus installed-package/UIA smoke.
-- macOS arm64 and Intel: DMG containing `ResearchWeave.app`, native launch/relaunch checks and Keychain acceptance.
-- Linux x86_64: Debian package and AppImage, native launch/relaunch, AT-SPI and Secret Service acceptance.
+- macOS arm64 and Intel: DMG containing `ResearchWeave.app`, native launch/relaunch checks.
+- Linux x86_64: Debian package and AppImage, native launch/relaunch and AT-SPI acceptance.
 
 `packaging/rust/build-native.py`, `package-unix.sh`, `windows-installed-smoke.ps1`, `macos-native-acceptance.sh`, and `linux-native-acceptance.sh` are the canonical packaging/acceptance helpers. Generated packages belong in CI artifacts/GitHub Releases, not Git.
 
 ## Release integrity
 
-A release must pass the security, native package, exact-SHA live Liara, checksum, public-download and release-link gates described in `docs/release/RELEASE_READINESS.md`. Signing is verified when credentials exist; otherwise release notes must state unsigned/unnotarized status.
+A release must pass security, native package, exact-source, checksum, public-download and release-link gates described in `docs/release/RELEASE_READINESS.md`. Signing is verified when credentials exist; otherwise release notes must state unsigned/unnotarized status.

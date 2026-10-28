@@ -1,8 +1,12 @@
 # ResearchWeave regression results
 
-Snapshot: 2026-10-26. This is a living result ledger, not a substitute for the final release-candidate gates. Results are labeled by how directly they were observed in the current continuation.
+Historical snapshot: 2026-10-26. All measurements and pass counts below are from earlier source revisions and cannot be applied to the final local-only v0.2.0 build. The 2026-10-28 removal deleted cloud/sync crates, provider-only tests, and native cloud UI; the last pre-removal main SHA was `91371050`. Final-release verification requires fresh tests on the new commit.
 
-## Freshly observed in this continuation
+## Local-only removal verification (2026-10-28)
+
+The isolated `rust-local-only-v020-20261028` source removes cloud/sync crates, Cloud Sync desktop/CLI operations and UI, and Liara release gates. The rewritten desktop tests passed 36/36, CLI tests 5/5, and targeted desktop strict Clippy/format checks passed. An attempted full local workspace test was interrupted by the Windows build volume running out of disk space during desktop test linking; **this is not a successful workspace test result**. A fresh hosted all-features matrix and native installer verification are required on the final source SHA. Password-protected local archive/recovery support is retained.
+
+## Earlier observations (historical; superseded by local-only changes)
 
 | Gate | Result | Evidence |
 | --- | --- | --- |
@@ -45,18 +49,17 @@ These rows are supported by checked-in/current workspace verification notes and 
 | Installed Windows candidate | `SMOKE_OK`, `PDF_SMOKE_OK`, complete installed UIA and `PACKAGED_QA_OK` recorded for the current staged release binary at that run | `rust-rewrite/release-candidate-gates.md` |
 | Analysis native imports | Parquet/SAV/ZSAV/DTA focused suite and strict Clippy recorded green | `rust-rewrite/native-tabular-imports.md` |
 | Manuscript DOCX | Evidence tests, desktop build/Clippy and UIA DOCX receipt recorded green | `DOCX_EXPORT_MATRIX.md` |
-| Windows keyring | Synthetic S3/sync credential write/read/delete recorded | acceptance ledger / cloud verification notes |
+| Former Windows keyring | Synthetic remote-storage credential write/read/delete previously recorded | Historical evidence only; the remote-storage feature has been removed |
 
 ## Test inventory census
 
-The live Rust source currently contains 182 `#[test]` markers across crates: AI 25, analysis 46, CLI 5, cloud 14, core 6, crypto 6, desktop 26, evidence 18, library 8, project 21 and sync 7. The marker count remains an inventory statistic; separately, the fresh all-features full-workspace test gate above is green.
+The pre-removal source contained 182 `#[test]` markers, including now-removed cloud and sync suites. This count is historical. The local-only build must establish its own independent hosted all-features test results.
 
 ## Known open regression/release gates
 
 - Native macOS arm64/x64 package execution and rendered GUI QA.
 - Native Linux AppImage/DEB execution and rendered GUI QA.
-- Live Iranian S3 conditional-write + encrypted push/pull/conflict/history + second-device restore.
-- macOS/Linux keyring evidence and signing/notarization when credentials are available.
-- Final public release/tag/download-link verification remains intentionally unperformed until the external native/provider gates are satisfied.
+- Signed/notarized native packages when signing credentials are available; otherwise accurately label packages unsigned/unnotarized.
+- Final public release/tag/download-link verification after exact-source native security/GUI checks.
 
 Any later failure supersedes a prior green row until it is understood and rerun. No historical result should be promoted to final release evidence merely because the source file still contains the test.

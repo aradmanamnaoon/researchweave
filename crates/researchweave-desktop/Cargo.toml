@@ -14,7 +14,6 @@ researchweave-library = { path = "../researchweave-library", version = "=0.2.0" 
 researchweave-evidence = { path = "../researchweave-evidence", version = "=0.2.0" }
 researchweave-analysis = { path = "../researchweave-analysis", version = "=0.2.0" }
 researchweave-ai = { path = "../researchweave-ai", version = "=0.2.0" }
-researchweave-cloud = { path = "../researchweave-cloud", version = "=0.2.0" }
 researchweave-core = { path = "../researchweave-core", version = "=0.2.0" }
 uuid = { version = "1", features = ["v4"] }
 serde_json.workspace = true
