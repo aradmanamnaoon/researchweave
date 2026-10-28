@@ -111,7 +111,37 @@ function Select-FileThroughNativeDialog(
     ([System.Windows.Automation.ValuePattern]$filename.GetCurrentPattern(
         [System.Windows.Automation.ValuePattern]::Pattern
     )).SetValue($selectedPath)
-    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    # The common dialog's ID 1 is its default Open button. SendKeys(ENTER)
+    # after UIA ValuePattern.SetValue is not reliable on hosted Windows: it
+    # can reach the parent app instead of the modal dialog. Invoke the actual
+    # accessible dialog button, rather than relying on keyboard focus.
+    $confirm = $null
+    foreach ($button in (Children $dialog ([System.Windows.Automation.ControlType]::Button))) {
+        if ($button.Current.AutomationId -eq '1') {
+            $confirm = $button
+            break
+        }
+    }
+    if (-not $confirm) {
+        throw "Native file picker has no accessible Open button (ID 1): $buttonName"
+    }
+    $confirm.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $handle = $dialog.Current.NativeWindowHandle
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        $stillOpen = $false
+        foreach ($candidate in $desktop.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )) {
+            if ($candidate.Current.NativeWindowHandle -eq $handle) {
+                $stillOpen = $true
+                break
+            }
+        }
+        if (-not $stillOpen) { return }
+        Start-Sleep -Milliseconds 100
+    }
+    throw "Native file picker did not close after invoking Open: $buttonName"
 }
 function WindowFor($process, [string]$failureMessage) {
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $process.Id)
