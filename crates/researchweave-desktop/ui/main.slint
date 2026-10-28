@@ -184,6 +184,9 @@ export component MainWindow inherits Window {
     callback dismiss-notifications();
     in-out property <image> pdf-image;
     in-out property <string> pdf-status: "Choose a local PDF file";
+    in-out property <string> pdf-local-path: "";
+    in-out property <string> data-local-path: "";
+    in-out property <bool> local-file-dialog-busy: false;
     in-out property <int> pdf-matches: 0;
     in-out property <int> pdf-page-number: 1;
     in-out property <int> pdf-page-count: 0;
@@ -241,7 +244,7 @@ export component MainWindow inherits Window {
 
     callback load-pdf(string, string, int);
     callback find-next-pdf(string, string, int);
-    callback choose-local-file(string) -> string;
+    callback choose-local-file(string);
     callback create-project(string, string);
     callback create-default-project(string);
     callback open-project(string);
@@ -947,6 +950,8 @@ export component MainWindow inherits Window {
                                 HorizontalLayout {
                                     spacing: 8px;
                                     pdf-path := LineEdit {
+                                        text: root.pdf-local-path;
+                                        edited => { root.pdf-local-path = self.text; }
                                         horizontal-stretch: 1;
                                         placeholder-text: "Absolute path to a local PDF";
                                         accessible-label: "PDF file path";
@@ -955,10 +960,8 @@ export component MainWindow inherits Window {
                                     Button {
                                         text: "Browse PDF…";
                                         accessible-label: "Choose local PDF with native file picker";
-                                        clicked => {
-                                            let selected = root.choose-local-file("pdf");
-                                            if selected != "" { pdf-path.text = selected; }
-                                        }
+                                        enabled: !root.local-file-dialog-busy;
+                                        clicked => { root.choose-local-file("pdf"); }
                                     }
                                 }
                                 HorizontalLayout {
@@ -1681,6 +1684,8 @@ export component MainWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 8px;
                                 analysis-import-path := LineEdit {
+                                    text: root.data-local-path;
+                                    edited => { root.data-local-path = self.text; }
                                     horizontal-stretch: 1;
                                     placeholder-text: "Absolute data file path";
                                     accessible-label: "Analysis import path";
@@ -1688,10 +1693,8 @@ export component MainWindow inherits Window {
                                 Button {
                                     text: "Browse data…";
                                     accessible-label: "Choose scientific dataset with native file picker";
-                                    clicked => {
-                                        let selected = root.choose-local-file("data");
-                                        if selected != "" { analysis-import-path.text = selected; }
-                                    }
+                                    enabled: !root.local-file-dialog-busy;
+                                    clicked => { root.choose-local-file("data"); }
                                 }
                             }
                             HorizontalLayout {
