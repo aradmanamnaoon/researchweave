@@ -442,13 +442,7 @@ try {
         throw 'Physically exported protocol is missing persisted Markdown/version content'
     }
     $protocolHash = (Get-FileHash -LiteralPath $protocolFile -Algorithm SHA256).Hash.ToLowerInvariant()
-    $protocolSaveNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($protocolSaveNames | Where-Object { $_ -like "*$protocolHash*" })) {
-        throw 'Protocol physical file digest does not match the UI save receipt'
-    }
+    WaitForNameLike $window "*Protocol saved SHA-256: $protocolHash*" 10000
     Invoke-AccessibleButton $window 'View protocol Markdown export'
     Start-Sleep -Milliseconds 160
     Invoke-AccessibleButton $window 'Save prepared protocol Markdown without overwrite'
