@@ -7,9 +7,32 @@ fixture="${3:-docs/verification/rust-rewrite/pdfium-deterministic-fixture.pdf}"
 test -s "$fixture"
 temp="$(mktemp -d)"
 mounted=0
+detach_dmg() {
+  local attempt
+  for attempt in 1 2 3 4 5; do
+    if hdiutil detach "$temp/mount" -quiet; then
+      mounted=0
+      return 0
+    fi
+    sleep 1
+  done
+  # A transient macOS filesystem/indexer handle can keep a freshly exercised
+  # image busy. Only force-detach after several ordinary retries.
+  if hdiutil detach "$temp/mount" -force -quiet; then
+    mounted=0
+    return 0
+  fi
+  return 1
+}
 cleanup() {
-  if [[ "$mounted" == 1 ]]; then hdiutil detach "$temp/mount" -quiet || true; fi
+  local status=$?
+  trap - EXIT
+  if [[ "$mounted" == 1 ]] && ! detach_dmg; then
+    echo "Cannot detach packaged DMG; refusing to recursively delete a mounted volume: $temp/mount" >&2
+    exit 1
+  fi
   rm -rf "$temp"
+  exit "$status"
 }
 trap cleanup EXIT
 case "$platform" in
