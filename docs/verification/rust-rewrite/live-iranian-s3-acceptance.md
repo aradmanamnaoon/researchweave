@@ -13,7 +13,7 @@ Create a GitHub Actions environment named `live-iranian-s3-acceptance`. Approval
 Store the non-secret provider configuration as environment variables:
 
 - `RESEARCHWEAVE_LIVE_S3_PROFILE_ID` — ASCII letters/numbers plus `._-`
-- `RESEARCHWEAVE_LIVE_S3_ENDPOINT` — the real HTTPS Liara endpoint ending in `.liara.site`
+- `RESEARCHWEAVE_LIVE_S3_ENDPOINT` — the real HTTPS Liara endpoint ending in `.liara.site` (current bucket-specific examples) or `.liara.space` (legacy S3 endpoint, e.g. `storage.iran.liara.space`)
 - `RESEARCHWEAVE_LIVE_S3_BUCKET` — the dedicated acceptance bucket
 
 For the candidate PR only, set `RESEARCHWEAVE_RUN_LIVE_S3=true` as a repository or environment variable when the protected credential/infrastructure is ready. Without that opt-in the candidate live-provider job is skipped; native/security candidate jobs continue normally.
@@ -44,7 +44,7 @@ The test prints bounded stage markers, not credentials or payloads. `build_live_
 - rejects duplicate or unexpected JSON keys;
 - rejects credential-like material in the redacted log;
 - requires exactly one marker for every acceptance stage;
-- requires a Liara `.liara.site` endpoint;
+- requires a Liara `.liara.site` or `.liara.space` HTTPS endpoint;
 - binds the evidence to the GitHub source SHA, run ID, run attempt, and exact workflow path;
 - rejects evidence older than seven days or future-dated evidence.
 

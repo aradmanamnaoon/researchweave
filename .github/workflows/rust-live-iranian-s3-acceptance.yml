@@ -63,7 +63,9 @@ jobs:
             throw 'Protected environment is missing a valid live S3 profile ID'
           }
           $endpoint = [Uri]$env:RESEARCHWEAVE_LIVE_S3_ENDPOINT
-          if ($endpoint.Scheme -ne 'https' -or -not $endpoint.Host.EndsWith('.liara.site', [StringComparison]::OrdinalIgnoreCase)) {
+          $liaraHost = $endpoint.Host.EndsWith('.liara.site', [StringComparison]::OrdinalIgnoreCase) -or `
+            $endpoint.Host.EndsWith('.liara.space', [StringComparison]::OrdinalIgnoreCase)
+          if ($endpoint.Scheme -ne 'https' -or -not $liaraHost) {
             throw 'Protected live S3 endpoint must be an HTTPS Liara hostname'
           }
           if ($env:RESEARCHWEAVE_LIVE_S3_BUCKET -notmatch '^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$') {

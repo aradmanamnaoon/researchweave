@@ -39,6 +39,19 @@ jobs:
           version="${GITHUB_REF_NAME#v}"
           actual="$(cargo metadata --no-deps --format-version 1 | python3 -c 'import json,sys;data=json.load(sys.stdin);print(next(package["version"] for package in data["packages"] if package["name"]=="researchweave-desktop"))')"
           [[ "$version" == "$actual" ]]
+      - name: Verify release tag points to the current default-branch commit
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$(git rev-parse HEAD)" == "$GITHUB_SHA" ]]
+          # Public releases must be cut from a single verified main tip, not
+          # from an older or unrelated commit that happens to share a version.
+          main_sha="$(git ls-remote --exit-code origin refs/heads/main | cut -f1)"
+          [[ "$main_sha" =~ ^[0-9a-f]{40}$ ]]
+          if [[ "$GITHUB_SHA" != "$main_sha" ]]; then
+            echo 'Refusing release: tag commit is not the current main tip' >&2
+            exit 1
+          fi
       - name: Verify declared Rust MSRV
         run: |
           rustup toolchain install 1.94.1 --profile minimal
@@ -46,6 +59,8 @@ jobs:
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --locked --all-features
+      - name: Verify both documented Liara hostnames and reject endpoint spoofing
+        run: python3 -m unittest discover -s packaging/rust -p test_liara_hostname_validation.py
       - name: Install pinned cargo security commands
         run: |
           cargo install --locked cargo-audit --version 0.22.0

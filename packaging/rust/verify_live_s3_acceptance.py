@@ -49,6 +49,19 @@ FORBIDDEN_LOG_PATTERNS = (
     "x-amz-security-token",
 )
 
+# Liara documents bucket-specific endpoints under liara.site; its older
+# compatible S3 endpoint (storage.iran.liara.space) is also in active use.
+# Never accept a generic S3 domain as proof of Iranian-provider acceptance.
+LIARA_ENDPOINT_SUFFIXES = (".liara.site", ".liara.space")
+
+
+def is_liara_endpoint_host(value: object) -> bool:
+    return (
+        isinstance(value, str)
+        and bool(re.fullmatch(r"[A-Za-z0-9.-]+", value))
+        and any(value.lower().endswith(suffix) for suffix in LIARA_ENDPOINT_SUFFIXES)
+    )
+
 
 def _pairs_no_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     result: dict[str, Any] = {}
@@ -131,11 +144,7 @@ def verify(
         raise ValueError("provider_country must be IR")
 
     endpoint_host = data["endpoint_host"]
-    if (
-        not isinstance(endpoint_host, str)
-        or not re.fullmatch(r"[A-Za-z0-9.-]+", endpoint_host)
-        or not endpoint_host.lower().endswith(".liara.site")
-    ):
+    if not is_liara_endpoint_host(endpoint_host):
         raise ValueError("endpoint_host is not an accepted Liara DNS hostname")
 
     observed = _parse_utc(data["observed_at_utc"])

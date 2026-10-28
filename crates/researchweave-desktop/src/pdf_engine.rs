@@ -1,5 +1,6 @@
 //! Native, dynamically loaded PDFium render + positioned text proof.
 use firecrawl_pdfium::{PageRect, Pdfium, PixelFormat, RenderConfig};
+use std::io::Read;
 use std::path::{Path, PathBuf};
 #[cfg(test)]
 use std::{fs::File, io::BufWriter};
@@ -95,6 +96,67 @@ pub fn runtime_library() -> Result<PathBuf, String> {
 
 pub fn render_search(pdf_path: &Path, query: &str) -> Result<PdfRender, String> {
     render_search_at(pdf_path, query, 0)
+}
+
+const MAX_FIND_NEXT_PDF_BYTES: u64 = 128 * 1024 * 1024;
+
+fn read_bounded_find_next_pdf(pdf_path: &Path) -> Result<Vec<u8>, String> {
+    // Use one open handle for metadata and content. A path could otherwise be
+    // swapped or the file could grow between metadata(path) and read(path).
+    let file = std::fs::File::open(pdf_path).map_err(|e| e.to_string())?;
+    if file.metadata().map_err(|e| e.to_string())?.len() > MAX_FIND_NEXT_PDF_BYTES {
+        return Err("PDF exceeds the bounded find-next file budget".into());
+    }
+    let mut contents = Vec::new();
+    file.take(MAX_FIND_NEXT_PDF_BYTES + 1)
+        .read_to_end(&mut contents)
+        .map_err(|e| e.to_string())?;
+    if contents.len() as u64 > MAX_FIND_NEXT_PDF_BYTES {
+        return Err("PDF exceeds the bounded find-next file budget".into());
+    }
+    Ok(contents)
+}
+
+/// Find the next page containing an exact, case-sensitive query. Starts after
+/// the current page, wraps once, and includes the current page only last.
+/// This text-only pass does not render intermediate pages or mutate a source.
+pub fn find_next_matching_page(
+    pdf_path: &Path,
+    query: &str,
+    current_page_index: usize,
+) -> Result<Option<usize>, String> {
+    if query.trim().is_empty() || query.len() > 256 {
+        return Err("PDF find-next requires a nonblank query of at most 256 bytes".into());
+    }
+    const MAX_SCAN_PAGES: usize = 512;
+    const MAX_TOTAL_TEXT_BYTES: usize = 16 * 1024 * 1024;
+    let contents = read_bounded_find_next_pdf(pdf_path)?;
+    let runtime = runtime_library()?;
+    let pdfium = Pdfium::load_from_path(runtime).map_err(|e| e.to_string())?;
+    let doc = pdfium
+        .load_document(contents, None)
+        .map_err(|e| e.to_string())?;
+    let page_count = doc.page_count();
+    if page_count == 0 || page_count > MAX_SCAN_PAGES || current_page_index >= page_count {
+        return Err("PDF find-next page count or current index exceeds the supported range".into());
+    }
+    let mut total_bytes = 0_usize;
+    for offset in 1..=page_count {
+        let page_index = (current_page_index + offset) % page_count;
+        let text = doc
+            .page(page_index)
+            .map_err(|e| e.to_string())?
+            .text()
+            .map_err(|e| e.to_string())?;
+        total_bytes = total_bytes.saturating_add(text.text().len());
+        if total_bytes > MAX_TOTAL_TEXT_BYTES {
+            return Err("PDF find-next extracted text exceeds the bounded scan budget".into());
+        }
+        if text.text().contains(query) {
+            return Ok(Some(page_index));
+        }
+    }
+    Ok(None)
 }
 
 /// Render and search one explicit page in a PDF. Page indexes are zero-based.
@@ -330,6 +392,60 @@ mod tests {
         assert!(render_search_at(&input, "PDFium", 2)
             .unwrap_err()
             .contains("valid range 1"));
+        std::fs::remove_file(input).unwrap();
+    }
+
+    #[test]
+    fn find_next_page_wraps_once_and_leaves_missing_queries_absent() {
+        let input = std::env::temp_dir().join(format!("rw-find-next-{}.pdf", uuid::Uuid::new_v4()));
+        fixture_pages(
+            &input,
+            &[
+                "First page alpha",
+                "Second page PDFium landmark",
+                "Third page beta",
+            ],
+        );
+        if runtime_library().is_err() {
+            eprintln!("PDFium runtime missing; download with packaging script");
+            std::fs::remove_file(input).unwrap();
+            return;
+        }
+        assert_eq!(
+            find_next_matching_page(&input, "PDFium", 0).unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            find_next_matching_page(&input, "PDFium", 1).unwrap(),
+            Some(1)
+        );
+        assert_eq!(
+            find_next_matching_page(&input, "PDFium", 2).unwrap(),
+            Some(1)
+        );
+        assert_eq!(find_next_matching_page(&input, "missing", 0).unwrap(), None);
+        assert!(find_next_matching_page(&input, "", 0).is_err());
+        assert!(find_next_matching_page(&input, " ", 0).is_err());
+        assert!(find_next_matching_page(&input, &"x".repeat(257), 0).is_err());
+        assert!(find_next_matching_page(&input, "PDFium", 3).is_err());
+        std::fs::remove_file(input).unwrap();
+    }
+
+    #[test]
+    fn bounded_find_next_pdf_read_rejects_oversize_before_pdfium() {
+        let input =
+            std::env::temp_dir().join(format!("rw-bounded-find-{}.pdf", uuid::Uuid::new_v4()));
+        std::fs::write(&input, b"PDF").unwrap();
+        assert_eq!(read_bounded_find_next_pdf(&input).unwrap(), b"PDF");
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&input)
+            .unwrap()
+            .set_len(MAX_FIND_NEXT_PDF_BYTES + 1)
+            .unwrap();
+        assert!(read_bounded_find_next_pdf(&input)
+            .unwrap_err()
+            .contains("bounded find-next file budget"));
         std::fs::remove_file(input).unwrap();
     }
 }

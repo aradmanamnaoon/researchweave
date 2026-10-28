@@ -3266,6 +3266,26 @@ fn apply_preferences(app: &MainWindow, preferences: DisplayPreferences) {
     app.invoke_sync_widget_theme(preferences.dark_mode || preferences.high_contrast);
 }
 
+fn native_chooser_filter(kind: &str) -> Result<(&'static str, &'static [&'static str]), String> {
+    match kind {
+        "pdf" => Ok(("PDF documents", &["pdf"])),
+        "data" => Ok((
+            "Scientific datasets",
+            &["csv", "tsv", "xlsx", "ods", "parquet", "sav", "zsav", "dta"],
+        )),
+        _ => Err("Unrecognized native file-selection workflow".into()),
+    }
+}
+
+fn chosen_local_file_path(path: &Path) -> Result<String, String> {
+    if !path.is_absolute() {
+        return Err("Native chooser did not return an absolute file path".into());
+    }
+    path.to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "Selected file path cannot be represented as Unicode".into())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(args) = std::env::args().nth(1) {
         if args == "--smoke-native-workflow" {
@@ -3313,6 +3333,62 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let app = MainWindow::new()?;
+    app.on_choose_local_file({
+        let weak = app.as_weak();
+        move |kind| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            if ui.get_local_file_dialog_busy() {
+                return;
+            }
+            let (label, extensions) = match native_chooser_filter(kind.as_str()) {
+                Ok(filter) => filter,
+                Err(error) => {
+                    ui.set_status(error.into());
+                    return;
+                }
+            };
+            // AsyncFileDialog is polled by Slint's UI event loop instead of
+            // blocking it on Linux's portal, while retaining macOS main-thread
+            // dialog requirements. An explicit click starts this read-only
+            // chooser; it never imports a file or authorizes network egress.
+            ui.set_local_file_dialog_busy(true);
+            let weak_task = weak.clone();
+            let kind = kind.to_string();
+            let task = async move {
+                let selected = rfd::AsyncFileDialog::new()
+                    .add_filter(label, extensions)
+                    .pick_file()
+                    .await;
+                if let Some(ui) = weak_task.upgrade() {
+                    if let Some(selected) = selected {
+                        match chosen_local_file_path(selected.path()) {
+                            Ok(path) if kind == "pdf" => {
+                                ui.set_pdf_local_path(path.into());
+                                ui.set_status("PDF selected from native file dialog".into());
+                            }
+                            Ok(path) if kind == "data" => {
+                                ui.set_data_local_path(path.into());
+                                ui.set_status("Dataset selected from native file dialog".into());
+                            }
+                            Ok(_) => ui.set_status("Unrecognized file picker destination".into()),
+                            Err(error) => ui.set_status(error.into()),
+                        }
+                    } else {
+                        ui.set_status("Native file selection canceled".into());
+                    }
+                    // Cancel leaves the manual path untouched. The ongoing
+                    // imported revision/preview/approval is never modified.
+                    ui.set_local_file_dialog_busy(false);
+                }
+            };
+            if let Err(error) = slint::spawn_local(task) {
+                ui.set_local_file_dialog_busy(false);
+                ui.set_status(format!("Native file chooser unavailable: {error}").into());
+            }
+        }
+    });
     let activity_path = host_data_root()?.join("desktop-activity.json");
     // Do not quietly replace a damaged or inaccessible activity journal with
     // an empty state that the next write would overwrite.
@@ -7340,6 +7416,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 ui.set_pdf_page_count(
                                     i32::try_from(rendered.page_count).unwrap_or(i32::MAX),
                                 );
+                                ui.set_pdf_render_width(rendered.width as f32);
+                                ui.set_pdf_render_height(rendered.height as f32);
                                 let count =
                                     i32::try_from(rendered.match_count).unwrap_or(i32::MAX);
                                 if let Some(hit) = rendered.matches.first() {
@@ -7382,9 +7460,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 ui.set_pdf_status(format!("PDF error: {}", e).into());
                                 ui.set_pdf_page_number(1);
                                 ui.set_pdf_page_count(0);
+                                ui.set_pdf_render_width(0.0);
+                                ui.set_pdf_render_height(0.0);
                                 ui.set_pdf_image(Image::default());
                                 ui.set_pdf_highlight_visible(false);
                                 ui.set_pdf_matches(0);
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    });
+    app.on_find_next_pdf({
+        let weak = app.as_weak();
+        move |path, query, current_page_number| {
+            let job_id = weak
+                .upgrade()
+                .map(|ui| ui.get_pdf_job())
+                .unwrap_or_default();
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                let result = usize::try_from(current_page_number)
+                    .ok()
+                    .filter(|number| *number > 0)
+                    .ok_or_else(|| "Open a PDF page before finding the next match".to_string())
+                    .and_then(|number| {
+                        pdf_engine::find_next_matching_page(
+                            Path::new(path.as_str()),
+                            query.as_str(),
+                            number - 1,
+                        )
+                    });
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        if ui.get_pdf_job() != job_id {
+                            return;
+                        }
+                        match result {
+                            Ok(Some(next_index)) => {
+                                let next_page =
+                                    i32::try_from(next_index.saturating_add(1)).unwrap_or(i32::MAX);
+                                ui.set_pdf_status(
+                                    format!("Found matching PDF page {next_page}; rendering…")
+                                        .into(),
+                                );
+                                // Reuse the normal page render + stale-result guard.
+                                // Never render intermediate search-only pages.
+                                ui.invoke_load_pdf(path, query, next_page);
+                            }
+                            Ok(None) => {
+                                ui.set_pdf_matches(0);
+                                ui.set_pdf_status(
+                                    "No matching page in PDF; current page is unchanged".into(),
+                                );
+                            }
+                            Err(error) => {
+                                ui.set_pdf_matches(0);
+                                ui.set_pdf_status(format!("PDF find-next error: {error}").into());
                             }
                         }
                     }
@@ -7688,6 +7821,28 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_file_dialogs_are_explicitly_scoped_to_supported_read_imports() {
+        let (pdf, pdf_ext) = native_chooser_filter("pdf").unwrap();
+        assert_eq!(pdf, "PDF documents");
+        assert_eq!(pdf_ext, &["pdf"]);
+        let (data, extensions) = native_chooser_filter("data").unwrap();
+        assert_eq!(data, "Scientific datasets");
+        assert_eq!(
+            extensions,
+            &["csv", "tsv", "xlsx", "ods", "parquet", "sav", "zsav", "dta"]
+        );
+        for mode in ["", "save", "cloud", "credentials", "../pdf", "PDF"] {
+            assert!(native_chooser_filter(mode).is_err());
+        }
+        assert!(chosen_local_file_path(Path::new("relative.pdf")).is_err());
+        let absolute = std::env::temp_dir().join("nonexistent-picker-fixture.pdf");
+        assert_eq!(
+            chosen_local_file_path(&absolute).unwrap(),
+            absolute.to_str().unwrap()
+        );
+    }
 
     #[test]
     fn statistics_result_summary_keeps_readable_metrics_and_revision_provenance() {

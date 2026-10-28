@@ -49,6 +49,145 @@ function Invoke-AccessibleButton([System.Windows.Automation.AutomationElement]$p
     $button.SetFocus()
     $button.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
 }
+function Test-SelectedFixturePath([string]$observedPath, [string]$fixturePath) {
+    if ([string]::IsNullOrWhiteSpace($observedPath) -or [string]::IsNullOrWhiteSpace($fixturePath)) {
+        return $false
+    }
+    try {
+        $actual = [System.IO.Path]::GetFullPath($observedPath)
+        $fixture = [System.IO.Path]::GetFullPath($fixturePath)
+        if ([string]::Equals($actual, $fixture, [StringComparison]::OrdinalIgnoreCase)) {
+            return $true
+        }
+        # Windows native dialogs can return a different spelling of the same
+        # physical file (for example, a resolved/aliased user-profile path).
+        # When strings differ, require a real readable file with the identical
+        # filename, length and SHA256, not a loose substring/path-tail match.
+        if (-not [System.IO.File]::Exists($actual) -or -not [System.IO.File]::Exists($fixture)) {
+            return $false
+        }
+        $actualInfo = [System.IO.FileInfo]::new($actual)
+        $fixtureInfo = [System.IO.FileInfo]::new($fixture)
+        if (-not [string]::Equals($actualInfo.Name, $fixtureInfo.Name, [StringComparison]::OrdinalIgnoreCase) -or
+            $actualInfo.Length -ne $fixtureInfo.Length) {
+            return $false
+        }
+        return (Get-FileHash -LiteralPath $actual -Algorithm SHA256).Hash -eq
+            (Get-FileHash -LiteralPath $fixture -Algorithm SHA256).Hash
+    } catch {
+        return $false
+    }
+}
+function Select-FileThroughNativeDialog(
+    [System.Windows.Automation.AutomationElement]$window,
+    [string]$buttonName,
+    [string]$selectedPath,
+    [int]$processId
+) {
+    # Exercise the Windows Common Item Dialog itself. The File name edit uses
+    # automation ID 1148 independently of the runner's display language.
+    if (-not [System.IO.File]::Exists($selectedPath)) {
+        throw "Native picker fixture does not exist: $selectedPath"
+    }
+    $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+    $existing = @($desktop.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.NativeWindowHandle })
+    Invoke-AccessibleButton $window $buttonName
+    $dialog = $null
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        foreach ($candidate in $desktop.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )) {
+            $current = $candidate.Current
+            if ($current.ControlType -eq [System.Windows.Automation.ControlType]::Window -and
+                $current.NativeWindowHandle -ne 0 -and
+                $existing -notcontains $current.NativeWindowHandle -and
+                ($current.ProcessId -eq $processId -or $current.ClassName -eq '#32770') -and
+                -not $current.IsOffscreen) {
+                $dialog = $candidate
+                break
+            }
+        }
+        if ($dialog) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $dialog) { throw "Native picker did not open an observable dialog: $buttonName" }
+    $filename = $null
+    # Common Item Dialog variants put ID 1148 on either the editable control
+    # or its parent combo box. Find the edit within that identified control.
+    foreach ($edit in (Children $dialog ([System.Windows.Automation.ControlType]::Edit))) {
+        if ($edit.Current.AutomationId -eq '1148') {
+            $filename = $edit
+            break
+        }
+    }
+    if (-not $filename) {
+        foreach ($combo in (Children $dialog ([System.Windows.Automation.ControlType]::ComboBox))) {
+            if ($combo.Current.AutomationId -eq '1148') {
+                foreach ($edit in (Children $combo ([System.Windows.Automation.ControlType]::Edit))) {
+                    $filename = $edit
+                    break
+                }
+                if ($filename) { break }
+            }
+        }
+    }
+    if (-not $filename) { throw 'Native file dialog has no editable File name field (ID 1148)' }
+    # Type into the native control to exercise its real keyboard-change path.
+    # A UIA ValuePattern setter can update the exposed text without notifying
+    # the Windows shell dialog that the file name has changed.
+    $filename.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    $escapedPath = [regex]::Replace($selectedPath, '([+^%~(){}])', '{$1}')
+    [System.Windows.Forms.SendKeys]::SendWait($escapedPath)
+    $enteredPath = ([System.Windows.Automation.ValuePattern]$filename.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+    )).Current.Value
+    if ($enteredPath -ne $selectedPath) {
+        throw "Native picker filename entry did not match the fixture: $buttonName (value=$enteredPath)"
+    }
+    # Let the dialog commit and validate its file name before activating Open;
+    # pressing Enter while an auto-completion popup is active can accept only
+    # the suggestion and return cancellation to the async picker.
+    [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
+    # Prefer the native dialog's accessible Open button (ID 1), avoiding
+    # dependence on focus that may be stolen by the host application.
+    $confirm = $null
+    foreach ($button in (Children $dialog ([System.Windows.Automation.ControlType]::Button))) {
+        if ($button.Current.AutomationId -eq '1') {
+            $confirm = $button
+            break
+        }
+    }
+    if ($confirm) {
+        $confirm.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    } else {
+        # Some Windows Common Item Dialog accessibility implementations omit
+        # the default Open button. Enter from the focused filename edit is
+        # equivalent to submitting the typed path in that variant.
+        $filename.SetFocus()
+        [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    }
+    $handle = $dialog.Current.NativeWindowHandle
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        $stillOpen = $false
+        foreach ($candidate in $desktop.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )) {
+            if ($candidate.Current.NativeWindowHandle -eq $handle) {
+                $stillOpen = $true
+                break
+            }
+        }
+        if (-not $stillOpen) { return }
+        Start-Sleep -Milliseconds 100
+    }
+    throw "Native file picker did not close after invoking Open: $buttonName"
+}
 function WindowFor($process, [string]$failureMessage) {
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ProcessIdProperty, $process.Id)
     for ($attempt = 0; $attempt -lt 40; $attempt++) {
@@ -461,12 +600,93 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
     $pdfPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF file path'
+    if (-not (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose local PDF with native file picker').Current.IsEnabled) {
+        throw 'PDF native file picker is not exposed as an enabled accessible button'
+    }
     $pdfSearch = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF search query'
     ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($twoPagePdf)
     ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('PDFium')
+    # Exercise the *real* installed Windows native dialog, not merely the
+    # presence of a Browse button. Cancellation must preserve the typed path
+    # and return control to the Slint event loop without starting an import.
+    $rootWindows = [System.Windows.Automation.AutomationElement]::RootElement
+    $existingHandles = @($rootWindows.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.NativeWindowHandle })
+    Invoke-AccessibleButton $window 'Choose local PDF with native file picker'
+    $nativeDialog = $null
+    for ($dialogAttempt = 0; $dialogAttempt -lt 100; $dialogAttempt++) {
+        foreach ($candidate in $rootWindows.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )) {
+            $info = $candidate.Current
+            if ($info.ControlType -eq [System.Windows.Automation.ControlType]::Window -and
+                $info.NativeWindowHandle -ne 0 -and
+                $existingHandles -notcontains $info.NativeWindowHandle -and
+                ($info.ProcessId -eq $p.Id -or $info.ClassName -eq '#32770') -and
+                -not $info.IsOffscreen) {
+                $nativeDialog = $candidate
+                break
+            }
+        }
+        if ($nativeDialog) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $nativeDialog) { throw 'Native PDF Browse did not open an observable Windows file dialog' }
+    $nativeDialog.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+    $chooserRestored = $false
+    for ($dialogAttempt = 0; $dialogAttempt -lt 100; $dialogAttempt++) {
+        $value = ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $browseReady = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose local PDF with native file picker').Current.IsEnabled
+        if ($value -eq $twoPagePdf -and $browseReady) {
+            $chooserRestored = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $chooserRestored) { throw 'Native PDF dialog cancellation changed the manually typed path or did not restore the UI' }
+    Write-Output 'PASS: installed native Windows PDF picker opened, cancelled and preserved the manual path'
+    ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue((Join-Path $hostData 'not-selected.pdf'))
+    Select-FileThroughNativeDialog $window 'Choose local PDF with native file picker' $twoPagePdf $p.Id
+    $pdfSelected = $false
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        # Slint may recreate accessibility nodes when the native modal closes.
+        # Requery instead of reading a cached UIA element from before Browse.
+        $pdfPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF file path'
+        $value = ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose local PDF with native file picker').Current.IsEnabled
+        if ($value -eq $twoPagePdf -and $ready) {
+            $pdfSelected = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $pdfSelected) {
+        $pdfPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF file path'
+        $observed = ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose local PDF with native file picker').Current.IsEnabled
+        $statuses = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
+            Where-Object { $_ -like 'Status: *' })
+        throw "Native PDF selection did not replace the manual path and restore the UI (value=$observed, ready=$ready, status=$($statuses -join ' | '))"
+    }
+    Write-Output 'PASS: native Windows PDF selection updates the path without importing'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open PDF').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF page 1 of 2*' 20000
     WaitForNameLike $window '*PDF search status: Rendered page 1 of 2*matches: 0*' 10000
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Find next PDF matching page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*PDF page 2 of 2*' 20000
+    WaitForNameLike $window '*PDF search status: Rendered page 2 of 2*matches: 1*' 10000
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Previous PDF page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*PDF page 1 of 2*' 20000
+    ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('not-present-in-any-pdf-page')
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Find next PDF matching page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*PDF search status: No matching page in PDF; current page is unchanged*matches: 0*' 20000
+    WaitForNameLike $window '*PDF page 1 of 2*' 10000
+    ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('PDFium')
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Next PDF page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF page 2 of 2*' 20000
     WaitForNameLike $window '*PDF search status: Rendered page 2 of 2*matches: 1*' 10000
@@ -478,7 +698,7 @@ try {
     if ((Named $window ([System.Windows.Automation.ControlType]::Button) 'Previous PDF page').Current.IsEnabled) {
         throw 'PDF reader Previous button did not disable at first page'
     }
-    Write-Output 'PASS: installed native PDFium reader navigates and searches two distinct pages with accessible controls'
+    Write-Output 'PASS: installed native PDFium reader finds matches across pages, preserves current page on miss, navigates bounds and exposes accessible controls'
 
     # Register a real project reference, then carry its generated ID into the
     # systematic-review workflow. This proves the redesigned References and
@@ -630,7 +850,35 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
     $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
-    ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($analysisInput)
+    if (-not (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled) {
+        throw 'Scientific import native file picker is not exposed as an enabled accessible button'
+    }
+    ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue((Join-Path $hostData 'not-selected.csv'))
+    Select-FileThroughNativeDialog $window 'Choose scientific dataset with native file picker' $analysisInput $p.Id
+    $dataSelected = $false
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        # The Slint accessibility provider may replace the LineEdit node when
+        # the asynchronous native chooser completes. Never poll the pre-dialog
+        # AutomationElement: it can retain the manually entered sentinel.
+        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+        $value = ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled
+        if ((Test-SelectedFixturePath $value $analysisInput) -and $ready) {
+            $dataSelected = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $dataSelected) {
+        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+        $observed = ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled
+        $statuses = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
+            Where-Object { $_ -like 'Status: *' })
+        throw "Native scientific dataset selection did not update the path and restore the UI (value=$observed, expected=$analysisInput, observed_length=$($observed.Length), expected_length=$($analysisInput.Length), ready=$ready, status=$($statuses -join ' | '))"
+    }
+    Write-Output 'PASS: native Windows dataset selection updates the path before preview/import'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 260
     $analysisPreviewNames = @($window.FindAll(
@@ -1768,7 +2016,11 @@ try {
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open project metadata editor').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 160
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect current project metadata').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    WaitForNameLike $window '*Current project (revision*'
+    # The long result text is clipped by the metadata ScrollView on Windows.
+    # The controller sets this success status only after reading real project
+    # metadata; the panel exposes the title/revision even when text is clipped.
+    WaitForNameLike $window '*Status: Current project metadata loaded locally*' 10000
+    WaitForNameLike $window '*Project metadata title*revision*' 10000
     $metadataTitle = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project metadata title change'
     ([System.Windows.Automation.ValuePattern]$metadataTitle.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('UIA Updated Persian Project')
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview project metadata changes').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -1843,7 +2095,10 @@ try {
     Write-Output 'PASS: approved project metadata revision survives native process restart'
     Capture-WindowScreenshot $window $Screenshot
 } finally {
-    if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force }
+    if ($p -and -not $p.HasExited) {
+        Stop-Process -Id $p.Id -Force
+        [void]$p.WaitForExit(10000)
+    }
     if ($PreserveProjectDirectory -and (Test-Path -LiteralPath $temporary)) {
         $repoRoot = (Resolve-Path (Join-Path $PSScriptRoot '../../..')).Path
         $allowedRoot = [IO.Path]::GetFullPath((Join-Path $repoRoot 'target/performance-fixtures'))
@@ -1862,7 +2117,20 @@ try {
         Copy-Item -LiteralPath $temporary -Destination $preservePath -Recurse
         Write-Output "Preserved project fixture: $preservePath"
     }
-    if (Test-Path $temporary) { Remove-Item -LiteralPath $temporary -Recurse -Force }
-    if (Test-Path $hostData) { Remove-Item -LiteralPath $hostData -Recurse -Force }
+    foreach ($cleanupPath in @($temporary, $hostData)) {
+        if (-not (Test-Path -LiteralPath $cleanupPath)) { continue }
+        for ($cleanupAttempt = 0; $cleanupAttempt -lt 15; $cleanupAttempt++) {
+            try {
+                Remove-Item -LiteralPath $cleanupPath -Recurse -Force -ErrorAction Stop
+                break
+            } catch [System.IO.IOException] {
+                if ($cleanupAttempt -eq 14) {
+                    Write-Warning "Could not remove isolated UIA fixture: $cleanupPath"
+                } else {
+                    Start-Sleep -Milliseconds 200
+                }
+            }
+        }
+    }
     $env:RESEARCHWEAVE_HOST_DATA_DIR = $previousHostData
 }

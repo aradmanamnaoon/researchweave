@@ -12,36 +12,45 @@
 <p align="center">
   <img alt="Rust" src="https://img.shields.io/badge/Rust-native-172438?style=for-the-badge&logo=rust&logoColor=white" />
   <img alt="Slint" src="https://img.shields.io/badge/Desktop-Slint-147A75?style=for-the-badge" />
-  <img alt="Local first" src="https://img.shields.io/badge/Local--first-default-7564B5?style=for-the-badge" />
-  <img alt="GPL 3" src="https://img.shields.io/badge/License-GPL--3.0--only-9A5B3A?style=for-the-badge" />
+  <img alt="Available targets: Windows, macOS, Linux" src="https://img.shields.io/badge/Targets-Windows%20%7C%20macOS%20%7C%20Linux-7564B5?style=for-the-badge" />
+  <a href="LICENSE"><img alt="GPL-3.0-only license" src="https://img.shields.io/badge/License-GPL--3.0--only-9A5B3A?style=for-the-badge" /></a>
 </p>
 
 <p align="center">
-  <img alt="Deep Ink" src="https://img.shields.io/badge/Deep%20Ink-%23172438-172438?style=flat-square" />
-  <img alt="Research Teal" src="https://img.shields.io/badge/Research%20Teal-%23147A75-147A75?style=flat-square" />
-  <img alt="Evidence Violet" src="https://img.shields.io/badge/Evidence%20Violet-%237564B5-7564B5?style=flat-square" />
-  <img alt="Discovery Copper" src="https://img.shields.io/badge/Discovery%20Copper-%239A5B3A-9A5B3A?style=flat-square" />
-  <img alt="Soft Paper" src="https://img.shields.io/badge/Soft%20Paper-%23F6F5F1-F6F5F1?style=flat-square&labelColor=F6F5F1&color=F6F5F1" />
+  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-quality.yml"><img alt="Rust quality workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-quality.yml/badge.svg?branch=main" /></a>
+  <a href="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml"><img alt="Rust release candidate workflow status" src="https://github.com/aradmanamnaoon/researchweave/actions/workflows/rust-release-candidate.yml/badge.svg?branch=main" /></a>
+  <img alt="Rust v0.2.0 release awaiting verification" src="https://img.shields.io/badge/v0.2.0-release%20gated-9A5B3A?style=flat-square" />
 </p>
 
 <p align="center">
   <a href="#downloads-and-release-status">Downloads</a> ·
   <a href="#what-researchweave-does">Capabilities</a> ·
   <a href="#real-rust-desktop">Screenshots</a> ·
+  <a href="#quick-start">Quick start</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#build-from-source">Build</a> ·
   <a href="#verification-and-release-gates">Verification</a> ·
   <a href="#contributing">Contributing</a>
 </p>
 
-![ResearchWeave Rust/Slint welcome screen with the six-section activity rail](assets/screenshots/rust-welcome-activity-rail.png)
+<p align="center">
+  <img src="assets/branding/readme-hero.svg" width="100%" alt="Illustrated research workflow showing connected sources, analysis, synthesis, AI assistance and project management." />
+</p>
+
+<p align="center">
+  <img src="assets/screenshots/rust-welcome-activity-rail.png" width="66%" alt="Real Rust/Slint welcome screen with the six-section activity rail and a local project creation form." />
+</p>
+
+<p align="center"><em>Actual Rust desktop capture. The banner above is a conceptual illustration, not an application screenshot.</em></p>
 
 > [!IMPORTANT]
-> **Rust v0.2.0 release-candidate status — 2026-10-27.** The native Rust/Slint rewrite is under final hosted package/GUI validation. Earlier hosted candidate runs have independently exercised Windows, Ubuntu, macOS Apple Silicon and macOS Intel paths, but the final source commit must pass the complete matrix again. Publication remains fail-closed until the same final `main` SHA also passes the protected real-Liara acceptance workflow. The GitHub Releases page therefore continues to expose the legacy Python release until the Rust release is genuinely public and verified.
+> **Rust v0.2.0 status — 2026-10-28: release gated.** Native Rust/Slint implementation and candidate package/GUI evidence exist across Windows, Linux and both macOS architectures. The final exact-source matrix and real Liara S3 acceptance must still pass before publication. **The [latest published release (v0.1.2)](https://github.com/aradmanamnaoon/researchweave/releases/latest) is the older Python application.** The Rust v0.2.0 installers below are future release targets, not available downloads.
 
 ## Downloads and release status
 
-The v0.2.0 asset names and direct URLs are reserved below so the release workflow can verify the README against the exact published filenames. **They intentionally return no Rust artifact until v0.2.0 is published and anonymously verified.**
+**Available today:** [ResearchWeave v0.1.2 (legacy Python release)](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.1.2). Check that release's platform assets and checksums before installation.
+
+**Rust v0.2.0 (pending):** The exact URLs below are required by the release workflow's README verification. **They will return 404 until the release is published.** Do not treat a successful candidate build as a published artifact.
 
 | Platform | Planned Rust artifact | Current evidence | Public Rust download |
 | --- | --- | --- | --- |
@@ -51,6 +60,28 @@ The v0.2.0 asset names and direct URLs are reserved below so the release workflo
 | Linux x86_64 | AppImage + Debian package | Hosted native package/GUI/AT-SPI evidence exists on candidate SHAs; final exact-source matrix still required | [v0.2.0 AppImage](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-linux-x86_64.AppImage) · [v0.2.0 DEB](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-linux-amd64.deb) |
 
 Checksum manifest: [SHA256SUMS.txt](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/SHA256SUMS.txt). The repository release page is <https://github.com/aradmanamnaoon/researchweave/releases>. The release workflow refuses to call these links verified until anonymous public downloads and hashes succeed.
+
+## Quick start
+
+**Already using the released Python edition?** Install from the [current release page](https://github.com/aradmanamnaoon/researchweave/releases/latest). To explore the Rust implementation from source, install [Rustup](https://rustup.rs/) and the native build tools for your OS. The Rust-native source is already tracked on the default [`main` branch](https://github.com/aradmanamnaoon/researchweave/tree/main); additional reviewed features are merged only after their native acceptance checks pass:
+
+```sh
+git clone https://github.com/aradmanamnaoon/researchweave.git
+cd researchweave
+git switch main
+rustup toolchain install 1.94.1
+cargo +1.94.1 run --locked -p researchweave-desktop
+```
+
+The native PDF reader additionally needs the platform PDFium library; see [build instructions](#build-from-source). Project work starts locally without a cloud account or configured AI provider. The application supports creating or opening a research project from **Home**, adding references/PDFs in **Sources**, running analyses in **Analyze**, and working on manuscripts in **Synthesize**.
+
+| Start here | Then try | Where to look |
+| --- | --- | --- |
+| **Create a local research project** | Add a question, protocol and source records | **Home → Sources** |
+| **Import and inspect a dataset** | Run a descriptive or regression analysis with provenance | **Analyze → Statistics** |
+| **Write and review a manuscript** | Save revisions and generate a DOCX export | **Synthesize → Manuscript** |
+
+You can use local research workflows without enabling cloud sync or AI. Remote services require explicit configuration and consent.
 
 ## What ResearchWeave is
 
@@ -300,9 +331,8 @@ PDFium release assets are pinned and hash-verified before packaging. Runtime not
 
 ```powershell
 rustup toolchain install 1.94.1
-rustup override set 1.94.1
-cargo build --locked -p researchweave-desktop
-cargo run --locked -p researchweave-desktop
+cargo +1.94.1 build --locked -p researchweave-desktop
+cargo +1.94.1 run --locked -p researchweave-desktop
 ```
 
 On Windows, fetch the pinned PDFium runtime with:
@@ -316,7 +346,7 @@ The desktop searches the packaged location, `PDFIUM_LIB_PATH`, and the repositor
 ### CLI
 
 ```powershell
-cargo run --locked -p researchweave-cli -- --help
+cargo +1.94.1 run --locked -p researchweave-cli -- --help
 ```
 
 ## Verification and release gates
