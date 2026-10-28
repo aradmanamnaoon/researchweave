@@ -1975,7 +1975,11 @@ try {
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open project metadata editor').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 160
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect current project metadata').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    WaitForNameLike $window '*Current project (revision*' 10000
+    # The long result text is clipped by the metadata ScrollView on Windows.
+    # The controller sets this success status only after reading real project
+    # metadata; the panel exposes the title/revision even when text is clipped.
+    WaitForNameLike $window '*Status: Current project metadata loaded locally*' 10000
+    WaitForNameLike $window '*Project metadata title*revision*' 10000
     $metadataTitle = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project metadata title change'
     ([System.Windows.Automation.ValuePattern]$metadataTitle.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('UIA Updated Persian Project')
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview project metadata changes').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
