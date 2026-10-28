@@ -3266,6 +3266,35 @@ fn apply_preferences(app: &MainWindow, preferences: DisplayPreferences) {
     app.invoke_sync_widget_theme(preferences.dark_mode || preferences.high_contrast);
 }
 
+fn native_chooser_filter(kind: &str) -> Result<(&'static str, &'static [&'static str]), String> {
+    match kind {
+        "pdf" => Ok(("PDF documents", &["pdf"])),
+        "data" => Ok((
+            "Scientific datasets",
+            &["csv", "tsv", "xlsx", "ods", "parquet", "sav", "zsav", "dta"],
+        )),
+        _ => Err("Unrecognized native file-selection workflow".into()),
+    }
+}
+
+fn choose_local_file(kind: &str) -> Result<Option<String>, String> {
+    let (label, extensions) = native_chooser_filter(kind)?;
+    // This is called only by an explicit user button. Dialog cancel preserves
+    // the previously typed path and never initiates any import or network call.
+    let selected = rfd::FileDialog::new()
+        .add_filter(label, extensions)
+        .pick_file();
+    let Some(path) = selected else {
+        return Ok(None);
+    };
+    if !path.is_absolute() {
+        return Err("Native chooser did not return an absolute file path".into());
+    }
+    path.to_str()
+        .map(|path| Some(path.to_owned()))
+        .ok_or_else(|| "Selected file path cannot be represented as Unicode".into())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(args) = std::env::args().nth(1) {
         if args == "--smoke-native-workflow" {
@@ -3313,6 +3342,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let app = MainWindow::new()?;
+    app.on_choose_local_file({
+        let weak = app.as_weak();
+        move |kind| match choose_local_file(kind.as_str()) {
+            Ok(Some(path)) => path.into(),
+            Ok(None) => "".into(),
+            Err(error) => {
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_status(error.into());
+                }
+                "".into()
+            }
+        }
+    });
     let activity_path = host_data_root()?.join("desktop-activity.json");
     // Do not quietly replace a damaged or inaccessible activity journal with
     // an empty state that the next write would overwrite.
@@ -7672,6 +7714,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_file_dialogs_are_explicitly_scoped_to_supported_read_imports() {
+        let (pdf, pdf_ext) = native_chooser_filter("pdf").unwrap();
+        assert_eq!(pdf, "PDF documents");
+        assert_eq!(pdf_ext, &["pdf"]);
+        let (data, extensions) = native_chooser_filter("data").unwrap();
+        assert_eq!(data, "Scientific datasets");
+        assert_eq!(
+            extensions,
+            &["csv", "tsv", "xlsx", "ods", "parquet", "sav", "zsav", "dta"]
+        );
+        for mode in ["", "save", "cloud", "credentials", "../pdf", "PDF"] {
+            assert!(native_chooser_filter(mode).is_err());
+        }
+    }
 
     #[test]
     fn statistics_result_summary_keeps_readable_metrics_and_revision_provenance() {

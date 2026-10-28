@@ -237,6 +237,7 @@ export component MainWindow inherits Window {
     in-out property <string> command-results: "Search views, resources, settings and help";
 
     callback load-pdf(string, string, int);
+    callback choose-local-file(string) -> string;
     callback create-project(string, string);
     callback create-default-project(string);
     callback open-project(string);
@@ -939,10 +940,22 @@ export component MainWindow inherits Window {
                             VerticalLayout {
                                 spacing: 8px;
                                 Text { text: "PDF source"; font-size: 18px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
-                                pdf-path := LineEdit {
-                                    placeholder-text: "Absolute path to a local PDF";
-                                    accessible-label: "PDF file path";
-                                    accessible-description: "Absolute path to the PDF file to display";
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    pdf-path := LineEdit {
+                                        horizontal-stretch: 1;
+                                        placeholder-text: "Absolute path to a local PDF";
+                                        accessible-label: "PDF file path";
+                                        accessible-description: "Absolute path to the PDF file to display";
+                                    }
+                                    Button {
+                                        text: "Browse PDF…";
+                                        accessible-label: "Choose local PDF with native file picker";
+                                        clicked => {
+                                            let selected = root.choose-local-file("pdf");
+                                            if selected != "" { pdf-path.text = selected; }
+                                        }
+                                    }
                                 }
                                 HorizontalLayout {
                                     spacing: 8px;
@@ -1633,7 +1646,22 @@ export component MainWindow inherits Window {
                             spacing: 10px;
                             Text { text: "Data view"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
                             Text { text: "Import CSV, TSV, XLSX, ODS, Parquet, SPSS SAV/ZSAV or Stata DTA into an immutable project-local dataset revision. The file hash is bound to Preview → Import."; color: Theme.muted-ink; wrap: word-wrap; }
-                            analysis-import-path := LineEdit { placeholder-text: "Absolute data file path"; accessible-label: "Analysis import path"; }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                analysis-import-path := LineEdit {
+                                    horizontal-stretch: 1;
+                                    placeholder-text: "Absolute data file path";
+                                    accessible-label: "Analysis import path";
+                                }
+                                Button {
+                                    text: "Browse data…";
+                                    accessible-label: "Choose scientific dataset with native file picker";
+                                    clicked => {
+                                        let selected = root.choose-local-file("data");
+                                        if selected != "" { analysis-import-path.text = selected; }
+                                    }
+                                }
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
                                 Button { text: "Preview import"; accessible-label: "Preview analysis import"; clicked => { root.preview-analysis-import(analysis-import-path.text); } }

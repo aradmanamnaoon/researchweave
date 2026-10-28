@@ -467,6 +467,9 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
     $pdfPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF file path'
+    if (-not (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose local PDF with native file picker').Current.IsEnabled) {
+        throw 'PDF native file picker is not exposed as an enabled accessible button'
+    }
     $pdfSearch = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF search query'
     ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($twoPagePdf)
     ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('PDFium')
@@ -636,6 +639,9 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
     $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+    if (-not (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled) {
+        throw 'Scientific import native file picker is not exposed as an enabled accessible button'
+    }
     ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($analysisInput)
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 260
