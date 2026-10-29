@@ -1,12 +1,19 @@
+// The desktop executable is a native GUI application. Windows must not create
+// a separate console window when started from Explorer or an installed shortcut.
+// Explicit smoke commands still use redirected stdout in the packaging harness.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use researchweave_ai::{
     agent_actions::{AgentActionRecord, AgentActionStore},
+    chat as ai_chat,
+    contextual::{self, ContextKind, ContextualContext, ContextualRequest, PromptPreview},
     conversations::ConversationStore,
     grounding::GroundingStore,
     operations::{self as ai_operations, AiOperationHandler, NoSecrets},
     profile_store::ProfileStore,
     prompts::PromptStore,
-    EgressPolicy, NativeHttpTransport,
+    EgressPolicy, NativeHttpTransport, ProviderProfile,
 };
 use researchweave_analysis::AnalysisService;
 use researchweave_core::{
@@ -16,21 +23,28 @@ use researchweave_core::{
 use researchweave_evidence::EvidenceHandler;
 use researchweave_library::LibraryHandler;
 use researchweave_project::{
+    quick_notes::{self, NoteFlag, QuickNote},
     verify_archive, verify_encrypted_archive, ProjectHandler, ProjectInfo, ProjectStore,
 };
 use sha2::{Digest, Sha256};
-use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
+use slint::{
+    Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, StandardListViewItem, TableColumn, VecModel,
+};
 use std::{
     cell::RefCell,
     io::Read,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use uuid::Uuid;
 #[cfg(test)]
 mod display_contrast;
+mod document_navigation;
 mod durable_activity;
 mod pdf_engine;
 mod physical_export;
@@ -109,6 +123,12 @@ fn restore_writing_drafts(
     ui.set_manuscript_draft_section(recovered.section.clone().into());
     ui.set_manuscript_draft_citations(recovered.citations.clone().into());
     ui.set_manuscript_draft_body(recovered.body.clone().into());
+    ui.set_manuscript_word_count(
+        i32::try_from(recovered.body.split_whitespace().count()).unwrap_or(i32::MAX),
+    );
+    ui.set_manuscript_character_count(
+        i32::try_from(recovered.body.chars().count()).unwrap_or(i32::MAX),
+    );
     if recovered.notebook_dirty {
         ui.set_notebook_results("Recovered notebook edits awaiting project autosave".into());
     }
@@ -232,6 +252,374 @@ fn show_activity(ui: &MainWindow, state: &durable_activity::Activity) {
 }
 
 slint::include_modules!();
+
+fn update_manuscript_outline(ui: &MainWindow, body: &str) {
+    let headings = document_navigation::outline(body, 100)
+        .into_iter()
+        .map(|heading| ManuscriptHeading {
+            title: heading.title.into(),
+            level: i32::try_from(heading.level).unwrap_or(i32::MAX),
+            offset: i32::try_from(heading.offset).unwrap_or(i32::MAX),
+        })
+        .collect::<Vec<_>>();
+    ui.set_manuscript_headings(ModelRc::new(VecModel::from(headings)));
+}
+
+fn set_verified_dataset_grid(
+    ui: &MainWindow,
+    response: &serde_json::Value,
+    requested_revision: &str,
+    page_index: i32,
+    page_size: i32,
+) -> Result<(), String> {
+    let data = response
+        .get("data")
+        .filter(|value| value.is_object())
+        .ok_or("Dataset read returned no verified data object")?;
+    if page_index < 0 || !(1..=100).contains(&page_size) {
+        return Err("Dataset page size/index is outside the safe range".into());
+    }
+    let expected_offset = (page_index as u64)
+        .checked_mul(page_size as u64)
+        .ok_or("Dataset page offset overflow")?;
+    let offset = data["offset"].as_u64().ok_or("Dataset offset missing")?;
+    let total = data["total"].as_u64().ok_or("Dataset row count missing")?;
+    let revision = data["revision"]
+        .as_str()
+        .ok_or("Dataset revision missing")?;
+    if offset != expected_offset
+        || total < offset
+        || revision != requested_revision
+        || data["limit"].as_u64() != Some(page_size as u64)
+    {
+        return Err("Dataset page response does not match selected immutable revision".into());
+    }
+    let records = data["rows"]
+        .as_array()
+        .ok_or("Verified dataset rows missing")?;
+    if records.len() > page_size as usize {
+        return Err("Dataset returned more rows than requested".into());
+    }
+    let headers = records
+        .first()
+        .and_then(serde_json::Value::as_object)
+        .map(|object| object.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    if headers.len() > 200 {
+        return Err("Dataset preview exceeds the 200-column UI limit".into());
+    }
+    let columns = headers
+        .iter()
+        .map(|name| {
+            let mut column = TableColumn::default();
+            column.title = name.clone().into();
+            column.min_width = 85.0;
+            column.width = 140.0;
+            column.horizontal_stretch = 1.0;
+            column
+        })
+        .collect::<Vec<_>>();
+    let mut rows: Vec<ModelRc<StandardListViewItem>> = Vec::with_capacity(records.len());
+    for record in records {
+        let values = record
+            .as_object()
+            .ok_or("Dataset record is not an object")?;
+        if values.len() != headers.len() || headers.iter().any(|name| !values.contains_key(name)) {
+            return Err("Dataset row schema differs from the selected column headers".into());
+        }
+        let cells = headers
+            .iter()
+            .map(|name| {
+                let value = &values[name];
+                let text = match value {
+                    serde_json::Value::Null => "Missing".to_owned(),
+                    serde_json::Value::String(value) => value.clone(),
+                    serde_json::Value::Number(_) | serde_json::Value::Bool(_) => value.to_string(),
+                    _ => "[structured value; inspect JSON below]".to_owned(),
+                };
+                let mut cell = StandardListViewItem::default();
+                cell.text = text.chars().take(300).collect::<String>().into();
+                cell
+            })
+            .collect::<Vec<_>>();
+        rows.push(ModelRc::new(VecModel::from(cells)));
+    }
+    ui.set_dataset_grid_columns(ModelRc::new(VecModel::from(columns)));
+    ui.set_dataset_grid_rows(ModelRc::new(VecModel::from(rows)));
+    ui.set_dataset_grid_page(page_index);
+    ui.set_dataset_grid_page_size(page_size);
+    ui.set_dataset_grid_total_rows(i32::try_from(total).unwrap_or(i32::MAX));
+    ui.set_dataset_grid_ready(!records.is_empty());
+    ui.set_dataset_grid_status(
+        format!(
+            "Verified revision {} · Rows {}–{} of {} · Read-only, original row order",
+            &revision[..revision.len().min(12)],
+            offset.saturating_add(1),
+            offset.saturating_add(records.len() as u64),
+            total
+        )
+        .into(),
+    );
+    Ok(())
+}
+
+fn clear_dataset_grid(ui: &MainWindow, status: &str) {
+    ui.set_dataset_grid_columns(ModelRc::new(VecModel::from(Vec::<TableColumn>::new())));
+    ui.set_dataset_grid_rows(ModelRc::new(VecModel::from(Vec::<
+        ModelRc<StandardListViewItem>,
+    >::new())));
+    ui.set_dataset_grid_page(0);
+    ui.set_dataset_grid_total_rows(-1);
+    ui.set_dataset_grid_ready(false);
+    ui.set_dataset_grid_busy(false);
+    ui.set_dataset_grid_status(status.into());
+}
+
+#[derive(Clone)]
+struct PendingContextAi {
+    page: i32,
+    project: PathBuf,
+    request: ContextualRequest,
+    profile: ProviderProfile,
+    preview: PromptPreview,
+}
+
+const LOCAL_ONLY_AI_POLICY: EgressPolicy = EgressPolicy {
+    offline: true,
+    external_allowed: false,
+};
+
+fn contextual_request_from_ui(
+    ui: &MainWindow,
+    project: &Path,
+) -> Result<ContextualRequest, String> {
+    let info = ProjectStore::open(project)
+        .map_err(|error| error.to_string())?
+        .info()
+        .map_err(|error| error.to_string())?;
+    let (kind, object, title, content): (ContextKind, &str, String, String) = match ui.get_page() {
+        19 => (
+            ContextKind::Manuscript,
+            "manuscript",
+            format!(
+                "Manuscript: {} · {}",
+                ui.get_manuscript_draft_id(),
+                ui.get_manuscript_draft_section()
+            ),
+            ui.get_manuscript_draft_body().to_string(),
+        ),
+        21 => (
+            ContextKind::Notes,
+            "note",
+            if ui.get_quick_note_id().is_empty() {
+                "Research notebook".into()
+            } else {
+                format!("Quick note: {}", ui.get_quick_note_title())
+            },
+            if ui.get_quick_note_id().is_empty() {
+                ui.get_notebook_draft().to_string()
+            } else {
+                ui.get_quick_note_body().to_string()
+            },
+        ),
+        12 | 13 => (
+            ContextKind::Dataset,
+            "dataset",
+            "Current dataset metadata".into(),
+            format!(
+                "Dataset: {}\nVariable metadata: {}",
+                ui.get_analysis_results(),
+                ui.get_variable_results()
+            ),
+        ),
+        14 | 15 => (
+            ContextKind::Statistics,
+            "analysis",
+            ui.get_statistics_result_title().to_string(),
+            format!(
+                "Statistical result: {}\nDiagnostics: {}\nProvenance: {}",
+                ui.get_statistics_result_primary(),
+                ui.get_statistics_result_secondary(),
+                ui.get_statistics_result_provenance()
+            ),
+        ),
+        3 => (
+            ContextKind::Search,
+            "search",
+            "Research search".into(),
+            ui.get_library_results().to_string(),
+        ),
+        5..=11 | 20 => (
+            ContextKind::Evidence,
+            "evidence",
+            "Current sources and evidence".into(),
+            format!(
+                "Sources: {}\nReferences: {}\nReview: {}",
+                ui.get_library_results(),
+                ui.get_reference_results(),
+                ui.get_review_results()
+            ),
+        ),
+        22 | 27 => (
+            ContextKind::Reports,
+            "report",
+            "Prepared manuscript/report".into(),
+            ui.get_writing_results().to_string(),
+        ),
+        _ => (
+            ContextKind::Project,
+            "project",
+            format!("Project: {}", info.title),
+            format!(
+                "Research question: {}\nDesign: {}\nPrivacy: {}",
+                info.question, info.design, info.privacy
+            ),
+        ),
+    };
+    if content.trim().is_empty() {
+        return Err("This screen has no content for AI to inspect. Add a note, manuscript, dataset, or result first.".into());
+    }
+    Ok(ContextualRequest {
+        user_request: ui.get_context_ai_task().to_string(),
+        context: ContextualContext {
+            kind,
+            project_id: info.id,
+            object_id: object.into(),
+            title,
+            content,
+            source_excerpts: Vec::new(),
+        },
+    })
+}
+
+fn selected_local_ai_profile(data_root: &Path, selected: &str) -> Result<ProviderProfile, String> {
+    let store = ProfileStore::open(&data_root.join("ai-profiles.json"))
+        .map_err(|error| error.to_string())?;
+    let profile = store
+        .list()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|profile| {
+            profile.local && (selected.trim().is_empty() || profile.id == selected.trim())
+        })
+        .ok_or("No matching local AI model. Configure a loopback provider profile in Manage → Providers.")?;
+    let profile = ProviderProfile {
+        id: profile.id,
+        kind: profile.kind,
+        model: profile.model,
+        endpoint: profile.endpoint,
+        local: true,
+        credential_reference: None,
+        capabilities: profile.capabilities,
+    };
+    LOCAL_ONLY_AI_POLICY
+        .authorize(&profile)
+        .map_err(|error| error.to_string())?;
+    Ok(profile)
+}
+
+fn populate_quick_notes(
+    ui: &MainWindow,
+    project: &Path,
+    search: &str,
+    view: i32,
+) -> Result<(), String> {
+    let notes = quick_notes::list_with_deleted(project, search, view == 1, view == 2)
+        .map_err(|error| error.to_string())?;
+    let count = notes.len();
+    let cards: Vec<QuickNoteCard> = notes
+        .into_iter()
+        .map(|note| QuickNoteCard {
+            id: note.id.into(),
+            title: note.title.into(),
+            preview: note.body.chars().take(135).collect::<String>().into(),
+            labels: note.labels.into(),
+            pinned: note.pinned,
+            archived: note.archived,
+            revision: note.revision as i32,
+        })
+        .collect();
+    ui.set_quick_notes(slint::ModelRc::new(slint::VecModel::from(cards)));
+    ui.set_quick_note_status(format!("{count} note(s) · Saved locally").into());
+    Ok(())
+}
+
+fn select_quick_note(ui: &MainWindow, note: &QuickNote) {
+    ui.set_quick_note_id(note.id.clone().into());
+    ui.set_quick_note_revision(note.revision as i32);
+    ui.set_quick_note_title(note.title.clone().into());
+    ui.set_quick_note_body(note.body.clone().into());
+    ui.set_quick_note_labels(note.labels.clone().into());
+    ui.set_quick_note_status("Ready to edit · Auto-save is on".into());
+}
+
+fn reset_quick_notes_for_project(ui: &MainWindow, project: &Path) {
+    ui.set_dataset_selected_id("".into());
+    ui.set_dataset_selected_revision("".into());
+    clear_dataset_grid(ui, "Open or import a dataset revision to inspect it");
+    ui.set_quick_note_id("".into());
+    ui.set_quick_note_title("".into());
+    ui.set_quick_note_body("".into());
+    ui.set_quick_note_labels("".into());
+    ui.set_quick_note_revision(0);
+    ui.set_quick_note_search("".into());
+    ui.set_quick_note_view(0);
+    ui.set_quick_note_grid(true);
+    let recovered = quick_notes::recover_drafts(project);
+    if let Err(error) = populate_quick_notes(ui, project, "", 0) {
+        ui.set_quick_note_status(format!("Cannot load project notes: {error}").into());
+    } else {
+        match recovered {
+            Ok(count) if count > 0 => ui.set_quick_note_status(
+                format!("Recovered {count} interrupted note draft(s)").into(),
+            ),
+            Err(error) => ui.set_quick_note_status(
+                format!("Note draft recovery needs attention: {error}").into(),
+            ),
+            _ => {}
+        }
+    }
+}
+
+fn save_selected_quick_note(ui: &MainWindow, project: &Path) -> Result<(), String> {
+    let id = ui.get_quick_note_id().to_string();
+    if id.is_empty() {
+        return Ok(());
+    }
+    let updated = quick_notes::save(
+        project,
+        Some(&id),
+        Some(ui.get_quick_note_revision() as i64),
+        ui.get_quick_note_title().as_str(),
+        ui.get_quick_note_body().as_str(),
+        ui.get_quick_note_labels().as_str(),
+    )
+    .map_err(|error| error.to_string())?;
+    quick_notes::flush_draft(project, &id).map_err(|error| error.to_string())?;
+    ui.set_quick_note_revision(updated.revision as i32);
+    ui.set_quick_note_status("Saved locally · Revision history retained".into());
+    populate_quick_notes(
+        ui,
+        project,
+        ui.get_quick_note_search().as_str(),
+        ui.get_quick_note_view(),
+    )
+}
+
+/// Save the active quick note before changing projects. A pending timer could
+/// otherwise run after project switch and persist the previous project's text
+/// under the new project's active note identifier.
+fn finish_quick_note_before_project_switch(
+    ui: &MainWindow,
+    project: Option<&Path>,
+    timer: &slint::Timer,
+) -> Result<(), String> {
+    timer.stop();
+    if let Some(project) = project {
+        save_selected_quick_note(ui, project)?;
+    }
+    Ok(())
+}
 
 const PAGES: [&str; 40] = [
     "Welcome",
@@ -3207,6 +3595,382 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let active_project: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    let quick_note_draft_session: Rc<RefCell<Option<quick_notes::DraftSession>>> =
+        Rc::new(RefCell::new(None));
+    let pending_context_ai: Rc<RefCell<Option<PendingContextAi>>> = Rc::new(RefCell::new(None));
+    let context_ai_cancellation: Rc<RefCell<Option<Arc<AtomicBool>>>> = Rc::new(RefCell::new(None));
+    app.on_preview_context_ai({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending = pending_context_ai.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            pending.borrow_mut().take();
+            ui.set_context_ai_ready(false);
+            let preview_result = (|| {
+                let project = active_project.borrow().clone().ok_or("Open a research project first")?;
+                let request = contextual_request_from_ui(&ui, &project)?;
+                let visible_preview = contextual::build_preview(
+                    &request, LOCAL_ONLY_AI_POLICY, None,
+                ).map_err(|error| format!("Cannot prepare context: {error}"))?;
+                let source = format!("{:?} · {}", request.context.kind, request.context.title);
+                ui.set_context_ai_source(source.into());
+                let local_model = selected_local_ai_profile(
+                    &host_data_root()?, ui.get_context_ai_profile().as_str(),
+                );
+                let preview_text = format!(
+                    "Local preview only. Nothing has been sent.\nSource: {}\nTask: {}\nContext: {} bytes.\n\nExact user message:\n{}",
+                    request.context.title,
+                    request.user_request,
+                    request.context.content.len(),
+                    visible_preview.messages[1].content,
+                );
+                match local_model {
+                    Ok(profile) => {
+                        let permitted_preview = contextual::build_preview(
+                            &request, LOCAL_ONLY_AI_POLICY, Some(&profile),
+                        ).map_err(|error| error.to_string())?;
+                        *pending.borrow_mut() = Some(PendingContextAi {
+                            page: ui.get_page(),
+                            project,
+                            request,
+                            profile,
+                            preview: permitted_preview,
+                        });
+                        ui.set_context_ai_preview_summary(preview_text.into());
+                        ui.set_context_ai_ready(true);
+                    }
+                    Err(error) => {
+                        ui.set_context_ai_preview_summary(
+                            format!("{preview_text}\n\nLocal inference unavailable: {error}").into(),
+                        );
+                    }
+                }
+                Ok::<_, String>(())
+            })();
+            if let Err(error) = preview_result {
+                ui.set_context_ai_preview_summary(
+                    format!("No request prepared: {error}").into(),
+                );
+                ui.set_context_ai_ready(false);
+            }
+        }
+    });
+    app.on_run_context_ai({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending = pending_context_ai.clone();
+        let cancellation = context_ai_cancellation.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            if ui.get_context_ai_busy() { return; }
+            let Some(approved) = pending.borrow().clone() else {
+                ui.set_context_ai_output("Preview a valid local-model request first.".into());
+                return;
+            };
+            let valid = active_project.borrow().as_ref().is_some_and(|current| {
+                current == &approved.project
+            }) && ui.get_page() == approved.page
+                && contextual_request_from_ui(&ui, &approved.project).is_ok_and(|current| {
+                    current == approved.request
+                });
+            if !valid {
+                ui.set_context_ai_ready(false);
+                pending.borrow_mut().take();
+                ui.set_context_ai_output(
+                    "Your project, page or writing changed after preview. Review context again.".into(),
+                );
+                return;
+            }
+            // One explicit user action authorizes one local inference. Remote
+            // profiles cannot pass the offline egress policy.
+            let stop = Arc::new(AtomicBool::new(false));
+            *cancellation.borrow_mut() = Some(stop.clone());
+            ui.set_context_ai_busy(true);
+            ui.set_context_ai_ready(false);
+            ui.set_context_ai_output("Contacting the approved local model…".into());
+            let weak_task = weak.clone();
+            std::thread::spawn(move || {
+                let result = NativeHttpTransport::new(Duration::from_secs(30))
+                    .and_then(|transport| {
+                        ai_chat(
+                            &transport,
+                            &approved.profile,
+                            LOCAL_ONLY_AI_POLICY,
+                            &approved.preview.messages_json(),
+                            &|| stop.load(Ordering::SeqCst),
+                        )
+                    })
+                    .map_err(|error| error.to_string());
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak_task.upgrade() {
+                        ui.set_context_ai_busy(false);
+                        if stop.load(Ordering::SeqCst) {
+                            ui.set_context_ai_output(
+                                "Local AI request canceled. Research content is unchanged.".into(),
+                            );
+                        } else {
+                            match result {
+                                Ok(response) => ui.set_context_ai_output(
+                                    format!(
+                                        "Model-generated draft · Verify against actual sources.\n\n{}",
+                                        response.text
+                                    ).into(),
+                                ),
+                                Err(error) => ui.set_context_ai_output(
+                                    format!("Local model unavailable: {error}. Your project is unchanged.").into(),
+                                ),
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    });
+    app.on_cancel_context_ai({
+        let weak = app.as_weak();
+        let cancellation = context_ai_cancellation.clone();
+        move || {
+            if let Some(stop) = cancellation.borrow().as_ref() {
+                stop.store(true, Ordering::SeqCst);
+            }
+            if let Some(ui) = weak.upgrade() {
+                ui.set_context_ai_output(
+                    "Cancellation requested. The local request will be discarded when it ends."
+                        .into(),
+                );
+            }
+        }
+    });
+    // Quick notes deliberately have a separate debounce timer from the
+    // revisioned notebook/manuscript editor. Switching editors cannot cancel
+    // a pending save in an unrelated writing surface.
+    let quick_note_timer = Rc::new(slint::Timer::default());
+    app.on_refresh_quick_notes({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |search, view| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_quick_notes(slint::ModelRc::new(slint::VecModel::from(Vec::<
+                    QuickNoteCard,
+                >::new(
+                ))));
+                ui.set_quick_note_status("Open a project to see its notes".into());
+                return;
+            };
+            if let Err(error) = populate_quick_notes(&ui, &project, search.as_str(), view) {
+                ui.set_quick_note_status(format!("Unable to load notes: {error}").into());
+            }
+        }
+    });
+    app.on_create_quick_note({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_quick_note_status("Open a project before creating a note".into());
+                return;
+            };
+            match quick_notes::save(&project, None, None, "", "", "") {
+                Ok(note) => {
+                    select_quick_note(&ui, &note);
+                    ui.set_quick_note_grid(false);
+                    if let Err(error) = populate_quick_notes(&ui, &project, "", 0) {
+                        ui.set_quick_note_status(error.into());
+                    }
+                    ui.set_quick_note_search("".into());
+                    ui.set_quick_note_view(0);
+                    ui.set_quick_note_status("New note ready · Type to autosave".into());
+                }
+                Err(error) => {
+                    ui.set_quick_note_status(format!("Cannot create note: {error}").into())
+                }
+            }
+        }
+    });
+    app.on_select_quick_note({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                return;
+            };
+            match quick_notes::get(&project, id.as_str()) {
+                Ok(note) if !note.deleted => {
+                    ui.set_quick_note_grid(false);
+                    select_quick_note(&ui, &note)
+                }
+                Ok(_) => {
+                    ui.set_quick_note_status("This note is in Trash. Restore it to edit.".into())
+                }
+                Err(error) => ui.set_quick_note_status(format!("Cannot open note: {error}").into()),
+            }
+        }
+    });
+    app.on_save_quick_note({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let timer = quick_note_timer.clone();
+        move || {
+            timer.stop();
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                return;
+            };
+            if let Err(error) = save_selected_quick_note(&ui, &project) {
+                ui.set_quick_note_status(
+                    format!("Save failed; draft is still in editor: {error}").into(),
+                );
+            }
+        }
+    });
+    app.on_quick_note_draft_edited({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let draft_session = quick_note_draft_session.clone();
+        let timer = quick_note_timer.clone();
+        move |_, _, _| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                return;
+            };
+            // A durable one-row journal survives a sudden close; only one
+            // full revision is committed after the user pauses typing.
+            let note_id = ui.get_quick_note_id();
+            if note_id.is_empty() {
+                return;
+            }
+            let stage_result = match draft_session.borrow().as_ref() {
+                Some(session) if session.is_for(&project) => session.stage(
+                    note_id.as_str(),
+                    i64::from(ui.get_quick_note_revision()),
+                    ui.get_quick_note_title().as_str(),
+                    ui.get_quick_note_body().as_str(),
+                    ui.get_quick_note_labels().as_str(),
+                ),
+                _ => quick_notes::stage_draft(
+                    &project,
+                    note_id.as_str(),
+                    i64::from(ui.get_quick_note_revision()),
+                    ui.get_quick_note_title().as_str(),
+                    ui.get_quick_note_body().as_str(),
+                    ui.get_quick_note_labels().as_str(),
+                ),
+            };
+            match stage_result {
+                Ok(()) => ui.set_quick_note_status(
+                    "Draft safely stored · Creating a revision shortly".into(),
+                ),
+                Err(error) => {
+                    ui.set_quick_note_status(
+                        format!("Save failed. Keep this note open and retry: {error}").into(),
+                    );
+                    return;
+                }
+            }
+            let weak_task = weak.clone();
+            timer.start(
+                slint::TimerMode::SingleShot,
+                Duration::from_millis(650),
+                move || {
+                    if let Some(ui) = weak_task.upgrade() {
+                        match quick_notes::flush_draft(&project, note_id.as_str()) {
+                            Ok(saved) => {
+                                if ui.get_quick_note_id() == note_id {
+                                    ui.set_quick_note_revision(saved.revision as i32);
+                                }
+                            }
+                            Err(error) => {
+                                ui.set_quick_note_status(
+                                    format!(
+                                        "Draft retained for recovery; revision failed: {error}"
+                                    )
+                                    .into(),
+                                );
+                                return;
+                            }
+                        }
+                        if let Err(error) = populate_quick_notes(
+                            &ui,
+                            &project,
+                            ui.get_quick_note_search().as_str(),
+                            ui.get_quick_note_view(),
+                        ) {
+                            ui.set_quick_note_status(
+                                format!("Note saved; preview refresh failed: {error}").into(),
+                            );
+                        }
+                    }
+                },
+            );
+        }
+    });
+    app.on_quick_note_action({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |action, id, revision| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                return;
+            };
+            let flag = match action.as_str() {
+                "pin" => NoteFlag::Pinned,
+                "archive" | "unarchive" => NoteFlag::Archived,
+                "delete" | "restore" => NoteFlag::Deleted,
+                _ => {
+                    ui.set_quick_note_status("Unknown note action".into());
+                    return;
+                }
+            };
+            let selected = ui.get_quick_note_id().as_str() == id.as_str();
+            let expected = if selected {
+                i64::from(ui.get_quick_note_revision())
+            } else {
+                i64::from(revision)
+            };
+            let result = quick_notes::get(&project, id.as_str())
+                .map_err(|error| error.to_string())
+                .and_then(|existing| {
+                    if existing.revision != expected {
+                        return Err("This note has changed. Refresh before retrying.".into());
+                    }
+                    let value = match action.as_str() {
+                        "pin" => !existing.pinned,
+                        "archive" | "delete" => true,
+                        _ => false,
+                    };
+                    quick_notes::set_flag(&project, id.as_str(), existing.revision, flag, value)
+                        .map_err(|error| error.to_string())
+                });
+            match result {
+                Ok(updated) => {
+                    if selected && action.as_str() == "pin" {
+                        // A quick pin toggle should not eject the writer from
+                        // their active note or lose the optimistic revision.
+                        select_quick_note(&ui, &updated);
+                    } else if selected {
+                        ui.set_quick_note_id("".into());
+                        ui.set_quick_note_title("".into());
+                        ui.set_quick_note_body("".into());
+                        ui.set_quick_note_labels("".into());
+                        ui.set_quick_note_revision(0);
+                    }
+                    if let Err(error) = populate_quick_notes(
+                        &ui,
+                        &project,
+                        ui.get_quick_note_search().as_str(),
+                        ui.get_quick_note_view(),
+                    ) {
+                        ui.set_quick_note_status(error.into());
+                    }
+                }
+                Err(error) => ui.set_quick_note_status(format!("Note unchanged: {error}").into()),
+            }
+        }
+    });
     let pending_project_metadata: Rc<RefCell<Option<PendingProjectMetadata>>> =
         Rc::new(RefCell::new(None));
     let writing_drafts = Rc::new(RefCell::new(writing_autosave::Drafts::default()));
@@ -3274,6 +4038,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |id, section, citations, body| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_manuscript_word_count(
+                    i32::try_from(body.split_whitespace().count()).unwrap_or(i32::MAX),
+                );
+                ui.set_manuscript_character_count(
+                    i32::try_from(body.chars().count()).unwrap_or(i32::MAX),
+                );
+                ui.set_writing_find_next_from(0);
+                ui.set_writing_find_match(false);
+                if ui.get_writing_show_outline() {
+                    update_manuscript_outline(&ui, body.as_str());
+                }
+            }
             let Some(project) = active_project.borrow().clone() else {
                 return;
             };
@@ -3326,6 +4103,81 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 },
             );
+        }
+    });
+    app.on_refresh_manuscript_outline({
+        let weak = app.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                update_manuscript_outline(&ui, ui.get_manuscript_draft_body().as_str());
+            }
+        }
+    });
+    app.on_find_next_manuscript({
+        let weak = app.as_weak();
+        move |needle| {
+            let Some(ui) = weak.upgrade() else { return };
+            let body = ui.get_manuscript_draft_body();
+            if let Some(found) = document_navigation::find_next(
+                body.as_str(),
+                needle.as_str(),
+                ui.get_writing_find_next_from().max(0) as usize,
+            ) {
+                let Ok(start) = i32::try_from(found.start) else {
+                    ui.set_writing_find_status(
+                        "Search match lies outside the editor's supported range".into(),
+                    );
+                    ui.set_writing_find_match(false);
+                    return;
+                };
+                let Ok(end) = i32::try_from(found.end) else {
+                    ui.set_writing_find_status(
+                        "Search match lies outside the editor's supported range".into(),
+                    );
+                    ui.set_writing_find_match(false);
+                    return;
+                };
+                ui.set_writing_find_offset(start);
+                ui.set_writing_find_end(end);
+                ui.set_writing_find_next_from(end);
+                ui.set_writing_find_match(true);
+                ui.set_writing_find_status(
+                    format!(
+                        "Found at byte {start}{}",
+                        if found.wrapped {
+                            " · Wrapped to start"
+                        } else {
+                            ""
+                        }
+                    )
+                    .into(),
+                );
+            } else {
+                ui.set_writing_find_match(false);
+                ui.set_writing_find_status(
+                    "No matching text in the current manuscript draft".into(),
+                );
+            }
+        }
+    });
+    app.on_select_manuscript_range({
+        let weak = app.as_weak();
+        move |start, end| {
+            let Some(ui) = weak.upgrade() else { return };
+            let body = ui.get_manuscript_draft_body();
+            let valid = start >= 0
+                && end >= start
+                && (end as usize) <= body.len()
+                && body.is_char_boundary(start as usize)
+                && body.is_char_boundary(end as usize);
+            if valid {
+                ui.set_writing_find_status("Moved to selected manuscript heading".into());
+            } else {
+                ui.set_writing_find_status(
+                    "Cannot navigate to stale manuscript position; refresh outline".into(),
+                );
+            }
+            ui.set_writing_find_match(false);
         }
     });
     let pending_evidence: Rc<RefCell<Option<PendingEvidenceAction>>> = Rc::new(RefCell::new(None));
@@ -4261,6 +5113,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 match result {
                     Ok(executed) => {
+                        if let (Some(dataset_id), Some(revision)) = (
+                            executed["data"]["dataset_id"].as_str(),
+                            executed["data"]["revision"].as_str(),
+                        ) {
+                            ui.set_dataset_selected_id(dataset_id.into());
+                            ui.set_dataset_selected_revision(revision.into());
+                            clear_dataset_grid(
+                                &ui,
+                                "Dataset imported. Choose Inspect dataset to see verified rows.",
+                            );
+                        }
                         ui.set_analysis_results(
                             format!(
                                 "Immutable dataset revision imported through approved local-write command:\n{}",
@@ -4306,13 +5169,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(result) => {
                         ui.set_analysis_results(pretty_result_data(&result).into());
                         ui.set_status("Immutable dataset revision loaded".into());
+                        ui.invoke_request_dataset_page(dataset_id, revision, 0, 25);
                     }
                     Err(error) => {
+                        clear_dataset_grid(
+                            &ui,
+                            &format!("Cannot inspect selected revision: {error}"),
+                        );
                         ui.set_analysis_results(error.clone().into());
                         ui.set_status(error.into());
                     }
                 }
             }
+        }
+    });
+    app.on_request_dataset_page({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |dataset_id, revision, page_index, page_size| {
+            let Some(ui) = weak.upgrade() else { return };
+            if page_index < 0 || !(1..=100).contains(&page_size) {
+                clear_dataset_grid(
+                    &ui,
+                    "Invalid page. Select a nonnegative page and 1–100 rows.",
+                );
+                return;
+            }
+            let Some(offset) = (page_index as u64).checked_mul(page_size as u64) else {
+                clear_dataset_grid(&ui, "Dataset page is too large");
+                return;
+            };
+            let dataset_id = dataset_id.to_string();
+            let revision = revision.to_string();
+            ui.set_dataset_grid_busy(true);
+            ui.set_dataset_grid_status("Reading selected immutable dataset revision…".into());
+            let result = active_project
+                .borrow()
+                .as_ref()
+                .ok_or_else(|| "Open a project first".to_owned())
+                .and_then(|project| {
+                    let root = host_data_root()?;
+                    analysis_read_at(
+                        project,
+                        "dataset.inspect",
+                        serde_json::json!({
+                            "dataset_id": dataset_id.trim(),
+                            "revision": revision.trim(),
+                            "offset": offset,
+                            "limit": page_size,
+                        }),
+                        &root,
+                    )
+                });
+            match result.and_then(|result| {
+                set_verified_dataset_grid(&ui, &result, revision.trim(), page_index, page_size)
+            }) {
+                Ok(()) => {}
+                Err(error) => {
+                    clear_dataset_grid(
+                        &ui,
+                        &format!("Unable to display this exact dataset revision: {error}"),
+                    );
+                }
+            }
+            ui.set_dataset_grid_busy(false);
         }
     });
     app.on_run_descriptives({
@@ -6813,10 +7733,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
+        let quick_timer = quick_note_timer.clone();
         move |path, title| {
+            if let Some(ui) = weak.upgrade() {
+                if let Err(error) = finish_quick_note_before_project_switch(
+                    &ui,
+                    active_project.borrow().as_deref(),
+                    &quick_timer,
+                ) {
+                    ui.set_status(
+                        format!("Project switch canceled because the current note could not be saved: {error}").into(),
+                    );
+                    return;
+                }
+            }
             let result = load_project(&path, &title, true);
             if let Some(ui) = weak.upgrade() {
                 match result {
@@ -6826,6 +7760,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
+                        reset_quick_notes_for_project(&ui, Path::new(path.as_str()));
+                        *draft_session.borrow_mut() =
+                            quick_notes::DraftSession::open(Path::new(path.as_str())).ok();
                         if let Err(error) =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
                         {
@@ -6851,10 +7788,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_default_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
+        let quick_timer = quick_note_timer.clone();
         move |title| {
+            if let Some(ui) = weak.upgrade() {
+                if let Err(error) = finish_quick_note_before_project_switch(
+                    &ui,
+                    active_project.borrow().as_deref(),
+                    &quick_timer,
+                ) {
+                    ui.set_status(
+                        format!("Project switch canceled because the current note could not be saved: {error}").into(),
+                    );
+                    return;
+                }
+            }
             let result = create_managed_project(&title);
             if let Some(ui) = weak.upgrade() {
                 match result {
@@ -6865,6 +7816,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = find_managed_project(&info.id).ok();
                         if let Some(project) = active_project.borrow().as_ref() {
+                            reset_quick_notes_for_project(&ui, project);
+                            *draft_session.borrow_mut() =
+                                quick_notes::DraftSession::open(project).ok();
                             if let Err(error) = restore_writing_drafts(&ui, project, &drafts) {
                                 ui.set_status(error.into());
                             } else {
@@ -6889,10 +7843,24 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_open_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
+        let quick_timer = quick_note_timer.clone();
         move |path| {
+            if let Some(ui) = weak.upgrade() {
+                if let Err(error) = finish_quick_note_before_project_switch(
+                    &ui,
+                    active_project.borrow().as_deref(),
+                    &quick_timer,
+                ) {
+                    ui.set_status(
+                        format!("Project switch canceled because the current note could not be saved: {error}").into(),
+                    );
+                    return;
+                }
+            }
             let result = load_project(&path, "", false);
             if let Some(ui) = weak.upgrade() {
                 match result {
@@ -6902,6 +7870,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
+                        reset_quick_notes_for_project(&ui, Path::new(path.as_str()));
+                        *draft_session.borrow_mut() =
+                            quick_notes::DraftSession::open(Path::new(path.as_str())).ok();
                         if let Err(error) =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
                         {

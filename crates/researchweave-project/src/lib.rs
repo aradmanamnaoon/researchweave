@@ -19,6 +19,7 @@ use thiserror::Error;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 mod handler;
+pub mod quick_notes;
 pub use handler::ProjectHandler;
 
 pub const SCHEMA_VERSION: u32 = 5;

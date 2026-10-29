@@ -5,6 +5,13 @@ crates/*/*.cdx.json
 *.rs.bk
 *.pdb
 *.dSYM/
+*.profraw
+*.profdata
+*.gcda
+*.gcno
+/coverage/
+/tarpaulin-report.html
+/lcov.info
 
 # Native installer / release staging output.
 /dist/
@@ -17,6 +24,13 @@ crates/*/*.cdx.json
 *.AppImage
 *.deb
 *.rpm
+*.msix
+*.appx
+*.dmg.part
+*.exe.part
+*.zip.part
+/package-cache/
+/installer-cache/
 
 # Local Python tooling used by development and verification scripts.
 .venv/
@@ -32,24 +46,39 @@ __pycache__/
 .nox/
 .coverage*
 htmlcov/
+.python-version
+.ipynb_checkpoints/
+pip-wheel-metadata/
 
 # Editor, operating-system and temporary files.
 .idea/
 .vscode/
 .fleet/
 .history/
+.vs/
+.vscode-test/
 .DS_Store
 .AppleDouble
 Thumbs.db
 Desktop.ini
+ehthumbs.db
+*.stackdump
 *.swp
 *.swo
 *~
 *.orig
 *.rej
+*.bak
 *.tmp
 *.temp
 *.log
+*.trace
+*.crash
+/logs/
+/test-results/
+/playwright-report/
+/qa-artifacts/
+/screenshots-local/
 
 # Secrets and local provider configuration.
 .env
@@ -64,6 +93,9 @@ Desktop.ini
 *credentials*.local.json
 *.secret.json
 *.local.json
+*.secrets.toml
+/secrets/
+/credentials/
 
 # User research data, database sidecars, backups and private workspaces.
 # Deliberately preserve explicitly committed synthetic fixtures below.
@@ -82,6 +114,7 @@ Desktop.ini
 !/crates/*/tests/fixtures/*.rwproj
 !/crates/*/tests/fixtures/*.rwproj.enc
 !/crates/*/tests/fixtures/*.rwenc
+!/docs/verification/rust-rewrite/rust-generated.rwenc
 /projects/
 /workspace-data/
 /private/
@@ -91,6 +124,9 @@ Desktop.ini
 /tmp/
 /temp/
 /.cache/
+/cache/
+/.cargo-local/
+/.rustup-local/
 /.local-audit/
 /.tmp-external-audit/
 
@@ -106,8 +142,14 @@ Desktop.ini
 /models/
 /model-cache/
 /weights/
+/datasets-local/
+/research-data/
 
 # Private local planning/recovery artifacts that are absent from the public tree.
 /prompts/
 /*.bundle
 /legacy-tracked-files.pre-v2.txt
+
+# Keep versioned Rust source, CI scripts, branding, synthetic fixtures and
+# historical Python-to-Rust interoperability evidence under Git.
+# Globally ignored extensions above do not untrack already committed fixtures.

@@ -5,6 +5,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 pub mod agent_actions;
+pub mod contextual;
 pub mod conversations;
 pub mod grounding;
 pub mod operations;
