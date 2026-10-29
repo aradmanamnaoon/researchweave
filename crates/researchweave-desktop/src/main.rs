@@ -31,7 +31,7 @@ use slint::{
     Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, StandardListViewItem, TableColumn, VecModel,
 };
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     io::Read,
     path::{Path, PathBuf},
     rc::Rc,
@@ -75,7 +75,7 @@ fn flush_writing_drafts(
             .info()
             .map_err(|error| error.to_string())?
             .id;
-        writing_autosave::save(&writing_autosave::path(root, &id), drafts)?;
+        writing_autosave::save(&writing_autosave::scoped_path(root, project, &id)?, drafts)?;
     }
     if drafts.manuscript_dirty
         && !drafts.manuscript_id.trim().is_empty()
@@ -101,7 +101,7 @@ fn flush_writing_drafts(
             .info()
             .map_err(|error| error.to_string())?
             .id;
-        writing_autosave::save(&writing_autosave::path(root, &id), drafts)?;
+        writing_autosave::save(&writing_autosave::scoped_path(root, project, &id)?, drafts)?;
     }
     Ok(revision)
 }
@@ -111,13 +111,24 @@ fn restore_writing_drafts(
     project: &Path,
     drafts: &RefCell<writing_autosave::Drafts>,
 ) -> Result<(), String> {
+    ui.set_writing_recovery_blocked(true);
+    // Always discard the previous project's in-memory text before recovery.
+    // Failed/corrupt journals must never carry prior-project text forward.
+    *drafts.borrow_mut() = writing_autosave::Drafts::default();
+    ui.set_notebook_draft("".into());
+    ui.set_manuscript_draft_id("".into());
+    ui.set_manuscript_draft_section("".into());
+    ui.set_manuscript_draft_citations("".into());
+    ui.set_manuscript_draft_body("".into());
+    ui.set_manuscript_word_count(0);
+    ui.set_manuscript_character_count(0);
     let root = host_data_root()?;
     let id = ProjectStore::open(project)
         .map_err(|error| error.to_string())?
         .info()
         .map_err(|error| error.to_string())?
         .id;
-    let recovered = writing_autosave::load(&writing_autosave::path(&root, &id))?;
+    let recovered = writing_autosave::load_for_project(&root, project, &id)?;
     ui.set_notebook_draft(recovered.notebook.clone().into());
     ui.set_manuscript_draft_id(recovered.manuscript_id.clone().into());
     ui.set_manuscript_draft_section(recovered.section.clone().into());
@@ -136,6 +147,7 @@ fn restore_writing_drafts(
         ui.set_writing_results("Recovered manuscript edits awaiting project autosave".into());
     }
     *drafts.borrow_mut() = recovered;
+    ui.set_writing_recovery_blocked(false);
     Ok(())
 }
 
@@ -239,7 +251,11 @@ fn reconcile_manual_writing_save(
         updated.manuscript_dirty = false;
     }
     writing_autosave::save(
-        &writing_autosave::path(root, &pending.project_id.to_string()),
+        &writing_autosave::scoped_path(
+            root,
+            &pending.project_path,
+            &pending.project_id.to_string(),
+        )?,
         &updated,
     )?;
     *drafts = updated;
@@ -2969,6 +2985,10 @@ fn clear_evidence_draft_on_project_switch(ui: &MainWindow) {
 /// Drop previous-project result text and UI-only selections before exposing
 /// another project's workspaces. This does not modify stored project data.
 fn clear_project_scoped_view_state(ui: &MainWindow) {
+    // PDF rendering/search runs on a worker thread. Invalidate its token
+    // before clearing the screen so an old project's late completion cannot
+    // paint its page or search status into the newly opened project.
+    ui.set_pdf_job(ui.get_pdf_job().wrapping_add(1));
     clear_evidence_draft_on_project_switch(ui);
     ui.set_notebook_draft("".into());
     ui.set_manuscript_draft_id("".into());
@@ -3933,6 +3953,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let active_project: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    let project_generation = Rc::new(Cell::new(0_u64));
     let quick_note_draft_session: Rc<RefCell<Option<quick_notes::DraftSession>>> =
         Rc::new(RefCell::new(None));
     let pending_context_ai: Rc<RefCell<Option<PendingContextAi>>> = Rc::new(RefCell::new(None));
@@ -4313,12 +4334,87 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Rc::new(RefCell::new(None));
     let writing_drafts = Rc::new(RefCell::new(writing_autosave::Drafts::default()));
     let writing_timer = Rc::new(slint::Timer::default());
+    app.on_adopt_legacy_writing_draft({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            if !ui.get_writing_recovery_blocked() {
+                ui.set_status("Current project writing recovery is already available".into());
+                return;
+            }
+            let result = (|| {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or_else(|| "Open a project before adopting a writing draft".to_string())?;
+                let root = host_data_root()?;
+                let id = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?
+                    .id;
+                writing_autosave::adopt_legacy_for_project(&root, &project, &id)?;
+                restore_writing_drafts(&ui, &project, &drafts)?;
+                resume_recovered_writing(&timer, &project, drafts.clone(), weak.clone());
+                Ok::<(), String>(())
+            })();
+            match result {
+                Ok(()) => ui.set_status(
+                    "Older writing draft adopted into this exact project. Original recovery file retained."
+                        .into(),
+                ),
+                Err(error) => ui.set_status(format!("Writing draft not adopted: {error}").into()),
+            }
+        }
+    });
+    app.on_start_fresh_writing_draft({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let drafts = writing_drafts.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            if !ui.get_writing_recovery_blocked() {
+                return;
+            }
+            let result = (|| {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or_else(|| "Open a project before starting a writing draft".to_string())?;
+                let root = host_data_root()?;
+                let id = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?
+                    .id;
+                writing_autosave::start_fresh_for_project(&root, &project, &id)?;
+                restore_writing_drafts(&ui, &project, &drafts)?;
+                Ok::<(), String>(())
+            })();
+            match result {
+                Ok(()) => ui.set_status(
+                    "Fresh writing journal created for this project; older recovery files remain untouched."
+                        .into(),
+                ),
+                Err(error) => ui.set_status(format!("Cannot start fresh writing: {error}").into()),
+            }
+        }
+    });
     app.on_notebook_draft_edited({
         let weak = app.as_weak();
         let active_project = active_project.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |body| {
+            if weak
+                .upgrade()
+                .is_some_and(|ui| ui.get_writing_recovery_blocked())
+            {
+                return;
+            }
             let Some(project) = active_project.borrow().clone() else {
                 return;
             };
@@ -4332,7 +4428,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut draft = drafts.borrow_mut();
                 draft.notebook = body.to_string();
                 draft.notebook_dirty = true;
-                writing_autosave::save(&writing_autosave::path(&root, &id), &draft)
+                writing_autosave::save(
+                    &writing_autosave::scoped_path(&root, &project, &id)?,
+                    &draft,
+                )
             })();
             if let Err(error) = result {
                 if let Some(ui) = weak.upgrade() {
@@ -4376,6 +4475,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |id, section, citations, body| {
+            if weak.upgrade().is_some_and(|ui| ui.get_writing_recovery_blocked()) {
+                return;
+            }
             if let Some(ui) = weak.upgrade() {
                 ui.set_manuscript_word_count(
                     i32::try_from(body.split_whitespace().count()).unwrap_or(i32::MAX),
@@ -4406,7 +4508,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 draft.citations = citations.to_string();
                 draft.body = body.to_string();
                 draft.manuscript_dirty = true;
-                writing_autosave::save(&writing_autosave::path(&root, &project_id), &draft)
+                writing_autosave::save(&writing_autosave::scoped_path(&root, &project, &project_id)?, &draft)
             })();
             if let Err(error) = result {
                 if let Some(ui) = weak.upgrade() {
@@ -8180,82 +8282,136 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
     });
+    app.on_backup_finished({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |succeeded, source_path, message| {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_backup_busy(false);
+            if active_project.borrow().as_deref() != Some(Path::new(source_path.as_str())) {
+                ui.set_backup_results(
+                    "Backup finished for the previously open project. Reopen that project to inspect its archive status.".into(),
+                );
+                return;
+            }
+            ui.set_backup_results(message.clone());
+            ui.set_status(if succeeded {
+                "Backup operation completed".into()
+            } else {
+                message
+            });
+        }
+    });
     app.on_backup_action({
         let weak = app.as_weak();
         let active_project = active_project.clone();
         move |action, archive, password| {
-            if let Some(ui) = weak.upgrade() {
-                let result = active_project
-                    .borrow()
-                    .as_ref()
-                    .ok_or_else(|| "Open a project first".to_string())
-                    .and_then(|path| backup_operation(path, &action, &archive, &password));
-                match result {
-                    Ok(message) => {
-                        ui.set_backup_results(message.into());
-                        ui.set_status("Backup operation completed".into());
+            let Some(ui) = weak.upgrade() else { return };
+            if ui.get_backup_busy() || ui.get_recovery_busy() {
+                return;
+            }
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_backup_results("Open a project first".into());
+                return;
+            };
+            ui.set_backup_busy(true);
+            ui.set_backup_results("Working with the selected local archive…".into());
+            let weak_task = weak.clone();
+            std::thread::spawn(move || {
+                let result = backup_operation(&project, &action, &archive, &password);
+                let (succeeded, message) = match result {
+                    Ok(message) => (true, message),
+                    Err(error) => (false, error),
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak_task.upgrade() {
+                        ui.invoke_backup_finished(
+                            succeeded,
+                            project.to_string_lossy().into_owned().into(),
+                            message.into(),
+                        );
                     }
-                    Err(error) => {
-                        ui.set_backup_results(error.clone().into());
-                        ui.set_status(error.into());
-                    }
-                }
+                });
+            });
+        }
+    });
+    let restoring_from = Rc::new(RefCell::new(None::<(u64, Option<PathBuf>)>));
+    app.on_restore_finished({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let project_generation = project_generation.clone();
+        let restoring_from = restoring_from.clone();
+        move |succeeded, destination, message| {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_recovery_busy(false);
+            let requested_from = restoring_from.borrow_mut().take();
+            if !succeeded {
+                ui.set_recovery_results(message.clone());
+                ui.set_status(message);
+                return;
+            }
+            // The user may open another project while a large archive is being
+            // authenticated and restored. Never unexpectedly replace it.
+            if requested_from
+                != Some((project_generation.get(), active_project.borrow().clone()))
+            {
+                ui.set_recovery_results(
+                    format!("Archive restored to {destination}. Your current project has not changed; open the restored directory when ready.").into(),
+                );
+                return;
+            }
+            let restored_path = PathBuf::from(destination.as_str());
+            ui.invoke_open_project(destination.clone());
+            if active_project.borrow().as_deref() == Some(restored_path.as_path()) {
+                ui.set_recovery_results(message.clone());
+                ui.set_status(message);
+            } else {
+                ui.set_recovery_results(
+                    format!("Archive restored to {destination}, but could not be opened automatically. Open the restored directory to continue.").into(),
+                );
             }
         }
     });
     app.on_restore_backup({
         let weak = app.as_weak();
         let active_project = active_project.clone();
-        let pending_evidence = pending_evidence.clone();
-        let pending_physical_export = pending_physical_export.clone();
-        let pending_ai = pending_ai.clone();
-        let draft_session = quick_note_draft_session.clone();
-        let drafts = writing_drafts.clone();
-        let timer = writing_timer.clone();
+        let project_generation = project_generation.clone();
+        let restoring_from = restoring_from.clone();
         let quick_timer = quick_note_timer.clone();
         move |encrypted, archive, destination, password| {
-            if let Some(ui) = weak.upgrade() {
-                if let Err(error) = finish_quick_note_before_project_switch(
-                    &ui,
-                    active_project.borrow().as_deref(),
-                    &quick_timer,
-                ) {
-                    ui.set_status(format!("Restore canceled: current note could not be saved: {error}").into());
-                    return;
-                }
+            let Some(ui) = weak.upgrade() else { return };
+            if ui.get_recovery_busy() || ui.get_backup_busy() {
+                return;
             }
-            if let Some(ui) = weak.upgrade() {
-                match restore_backup(encrypted, &archive, &destination, &password) {
-                    Ok((info, path, message)) => {
-                        timer.stop();
-                        pending_evidence.borrow_mut().take();
-                        pending_physical_export.borrow_mut().take();
-                        pending_ai.borrow_mut().take();
-                        *active_project.borrow_mut() = Some(path.clone());
-                        clear_project_scoped_view_state(&ui);
-                        reset_quick_notes_for_project(&ui, &path);
-                        *draft_session.borrow_mut() = quick_notes::DraftSession::open(&path).ok();
-                        if let Err(error) = restore_writing_drafts(&ui, &path, &drafts) {
-                            ui.set_writing_results(format!("Restored project opened, but writing draft recovery needs attention: {error}").into());
-                        } else {
-                            resume_recovered_writing(&timer, &path, drafts.clone(), weak.clone());
-                        }
-                        reset_source_views(&ui, &info.id);
-                        ui.set_evidence_results(
-                            "Project changed. Preview a new evidence note or load its history from this project.".into(),
-                        );
-                        ui.set_project_title(info.title.into());
-                        ui.set_project_revision(info.revision as i32);
-                        ui.set_recovery_results(message.clone().into());
-                        ui.set_status(message.into());
-                        ui.set_page(1);
-                    }
-                    Err(error) => {
-                        ui.set_recovery_results(error.clone().into());
-                        ui.set_status(error.into());
-                    }
-                }
+            if let Err(error) = finish_quick_note_before_project_switch(
+                &ui,
+                active_project.borrow().as_deref(),
+                &quick_timer,
+            ) {
+                ui.set_status(
+                    format!("Restore canceled: current note could not be saved: {error}").into(),
+                );
+                return;
             }
+            *restoring_from.borrow_mut() =
+                Some((project_generation.get(), active_project.borrow().clone()));
+            ui.set_recovery_busy(true);
+            ui.set_recovery_results("Authenticating and restoring a local archive…".into());
+            let weak_task = weak.clone();
+            std::thread::spawn(move || {
+                let result = restore_backup(encrypted, &archive, &destination, &password);
+                let (succeeded, restored_path, message) = match result {
+                    Ok((_info, path, message)) => {
+                        (true, path.to_string_lossy().into_owned(), message)
+                    }
+                    Err(error) => (false, String::new(), error),
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak_task.upgrade() {
+                        ui.invoke_restore_finished(succeeded, restored_path.into(), message.into());
+                    }
+                });
+            });
         }
     });
     let preferences_path = host_data_root()?.join("display-preferences.json");
@@ -8486,7 +8642,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let project_generation = project_generation.clone();
         let pending_evidence = pending_evidence.clone();
+        let pending_ai = pending_ai.clone();
+        let context_ai_cancellation = context_ai_cancellation.clone();
         let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
@@ -8509,8 +8668,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ui) = weak.upgrade() {
                 match result {
                     Ok(info) => {
+                        project_generation.set(project_generation.get().wrapping_add(1));
                         timer.stop();
                         pending_evidence.borrow_mut().take();
+                        pending_ai.borrow_mut().take();
+                        if let Some(stop) = context_ai_cancellation.borrow_mut().take() {
+                            stop.store(true, Ordering::SeqCst);
+                        }
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
@@ -8519,10 +8683,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         reset_quick_notes_for_project(&ui, Path::new(path.as_str()));
                         *draft_session.borrow_mut() =
                             quick_notes::DraftSession::open(Path::new(path.as_str())).ok();
-                        if let Err(error) =
+                        let draft_warning = if let Err(error) =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
                         {
-                            ui.set_status(error.into());
+                            ui.set_writing_results(format!("Writing recovery blocked: {error}").into());
+                            ui.set_notebook_results(format!("Writing recovery blocked: {error}").into());
+                            Some(error)
                         } else {
                             resume_recovered_writing(
                                 &timer,
@@ -8530,12 +8696,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 drafts.clone(),
                                 weak.clone(),
                             );
-                        }
+                            None
+                        };
                         reset_source_views(&ui, &info.id);
                         ui.set_evidence_results("Project changed. Evidence previews from another project are invalid. Enter an existing source ID to begin.".into());
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project created".into());
+                        ui.set_status(draft_warning.map_or_else(|| "Project created".to_owned(), |error| format!("Project created; writing recovery needs attention: {error}" )).into());
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -8546,7 +8713,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_default_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let project_generation = project_generation.clone();
         let pending_evidence = pending_evidence.clone();
+        let pending_ai = pending_ai.clone();
+        let context_ai_cancellation = context_ai_cancellation.clone();
         let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
@@ -8569,19 +8739,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ui) = weak.upgrade() {
                 match result {
                     Ok(info) => {
+                        project_generation.set(project_generation.get().wrapping_add(1));
                         timer.stop();
                         pending_evidence.borrow_mut().take();
+                        pending_ai.borrow_mut().take();
+                        if let Some(stop) = context_ai_cancellation.borrow_mut().take() {
+                            stop.store(true, Ordering::SeqCst);
+                        }
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = find_managed_project(&info.id).ok();
                         clear_project_scoped_view_state(&ui);
+                        let mut draft_warning = None;
                         if let Some(project) = active_project.borrow().as_ref() {
                             reset_quick_notes_for_project(&ui, project);
                             *draft_session.borrow_mut() =
                                 quick_notes::DraftSession::open(project).ok();
                             if let Err(error) = restore_writing_drafts(&ui, project, &drafts) {
-                                ui.set_status(error.into());
+                                ui.set_writing_results(format!("Writing recovery blocked: {error}").into());
+                                ui.set_notebook_results(format!("Writing recovery blocked: {error}").into());
+                                draft_warning = Some(error);
                             } else {
                                 resume_recovered_writing(
                                     &timer,
@@ -8595,7 +8773,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_evidence_results("Project changed. Evidence previews from another project are invalid. Enter an existing source ID to begin.".into());
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project created in managed local storage".into());
+                        ui.set_status(draft_warning.map_or_else(|| "Project created in managed local storage".to_owned(), |error| format!("Managed project created; writing recovery needs attention: {error}")).into());
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -8606,7 +8784,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_open_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let project_generation = project_generation.clone();
         let pending_evidence = pending_evidence.clone();
+        let pending_ai = pending_ai.clone();
+        let context_ai_cancellation = context_ai_cancellation.clone();
         let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
@@ -8629,8 +8810,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ui) = weak.upgrade() {
                 match result {
                     Ok(info) => {
+                        project_generation.set(project_generation.get().wrapping_add(1));
                         timer.stop();
                         pending_evidence.borrow_mut().take();
+                        pending_ai.borrow_mut().take();
+                        if let Some(stop) = context_ai_cancellation.borrow_mut().take() {
+                            stop.store(true, Ordering::SeqCst);
+                        }
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
@@ -8639,10 +8825,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         reset_quick_notes_for_project(&ui, Path::new(path.as_str()));
                         *draft_session.borrow_mut() =
                             quick_notes::DraftSession::open(Path::new(path.as_str())).ok();
-                        if let Err(error) =
+                        let draft_warning = if let Err(error) =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
                         {
-                            ui.set_status(error.into());
+                            ui.set_writing_results(format!("Writing recovery blocked: {error}").into());
+                            ui.set_notebook_results(format!("Writing recovery blocked: {error}").into());
+                            Some(error)
                         } else {
                             resume_recovered_writing(
                                 &timer,
@@ -8650,12 +8838,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 drafts.clone(),
                                 weak.clone(),
                             );
-                        }
+                            None
+                        };
                         reset_source_views(&ui, &info.id);
                         ui.set_evidence_results("Project changed. Evidence previews from another project are invalid. Enter an existing source ID to begin.".into());
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project opened".into());
+                        ui.set_status(draft_warning.map_or_else(|| "Project opened".to_owned(), |error| format!("Project opened; writing recovery needs attention: {error}")).into());
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -8905,6 +9094,7 @@ mod tests {
             arguments: serde_json::json!({"notebook":"Notebook current"}),
             expected_revision: 1,
         };
+        std::fs::create_dir_all(root.join("project")).unwrap();
         assert!(reconcile_manual_writing_save(&notebook, &mut drafts, &root).unwrap());
         assert!(!drafts.notebook_dirty);
         assert!(drafts.manuscript_dirty);
@@ -8936,9 +9126,11 @@ mod tests {
         };
         assert!(reconcile_manual_writing_save(&current_manuscript, &mut drafts, &root).unwrap());
         assert!(!drafts.manuscript_dirty);
-        let reopened =
-            writing_autosave::load(&writing_autosave::path(&root, &project_id.to_string()))
-                .unwrap();
+        let reopened = writing_autosave::load(
+            &writing_autosave::scoped_path(&root, &root.join("project"), &project_id.to_string())
+                .unwrap(),
+        )
+        .unwrap();
         assert!(!reopened.notebook_dirty && !reopened.manuscript_dirty);
         assert_eq!(reopened.body, "Newest body");
         std::fs::remove_dir_all(root).unwrap();
@@ -8958,7 +9150,7 @@ mod tests {
         .unwrap();
         let root = host.join("host");
         let id = ProjectStore::open(&project).unwrap().info().unwrap().id;
-        let draft_path = writing_autosave::path(&root, &id);
+        let draft_path = writing_autosave::scoped_path(&root, &project, &id).unwrap();
         let mut drafts = writing_autosave::Drafts {
             notebook: "ملاحظات notebook".into(),
             manuscript_id: "draft-1".into(),

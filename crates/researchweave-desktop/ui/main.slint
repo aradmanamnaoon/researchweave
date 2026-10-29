@@ -384,6 +384,13 @@ export component MainWindow inherits Window {
     in-out property <string> qualitative-results: "Inspect the codebook before editing; writes require the current content hash.";
     in-out property <string> backup-results: "Open a project, then choose an absolute archive path.";
     in-out property <string> recovery-results: "Restore always creates a new project directory.";
+    in-out property <bool> writing-recovery-blocked: false;
+    callback adopt-legacy-writing-draft();
+    callback start-fresh-writing-draft();
+    in-out property <bool> backup-busy: false;
+    in-out property <bool> recovery-busy: false;
+    callback backup-finished(bool, string, string);
+    callback restore-finished(bool, string, string);
     in-out property <string> command-results: "Search views, resources, settings and help";
 
     callback load-pdf(string, string, int);
@@ -1548,11 +1555,15 @@ export component MainWindow inherits Window {
                                 Button {
                                     text: "Export portable";
                                     accessible-label: "Export portable project archive";
+                                    enabled: !root.backup-busy && !root.recovery-busy;
+                                    accessible-enabled: !root.backup-busy && !root.recovery-busy;
                                     clicked => { root.backup-action("export", backup-path.text, ""); }
                                 }
                                 Button {
                                     text: "Export encrypted";
                                     accessible-label: "Export encrypted project archive";
+                                    enabled: !root.backup-busy && !root.recovery-busy;
+                                    accessible-enabled: !root.backup-busy && !root.recovery-busy;
                                     clicked => { root.backup-action("export-encrypted", backup-path.text, backup-password.text); }
                                 }
                             }
@@ -1561,15 +1572,19 @@ export component MainWindow inherits Window {
                                 Button {
                                     text: "Verify portable";
                                     accessible-label: "Verify portable project archive";
+                                    enabled: !root.backup-busy && !root.recovery-busy;
+                                    accessible-enabled: !root.backup-busy && !root.recovery-busy;
                                     clicked => { root.backup-action("verify", backup-path.text, ""); }
                                 }
                                 Button {
                                     text: "Verify encrypted";
                                     accessible-label: "Verify encrypted project archive";
+                                    enabled: !root.backup-busy && !root.recovery-busy;
+                                    accessible-enabled: !root.backup-busy && !root.recovery-busy;
                                     clicked => { root.backup-action("verify-encrypted", backup-path.text, backup-password.text); }
                                 }
                             }
-                            Text { text: root.backup-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Backup result"; }
+                            Text { text: root.backup-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Backup result"; accessible-live-region: polite; }
                             Rectangle { vertical-stretch: 1; }
                         }
                     }
@@ -1603,15 +1618,19 @@ export component MainWindow inherits Window {
                                 Button {
                                     text: "Restore portable";
                                     accessible-label: "Restore portable project archive";
+                                    enabled: !root.backup-busy && !root.recovery-busy;
+                                    accessible-enabled: !root.backup-busy && !root.recovery-busy;
                                     clicked => { root.restore-backup(false, recovery-archive.text, recovery-destination.text, ""); }
                                 }
                                 Button {
                                     text: "Restore encrypted";
                                     accessible-label: "Restore encrypted project archive";
+                                    enabled: !root.backup-busy && !root.recovery-busy;
+                                    accessible-enabled: !root.backup-busy && !root.recovery-busy;
                                     clicked => { root.restore-backup(true, recovery-archive.text, recovery-destination.text, recovery-password.text); }
                                 }
                             }
-                            Text { text: root.recovery-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Recovery result"; }
+                            Text { text: root.recovery-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Recovery result"; accessible-live-region: polite; }
                             Rectangle { vertical-stretch: 1; }
                         }
                     }
@@ -2034,12 +2053,29 @@ export component MainWindow inherits Window {
                             }
                             if root.show-research-notebook: VerticalLayout {
                                 spacing: Theme.space3;
+                                if root.writing-recovery-blocked: Text {
+                                    text: "A writing recovery journal needs attention. Confirm the older draft belongs to this project's folder before adopting it.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                if root.writing-recovery-blocked: Button {
+                                    text: "Adopt legacy writing draft into this project";
+                                    accessible-label: "Confirm and adopt older writing recovery draft into the current project";
+                                    clicked => { root.adopt-legacy-writing-draft(); }
+                                }
+                                if root.writing-recovery-blocked: Button {
+                                    text: "Start fresh writing · preserve older draft";
+                                    accessible-label: "Start an independent blank writing journal and preserve the older ambiguous draft";
+                                    clicked => { root.start-fresh-writing-draft(); }
+                                }
                                 Text {
                                     text: "One versioned, source-aware notebook for your project. Edits are autosaved and recoverable.";
                                     color: Theme.muted-ink;
                                     wrap: word-wrap;
                                 }
                                 notebook-body := TextEdit {
+                                    enabled: !root.writing-recovery-blocked;
+                                    accessible-enabled: !root.writing-recovery-blocked;
                                     min-height: 270px;
                                     vertical-stretch: 1;
                                     accessible-label: "Revisioned research notebook text";
@@ -2300,7 +2336,11 @@ export component MainWindow inherits Window {
                                     TextEdit {
                                         text: root.analysis-results;
                                         read-only: true;
-                                        min-height: 105px;
+                                        // A direct child of Rectangle does not automatically
+                                        // fill it. Without a width this editor renders at 0px,
+                                        // hiding valid data from users and assistive tools.
+                                        width: parent.width;
+                                        height: parent.height;
                                         accessible-label: "Verified current dataset page JSON; select and copy complete values including shortened table cells";
                                     }
                                 }
@@ -2830,12 +2870,25 @@ export component MainWindow inherits Window {
                                 edited(text) => { root.manuscript-draft-citations = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); }
                             }
                             manuscript-body := TextEdit {
+                                enabled: !root.writing-recovery-blocked;
+                                accessible-enabled: !root.writing-recovery-blocked;
                                 min-height: 320px;
                                 vertical-stretch: 1;
                                 horizontal-stretch: 1;
-                                accessible-label: "Long-form manuscript editor. Standard text editing shortcuts are available.";
+                                accessible-label: "Manuscript section body";
+                                accessible-description: "Long-form manuscript editor. Standard text editing shortcuts are available.";
                                 text: root.manuscript-draft-body;
                                 edited(text) => { root.manuscript-draft-body = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, text); }
+                            }
+                            if root.writing-recovery-blocked: Button {
+                                text: "Adopt legacy writing draft into this project";
+                                accessible-label: "Confirm and adopt older writing recovery draft into the current project";
+                                clicked => { root.adopt-legacy-writing-draft(); }
+                            }
+                            if root.writing-recovery-blocked: Button {
+                                text: "Start fresh writing · preserve older draft";
+                                accessible-label: "Start an independent blank writing journal and preserve the older ambiguous draft";
+                                clicked => { root.start-fresh-writing-draft(); }
                             }
                             HorizontalLayout {
                                 spacing: Theme.space2;

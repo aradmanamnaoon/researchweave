@@ -23,6 +23,105 @@ pub fn path(root: &Path, project_id: &str) -> PathBuf {
     root.join("writing-drafts").join(format!("{digest:x}.json"))
 }
 
+/// Journal identity includes the canonical physical project directory.
+/// Archive restoration retains the original UUID, so UUID-only journals
+/// would otherwise contaminate an independent restored project copy.
+pub fn scoped_path(root: &Path, project: &Path, project_id: &str) -> Result<PathBuf, String> {
+    let canonical = project
+        .canonicalize()
+        .map_err(|error| format!("Cannot resolve writing project path: {error}"))?;
+    let mut digest = Sha256::new();
+    digest.update(project_id.as_bytes());
+    digest.update([0]);
+    digest.update(canonical.as_os_str().as_encoded_bytes());
+    let fingerprint = digest.finalize();
+    Ok(root
+        .join("writing-drafts")
+        .join(format!("scoped-{fingerprint:x}.json")))
+}
+
+/// Old UUID-only journals contain no authoritative project directory.
+/// A user must explicitly choose which project, if any, adopts that draft.
+pub fn load_for_project(root: &Path, project: &Path, project_id: &str) -> Result<Drafts, String> {
+    let scoped = scoped_path(root, project, project_id)?;
+    if scoped.exists() {
+        return load(&scoped);
+    }
+    let legacy = path(root, project_id);
+    if !legacy.exists() {
+        return Ok(Drafts::default());
+    }
+    Err("An older UUID-only writing draft remains preserved. Confirm it belongs to this project and select Adopt legacy draft; no old text was applied automatically.".into())
+}
+
+/// Called only from the user's explicit Adopt action. Preserve the old journal
+/// and atomically create a new, independently scoped copy without overwrite.
+pub fn adopt_legacy_for_project(
+    root: &Path,
+    project: &Path,
+    project_id: &str,
+) -> Result<Drafts, String> {
+    let scoped = scoped_path(root, project, project_id)?;
+    if scoped.exists() {
+        return Err(
+            "This project already has a scoped writing journal; adoption cannot overwrite it"
+                .into(),
+        );
+    }
+    let legacy = path(root, project_id);
+    if !legacy.is_file() {
+        return Err("No older writing journal exists for this project UUID".into());
+    }
+    let recovered = load(&legacy)?;
+    create_scoped_without_overwrite(&scoped, &recovered)
+}
+
+/// Start independent writing in the selected directory while preserving any
+/// ambiguous legacy journal for a later deliberate import or forensic review.
+pub fn start_fresh_for_project(
+    root: &Path,
+    project: &Path,
+    project_id: &str,
+) -> Result<Drafts, String> {
+    let scoped = scoped_path(root, project, project_id)?;
+    create_scoped_without_overwrite(&scoped, &Drafts::default())
+}
+
+fn create_scoped_without_overwrite(scoped: &Path, recovered: &Drafts) -> Result<Drafts, String> {
+    if scoped.exists() {
+        return Err(
+            "This project already has a scoped writing journal; it will not be overwritten".into(),
+        );
+    }
+    let bytes = serde_json::to_vec(&recovered).map_err(|error| error.to_string())?;
+    if bytes.len() > MAX_DRAFT_BYTES {
+        return Err("Writing recovery draft exceeds size limit".into());
+    }
+    let parent = scoped.parent().ok_or("Invalid writing recovery path")?;
+    std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let stage = scoped.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .create_new(true)
+            .write(true)
+            .open(&stage)
+            .map_err(|error| error.to_string())?;
+        use std::io::Write as _;
+        file.write_all(&bytes).map_err(|error| error.to_string())?;
+        file.sync_all().map_err(|error| error.to_string())?;
+        // A hard link publishes fully staged bytes and fails if another
+        // process has already created this scoped journal.
+        std::fs::hard_link(&stage, scoped).map_err(|error| error.to_string())?;
+        let verified = load(scoped)?;
+        if verified != *recovered {
+            return Err("The adopted writing draft did not verify".into());
+        }
+        Ok(verified)
+    })();
+    let _ = std::fs::remove_file(&stage);
+    result
+}
+
 pub fn load(path: &Path) -> Result<Drafts, String> {
     match std::fs::File::open(path) {
         Ok(file) => {
@@ -196,6 +295,67 @@ mod tests {
         assert!(save(&a, &oversized).is_err());
         assert_eq!(load(&a).unwrap(), changed);
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn same_uuid_in_restored_directory_cannot_read_original_draft() {
+        let temp = TempDraftRoot::new();
+        let host = temp.0.join("host");
+        let source = temp.0.join("source");
+        let restored = temp.0.join("restored");
+        std::fs::create_dir_all(&source).unwrap();
+        std::fs::create_dir_all(&restored).unwrap();
+        let source_journal = scoped_path(&host, &source, "same-uuid").unwrap();
+        let restored_journal = scoped_path(&host, &restored, "same-uuid").unwrap();
+        assert_ne!(source_journal, restored_journal);
+        let original = Drafts {
+            body: "Uncommitted source-only manuscript".into(),
+            manuscript_dirty: true,
+            ..Drafts::default()
+        };
+        save(&source_journal, &original).unwrap();
+        assert_eq!(
+            load_for_project(&host, &source, "same-uuid").unwrap(),
+            original
+        );
+        assert_eq!(
+            load_for_project(&host, &restored, "same-uuid").unwrap(),
+            Drafts::default()
+        );
+        save(&path(&host, "same-uuid"), &original).unwrap();
+        // A legacy journal cannot be assigned to either arbitrary directory.
+        assert!(load_for_project(&host, &restored, "same-uuid").is_err());
+        assert_eq!(load(&source_journal).unwrap(), original);
+    }
+
+    #[test]
+    fn legacy_journal_requires_explicit_adoption_and_preserves_original() {
+        let temp = TempDraftRoot::new();
+        let host = temp.0.join("host");
+        let managed = host.join("projects").join("stable-id");
+        std::fs::create_dir_all(&managed).unwrap();
+        let legacy = path(&host, "stable-id");
+        let original = Drafts {
+            notebook: "پژوهش".into(),
+            notebook_dirty: true,
+            ..Drafts::default()
+        };
+        save(&legacy, &original).unwrap();
+        assert!(load_for_project(&host, &managed, "stable-id").is_err());
+        assert_eq!(
+            adopt_legacy_for_project(&host, &managed, "stable-id").unwrap(),
+            original
+        );
+        assert!(adopt_legacy_for_project(&host, &managed, "stable-id").is_err());
+        assert_eq!(
+            load_for_project(&host, &managed, "stable-id").unwrap(),
+            original
+        );
+        assert_eq!(
+            load(&scoped_path(&host, &managed, "stable-id").unwrap()).unwrap(),
+            original
+        );
+        assert_eq!(load(&legacy).unwrap(), original);
     }
 
     #[test]

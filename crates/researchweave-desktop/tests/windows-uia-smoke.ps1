@@ -43,8 +43,40 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
 function Read-DatasetPageJson([System.Windows.Automation.AutomationElement]$parent) {
     # Data View exposes the exact read-only page JSON through an accessible
     # TextEdit so users and UIA clients can inspect/copy unabridged cell values.
-    $details = Named $parent ([System.Windows.Automation.ControlType]::Edit) 'Verified current dataset page JSON; select and copy complete values including shortened table cells'
-    return ([System.Windows.Automation.ValuePattern]$details.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    # Slint materializes only the visible portion of Data View's ScrollView in
+    # its UIA tree. The table is taller than the viewport on hosted runners,
+    # so reveal the lower inspector with real keyboard scrolling first.
+    $name = 'Verified current dataset page JSON; select and copy complete values including shortened table cells'
+    $anchor = Named $parent ([System.Windows.Automation.ControlType]::Button) 'Inspect dataset revision and request preview'
+    EnsureLiveFocus $anchor
+    $scrolled = 0
+    try {
+        $details = $null
+        for ($step = 0; $step -le 10; $step++) {
+            foreach ($edit in (Children $parent ([System.Windows.Automation.ControlType]::Edit))) {
+                if ($edit.Current.Name -eq $name) {
+                    $details = $edit
+                    break
+                }
+            }
+            if ($details) { break }
+            [System.Windows.Forms.SendKeys]::SendWait('{PGDN}')
+            $scrolled++
+            Start-Sleep -Milliseconds 120
+        }
+        if (-not $details) {
+            throw "Verified dataset page JSON editor did not appear after $scrolled viewport scrolls"
+        }
+        return ([System.Windows.Automation.ValuePattern]$details.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    }
+    finally {
+        # Subsequent import checks start at the top of the same Data View.
+        # Keep focus on the button so PageUp scrolls the containing viewport.
+        for ($step = 0; $step -lt $scrolled; $step++) {
+            [System.Windows.Forms.SendKeys]::SendWait('{PGUP}')
+            Start-Sleep -Milliseconds 100
+        }
+    }
 }
 function Invoke-AccessibleButton([System.Windows.Automation.AutomationElement]$parent, [string]$name) {
     $button = Named $parent ([System.Windows.Automation.ControlType]::Button) $name
