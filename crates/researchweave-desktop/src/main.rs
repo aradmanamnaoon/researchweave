@@ -531,20 +531,48 @@ fn finish_context_ai_run(
     true
 }
 
+#[derive(Debug, PartialEq, Eq)]
+enum ContextAiCompletionDisposition {
+    IgnoredStale,
+    DiscardedAfterPageChange,
+    DisplayOnSourcePage,
+}
+
+fn complete_context_ai_for_page(
+    state: &mut ContextAiRunLifecycle,
+    completed: &ContextAiRunIdentity,
+    requested_page: i32,
+    visible_page: i32,
+) -> ContextAiCompletionDisposition {
+    if !finish_context_ai_run(state, completed) {
+        ContextAiCompletionDisposition::IgnoredStale
+    } else if requested_page != visible_page {
+        ContextAiCompletionDisposition::DiscardedAfterPageChange
+    } else {
+        ContextAiCompletionDisposition::DisplayOnSourcePage
+    }
+}
+
 const LOCAL_ONLY_AI_POLICY: EgressPolicy = EgressPolicy {
     offline: true,
     external_allowed: false,
 };
 
-fn contextual_request_from_ui(
+fn contextual_note_object_id(note_id: &str) -> String {
+    if note_id.is_empty() {
+        "research-notebook".into()
+    } else {
+        format!("quick-note:{note_id}")
+    }
+}
+
+/// Obtain the visible source without opening project storage. Keeping this
+/// one representation shared by request previews and completion fingerprints
+/// avoids SQLite integrity scans on the Slint event loop after an AI request.
+fn contextual_screen_payload(
     ui: &MainWindow,
-    project: &Path,
-) -> Result<ContextualRequest, String> {
-    let info = ProjectStore::open(project)
-        .map_err(|error| error.to_string())?
-        .info()
-        .map_err(|error| error.to_string())?;
-    let (kind, object, title, content): (ContextKind, &str, String, String) = match ui.get_page() {
+) -> Result<Option<(ContextKind, String, String, String)>, String> {
+    let payload = match ui.get_page() {
         19 => {
             let body = ui.get_manuscript_draft_body();
             let selected = ui.get_writing_ai_use_found_text();
@@ -560,9 +588,9 @@ fn contextual_request_from_ui(
             } else {
                 body.to_string()
             };
-            (
+            Some((
                 ContextKind::Manuscript,
-                "manuscript",
+                "manuscript".into(),
                 format!(
                     "Manuscript: {} · {}{}",
                     ui.get_manuscript_draft_id(),
@@ -574,11 +602,11 @@ fn contextual_request_from_ui(
                     }
                 ),
                 content,
-            )
+            ))
         }
-        21 => (
+        21 => Some((
             ContextKind::Notes,
-            "note",
+            contextual_note_object_id(ui.get_quick_note_id().as_str()),
             if ui.get_quick_note_id().is_empty() {
                 "Research notebook".into()
             } else {
@@ -589,20 +617,20 @@ fn contextual_request_from_ui(
             } else {
                 ui.get_quick_note_body().to_string()
             },
-        ),
-        12 | 13 => (
+        )),
+        12 | 13 => Some((
             ContextKind::Dataset,
-            "dataset",
+            "dataset".into(),
             "Current dataset metadata".into(),
             format!(
                 "Dataset: {}\nVariable metadata: {}",
                 ui.get_analysis_results(),
                 ui.get_variable_results()
             ),
-        ),
-        14 | 15 => (
+        )),
+        14 | 15 => Some((
             ContextKind::Statistics,
-            "analysis",
+            "analysis".into(),
             ui.get_statistics_result_title().to_string(),
             format!(
                 "Statistical result: {}\nDiagnostics: {}\nProvenance: {}",
@@ -610,16 +638,16 @@ fn contextual_request_from_ui(
                 ui.get_statistics_result_secondary(),
                 ui.get_statistics_result_provenance()
             ),
-        ),
-        3 => (
+        )),
+        3 => Some((
             ContextKind::Search,
-            "search",
+            "search".into(),
             "Research search".into(),
             ui.get_library_results().to_string(),
-        ),
-        5..=11 | 20 => (
+        )),
+        5..=11 | 20 => Some((
             ContextKind::Evidence,
-            "evidence",
+            "evidence".into(),
             "Current sources and evidence".into(),
             format!(
                 "Sources: {}\nReferences: {}\nReview: {}",
@@ -627,23 +655,50 @@ fn contextual_request_from_ui(
                 ui.get_reference_results(),
                 ui.get_review_results()
             ),
-        ),
-        22 | 27 => (
+        )),
+        22 | 27 => Some((
             ContextKind::Reports,
-            "report",
+            "report".into(),
             "Prepared manuscript/report".into(),
             ui.get_writing_results().to_string(),
-        ),
-        _ => (
+        )),
+        _ => None,
+    };
+    Ok(payload)
+}
+
+/// Privacy-preserving, constant-size comparison for an in-flight local model
+/// response. This contains the screen, exact task, source identity and visible
+/// text, and performs no filesystem/database I/O on the UI completion path.
+fn contextual_visible_ui_digest(ui: &MainWindow) -> Result<String, String> {
+    let payload = (
+        ui.get_page(),
+        ui.get_context_ai_task().to_string(),
+        contextual_screen_payload(ui)?,
+    );
+    let serialized = serde_json::to_vec(&payload).map_err(|error| error.to_string())?;
+    Ok(hex::encode(Sha256::digest(serialized)))
+}
+
+fn contextual_request_from_ui(
+    ui: &MainWindow,
+    project: &Path,
+) -> Result<ContextualRequest, String> {
+    let info = ProjectStore::open(project)
+        .map_err(|error| error.to_string())?
+        .info()
+        .map_err(|error| error.to_string())?;
+    let (kind, object, title, content) = contextual_screen_payload(ui)?.unwrap_or_else(|| {
+        (
             ContextKind::Project,
-            "project",
+            "project".into(),
             format!("Project: {}", info.title),
             format!(
                 "Research question: {}\nDesign: {}\nPrivacy: {}",
                 info.question, info.design, info.privacy
             ),
-        ),
-    };
+        )
+    });
     if content.trim().is_empty() {
         return Err("This screen has no content for AI to inspect. Add a note, manuscript, dataset, or result first.".into());
     }
@@ -652,7 +707,7 @@ fn contextual_request_from_ui(
         context: ContextualContext {
             kind,
             project_id: info.id,
-            object_id: object.into(),
+            object_id: object,
             title,
             content,
             source_excerpts: Vec::new(),
@@ -4371,6 +4426,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 return;
             }
+            let requested_ui_digest = match contextual_visible_ui_digest(&ui) {
+                Ok(digest) => digest,
+                Err(error) => {
+                    ui.set_context_ai_ready(false);
+                    pending.borrow_mut().take();
+                    ui.set_context_ai_output(
+                        format!("The visible local AI context cannot be verified: {error}").into(),
+                    );
+                    return;
+                }
+            };
             // One explicit user action authorizes one local inference. Remote
             // profiles cannot pass the offline egress policy.
             let identity = ContextAiRunIdentity {
@@ -4394,6 +4460,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             ui.set_context_ai_busy(true);
             ui.set_context_ai_ready(false);
             ui.set_context_ai_output("Contacting the approved local model…".into());
+            // A model response belongs to the screen whose exact context was
+            // approved. A later navigation within this same project must not
+            // display the old screen's result as though it described the new
+            // workspace.
+            let requested_page = approved.page;
             let weak_task = weak.clone();
             let active_run_task = active_run.clone();
             std::thread::spawn(move || {
@@ -4412,10 +4483,32 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(ui) = weak_task.upgrade() {
                         // Never let an older request clear the busy state or
                         // render into another request's or project's panel.
-                        if !finish_context_ai_run(&mut active_run_task.lock().unwrap(), &identity) {
+                        let disposition = complete_context_ai_for_page(
+                            &mut active_run_task.lock().unwrap(),
+                            &identity,
+                            requested_page,
+                            ui.get_page(),
+                        );
+                        if disposition == ContextAiCompletionDisposition::IgnoredStale {
                             return;
                         }
                         ui.set_context_ai_busy(false);
+                        if disposition == ContextAiCompletionDisposition::DiscardedAfterPageChange {
+                            ui.set_context_ai_output(
+                                "The local AI result was discarded because you switched workspaces. Preview the current screen again."
+                                    .into(),
+                            );
+                            return;
+                        }
+                        if !contextual_visible_ui_digest(&ui)
+                            .is_ok_and(|visible_digest| visible_digest == requested_ui_digest)
+                        {
+                            ui.set_context_ai_output(
+                                "The local AI result was discarded because the source text or task changed during inference. Review the current context and preview again."
+                                    .into(),
+                            );
+                            return;
+                        }
                         match result {
                             Ok(response) => ui.set_context_ai_output(
                                 format!(
@@ -9727,6 +9820,65 @@ mod tests {
         assert!(choices.current(&project).is_none());
         assert!(choices.drafts.is_empty());
         std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn contextual_note_identity_distinguishes_equal_text_in_different_notes() {
+        assert_eq!(contextual_note_object_id(""), "research-notebook");
+        assert_eq!(contextual_note_object_id("note-a"), "quick-note:note-a");
+        assert_ne!(
+            contextual_note_object_id("note-a"),
+            contextual_note_object_id("note-b"),
+            "identical note text must not erase source identity",
+        );
+    }
+
+    #[test]
+    fn contextual_ai_drops_completed_previous_page_and_allows_new_page_run() {
+        let project = PathBuf::from("local-synthetic-project");
+        let mut state = ContextAiRunLifecycle::default();
+        change_context_ai_project(&mut state, Some(project.clone()), 9);
+        let old = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project: project.clone(),
+            project_generation: 9,
+        };
+        assert!(begin_context_ai_run(
+            &mut state,
+            old.clone(),
+            Arc::new(AtomicBool::new(false)),
+        ));
+        assert_eq!(
+            complete_context_ai_for_page(&mut state, &old, 19, 21),
+            ContextAiCompletionDisposition::DiscardedAfterPageChange,
+        );
+        assert!(
+            state.current.is_none(),
+            "page switch must release busy state"
+        );
+
+        let current = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project,
+            project_generation: 9,
+        };
+        assert!(begin_context_ai_run(
+            &mut state,
+            current.clone(),
+            Arc::new(AtomicBool::new(false)),
+        ));
+        assert_eq!(
+            complete_context_ai_for_page(&mut state, &old, 19, 21),
+            ContextAiCompletionDisposition::IgnoredStale,
+        );
+        assert!(
+            state.current.is_some(),
+            "stale completion must not dismiss a new run"
+        );
+        assert_eq!(
+            complete_context_ai_for_page(&mut state, &current, 21, 21),
+            ContextAiCompletionDisposition::DisplayOnSourcePage,
+        );
     }
 
     #[test]

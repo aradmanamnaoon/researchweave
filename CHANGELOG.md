@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Corrected the installed Windows Data View native-format QA assertion: `dataset.inspect` returns immutable revision, original source hash and rows, while the dataset ID is read from the selected UI control. The native installer must still pass hosted installed Windows smoke on the new commit.
+
+- Reject a delayed contextual local-model result when the active workspace or exact source/task changed after its explicit preview; the UI preserves the new work context and permits another request. Added deterministic cancel/project/page lifecycle coverage.
+
 - Continued the Rust/Slint UX redesign on draft PR #16: accessible Data View paging/full-value inspection, scoped Quick Notes, manuscript/navigation improvements, source-backed Evidence previews, PDF page text access, and offline encrypted archive recovery. The branch remains under native GUI and scientific acceptance testing; these changes are not part of the published v0.2.0 release.
 - Reworked the Windows installed UI Automation Data View probe to read the import identity from its visible fields and locate the expanded, read-only page inspector through keyboard navigation. Native Windows acceptance of this change is pending.
 - Prevented Quick Notes navigation, archiving, restoring and view switches from replacing a visible draft when its SQLite optimistic save fails. The guard preserves staged recovery data and now has successful-save and concurrent-writer regression tests.

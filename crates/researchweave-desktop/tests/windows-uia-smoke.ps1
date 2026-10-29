@@ -1020,9 +1020,23 @@ try {
         (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect dataset revision and request preview').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         WaitForNameLike $window '*Immutable dataset revision loaded*' 5000
         $nativeResult = Read-DatasetPageJson $window
-        if ($nativeResult -notlike "*`"dataset_id`": `"$nativeId`"*" -or
-            $nativeResult -notlike "*`"revision`": `"$nativeRevision`"*") {
-            throw "Native data import $nativeName did not reopen the exact verified immutable revision"
+        try {
+            $nativePage = $nativeResult | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            throw "Native data import $nativeName returned invalid dataset inspection JSON: $($_.Exception.Message)"
+        }
+        # dataset.inspect returns revision, source_hash, rows and metadata,
+        # but intentionally no dataset_id. Bind that identity to the actual
+        # selected UI field instead of inventing an output-contract member.
+        $nativeSelectedIdEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis dataset ID'
+        $nativeSelectedId = ([System.Windows.Automation.ValuePattern]$nativeSelectedIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $nativeSourceHash = (Get-FileHash -LiteralPath $nativeSource -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($nativeSelectedId -ne $nativeId -or
+            $nativePage.revision -ne $nativeRevision -or
+            $nativePage.source_hash -ne $nativeSourceHash -or
+            [int]$nativePage.total -le 0 -or
+            @($nativePage.rows | Where-Object { $null -ne $_ }).Count -lt 1) {
+            throw "Native data import $nativeName did not reopen the UI-selected immutable revision with its verified fixture hash and rows"
         }
     }
     Write-Output 'PASS: native Parquet/SPSS SAV/ZSAV/Stata DTA imports preview and persist via installed GUI'

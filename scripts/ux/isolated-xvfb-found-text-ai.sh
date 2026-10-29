@@ -9,11 +9,24 @@ if [ "$#" -ne 2 ]; then
 fi
 binary="$(realpath "$1")"
 output="$(realpath -m "$2")"
+repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 test -x "$binary"
 if [ -e "$output" ]; then
   echo "Refusing to overwrite an existing evidence directory: $output" >&2
   exit 2
 fi
+for dependency in dbus-run-session dbus-send Xvfb openbox xdotool xclip import sha256sum python3; do
+  command -v "$dependency" >/dev/null || {
+    echo "Missing private GUI dependency: $dependency" >&2
+    exit 2
+  }
+done
+python3 -c 'import pyatspi' || exit 2
+if [[ "${RW_FOUND_TEXT_PRIVATE_DBUS:-}" != "1" ]]; then
+  exec dbus-run-session -- env RW_FOUND_TEXT_PRIVATE_DBUS=1 \
+    bash "$0" "$binary" "$output"
+fi
+export PYTHONPATH="$repo_root${PYTHONPATH:+:$PYTHONPATH}"
 mkdir -p "$output"
 private="$(mktemp -d)"
 display=":$((340 + $$ % 100))"
@@ -37,7 +50,7 @@ export RESEARCHWEAVE_HOST_DATA_DIR="$private/host-data"
 export LIBGL_ALWAYS_SOFTWARE=1
 export NO_AT_BRIDGE=0
 for _ in {1..50}; do
-  if xset q >/dev/null 2>&1; then break; fi
+  if xdotool getdisplaygeometry >/dev/null 2>&1; then break; fi
   sleep 0.1
 done
 openbox >"$output/openbox.log" 2>&1 &
@@ -62,12 +75,12 @@ dbus-send --session --print-reply --dest=org.a11y.Bus /org/a11y/bus \
   string:IsEnabled variant:boolean:true >/dev/null
 sleep 0.4
 
-click() { python3 scripts/ux/atspi_control.py click "$1"; }
+click() { python3 "$repo_root/scripts/ux/atspi_control.py" click "$1"; }
 wait_click() {
   local label="$1"
   local attempt
   for attempt in $(seq 1 40); do
-    if python3 scripts/ux/atspi_control.py click "$label" >"$output/last-action.log" 2>&1; then
+    if python3 "$repo_root/scripts/ux/atspi_control.py" click "$label" >"$output/last-action.log" 2>&1; then
       return 0
     fi
     sleep 0.2
@@ -79,7 +92,7 @@ wait_click() {
 }
 paste_to() {
   local xy x y
-  xy="$(python3 scripts/ux/atspi_control.py center "$1")"
+  xy="$(python3 "$repo_root/scripts/ux/atspi_control.py" center "$1")"
   read -r x y <<<"$xy"
   xdotool mousemove --sync "$x" "$y" click 1
   printf '%s' "$2" | xclip -selection clipboard -i
@@ -93,7 +106,7 @@ click "Manuscript workspace screen"
 sleep 0.3
 paste_to "Manuscript ID" "scope-test"
 paste_to "Manuscript section" "Introduction"
-paste_to "Long-form manuscript editor. Standard text editing shortcuts are available." \
+paste_to "Manuscript section body" \
   "PRIVATE_BEFORE_NO_EGRESS Research introduction. پژوهش PRIVATE_AFTER_NO_EGRESS."
 sleep 0.6
 click "Show manuscript editing and export tools"

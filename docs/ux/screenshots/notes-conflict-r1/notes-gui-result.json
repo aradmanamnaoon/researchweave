@@ -1,0 +1,46 @@
+{
+  "binary": "/home/saba/researchweave-gui-audits/worker2-pdf-narrow-r7-built/researchweave-desktop",
+  "steps": [
+    "VALID_STAGED_REVISION_1_CONFLICT_WITH_NEWER_SAVED_REVISION_2",
+    "OPENED_PRIVATE_REAL_PROJECT_WITH_NATIVE_GUI",
+    "READONLY_RECOVERY_PANEL_EXACT_UNICODE_TITLE_LABELS_BODY_AND_REVISIONS",
+    "CLICKED_NATIVE_RECOVER_AS_NEW_NOTE_COPY",
+    "SEPARATE_PERSISTED_COPY_EXACT_UNICODE_ORIGINAL_UNCHANGED_DRAFT_REMOVED_RECEIPT_PRESENT",
+    "SECOND_CLICK_NOT_AVAILABLE_PANEL_HIDDEN_AFTER_RECOVERY",
+    "SECOND_GUI_OPEN_NO_RECOVERY_DUPLICATE_COUNT_REMAINS_TWO"
+  ],
+  "recovery_body_hit_point": [
+    888,
+    393
+  ],
+  "copied_body": "Draft line فارسی تصادف\n漢字 ✅ — λ≠β\nExact Unicode sentinel RW-QN-20261029",
+  "result": "PASS",
+  "original": {
+    "id": "a08b08e2-7e15-4bd3-8ab9-2bcb490024bf",
+    "title": "Newer saved Ω",
+    "body": "ORIGINAL-PRESERVED newer saved متن",
+    "labels": "current",
+    "revision": 2,
+    "deleted": 0
+  },
+  "copy": {
+    "id": "dace216a-e99e-4266-a116-ee3faa54fb2d",
+    "title": "Recover پژوهش 🧠",
+    "body": "Draft line فارسی تصادف\n漢字 ✅ — λ≠β\nExact Unicode sentinel RW-QN-20261029",
+    "labels": "qualitative, یادداشت",
+    "revision": 1,
+    "deleted": 0
+  },
+  "recovery_count": 1,
+  "click": [
+    1274,
+    271,
+    209,
+    32
+  ],
+  "screenshots": [
+    "01-before-recovery.png",
+    "02-after-recovery.png",
+    "03-reopened-no-duplicate.png"
+  ]
+}
