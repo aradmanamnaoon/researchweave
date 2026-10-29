@@ -84,6 +84,29 @@ pub fn start_fresh_for_project(
     project_id: &str,
 ) -> Result<Drafts, String> {
     let scoped = scoped_path(root, project, project_id)?;
+    // A damaged scoped journal also blocks project editing. Explicit Start
+    // Fresh must preserve that unreadable file before creating a new journal;
+    // otherwise both recovery buttons would fail indefinitely.
+    if scoped.exists() {
+        let metadata = std::fs::symlink_metadata(&scoped).map_err(|error| error.to_string())?;
+        if !metadata.file_type().is_file() {
+            return Err("Writing journal is not a regular file; no data was replaced".into());
+        }
+        if load(&scoped).is_ok() {
+            return Err(
+                "A readable scoped writing journal already exists; it cannot be reset".into(),
+            );
+        }
+        let preserved = scoped.with_extension(format!("preserved-{}.json", uuid::Uuid::new_v4()));
+        // Publishing a second hard link is non-overwriting and preserves the
+        // exact original bytes. Refuse to proceed on file systems where that
+        // preservation cannot be guaranteed.
+        std::fs::hard_link(&scoped, &preserved)
+            .map_err(|error| format!("Cannot preserve unreadable writing journal: {error}"))?;
+        std::fs::remove_file(&scoped).map_err(|error| {
+            format!("Unreadable journal was preserved but cannot be moved: {error}")
+        })?;
+    }
     create_scoped_without_overwrite(&scoped, &Drafts::default())
 }
 
@@ -356,6 +379,45 @@ mod tests {
             original
         );
         assert_eq!(load(&legacy).unwrap(), original);
+    }
+
+    #[test]
+    fn explicit_start_fresh_preserves_corrupt_scoped_journal_without_resetting_valid_text() {
+        let temp = TempDraftRoot::new();
+        let host = temp.0.join("host");
+        let project = temp.0.join("project");
+        std::fs::create_dir_all(&project).unwrap();
+        let scoped = scoped_path(&host, &project, "same-uuid").unwrap();
+        let original = Drafts {
+            body: "Valid draft must never be erased".into(),
+            manuscript_dirty: true,
+            ..Drafts::default()
+        };
+        save(&scoped, &original).unwrap();
+        assert!(start_fresh_for_project(&host, &project, "same-uuid").is_err());
+        assert_eq!(load(&scoped).unwrap(), original);
+
+        let corrupt_bytes = b"{unfinished JSON: \xff}";
+        std::fs::write(&scoped, corrupt_bytes).unwrap();
+        assert!(load_for_project(&host, &project, "same-uuid").is_err());
+        assert_eq!(
+            start_fresh_for_project(&host, &project, "same-uuid").unwrap(),
+            Drafts::default()
+        );
+        assert_eq!(load(&scoped).unwrap(), Drafts::default());
+        let parent = scoped.parent().unwrap();
+        let preserved = std::fs::read_dir(parent)
+            .unwrap()
+            .map(|entry| entry.unwrap().path())
+            .filter(|path| {
+                path.file_name()
+                    .unwrap()
+                    .to_string_lossy()
+                    .contains(".preserved-")
+            })
+            .collect::<Vec<_>>();
+        assert_eq!(preserved.len(), 1);
+        assert_eq!(std::fs::read(&preserved[0]).unwrap(), corrupt_bytes);
     }
 
     #[test]

@@ -1,0 +1,33 @@
+{
+  "result": "PASS",
+  "editor_role": "entry",
+  "editor_name": "Verified current dataset page JSON; select and copy complete values including shortened table cells",
+  "geometry": {
+    "x": 485,
+    "y": 668,
+    "width": 781,
+    "height": 110
+  },
+  "scroll_steps": 1,
+  "ctrl_a_ctrl_c": true,
+  "stale_sentinel_rejected": true,
+  "copied_utf8_bytes": 1072,
+  "copied_sha256": "eb398d229bf48a3beba7cc8fe89ec89ababa27de515a51772cb8e5e55aee8f57",
+  "revision": "f25b1256b9022c8182cb6b600bd7002db3756ad53672d5746b24229f0b0515dd",
+  "rows": [
+    {
+      "group": "A",
+      "score": "1"
+    },
+    {
+      "group": "A",
+      "score": "3"
+    },
+    {
+      "group": "B",
+      "score": "5"
+    }
+  ],
+  "limit": 25,
+  "offset": 0
+}

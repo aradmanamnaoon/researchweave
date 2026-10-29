@@ -3,7 +3,7 @@
 //! a faithful event/revision integration before they can be registered.
 use researchweave_core::{Capability, DispatchContext, Effect, OperationHandler};
 use researchweave_project::ProjectStore;
-use rusqlite::{params, OptionalExtension, Transaction};
+use rusqlite::{params, Connection, OptionalExtension, Transaction};
 use serde_json::{json, Map, Value};
 use sha2::{Digest, Sha256};
 use std::{
@@ -1528,6 +1528,28 @@ fn question_feedback(args: &Value) -> Result<Value, String> {
     )
 }
 
+/// A preserved note row is not active support after its deletion tombstone.
+/// Older projects can have notes without the optional note-history tables.
+fn claim_note_is_active(connection: &Connection, note_id: &str) -> Result<bool, String> {
+    let has_tombstones: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='note_tombstones'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| "note support schema query failed")?;
+    let sql = if has_tombstones == 1 {
+        "SELECT count(*) FROM notes n WHERE n.id=?1
+         AND NOT EXISTS (SELECT 1 FROM note_tombstones t WHERE t.note_id=n.id)"
+    } else {
+        "SELECT count(*) FROM notes WHERE id=?1"
+    };
+    connection
+        .query_row(sql, [note_id], |row| row.get::<_, i64>(0))
+        .map(|count| count == 1)
+        .map_err(|_| "note support query failed".into())
+}
+
 fn writing_mutate(
     store: &mut ProjectStore,
     operation: &str,
@@ -1699,25 +1721,16 @@ fn writing_mutate(
             });
             let (_, project_revision) = mutate(store, operation, ctx, &payload, |tx, _now| {
                 if let Some(note_id) = note_id {
-                    let count: i64 = tx
-                        .query_row("SELECT count(*) FROM notes WHERE id=?1", [note_id], |row| {
-                            row.get(0)
-                        })
-                        .map_err(|_| "note support query failed")?;
-                    if count != 1 {
-                        return Err("supporting note not found".into());
+                    if !claim_note_is_active(tx, note_id)? {
+                        return Err("supporting active note not found".into());
                     }
                 }
                 if let Some(anchor_id) = anchor_id {
-                    let count: i64 = tx
-                        .query_row(
-                            "SELECT count(*) FROM anchors WHERE id=?1 AND verified=1",
-                            [anchor_id],
-                            |row| row.get(0),
-                        )
-                        .map_err(|_| "anchor support query failed")?;
-                    if count != 1 {
-                        return Err("supporting verified anchor not found".into());
+                    // Revalidate inside the same transaction that records the
+                    // claim. The preview runs this identical path on a shadow
+                    // snapshot; never trust a historical verified bit alone.
+                    if !claim_anchor_is_current(tx, anchor_id)? {
+                        return Err("supporting current verified anchor not found".into());
                     }
                 }
                 tx.execute(
@@ -1742,6 +1755,142 @@ fn writing_mutate(
         }
         _ => Err("unsupported writing mutation".into()),
     }
+}
+
+/// Revalidate persisted evidence rather than relying on the anchor's historical
+/// verified flag. An anchor proves an exact Unicode text span, not scientific
+/// agreement between the quoted passage and a manuscript claim.
+struct ClaimAnchorSource {
+    source_id: String,
+    quote: String,
+    start: i64,
+    end: i64,
+    page: Option<i64>,
+    anchor_hash: String,
+    verified: i64,
+    body: String,
+    body_hash: String,
+    media_type: String,
+}
+
+fn claim_anchor_is_current(connection: &Connection, anchor_id: &str) -> Result<bool, String> {
+    let row: Option<ClaimAnchorSource> = connection
+        .query_row(
+            "SELECT a.source_id,a.quote,a.start,a.end,a.page,a.body_hash,a.verified,
+                    d.body,d.body_hash,s.media_type
+             FROM anchors a
+             JOIN document_text d ON d.source_id=a.source_id
+             JOIN sources s ON s.id=a.source_id AND s.deleted=0
+             WHERE a.id=?1",
+            [anchor_id],
+            |row| {
+                Ok(ClaimAnchorSource {
+                    source_id: row.get(0)?,
+                    quote: row.get(1)?,
+                    start: row.get(2)?,
+                    end: row.get(3)?,
+                    page: row.get(4)?,
+                    anchor_hash: row.get(5)?,
+                    verified: row.get(6)?,
+                    body: row.get(7)?,
+                    body_hash: row.get(8)?,
+                    media_type: row.get(9)?,
+                })
+            },
+        )
+        .optional()
+        .map_err(|_| "claim anchor lookup failed")?;
+    let Some(anchor) = row else {
+        return Ok(false);
+    };
+    let (Ok(start), Ok(end)) = (usize::try_from(anchor.start), usize::try_from(anchor.end)) else {
+        return Ok(false);
+    };
+    if anchor.verified != 1
+        || start >= end
+        || anchor.body.len() > 4 * 1024 * 1024
+        || anchor.quote.is_empty()
+        || anchor.quote.chars().count() > 20_000
+        || digest(anchor.body.as_bytes()) != anchor.body_hash
+        || anchor.body_hash != anchor.anchor_hash
+    {
+        return Ok(false);
+    }
+    if end > anchor.body.chars().count()
+        || anchor
+            .body
+            .chars()
+            .skip(start)
+            .take(end - start)
+            .collect::<String>()
+            != anchor.quote
+    {
+        return Ok(false);
+    }
+    let Some(page_number) = anchor.page else {
+        return Ok(true);
+    };
+    // Historical page metadata alone proves nothing. Only a complete,
+    // hash-checked PDF page extraction that reconstructs the stored text can
+    // authenticate which physical page contains these global text offsets.
+    if page_number <= 0 || anchor.media_type != "application/pdf" {
+        return Ok(false);
+    }
+    let has_pages: i64 = connection
+        .query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name='fulltext_pages'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| "claim page schema lookup failed")?;
+    if has_pages != 1 {
+        return Ok(false);
+    }
+    let mut stmt = connection
+        .prepare(
+            "SELECT page_number,text,page_sha256 FROM fulltext_pages
+             WHERE source_id=?1 ORDER BY page_number LIMIT 1001",
+        )
+        .map_err(|_| "claim page evidence schema invalid")?;
+    let pages = stmt
+        .query_map([anchor.source_id], |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+            ))
+        })
+        .map_err(|_| "claim page evidence lookup failed")?;
+    let mut rebuilt = String::new();
+    let mut matched_page = false;
+    let mut count = 0_i64;
+    let mut char_cursor = 0_usize;
+    for item in pages {
+        let (number, text, hash) = item.map_err(|_| "claim page evidence invalid")?;
+        count += 1;
+        if count > 1000
+            || number != count
+            || text.len() > 4 * 1024 * 1024
+            || digest(text.as_bytes()) != hash
+        {
+            return Ok(false);
+        }
+        if rebuilt.len() + text.len() + usize::from(number > 1) > anchor.body.len() {
+            return Ok(false);
+        }
+        if number > 1 {
+            rebuilt.push('\n');
+            char_cursor += 1;
+        }
+        let page_start = char_cursor;
+        rebuilt.push_str(&text);
+        char_cursor += text.chars().count();
+        let page_end = char_cursor;
+        if number == page_number && start >= page_start && end <= page_end {
+            matched_page = true;
+        }
+    }
+    Ok(matched_page && rebuilt == anchor.body)
 }
 
 fn writing_read(store: &ProjectStore, operation: &str, args: &Value) -> Result<Value, String> {
@@ -1897,26 +2046,12 @@ fn writing_read(store: &ProjectStore, operation: &str, args: &Value) -> Result<V
                 )
                 .map_err(|_| "claim not found")?;
             let note_exists = if let Some(note_id) = note_id.as_deref() {
-                store
-                    .connection()
-                    .query_row("SELECT count(*) FROM notes WHERE id=?1", [note_id], |row| {
-                        row.get::<_, i64>(0)
-                    })
-                    .map_err(|_| "note support query failed")?
-                    == 1
+                claim_note_is_active(store.connection(), note_id)?
             } else {
                 false
             };
             let anchor_verified = if let Some(anchor_id) = anchor_id.as_deref() {
-                store
-                    .connection()
-                    .query_row(
-                        "SELECT count(*) FROM anchors WHERE id=?1 AND verified=1",
-                        [anchor_id],
-                        |row| row.get::<_, i64>(0),
-                    )
-                    .map_err(|_| "anchor support query failed")?
-                    == 1
+                claim_anchor_is_current(store.connection(), anchor_id)?
             } else {
                 false
             };
@@ -2871,6 +3006,508 @@ mod tests {
                     .get::<_, i64>(0))
                 .unwrap(),
             4
+        );
+    }
+
+    #[test]
+    fn tombstoned_notes_cannot_support_new_or_existing_claims() {
+        let root = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let project_path = root.path().join(project_id.to_string());
+        let store = ProjectStore::create(
+            &project_path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Deleted note support".into(),
+                question: "Is a retracted note still valid evidence?".into(),
+                design: "observational".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        let source_hash = store.put_object(b"Original evidence").unwrap();
+        store
+            .connection()
+            .execute(
+                "INSERT INTO sources VALUES ('source', 'Original evidence', 'text/plain', ?1, ?2, 'fixture', 0)",
+                params![source_hash, timestamp()],
+            )
+            .unwrap();
+        drop(store);
+
+        let handler = EvidenceHandler::new(root.path().to_path_buf());
+        let mut ctx = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "reviewer".into(),
+            expected_revision: Some(0),
+        };
+        let note = handler.execute(
+            "evidence.note",
+            &json!({"project_id":project_id.to_string(),"source_id":"source",
+                "title":"Review note","body":"Original interpretation"}),
+            &ctx,
+        );
+        assert_eq!(note["status"], "ok", "{note}");
+        let note_id = note["data"]["note_id"].as_str().unwrap().to_owned();
+
+        ctx.request_id = Uuid::new_v4();
+        ctx.expected_revision = Some(1);
+        let claim_args = json!({
+            "project_id":project_id.to_string(),
+            "statement":"Human interpretation linked to this note",
+            "interpretation":true,
+            "note_id":note_id
+        });
+        let claim = handler.execute("writing.claim_add", &claim_args, &ctx);
+        assert_eq!(claim["status"], "ok", "{claim}");
+        let claim_id = claim["data"]["claim_id"].as_str().unwrap().to_owned();
+        let check_args = json!({"project_id":project_id.to_string(),"claim_id":claim_id});
+        let before = handler.execute("writing.claim_check", &check_args, &ctx);
+        assert_eq!(before["data"]["support"]["note_exists"], true);
+        assert_eq!(before["data"]["supported"], true);
+
+        ctx.request_id = Uuid::new_v4();
+        ctx.expected_revision = Some(2);
+        let deleted = handler.execute(
+            "evidence.note_delete",
+            &json!({"project_id":project_id.to_string(),"note_id":note_id,
+                "actor":"reviewer","reason":"Withdrawn after review"}),
+            &ctx,
+        );
+        assert_eq!(deleted["status"], "ok", "{deleted}");
+        let history = handler.execute(
+            "evidence.note_history",
+            &json!({"project_id":project_id.to_string(),"note_id":note_id}),
+            &ctx,
+        );
+        assert_eq!(history["data"]["deleted"], true);
+
+        let after = handler.execute("writing.claim_check", &check_args, &ctx);
+        assert_eq!(after["status"], "ok", "{after}");
+        assert_eq!(after["data"]["support"]["note_exists"], false);
+        assert_eq!(after["data"]["supported"], false);
+
+        ctx.request_id = Uuid::new_v4();
+        ctx.expected_revision = Some(3);
+        let rejected_preview = handler.preview("writing.claim_add", &claim_args, &ctx);
+        assert_eq!(rejected_preview["status"], "error", "{rejected_preview}");
+        let rejected_commit = handler.execute("writing.claim_add", &claim_args, &ctx);
+        assert_eq!(rejected_commit["status"], "error", "{rejected_commit}");
+
+        let preserved = ProjectStore::open(&project_path).unwrap();
+        assert_eq!(preserved.info().unwrap().revision, 3);
+        for (table, expected) in [("notes", 1_i64), ("note_tombstones", 1), ("claims", 1)] {
+            let count: i64 = preserved
+                .connection()
+                .query_row(&format!("SELECT count(*) FROM {table}"), [], |row| {
+                    row.get(0)
+                })
+                .unwrap();
+            assert_eq!(count, expected, "{table} history must be preserved");
+        }
+    }
+
+    #[test]
+    fn claim_check_revalidates_unicode_anchor_source_and_pdf_page_provenance() {
+        let root = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let project_path = root.path().join(project_id.to_string());
+        let store = ProjectStore::create(
+            &project_path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Anchor audit".into(),
+                question: "Does the exact source passage remain available?".into(),
+                design: "observational".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        let body = "αβ پژوهش 😀 verified";
+        let quote = "پژوهش";
+        let start = 3_usize;
+        let end = start + quote.chars().count();
+        let hash = digest(body.as_bytes());
+        let object_digest = store.put_object(body.as_bytes()).unwrap();
+        store
+            .connection()
+            .execute(
+                "INSERT INTO sources VALUES ('source', 'Text', 'text/plain', ?1, ?2, 'fixture', 0)",
+                params![object_digest, timestamp()],
+            )
+            .unwrap();
+        store
+            .connection()
+            .execute(
+                "INSERT INTO document_text VALUES ('source', ?1, 'unicode-v1', ?2)",
+                params![body, hash],
+            )
+            .unwrap();
+        store
+            .connection()
+            .execute(
+                "INSERT INTO notes VALUES ('note', 'source', 'Human observation', 'Interpretation', ?1)",
+                [timestamp()],
+            )
+            .unwrap();
+        drop(store);
+
+        let handler = EvidenceHandler::new(root.path().to_path_buf());
+        let mut ctx = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "reviewer".into(),
+            expected_revision: Some(0),
+        };
+        let anchor = handler.execute(
+            "evidence.anchor",
+            &json!({"project_id":project_id.to_string(),"source_id":"source",
+                "quote":quote,"start":start,"end":end}),
+            &ctx,
+        );
+        assert_eq!(anchor["status"], "ok", "{anchor}");
+        assert_eq!(anchor["data"]["quote_verified"], true);
+        let anchor_id = anchor["data"]["anchor_id"].as_str().unwrap().to_owned();
+
+        ctx.expected_revision = Some(1);
+        ctx.request_id = Uuid::new_v4();
+        let anchored = handler.execute(
+            "writing.claim_add",
+            &json!({"project_id":project_id.to_string(),"statement":"Grounded quote",
+                "interpretation":false,"anchor_id":anchor_id}),
+            &ctx,
+        );
+        assert_eq!(anchored["status"], "ok", "{anchored}");
+        let anchored_id = anchored["data"]["claim_id"].as_str().unwrap().to_owned();
+        ctx.expected_revision = Some(2);
+        ctx.request_id = Uuid::new_v4();
+        let both = handler.execute(
+            "writing.claim_add",
+            &json!({"project_id":project_id.to_string(),"statement":"Human interpretation",
+                "interpretation":true,"note_id":"note","anchor_id":anchor_id}),
+            &ctx,
+        );
+        assert_eq!(both["status"], "ok", "{both}");
+        let both_id = both["data"]["claim_id"].as_str().unwrap().to_owned();
+        ctx.expected_revision = Some(3);
+        ctx.request_id = Uuid::new_v4();
+        let human = handler.execute(
+            "writing.claim_add",
+            &json!({"project_id":project_id.to_string(),"statement":"Standalone human note",
+                "interpretation":true,"note_id":"note"}),
+            &ctx,
+        );
+        assert_eq!(human["status"], "ok", "{human}");
+        let human_id = human["data"]["claim_id"].as_str().unwrap().to_owned();
+        let check = |id: &str| {
+            let result = handler.execute(
+                "writing.claim_check",
+                &json!({"project_id":project_id.to_string(),"claim_id":id}),
+                &ctx,
+            );
+            assert_eq!(result["status"], "ok", "{result}");
+            result["data"].clone()
+        };
+        assert_eq!(check(&anchored_id)["support"]["anchor_verified"], true);
+        let conn = ProjectStore::open(&project_path).unwrap();
+        let sql = conn.connection();
+        let assert_stale = || {
+            let anchored = check(&anchored_id);
+            assert_eq!(anchored["support"]["anchor_verified"], false);
+            assert_eq!(anchored["supported"], false);
+            let mixed = check(&both_id);
+            assert_eq!(mixed["support"]["anchor_verified"], false);
+            assert_eq!(mixed["support"]["note_exists"], true);
+            assert_eq!(mixed["supported"], true); // independent human note remains
+            assert_eq!(check(&human_id)["supported"], true);
+        };
+
+        sql.execute("UPDATE anchors SET start=start+1 WHERE id=?1", [&anchor_id])
+            .unwrap();
+        assert_stale(); // stale Unicode character range
+        sql.execute(
+            "UPDATE anchors SET start=?1 WHERE id=?2",
+            params![start as i64, anchor_id],
+        )
+        .unwrap();
+        sql.execute(
+            "UPDATE document_text SET body_hash='incorrect' WHERE source_id='source'",
+            [],
+        )
+        .unwrap();
+        assert_stale(); // recomputed source text digest disagrees
+        sql.execute(
+            "UPDATE document_text SET body_hash=?1 WHERE source_id='source'",
+            [hash.as_str()],
+        )
+        .unwrap();
+        sql.execute(
+            "UPDATE anchors SET body_hash='outdated' WHERE id=?1",
+            [&anchor_id],
+        )
+        .unwrap();
+        assert_stale(); // anchor is tied to a different text revision
+        sql.execute(
+            "UPDATE anchors SET body_hash=?1 WHERE id=?2",
+            params![hash, anchor_id],
+        )
+        .unwrap();
+        sql.execute("UPDATE anchors SET verified=0 WHERE id=?1", [&anchor_id])
+            .unwrap();
+        assert_stale();
+        sql.execute("UPDATE anchors SET verified=1 WHERE id=?1", [&anchor_id])
+            .unwrap();
+        sql.execute("UPDATE sources SET deleted=1 WHERE id='source'", [])
+            .unwrap();
+        assert_stale();
+        sql.execute("UPDATE sources SET deleted=0 WHERE id='source'", [])
+            .unwrap();
+        assert_eq!(check(&anchored_id)["supported"], true);
+
+        sql.execute("UPDATE anchors SET page=1 WHERE id=?1", [&anchor_id])
+            .unwrap();
+        assert_stale(); // no fulltext_pages: page metadata alone cannot prove a PDF page
+        sql.execute(
+            "UPDATE sources SET media_type='application/pdf' WHERE id='source'",
+            [],
+        )
+        .unwrap();
+        assert_stale(); // PDF label without pages is still insufficient
+        sql.execute_batch(
+            "CREATE TABLE fulltext_pages(
+                source_id TEXT NOT NULL REFERENCES sources(id),
+                page_number INTEGER NOT NULL,
+                text TEXT NOT NULL,
+                page_sha256 TEXT NOT NULL,
+                PRIMARY KEY(source_id,page_number)
+            )",
+        )
+        .unwrap();
+        sql.execute(
+            "INSERT INTO fulltext_pages VALUES ('source',1,?1,?2)",
+            params![body, hash],
+        )
+        .unwrap();
+        assert_eq!(check(&anchored_id)["support"]["anchor_verified"], true);
+        sql.execute(
+            "UPDATE fulltext_pages SET page_sha256='wrong' WHERE source_id='source'",
+            [],
+        )
+        .unwrap();
+        assert_stale();
+        sql.execute(
+            "UPDATE fulltext_pages SET page_sha256=?1 WHERE source_id='source'",
+            [hash.as_str()],
+        )
+        .unwrap();
+        sql.execute("UPDATE anchors SET page=2 WHERE id=?1", [&anchor_id])
+            .unwrap();
+        assert_stale(); // valid quote is on page 1, not claimed page 2
+        assert_eq!(check(&human_id)["support"]["anchor_verified"], false);
+    }
+
+    #[test]
+    fn claim_add_rejects_stale_anchors_on_preview_and_commit_without_losing_human_notes() {
+        let folder = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = folder.path().join(project_id.to_string());
+        let store = ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Claim creation integrity".into(),
+                question: "Are quoted sources still exact?".into(),
+                design: "observational".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        let source_text = "αβ پژوهش 😀 evidence";
+        let source_hash = digest(source_text.as_bytes());
+        let object_hash = store.put_object(source_text.as_bytes()).unwrap();
+        store
+            .connection()
+            .execute(
+                "INSERT INTO sources VALUES ('source', 'Sample', 'text/plain', ?1, ?2, 'test', 0)",
+                params![object_hash, timestamp()],
+            )
+            .unwrap();
+        store
+            .connection()
+            .execute(
+                "INSERT INTO document_text VALUES ('source', ?1, 'unicode-v1', ?2)",
+                params![source_text, source_hash],
+            )
+            .unwrap();
+        store
+            .connection()
+            .execute(
+                "INSERT INTO notes VALUES ('human-note', 'source', 'Observations', 'Human interpretation', ?1)",
+                [timestamp()],
+            )
+            .unwrap();
+        drop(store);
+        let handler = EvidenceHandler::new(folder.path().to_path_buf());
+        let mut ctx = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "reviewer".into(),
+            expected_revision: Some(0),
+        };
+        let quote = "پژوهش";
+        let anchor = handler.execute(
+            "evidence.anchor",
+            &json!({"project_id":project_id.to_string(),"source_id":"source",
+                "quote":quote,"start":3,"end":3+quote.chars().count()}),
+            &ctx,
+        );
+        assert_eq!(anchor["status"], "ok", "{anchor}");
+        assert_eq!(anchor["data"]["quote_verified"], true);
+        let anchor_id = anchor["data"]["anchor_id"].as_str().unwrap().to_owned();
+        ctx.expected_revision = Some(1);
+        ctx.request_id = Uuid::new_v4();
+        let anchor_args = json!({
+            "project_id":project_id.to_string(),"statement":"Exact extracted words",
+            "interpretation":false,"anchor_id":anchor_id
+        });
+        let mixed_args = json!({
+            "project_id":project_id.to_string(),"statement":"Interpretation with purported quotation",
+            "interpretation":true,"note_id":"human-note","anchor_id":anchor_id
+        });
+        let note_args = json!({
+            "project_id":project_id.to_string(),"statement":"Human interpretation only",
+            "interpretation":true,"note_id":"human-note"
+        });
+        // A valid anchor can be previewed without modifying the real project,
+        // then recorded exactly once with the existing request/revision guard.
+        assert_eq!(
+            handler.preview("writing.claim_add", &anchor_args, &ctx)["status"],
+            "ok"
+        );
+        assert_eq!(
+            ProjectStore::open(&path).unwrap().info().unwrap().revision,
+            1
+        );
+        let recorded = handler.execute("writing.claim_add", &anchor_args, &ctx);
+        assert_eq!(recorded["status"], "ok", "{recorded}");
+        assert_eq!(
+            handler.execute("writing.claim_add", &anchor_args, &ctx)["status"],
+            "error",
+            "replaying the original approved request must not create a second claim"
+        );
+        assert_eq!(
+            ProjectStore::open(&path).unwrap().info().unwrap().revision,
+            2
+        );
+        ctx.expected_revision = Some(2);
+        ctx.request_id = Uuid::new_v4();
+
+        // This preview was valid. Changes to persisted evidence after preview
+        // (even if made without a project revision increment) must block commit.
+        assert_eq!(
+            handler.preview("writing.claim_add", &mixed_args, &ctx)["status"],
+            "ok"
+        );
+        let db = ProjectStore::open(&path).unwrap();
+        let sql = db.connection();
+        let assert_rejected = |ctx: &DispatchContext| {
+            for args in [&anchor_args, &mixed_args] {
+                let preview = handler.preview("writing.claim_add", args, ctx);
+                assert_eq!(preview["status"], "error", "{preview}");
+                let execute = handler.execute("writing.claim_add", args, ctx);
+                assert_eq!(execute["status"], "error", "{execute}");
+            }
+            let state = ProjectStore::open(&path).unwrap();
+            assert_eq!(state.info().unwrap().revision, 2);
+            assert_eq!(
+                state
+                    .connection()
+                    .query_row("SELECT count(*) FROM claims", [], |row| row
+                        .get::<_, i64>(0),)
+                    .unwrap(),
+                1,
+                "invalid previews and commits must never add a claim"
+            );
+        };
+        sql.execute("UPDATE anchors SET start=start+1 WHERE id=?1", [&anchor_id])
+            .unwrap();
+        assert_rejected(&ctx);
+        sql.execute("UPDATE anchors SET start=3 WHERE id=?1", [&anchor_id])
+            .unwrap();
+        sql.execute(
+            "UPDATE document_text SET body_hash='forged' WHERE source_id='source'",
+            [],
+        )
+        .unwrap();
+        assert_rejected(&ctx);
+        sql.execute(
+            "UPDATE document_text SET body_hash=?1 WHERE source_id='source'",
+            [&source_hash],
+        )
+        .unwrap();
+        sql.execute(
+            "UPDATE anchors SET body_hash='forged' WHERE id=?1",
+            [&anchor_id],
+        )
+        .unwrap();
+        assert_rejected(&ctx);
+        sql.execute(
+            "UPDATE anchors SET body_hash=?1 WHERE id=?2",
+            params![source_hash, anchor_id],
+        )
+        .unwrap();
+        sql.execute("UPDATE anchors SET verified=0 WHERE id=?1", [&anchor_id])
+            .unwrap();
+        assert_rejected(&ctx);
+        sql.execute("UPDATE anchors SET verified=1 WHERE id=?1", [&anchor_id])
+            .unwrap();
+        sql.execute("UPDATE sources SET deleted=1 WHERE id='source'", [])
+            .unwrap();
+        assert_rejected(&ctx);
+        sql.execute("UPDATE sources SET deleted=0 WHERE id='source'", [])
+            .unwrap();
+        sql.execute("UPDATE anchors SET page=1 WHERE id=?1", [&anchor_id])
+            .unwrap();
+        assert_rejected(&ctx); // no genuine persisted PDF page evidence
+        sql.execute(
+            "UPDATE sources SET media_type='application/pdf' WHERE id='source'",
+            [],
+        )
+        .unwrap();
+        assert_rejected(&ctx); // PDF label alone does not prove the claimed page
+
+        // A human note is independent evidence and must remain usable even
+        // when an attempted anchored or mixed claim is rejected.
+        let note_preview = handler.preview("writing.claim_add", &note_args, &ctx);
+        assert_eq!(note_preview["status"], "ok", "{note_preview}");
+        let note_claim = handler.execute("writing.claim_add", &note_args, &ctx);
+        assert_eq!(note_claim["status"], "ok", "{note_claim}");
+        let note_id = note_claim["data"]["claim_id"].as_str().unwrap();
+        let checked = handler.execute(
+            "writing.claim_check",
+            &json!({"project_id":project_id.to_string(),"claim_id":note_id}),
+            &ctx,
+        );
+        assert_eq!(checked["data"]["support"]["note_exists"], true);
+        assert_eq!(checked["data"]["supported"], true);
+        assert_eq!(
+            ProjectStore::open(&path).unwrap().info().unwrap().revision,
+            3
+        );
+        assert_eq!(
+            handler.execute("writing.claim_add", &note_args, &ctx)["status"],
+            "error",
+            "note-only claim must still obey idempotency"
         );
     }
 

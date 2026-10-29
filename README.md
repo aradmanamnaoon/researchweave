@@ -4,7 +4,7 @@
 
 <h1 align="center">ResearchWeave</h1>
 
-**Latest private Linux GUI acceptance (29 October 2026; not yet released):** The vendored AccessKit candidate (binary SHA-256 `9fa1269b23fc28516bf1564288bf00a7ee2a836641d5d6da1601d9dd2bee67b5`) **PASSED** [strict Reader r6](docs/ux/screenshots/search-reader-accesskit-pass-r6/results.json): **16,916 Unicode scalars / 29,252 UTF-8 bytes** across 8,000+8,000+916-character pages, **53 GUI-created sources** across 50+3 list pages, [**16/16 correct AT-SPI enabled/sensitive states**](docs/ux/screenshots/search-reader-accesskit-pass-r6/accessibility-states.json) with zero mismatches, **4/4 disabled-boundary clicks inert**, 13 screenshots. The same binary **PASSED [r9 40/40 routes, zero placeholders](docs/ux/screenshots/native-40-accesskit-r9/results.json)** (46 screenshots) and **[r10 7/7 utility links + source-bound human-approved Evidence note/history task](docs/ux/screenshots/utility-evidence-accesskit-r10/results.json)** (21 screenshots). **Earlier strict r4 6/16 accessibility FAIL on `499cfebb...` is historical, not current.** Slint `4437d03c...`, Rust host `e03ea640...`, [vendored adapter](vendor/accesskit_atspi_common/src/node.rs) `9eb3b85...`. The local MIT/Apache-2.0 `accesskit_atspi_common` 0.19.1 [Cargo override](Cargo.toml) preserves ReadOnly and gates Enabled/Sensitive on not-disabled; future upstream updates require a documented rebase/override-removal check and repeated regression tests. Final commit/hosted CI, human screen readers, installed Windows/macOS/Linux packages, complete workflow/citation/scientific/security acceptance and 100 skill-specific GUI signoffs are **still pending**. Published **v0.2.0 remains unchanged**.
+**Release status — 29 October 2026:** Published [Rust v0.2.0](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.2.0) remains the supported download. The next native UX candidate is under review in [draft PR #16](https://github.com/aradmanamnaoon/researchweave/pull/16). Recent scoped native checks cover [Reader accessibility](docs/ux/screenshots/search-reader-accesskit-pass-r6/results.json), [40 routes](docs/ux/screenshots/native-40-accesskit-r9/results.json), and [a source-backed Evidence workflow](docs/ux/screenshots/utility-evidence-accesskit-r10/results.json); these historical binary-specific passes are not final-release approval. Consult the [12-task execution plan](docs/ux/PR16_EXECUTION_PLAN.md) and [cross-platform acceptance evidence](docs/ux/CROSS_PLATFORM_QA.md) for the remaining installed-Windows, PDF grounding, manuscript, security, 100-skill and 109-scenario gates.
 
 <p align="center">
   <strong>Your research, in one local Rust workspace.</strong><br/>
@@ -43,6 +43,12 @@
 <p align="center">
   <img src="assets/screenshots/rust-welcome-activity-rail.png" width="66%" alt="Real Rust/Slint welcome screen with the six-section activity rail and a local project creation form." />
 </p>
+
+<p align="center">
+  <img src="docs/ux/screenshots/data-view-json-20261029/02-visible-inspector-after-copy.png" width="48%" alt="Unreleased native Data View showing the full verified current-page JSON inspector." />
+  <img src="docs/ux/screenshots/pdf-extracted-20261029/02-pdf-page2-find-next-text.png" width="48%" alt="Unreleased native PDF reader showing the searchable second page and selectable extracted text." />
+</p>
+<p align="center"><em>Actual private Linux GUI captures from the unreleased PR #16 candidate. These prove scoped Data View and PDF extraction tests, not finished citation anchoring or a new published release.</em></p>
 
 <p align="center"><em>The welcome screenshot is from a previously captured Rust desktop build. The banner above illustrates the research workflow; it is not an app screenshot or a preview of unfinished UX features.</em></p>
 

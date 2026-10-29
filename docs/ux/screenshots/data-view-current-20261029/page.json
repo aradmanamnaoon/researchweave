@@ -1,0 +1,55 @@
+{
+  "limit": 25,
+  "offset": 0,
+  "revision": "f25b1256b9022c8182cb6b600bd7002db3756ad53672d5746b24229f0b0515dd",
+  "rows": [
+    {
+      "group": "A",
+      "score": "1"
+    },
+    {
+      "group": "A",
+      "score": "3"
+    },
+    {
+      "group": "B",
+      "score": "5"
+    }
+  ],
+  "source_hash": "f099e72a250e58f2f3b385760a55cf2acca8f33992c9369e46c8dbdc2a8794ca",
+  "total": 3,
+  "variables": [
+    {
+      "allowed_max": null,
+      "allowed_min": null,
+      "category_order": [],
+      "dtype": "text",
+      "label": "",
+      "missing_values": [
+        ""
+      ],
+      "name": "score",
+      "privacy_class": "public",
+      "private": false,
+      "scale": "unknown",
+      "units": "",
+      "value_labels": {}
+    },
+    {
+      "allowed_max": null,
+      "allowed_min": null,
+      "category_order": [],
+      "dtype": "text",
+      "label": "",
+      "missing_values": [
+        ""
+      ],
+      "name": "group",
+      "privacy_class": "public",
+      "private": false,
+      "scale": "unknown",
+      "units": "",
+      "value_labels": {}
+    }
+  ]
+}

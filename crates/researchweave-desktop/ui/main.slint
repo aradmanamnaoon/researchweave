@@ -17,6 +17,11 @@ export struct ManuscriptHeading {
     offset: int,
 }
 
+export struct ManuscriptReferenceChoice {
+    reference-id: string,
+    title: string,
+}
+
 export struct SourceListEntry {
     source-id: string,
     title: string,
@@ -254,6 +259,8 @@ export component MainWindow inherits Window {
     callback dismiss-notifications();
     in-out property <image> pdf-image;
     in-out property <string> pdf-status: "Choose a local PDF file";
+    in-out property <string> pdf-page-extracted-text: "";
+    in-out property <string> pdf-page-extraction-status: "No PDF page text loaded.";
     in-out property <string> pdf-local-path: "";
     in-out property <string> data-local-path: "";
     in-out property <bool> local-file-dialog-busy: false;
@@ -334,6 +341,10 @@ export component MainWindow inherits Window {
     in-out property <string> manuscript-draft-id: "";
     in-out property <string> manuscript-draft-section: "";
     in-out property <string> manuscript-draft-citations: "";
+    in-out property <[ManuscriptReferenceChoice]> manuscript-reference-options: [];
+    in-out property <string> manuscript-reference-status: "Search registered project references to insert their exact IDs.";
+    callback search-manuscript-references(string);
+    callback insert-manuscript-reference(string);
     in-out property <string> manuscript-draft-body: "";
     in-out property <int> manuscript-word-count: 0;
     in-out property <int> manuscript-character-count: 0;
@@ -1325,6 +1336,18 @@ export component MainWindow inherits Window {
                                         placeholder-text: "Absolute path to a local PDF";
                                         accessible-label: "PDF file path";
                                         accessible-description: "Absolute path to the PDF file to display";
+                                        edited(value) => {
+                                            root.pdf-job += 1;
+                                            root.pdf-highlight-visible = false;
+                                            root.pdf-page-extracted-text = "";
+                                            root.pdf-page-extraction-status = "PDF path changed. Open the file to inspect its current page text.";
+                                            root.pdf-page-count = 0;
+                                            root.pdf-page-number = 1;
+                                            root.pdf-matches = 0;
+                                            root.pdf-render-width = 0;
+                                            root.pdf-render-height = 0;
+                                            root.pdf-status = "PDF path changed; open the selected file.";
+                                        }
                                     }
                                     Button {
                                         text: "Browse PDF…";
@@ -1351,6 +1374,8 @@ export component MainWindow inherits Window {
                                             root.pdf-page-number = 1;
                                             root.pdf-page-count = 0;
                                             root.pdf-highlight-visible = false;
+                                            root.pdf-page-extracted-text = "";
+                                            root.pdf-page-extraction-status = "Extracting text from the requested PDF page…";
                                             root.load-pdf(pdf-path.text, pdf-query.text, 1);
                                         }
                                     }
@@ -1361,6 +1386,8 @@ export component MainWindow inherits Window {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Searching PDF…";
                                             root.pdf-highlight-visible = false;
+                                            root.pdf-page-extracted-text = "";
+                                            root.pdf-page-extraction-status = "Extracting text from the requested PDF page…";
                                             root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number);
                                         }
                                     }
@@ -1373,6 +1400,8 @@ export component MainWindow inherits Window {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Finding next matching PDF page…";
                                             root.pdf-highlight-visible = false;
+                                            root.pdf-page-extracted-text = "";
+                                            root.pdf-page-extraction-status = "Finding and extracting text from the next matching PDF page…";
                                             root.find-next-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number);
                                         }
                                     }
@@ -1388,6 +1417,8 @@ export component MainWindow inherits Window {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering previous PDF page…";
                                             root.pdf-highlight-visible = false;
+                                            root.pdf-page-extracted-text = "";
+                                            root.pdf-page-extraction-status = "Extracting text from the requested PDF page…";
                                             root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number - 1);
                                         }
                                     }
@@ -1405,6 +1436,8 @@ export component MainWindow inherits Window {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering next PDF page…";
                                             root.pdf-highlight-visible = false;
+                                            root.pdf-page-extracted-text = "";
+                                            root.pdf-page-extraction-status = "Extracting text from the requested PDF page…";
                                             root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number + 1);
                                         }
                                     }
@@ -1428,6 +1461,7 @@ export component MainWindow inherits Window {
                                         y: (parent.height - self.height) / 2;
                                         pdf-view := Image {
                                             source: root.pdf-image;
+                                            visible: root.pdf-page-count > 0;
                                             width: parent.width;
                                             height: parent.height;
                                             image-fit: contain;
@@ -1441,6 +1475,43 @@ export component MainWindow inherits Window {
                                             background: Theme.accent-subtle;
                                             border-color: Theme.warning;
                                             border-width: 2px;
+                                        }
+                                    }
+                                }
+                                // The right inspector collapses at narrow widths and
+                                // high UI scale. Keep actual extracted text reachable
+                                // on the Reader page instead of hiding it entirely.
+                                if !root.show-inspector: Rectangle {
+                                    background: Theme.surface;
+                                    border-radius: Theme.panel-radius;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    min-height: 160px;
+                                    preferred-height: 185px;
+                                    max-height: 260px;
+                                    VerticalLayout {
+                                        padding: 8px;
+                                        spacing: 4px;
+                                        Text {
+                                            text: "Extracted current-page text (read-only)";
+                                            color: Theme.ink;
+                                            font-size: 12px * Theme.ui-scale / 100;
+                                            font-weight: 600;
+                                        }
+                                        Text {
+                                            text: root.pdf-page-extraction-status;
+                                            color: Theme.muted-ink;
+                                            font-size: 10px * Theme.ui-scale / 100;
+                                            wrap: word-wrap;
+                                        }
+                                        TextEdit {
+                                            text: root.pdf-page-extracted-text;
+                                            read-only: true;
+                                            enabled: root.pdf-page-extracted-text != "";
+                                            accessible-enabled: root.pdf-page-extracted-text != "";
+                                            accessible-label: "Read-only actual extracted PDF page text; selectable and copyable, not yet a verified evidence anchor";
+                                            horizontal-stretch: 1;
+                                            vertical-stretch: 1;
                                         }
                                     }
                                 }
@@ -1464,6 +1535,24 @@ export component MainWindow inherits Window {
                                     Text { text: "Current native scope"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     Text { text: "Native rendering, per-page search and bounded Find next page (wraps once)."; color: Theme.ink; font-size: 11px * Theme.ui-scale / 100; wrap: word-wrap; }
                                     Text { text: "Selection and annotations remain pending."; color: Theme.warning; font-size: 11px * Theme.ui-scale / 100; }
+                                    Text { text: "Extracted current-page text"; color: Theme.ink; font-size: 12px * Theme.ui-scale / 100; font-weight: 600; }
+                                    Text {
+                                        text: root.pdf-page-extraction-status;
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                        font-size: 10px * Theme.ui-scale / 100;
+                                        accessible-label: "PDF extracted text provenance: " + root.pdf-page-extraction-status;
+                                    }
+                                    TextEdit {
+                                        text: root.pdf-page-extracted-text;
+                                        read-only: true;
+                                        enabled: root.pdf-page-extracted-text != "";
+                                        accessible-enabled: root.pdf-page-extracted-text != "";
+                                        accessible-label: "Read-only actual extracted PDF page text; selectable and copyable, not yet a verified evidence anchor";
+                                        horizontal-stretch: 1;
+                                        vertical-stretch: 1;
+                                        min-height: 120px;
+                                    }
                                     Text { text: "Evidence"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     Button { text: "Open evidence"; clicked => { root.page = 8; } }
                                 }
@@ -2246,12 +2335,19 @@ export component MainWindow inherits Window {
                                         clicked => { root.inspect-dataset(analysis-dataset-id.text, analysis-revision.text); }
                                     }
                                 }
+                                // Table and exact values share the first visible row. The
+                                // earlier vertically stacked layout concealed one of them
+                                // behind the native ScrollView viewport on some OSes.
+                                HorizontalLayout {
+                                    spacing: 12px;
                                 Rectangle {
                                     background: Theme.surface;
                                     border-width: 1px;
                                     border-color: Theme.divider;
                                     border-radius: Theme.panel-radius;
                                     height: root.dataset-grid-ready ? 395px : 125px;
+                                    horizontal-stretch: 2;
+                                    min-width: 0px;
                                     VerticalLayout {
                                         padding: 12px;
                                         spacing: 8px;
@@ -2325,24 +2421,33 @@ export component MainWindow inherits Window {
                                         }
                                     }
                                 }
-                                Text { text: "Inspection details · complete verified current page (select and copy)"; color: Theme.ink; font-weight: 700; }
                                 Rectangle {
                                     background: Theme.surface;
                                     border-width: 1px;
                                     border-color: Theme.divider;
                                     border-radius: Theme.panel-radius;
-                                    min-height: 110px;
-                                    preferred-height: 150px;
-                                    TextEdit {
-                                        text: root.analysis-results;
-                                        read-only: true;
-                                        // A direct child of Rectangle does not automatically
-                                        // fill it. Without a width this editor renders at 0px,
-                                        // hiding valid data from users and assistive tools.
-                                        width: parent.width;
-                                        height: parent.height;
-                                        accessible-label: "Verified current dataset page JSON; select and copy complete values including shortened table cells";
+                                    height: root.dataset-grid-ready ? 395px : 125px;
+                                    horizontal-stretch: 1;
+                                    min-width: 200px;
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        spacing: 8px;
+                                        Text {
+                                            text: "Complete current-page values · select and copy";
+                                            color: Theme.ink;
+                                            font-weight: 700;
+                                            wrap: word-wrap;
+                                        }
+                                        TextEdit {
+                                            text: root.analysis-results;
+                                            read-only: true;
+                                            horizontal-stretch: 1;
+                                            vertical-stretch: 1;
+                                            min-height: 85px;
+                                            accessible-label: "Verified current dataset page JSON; select and copy complete values including shortened table cells";
+                                        }
                                     }
+                                }
                                 }
                                 Text {
                                     text: "To change variable labels or declare missing values, open Variable View. That action creates a new immutable revision rather than editing these rows in place.";
@@ -2865,9 +2970,50 @@ export component MainWindow inherits Window {
                             manuscript-citations := LineEdit {
                                 visible: root.writing-show-tools;
                                 accessible-label: "Manuscript citations";
-                                placeholder-text: "Citation IDs separated by commas";
+                                placeholder-text: "Registered citation IDs separated by commas";
                                 text: root.manuscript-draft-citations;
                                 edited(text) => { root.manuscript-draft-citations = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); }
+                            }
+                            if root.writing-show-tools: HorizontalLayout {
+                                spacing: Theme.space2;
+                                manuscript-reference-query := LineEdit {
+                                    accessible-label: "Search registered manuscript references";
+                                    placeholder-text: "Reference title or ID";
+                                    horizontal-stretch: 1;
+                                }
+                                Button {
+                                    text: "Find citations";
+                                    accessible-label: "Find registered project references for manuscript citation";
+                                    enabled: !root.writing-recovery-blocked;
+                                    accessible-enabled: !root.writing-recovery-blocked;
+                                    clicked => { root.search-manuscript-references(manuscript-reference-query.text); }
+                                }
+                            }
+                            if root.writing-show-tools: Text {
+                                text: root.manuscript-reference-status;
+                                color: Theme.muted-ink;
+                                wrap: word-wrap;
+                                accessible-label: "Manuscript reference picker status: " + root.manuscript-reference-status;
+                            }
+                            if root.writing-show-tools && root.manuscript-reference-options.length > 0: Rectangle {
+                                height: 122px;
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                ScrollView {
+                                    VerticalLayout {
+                                        spacing: Theme.space1;
+                                        padding: Theme.space2;
+                                        for choice in root.manuscript-reference-options: Button {
+                                            text: choice.title + " · " + choice.reference-id;
+                                            accessible-label: "Insert registered manuscript citation " + choice.title + " ID " + choice.reference-id;
+                                            enabled: !root.writing-recovery-blocked;
+                                            accessible-enabled: !root.writing-recovery-blocked;
+                                            clicked => { root.insert-manuscript-reference(choice.reference-id); }
+                                        }
+                                    }
+                                }
                             }
                             manuscript-body := TextEdit {
                                 enabled: !root.writing-recovery-blocked;

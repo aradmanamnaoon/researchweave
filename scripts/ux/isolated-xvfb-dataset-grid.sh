@@ -121,6 +121,172 @@ else:
     print("Actual AT-SPI status names:",*[n for n in names if 'Dataset' in n or 'dataset' in n],sep="\n",file=sys.stderr)
     raise SystemExit("Expected real 3-row native data grid not found")
 PY
+# Verify the actual read-only Slint TextEdit, not an internal Rust model or
+# a stale clipboard value. The inspector sits below the table in a ScrollView.
+python3 - "$revision" "$evidence/inspector-page.json" <<'PY' >"$evidence/inspector-clipboard.json" 2>"$evidence/inspector-clipboard.stderr.log"
+import hashlib
+import json
+import subprocess
+import sys
+import time
+import uuid
+from collections import deque
+from pathlib import Path
+
+import pyatspi
+
+expected_revision, page_path = sys.argv[1:]
+editor_name = (
+    "Verified current dataset page JSON; select and copy complete values "
+    "including shortened table cells"
+)
+
+
+def inspector_node():
+    desktop = pyatspi.Registry.getDesktop(0)
+    for index in range(desktop.childCount):
+        app = desktop.getChildAtIndex(index)
+        try:
+            if "researchweave" not in str(app.name).lower():
+                continue
+        except Exception:
+            continue
+        queue = deque([(app, 0)])
+        while queue:
+            node, depth = queue.popleft()
+            try:
+                if node.name == editor_name:
+                    return node
+                if depth < 16:
+                    queue.extend(
+                        (node.getChildAtIndex(i), depth + 1)
+                        for i in range(min(node.childCount, 300))
+                    )
+            except Exception:
+                continue
+    return None
+
+
+node = None
+dimensions = None
+visible_dimensions = None
+probes = []
+for step in range(13):
+    candidate = inspector_node()
+    if candidate is not None:
+        bounds = candidate.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+        showing = candidate.getState().contains(pyatspi.STATE_SHOWING)
+        # AT-SPI reports the full TextEdit bounds even when only part is
+        # visible inside the window. A partially visible editor is usable;
+        # verify the actual visible intersection, then prove copyability.
+        left = max(bounds.x, 10, 0)
+        top = max(bounds.y, 10, 0)
+        right = min(bounds.x + bounds.width, 1290, 1600)
+        bottom = min(bounds.y + bounds.height, 810, 900)
+        visible_width = max(0, right - left)
+        visible_height = max(0, bottom - top)
+        probes.append({
+            "step": step, "role": candidate.getRoleName(),
+            "bounds": [bounds.x, bounds.y, bounds.width, bounds.height],
+            "showing": showing, "visible_intersection": [left, top, visible_width, visible_height],
+        })
+        if showing and visible_width >= 200 and visible_height >= 40:
+            node = candidate
+            dimensions = bounds
+            visible_dimensions = (left, top, visible_width, visible_height)
+            break
+    else:
+        probes.append({"step": step, "found": False})
+    if step < 12:
+        # PageDown follows the current focus; the wheel also reaches Slint's
+        # outer ScrollView when a nested table has retained keyboard focus.
+        subprocess.run(
+            ["xdotool", "key", "--clearmodifiers", "Page_Down"], check=True
+        )
+        subprocess.run(
+            ["xdotool", "mousemove", "--sync", "1200", "690",
+             "click", "--repeat", "3", "--delay", "80", "5"],
+            check=True,
+        )
+        time.sleep(0.2)
+if node is None:
+    print(json.dumps({"inspector_probes": probes}, indent=2), file=sys.stderr)
+    raise AssertionError(
+        "Verified JSON TextEdit never became sufficiently visible with "
+        "width >=200px and height >=40px after 12 PageDown steps"
+    )
+if node.getRoleName().lower() != "entry":
+    raise AssertionError(f"Expected actual TextEdit entry, got {node.getRoleName()!r}")
+
+sentinel = f"STALE_DATASET_GRID_CLIPBOARD_{uuid.uuid4().hex}"
+subprocess.run(
+    ["xclip", "-selection", "clipboard"],
+    input=sentinel.encode("utf-8"), check=True,
+)
+assert subprocess.check_output(
+    ["xclip", "-selection", "clipboard", "-o"]
+).decode("utf-8") == sentinel, "Clipboard sentinel could not be established"
+
+subprocess.run(
+    ["xdotool", "mousemove", "--sync",
+     str(visible_dimensions[0] + visible_dimensions[2] // 2),
+     str(visible_dimensions[1] + visible_dimensions[3] // 2), "click", "1"],
+    check=True,
+)
+subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+a"], check=True)
+subprocess.run(["xdotool", "key", "--clearmodifiers", "ctrl+c"], check=True)
+copied = sentinel
+for _ in range(20):
+    try:
+        copied = subprocess.check_output(
+            ["xclip", "-selection", "clipboard", "-o"],
+            stderr=subprocess.DEVNULL,
+        ).decode("utf-8")
+    except (subprocess.CalledProcessError, UnicodeDecodeError):
+        copied = sentinel
+    if copied != sentinel:
+        break
+    time.sleep(0.15)
+assert copied != sentinel, "Ctrl+A/C left the stale sentinel in the clipboard"
+assert sentinel not in copied, "Copied inspector content contains stale sentinel"
+actual = json.loads(copied)
+expected_rows = [
+    {"group": "A", "score": "1"},
+    {"group": "A", "score": "3"},
+    {"group": "B", "score": "5"},
+]
+assert isinstance(actual, dict), "Copied inspector must contain a JSON object"
+assert actual.get("revision") == expected_revision, "Copied wrong dataset revision"
+assert actual.get("offset") == 0, "Unexpected dataset page offset"
+assert actual.get("limit") == 25, "Unexpected dataset page size"
+assert actual.get("rows") == expected_rows, "Inspector omitted, altered or reordered rows"
+Path(page_path).write_text(copied, encoding="utf-8")
+print(json.dumps({
+    "result": "PASS",
+    "editor_role": node.getRoleName(),
+    "editor_name": editor_name,
+    "geometry": {
+        "x": dimensions.x, "y": dimensions.y,
+        "width": dimensions.width, "height": dimensions.height,
+    },
+    "visible_intersection": visible_dimensions,
+    "scroll_steps": step,
+    "ctrl_a_ctrl_c": True,
+    "stale_sentinel_rejected": True,
+    "copied_utf8_bytes": len(copied.encode("utf-8")),
+    "copied_sha256": hashlib.sha256(copied.encode("utf-8")).hexdigest(),
+    "revision": actual["revision"],
+    "rows": actual["rows"],
+    "limit": actual["limit"],
+    "offset": actual["offset"],
+}, indent=2, ensure_ascii=False))
+PY
+import -window root "$evidence/02-visible-inspector-after-copy.png"
 kill -0 "$app_pid"
 "$binary" --smoke-native-workflow verify >"$evidence/reopen-verify.log" 2>&1
-echo "ISOLATED_DATASET_GRID_GUI_OK project=$project_id source_sha=$(sha256sum "$repository/crates/researchweave-desktop/ui/main.slint" | cut -d' ' -f1)"
+sha256sum "$binary" \
+  "$repository/crates/researchweave-desktop/ui/main.slint" \
+  "$repository/crates/researchweave-desktop/src/main.rs" \
+  "$repository/scripts/ux/isolated-xvfb-dataset-grid.sh" \
+  >"$evidence/artifact-sha256.txt"
+echo "ISOLATED_DATASET_GRID_GUI_OK project=$project_id source_sha=$(sha256sum "$repository/crates/researchweave-desktop/ui/main.slint" | cut -d' ' -f1) binary_sha=$(sha256sum "$binary" | cut -d' ' -f1) inspector_clipboard=PASS" | tee "$evidence/summary.log"

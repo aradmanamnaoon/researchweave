@@ -201,6 +201,38 @@ fn recovered_writing_requires_flush(drafts: &writing_autosave::Drafts) -> bool {
             && !drafts.section.trim().is_empty())
 }
 
+/// An archive contains the project database, not the host-local writing journal.
+/// The UI must synchronously commit all pending edits before it snapshots that
+/// database. Refuse the export on ambiguous, stale, or unreadable recovery data.
+fn flush_writing_before_archive(
+    project: &Path,
+    drafts: &mut writing_autosave::Drafts,
+    root: &Path,
+) -> Result<i64, String> {
+    let info = ProjectStore::open(project)
+        .map_err(|error| error.to_string())?
+        .info()
+        .map_err(|error| error.to_string())?;
+    let persisted = writing_autosave::load_for_project(root, project, &info.id)?;
+    if persisted != *drafts {
+        return Err("Writing journal differs from the active editor; archive canceled to preserve unsaved edits. Reopen the project and resolve writing recovery.".into());
+    }
+    if drafts.manuscript_dirty
+        && (drafts.manuscript_id.trim().is_empty() || drafts.section.trim().is_empty())
+    {
+        return Err("Manuscript has unsaved edits but no manuscript ID or section; fill both fields before exporting an archive.".into());
+    }
+    let revision = if drafts.notebook_dirty || drafts.manuscript_dirty {
+        flush_writing_drafts(project, drafts, root)?
+    } else {
+        info.revision
+    };
+    if drafts.notebook_dirty || drafts.manuscript_dirty {
+        return Err("Writing edits remain pending; archive was not exported".into());
+    }
+    Ok(revision)
+}
+
 fn reconcile_manual_writing_save(
     pending: &PendingEvidenceAction,
     drafts: &mut writing_autosave::Drafts,
@@ -2994,6 +3026,12 @@ fn clear_project_scoped_view_state(ui: &MainWindow) {
     ui.set_manuscript_draft_id("".into());
     ui.set_manuscript_draft_section("".into());
     ui.set_manuscript_draft_citations("".into());
+    ui.set_manuscript_reference_options(ModelRc::new(VecModel::from(Vec::<
+        ManuscriptReferenceChoice,
+    >::new())));
+    ui.set_manuscript_reference_status(
+        "Search registered project references to insert their exact IDs.".into(),
+    );
     ui.set_manuscript_draft_body("".into());
     ui.set_manuscript_word_count(0);
     ui.set_manuscript_character_count(0);
@@ -3035,6 +3073,8 @@ fn clear_project_scoped_view_state(ui: &MainWindow) {
     ui.set_writing_results("Load or preview a current-project manuscript section.".into());
     ui.set_notebook_results("Load or edit this project's notebook.".into());
     ui.set_pdf_local_path("".into());
+    ui.set_pdf_page_extracted_text("".into());
+    ui.set_pdf_page_extraction_status("No PDF page text loaded.".into());
     ui.set_pdf_page_count(0);
     ui.set_pdf_page_number(1);
     ui.set_pdf_matches(0);
@@ -3246,6 +3286,55 @@ fn statistics_result_summary(
 
 fn parse_json_input(input: &str, label: &str) -> Result<serde_json::Value, String> {
     serde_json::from_str(input.trim()).map_err(|_| format!("{label} must be valid JSON"))
+}
+
+fn insert_unique_registered_citation(existing: &str, reference_id: &str) -> Result<String, String> {
+    let parsed = Uuid::parse_str(reference_id.trim())
+        .map_err(|_| "The selected reference does not have a valid ID".to_string())?;
+    let id = parsed.to_string();
+    let mut citations: Vec<&str> = existing
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect();
+    if citations
+        .iter()
+        .any(|value| Uuid::parse_str(value).is_ok_and(|candidate| candidate == parsed))
+    {
+        return Ok(existing.to_owned());
+    }
+    citations.push(&id);
+    Ok(citations.join(", "))
+}
+
+fn registered_manuscript_reference_choices_at(
+    project: &Path,
+    query: &str,
+    data_root: &Path,
+) -> Result<(Vec<ManuscriptReferenceChoice>, usize), String> {
+    // Push literal title/ID filtering into SQLite, rather than executing up
+    // to 50 round trips on the Slint event loop for every picker search.
+    const MAX_RESULTS: usize = 50;
+    let result = library_read_at(
+        project,
+        "library.references",
+        serde_json::json!({"limit": MAX_RESULTS, "query": query.trim()}),
+        data_root,
+    )?;
+    let references = result
+        .pointer("/data/references")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "Reference list is unavailable".to_string())?;
+    let choices = references
+        .iter()
+        .filter_map(|reference| {
+            Some(ManuscriptReferenceChoice {
+                reference_id: reference.get("reference_id")?.as_str()?.into(),
+                title: reference.get("title")?.as_str()?.into(),
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok((choices, references.len()))
 }
 
 fn reference_arguments(
@@ -3885,6 +3974,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(selected) = selected {
                         match chosen_local_file_path(selected.path()) {
                             Ok(path) if kind == "pdf" => {
+                                // File-picker selection updates the property
+                                // programmatically, so Slint's `edited` event
+                                // does not run. Invalidate any in-flight old
+                                // file render and clear stale page evidence.
+                                ui.set_pdf_job(ui.get_pdf_job().wrapping_add(1));
+                                ui.set_pdf_image(Image::default());
+                                ui.set_pdf_page_count(0);
+                                ui.set_pdf_page_number(1);
+                                ui.set_pdf_matches(0);
+                                ui.set_pdf_highlight_visible(false);
+                                ui.set_pdf_render_width(0.0);
+                                ui.set_pdf_render_height(0.0);
+                                ui.set_pdf_page_extracted_text("".into());
+                                ui.set_pdf_page_extraction_status(
+                                    "Selected a different file. Open it to inspect verified page text.".into(),
+                                );
                                 ui.set_pdf_local_path(path.into());
                                 ui.set_status("PDF selected from native file dialog".into());
                             }
@@ -7750,6 +7855,88 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_search_manuscript_references({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |query| {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_manuscript_reference_options(ModelRc::new(VecModel::from(
+                Vec::<ManuscriptReferenceChoice>::new(),
+            )));
+            let result = active_project
+                .borrow()
+                .as_ref()
+                .ok_or_else(|| "Open a project before selecting citations".to_string())
+                .and_then(|path| {
+                    let root = host_data_root()?;
+                    registered_manuscript_reference_choices_at(path, query.as_str(), &root)
+                });
+            match result {
+                Ok((choices, _matched)) => {
+                    let total = choices.len();
+                    ui.set_manuscript_reference_options(ModelRc::new(VecModel::from(choices)));
+                    ui.set_manuscript_reference_status(
+                        format!("{total} matching registered references displayed (up to 50 per search). Refine your search to narrow the list; select one to insert its canonical ID.").into(),
+                    );
+                }
+                Err(error) => ui.set_manuscript_reference_status(error.into()),
+            }
+        }
+    });
+    app.on_insert_manuscript_reference({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |reference_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            if ui.get_writing_recovery_blocked() {
+                ui.set_manuscript_reference_status(
+                    "Resolve the current project's writing recovery before inserting citations"
+                        .into(),
+                );
+                return;
+            }
+            let result = active_project
+                .borrow()
+                .as_ref()
+                .ok_or_else(|| "Open a project before inserting citations".to_string())
+                .and_then(|path| {
+                    let root = host_data_root()?;
+                    library_read_at(
+                        path,
+                        "reference.resolve",
+                        serde_json::json!({"reference_id":reference_id.as_str()}),
+                        &root,
+                    )
+                })
+                .and_then(|resolution| {
+                    let canonical_id = resolution
+                        .pointer("/data/canonical_id")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| {
+                            "Reference resolution did not identify a canonical ID".to_string()
+                        })?;
+                    insert_unique_registered_citation(
+                        ui.get_manuscript_draft_citations().as_str(),
+                        canonical_id,
+                    )
+                });
+            match result {
+                Ok(next) => {
+                    ui.set_manuscript_draft_citations(next.clone().into());
+                    ui.invoke_manuscript_draft_edited(
+                        ui.get_manuscript_draft_id(),
+                        ui.get_manuscript_draft_section(),
+                        next.into(),
+                        ui.get_manuscript_draft_body(),
+                    );
+                    ui.set_manuscript_reference_status(
+                        "Registered project reference inserted into the manuscript draft".into(),
+                    );
+                }
+                Err(error) => ui.set_manuscript_reference_status(error.into()),
+            }
+        }
+    });
     app.on_preview_writing_section({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -8305,6 +8492,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_backup_action({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let writing_drafts = writing_drafts.clone();
+        let quick_timer = quick_note_timer.clone();
         move |action, archive, password| {
             let Some(ui) = weak.upgrade() else { return };
             if ui.get_backup_busy() || ui.get_recovery_busy() {
@@ -8314,6 +8503,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 ui.set_backup_results("Open a project first".into());
                 return;
             };
+            if action == "export" || action == "export-encrypted" {
+                // Quick Notes have their own debounced journal, separate from
+                // notebook/manuscript. Include the active note in this snapshot.
+                if let Err(error) =
+                    finish_quick_note_before_project_switch(&ui, Some(&project), &quick_timer)
+                {
+                    ui.set_backup_results(
+                        format!("Archive not created: active note could not be saved: {error}")
+                            .into(),
+                    );
+                    return;
+                }
+                if ui.get_writing_recovery_blocked() {
+                    ui.set_backup_results(
+                        "Archive not created: resolve the writing recovery journal before exporting".into(),
+                    );
+                    return;
+                }
+                let preflight = host_data_root().and_then(|root| {
+                    flush_writing_before_archive(&project, &mut writing_drafts.borrow_mut(), &root)
+                });
+                match preflight {
+                    Ok(revision) => ui.set_project_revision(revision as i32),
+                    Err(error) => {
+                        ui.set_backup_results(format!("Archive not created: {error}").into());
+                        return;
+                    }
+                }
+            }
             ui.set_backup_busy(true);
             ui.set_backup_results("Working with the selected local archive…".into());
             let weak_task = weak.clone();
@@ -8557,6 +8775,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     rendered.height,
                                 );
                                 ui.set_pdf_image(Image::from_rgba8(buffer));
+                                const MAX_VISIBLE_PDF_PAGE_CHARS: usize = 16_000;
+                                let count_chars = rendered.extracted_text.chars().count();
+                                let clipped = count_chars > MAX_VISIBLE_PDF_PAGE_CHARS;
+                                let copyable_text = rendered
+                                    .extracted_text
+                                    .chars()
+                                    .take(MAX_VISIBLE_PDF_PAGE_CHARS)
+                                    .collect::<String>();
+                                let text_sha = hex::encode(Sha256::digest(rendered.extracted_text.as_bytes()));
+                                ui.set_pdf_page_extracted_text(copyable_text.into());
+                                ui.set_pdf_page_extraction_status(
+                                    format!(
+                                        "Page {} of {} · {} extracted Unicode characters{} · extracted-text SHA-256 {}. This text is for inspection only; no page-specific evidence anchor has been recorded.",
+                                        rendered.page_index + 1,
+                                        rendered.page_count,
+                                        count_chars,
+                                        if clipped { " (first 16,000 shown; truncated)" } else { "" },
+                                        &text_sha[..16],
+                                    )
+                                    .into(),
+                                );
                                 ui.set_pdf_matches(count);
                                 ui.set_pdf_status(
                                     format!(
@@ -8571,6 +8810,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                             }
                             Err(e) => {
+                                ui.set_pdf_page_extracted_text("".into());
+                                ui.set_pdf_page_extraction_status("PDF page text unavailable; retry opening the file.".into());
                                 ui.set_pdf_status(format!("PDF error: {}", e).into());
                                 ui.set_pdf_page_number(1);
                                 ui.set_pdf_page_count(0);
@@ -8898,6 +9139,65 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn citation_picker_inserts_canonical_reference_once_without_discarding_existing_ids() {
+        let id = "A410D409-112D-461F-9872-EA62680C2B83";
+        let canonical = "a410d409-112d-461f-9872-ea62680c2b83";
+        let result = insert_unique_registered_citation("legacy-ref", id).unwrap();
+        assert_eq!(result, format!("legacy-ref, {canonical}"));
+        assert_eq!(
+            insert_unique_registered_citation(&result, canonical).unwrap(),
+            result
+        );
+        assert_eq!(
+            insert_unique_registered_citation(id, canonical).unwrap(),
+            id
+        );
+        assert!(insert_unique_registered_citation("legacy-ref", "../project-b").is_err());
+    }
+
+    #[test]
+    fn manuscript_reference_picker_searches_beyond_first_200_project_references() {
+        let root = std::env::temp_dir().join(format!("rw-citation-picker-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Reference picker pagination",
+            true,
+            &root.join("project-audit.sqlite"),
+        )
+        .unwrap();
+        let mut store = ProjectStore::open(&project).unwrap();
+        let tx = store.transaction().unwrap();
+        let mut final_id = String::new();
+        for index in 0..201_u128 {
+            let id = Uuid::from_u128(index + 1).to_string();
+            let title = if index == 200 {
+                final_id = id.clone();
+                "Unique Persian citation target پژوهش".to_string()
+            } else {
+                format!("Unrelated reference {index}")
+            };
+            let created = format!("2026-10-29T00:{:02}:{:02}Z", index / 60, index % 60);
+            tx.execute(
+                "INSERT INTO reference(id,title,authors_json,year,doi,kind,format,raw,metadata_json,status,imported_at) VALUES (?1,?2,'[]',NULL,NULL,'article','bibtex','@article{synthetic}','{}','unverified',?3)",
+                [&id, &title, &created],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        let (choices, matched) =
+            registered_manuscript_reference_choices_at(&project, "Persian citation", &root)
+                .unwrap();
+        assert_eq!(matched, 1);
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].reference_id.as_str(), final_id);
+        assert!(choices[0].title.as_str().contains("پژوهش"));
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn native_file_dialogs_are_explicitly_scoped_to_supported_read_imports() {
@@ -10545,6 +10845,115 @@ mod tests {
         assert_eq!(events[0].operation, "project.create");
         assert_eq!(events[0].effect, "local-write");
         std::fs::remove_dir_all(harness).unwrap();
+    }
+
+    #[test]
+    fn archive_preflight_flushes_immediate_edits_and_restores_exact_encrypted_writing() {
+        let host = std::env::temp_dir().join(format!("rw-backup-writing-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&host).unwrap();
+        let project = host.join("original");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Writing backup preflight",
+            true,
+            &host.join("create-audit.sqlite"),
+        )
+        .unwrap();
+        let project_id = ProjectStore::open(&project).unwrap().info().unwrap().id;
+        let journal = writing_autosave::scoped_path(&host, &project, &project_id).unwrap();
+        let mut drafts = writing_autosave::Drafts {
+            notebook: "Final notebook after last keystroke".into(),
+            manuscript_id: "paper-backup".into(),
+            section: "Results".into(),
+            body: "Immediate edit: پژوهش before 800ms autosave".into(),
+            citations: String::new(),
+            notebook_dirty: true,
+            manuscript_dirty: true,
+        };
+        writing_autosave::save(&journal, &drafts).unwrap();
+        // Export is requested immediately, without allowing the autosave timer to fire.
+        assert_eq!(
+            flush_writing_before_archive(&project, &mut drafts, &host).unwrap(),
+            2
+        );
+        assert!(!drafts.notebook_dirty && !drafts.manuscript_dirty);
+        let archive = host.join("immediate.rwproj.enc");
+        backup_operation_at(
+            &project,
+            "export-encrypted",
+            archive.to_str().unwrap(),
+            "offline-only-test-password",
+            &host,
+        )
+        .unwrap();
+        let recovered = host.join("restored");
+        restore_backup_at(
+            true,
+            archive.to_str().unwrap(),
+            recovered.to_str().unwrap(),
+            "offline-only-test-password",
+            &host,
+        )
+        .unwrap();
+        let notebook = evidence_read_at(
+            &recovered,
+            "evidence.notebook_export",
+            serde_json::json!({}),
+            &host,
+        )
+        .unwrap();
+        assert!(notebook
+            .to_string()
+            .contains("Final notebook after last keystroke"));
+        let manuscript = evidence_read_at(
+            &recovered,
+            "writing.inspect",
+            serde_json::json!({"manuscript_id":"paper-backup"}),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(
+            manuscript["data"]["sections"][0]["body"],
+            "Immediate edit: پژوهش before 800ms autosave"
+        );
+        // The restored project shares its UUID, but not its host journal path.
+        assert_ne!(
+            writing_autosave::scoped_path(&host, &project, &project_id).unwrap(),
+            writing_autosave::scoped_path(&host, &recovered, &project_id).unwrap()
+        );
+        std::fs::remove_dir_all(host).unwrap();
+    }
+
+    #[test]
+    fn archive_preflight_rejects_incomplete_or_corrupt_writing_journals() {
+        let host = std::env::temp_dir().join(format!("rw-backup-block-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&host).unwrap();
+        let project = host.join("original");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Writing backup safety",
+            true,
+            &host.join("create-audit.sqlite"),
+        )
+        .unwrap();
+        let project_id = ProjectStore::open(&project).unwrap().info().unwrap().id;
+        let journal = writing_autosave::scoped_path(&host, &project, &project_id).unwrap();
+        let mut drafts = writing_autosave::Drafts {
+            body: "Must not disappear".into(),
+            manuscript_dirty: true,
+            ..Default::default()
+        };
+        writing_autosave::save(&journal, &drafts).unwrap();
+        assert!(flush_writing_before_archive(&project, &mut drafts, &host)
+            .unwrap_err()
+            .contains("no manuscript ID or section"));
+        assert!(drafts.manuscript_dirty);
+        std::fs::write(&journal, b"{broken journal").unwrap();
+        assert!(flush_writing_before_archive(&project, &mut drafts, &host)
+            .unwrap_err()
+            .contains("corrupt"));
+        assert_eq!(std::fs::read(&journal).unwrap(), b"{broken journal");
+        std::fs::remove_dir_all(host).unwrap();
     }
 
     #[test]

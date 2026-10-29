@@ -34,11 +34,26 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
         foreach ($item in (Children $parent $type)) { if ($item.Current.Name -eq $name) { return $item } }
         Start-Sleep -Milliseconds 100
     }
-    $available = @($parent.FindAll(
+    # An accessible Name may contain an entire private manuscript, note or
+    # provider response. CI failures must never dump arbitrary UIA names.
+    $staticTargets = @(
+        'Command palette', 'Project path', 'Project title',
+        'Manuscript section body', 'Manuscript citations', 'Manuscript ID',
+        'Backup archive path', 'Backup encryption password',
+        'Recovery archive path', 'Recovery destination path',
+        'Recovery encryption password', 'Reader source ID',
+        'Show manuscript editing and export tools',
+        'Hide manuscript editing and export tools'
+    )
+    $safeTarget = if ($staticTargets -contains $name) { $name } else { '[redacted dynamic target]' }
+    $availableTypes = @($parent.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName + ' :: ' + $_.Current.Name })
-    throw "UIA element missing: $type '$name'. Available: $($available -join ' | ')"
+    ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName })
+    $counts = @($availableTypes | Group-Object | Sort-Object Name | ForEach-Object {
+        $_.Name + '=' + $_.Count
+    })
+    throw "UIA element missing: $type '$safeTarget'. Tree controls=$($availableTypes.Count): $($counts -join ', ')"
 }
 function Read-DatasetPageJson([System.Windows.Automation.AutomationElement]$parent) {
     # Data View exposes the exact read-only page JSON through an accessible
@@ -185,7 +200,7 @@ function Select-FileThroughNativeDialog(
         [System.Windows.Automation.ValuePattern]::Pattern
     )).Current.Value
     if ($enteredPath -ne $selectedPath) {
-        throw "Native picker filename entry did not match the fixture: $buttonName (value=$enteredPath)"
+        throw "Native picker filename entry did not match the fixture (control=$buttonName, entered_length=$($enteredPath.Length), expected_length=$($selectedPath.Length))"
     }
     # Let the dialog commit and validate its file name before activating Open;
     # pressing Enter while an auto-completion popup is active can accept only
@@ -263,7 +278,7 @@ function Capture-WindowScreenshot([System.Windows.Automation.AutomationElement]$
     $graphics.Dispose()
     $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
     $bmp.Dispose()
-    Write-Output "Screenshot: $Path"
+    Write-Output 'Screenshot captured in the isolated test artifact directory'
 }
 function Read-JsonRetry([string]$Path, [int]$Attempts = 20) {
     for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
@@ -308,18 +323,39 @@ function WaitForNameLike(
         }
         Start-Sleep -Milliseconds 50
     } while ([DateTime]::UtcNow -lt $deadline)
-    $diagnosticNames = @($Window.FindAll(
+    $diagnosticTypes = @($Window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name } | Where-Object {
-        $_ -like '*agent*' -or $_ -like '*proposal*' -or $_ -like '*plan*' -or
-        $_ -like '*tools_executed*' -or $_ -like '*arguments=hidden*' -or
-        $_ -like '*Open a project*' -or $_ -like '*invalid*'
+    ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName })
+    $counts = @($diagnosticTypes | Group-Object | Sort-Object Name | ForEach-Object {
+        $_.Name + '=' + $_.Count
     })
-    if ($diagnosticNames.Count -gt 0) {
-        Write-Output ('UIA_WAIT_DIAGNOSTIC: ' + (($diagnosticNames | Select-Object -First 20) -join ' | '))
+    Write-Output ('UIA_WAIT_DIAGNOSTIC controls=' + $diagnosticTypes.Count + ': ' + ($counts -join ', '))
+    # The expected pattern can itself contain a private document title/body.
+    throw 'Expected UIA result did not appear before timeout; details redacted'
+}
+function Enter-ArchivePassword(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$ControlName,
+    [string]$Password
+) {
+    # Use the native edit gesture for a masked password field. Never read its
+    # ValuePattern, print the password, or serialize it into test receipts.
+    $entry = Named $Window ([System.Windows.Automation.ControlType]::Edit) $ControlName
+    EnsureLiveFocus $entry
+    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    [System.Windows.Forms.SendKeys]::SendWait($Password)
+}
+function Ensure-ManuscriptToolsVisible([System.Windows.Automation.AutomationElement]$Window) {
+    # A fresh Slint process collapses Writing tools; subsequent navigations
+    # may retain their state. Expand only when the Show action is present.
+    foreach ($button in (Children $Window ([System.Windows.Automation.ControlType]::Button))) {
+        if ($button.Current.Name -eq 'Show manuscript editing and export tools') {
+            Invoke-AccessibleButton $Window 'Show manuscript editing and export tools'
+            break
+        }
     }
-    throw "UIA result missing: $Pattern"
+    [void](Named $Window ([System.Windows.Automation.ControlType]::Button) 'Hide manuscript editing and export tools')
 }
 function AssertImplementedPageHasNoFallback(
     [System.Windows.Automation.AutomationElement]$Window,
@@ -374,7 +410,7 @@ function EnsureLiveFocus([System.Windows.Automation.AutomationElement]$Anchor) {
             }
         } catch [System.Windows.Automation.ElementNotAvailableException] { }
     }
-    throw "UIA anchor failed to receive keyboard focus: $expectedType '$expectedName'"
+    throw "UIA anchor failed to receive keyboard focus: $expectedType (expected_name_length=$($expectedName.Length))"
 }
 function FocusByTab(
     [System.Windows.Automation.AutomationElement]$Anchor,
@@ -388,7 +424,9 @@ function FocusByTab(
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         if ($focused) {
             try {
-                $visited.Add("$($focused.Current.ControlType.ProgrammaticName):$($focused.Current.Name)")
+                # Do not leak private editor text or file paths from UIA Names
+                # into hosted CI failure logs.
+                $visited.Add($focused.Current.ControlType.ProgrammaticName)
                 if ($focused.Current.ControlType -eq $Type -and $focused.Current.Name -eq $Name) {
                     return $focused
                 }
@@ -402,8 +440,8 @@ function FocusByTab(
         Start-Sleep -Milliseconds 120
     }
     $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-    $focusedName = if ($focused) { $focused.Current.Name } else { '<none>' }
-    throw "UIA element did not receive keyboard focus: $Type '$Name' (focused='$focusedName'; tab_trace='$($visited -join ' -> ')')"
+    $focusedType = if ($focused) { $focused.Current.ControlType.ProgrammaticName } else { '<none>' }
+    throw "UIA element did not receive keyboard focus: $Type (expected_name_length=$($Name.Length), focused_type=$focusedType; tab_types='$($visited -join ' -> ')')"
 }
 function FocusByShiftTab(
     [System.Windows.Automation.AutomationElement]$Anchor,
@@ -496,7 +534,7 @@ try {
         }
     }
     if (-not $focused -or $focused.Current.Name -ne 'Command palette') {
-        throw "Ctrl+K did not focus Command palette (focused='$($focused.Current.Name)')"
+        throw 'Ctrl+K did not focus Command palette'
     }
     ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('About')
     $command.SetFocus()
@@ -706,10 +744,7 @@ try {
         $pdfPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF file path'
         $observed = ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
         $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose local PDF with native file picker').Current.IsEnabled
-        $statuses = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
-            Where-Object { $_ -like 'Status: *' })
-        throw "Native PDF selection did not replace the manual path and restore the UI (value=$observed, ready=$ready, status=$($statuses -join ' | '))"
+        throw "Native PDF selection did not replace the manual path and restore the UI (path_matches_fixture=$($observed -eq $twoPagePdf), observed_length=$($observed.Length), ready=$ready)"
     }
     Write-Output 'PASS: native Windows PDF selection updates the path without importing'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open PDF').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -911,10 +946,7 @@ try {
         $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Local dataset path to preview'
         $observed = ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
         $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled
-        $statuses = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
-            Where-Object { $_ -like 'Status: *' })
-        throw "Native scientific dataset selection did not update the path and restore the UI (value=$observed, expected=$analysisInput, observed_length=$($observed.Length), expected_length=$($analysisInput.Length), ready=$ready, status=$($statuses -join ' | '))"
+        throw "Native scientific dataset selection did not update the path and restore the UI (path_matches_fixture=$(Test-SelectedFixturePath $observed $analysisInput), observed_length=$($observed.Length), expected_length=$($analysisInput.Length), ready=$ready)"
     }
     Write-Output 'PASS: native Windows dataset selection updates the path before preview/import'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import without modifying project').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -1226,6 +1258,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
+    Ensure-ManuscriptToolsVisible $window
     foreach ($pair in @(
         @('Manuscript ID','uia-paper'),
         @('Manuscript section','Results'),
@@ -1440,6 +1473,8 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 220
 
+    # The inspector and export actions stay in the expanded Writing tools panel.
+    Ensure-ManuscriptToolsVisible $window
     # Exercise the real edit-driven debounce path. UI Automation SetValue is
     # surfaced by Slint as an edit, which journals synchronously and restarts
     # the shared 800 ms single-shot autosave timer.
@@ -1502,6 +1537,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 120
+    Ensure-ManuscriptToolsVisible $window
     $recoveredManuscript = 'Abrupt manuscript recovery'
     $manuscriptBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
     $manuscriptBody.SetFocus()
@@ -1512,7 +1548,7 @@ try {
         if ($focused -and $focused.Current.Name -eq 'Manuscript section body') { break }
     }
     if (-not $focused -or $focused.Current.Name -ne 'Manuscript section body') {
-        throw "Manuscript editor did not receive focus before abrupt-exit edit (focused='$($focused.Current.Name)')"
+        throw 'Manuscript editor did not receive focus before abrupt-exit edit'
     }
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait($recoveredManuscript)
@@ -1549,6 +1585,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 120
+    Ensure-ManuscriptToolsVisible $window
     $restoredManuscript = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
     $restoredManuscriptValue = ([System.Windows.Automation.ValuePattern]$restoredManuscript.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
     if ($restoredManuscriptValue -ne $recoveredManuscript) {
@@ -1596,7 +1633,7 @@ try {
         if ($focused -and $focused.Current.Name -eq 'Project notebook text') { break }
     }
     if (-not $focused -or $focused.Current.Name -ne 'Project notebook text') {
-        throw "Notebook editor did not receive focus before abrupt-exit edit (focused='$($focused.Current.Name)')"
+        throw 'Notebook editor did not receive focus before abrupt-exit edit'
     }
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait($recoveredNotebook)
@@ -1846,6 +1883,164 @@ try {
         throw 'Removed Cloud Sync workspace is still reachable through Manage'
     }
     Write-Output 'PASS: local backups and recovery remain accessible without cloud sync navigation'
+
+    # Real offline encrypted archive flow on the isolated installed candidate.
+    # The original project A and restored project B deliberately have the same
+    # archive UUID but different physical directories. All created files stay
+    # beneath this run's disposable host-data root; no cloud service is used.
+    $encryptedArchive = Join-Path $hostData 'uia-local-archive.rwproj.enc'
+    $restoredDirectory = Join-Path $hostData 'uia-local-restored-project'
+    $archivePassword = 'RwArchive' + [guid]::NewGuid().ToString('N')
+    if ((Test-Path -LiteralPath $encryptedArchive) -or (Test-Path -LiteralPath $restoredDirectory)) {
+        throw 'Encrypted archive UIA destination was not fresh'
+    }
+    Invoke-AccessibleButton $window 'Backups workspace screen'
+    $backupPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Backup archive path'
+    ([System.Windows.Automation.ValuePattern]$backupPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($encryptedArchive)
+    Enter-ArchivePassword $window 'Backup encryption password' $archivePassword
+    Invoke-AccessibleButton $window 'Export encrypted project archive'
+    WaitForNameLike $window '*Status: Backup operation completed*' 60000
+    if (-not (Test-Path -LiteralPath $encryptedArchive -PathType Leaf)) {
+        throw 'Encrypted archive export completed without producing a local file'
+    }
+    $encryptedLength = (Get-Item -LiteralPath $encryptedArchive).Length
+    if ($encryptedLength -lt 100) { throw 'Encrypted archive is unexpectedly small' }
+    $encryptedStream = [System.IO.File]::OpenRead($encryptedArchive)
+    try {
+        $magic = New-Object byte[] 8
+        if ($encryptedStream.Read($magic, 0, $magic.Length) -ne 8 -or
+            [System.Text.Encoding]::ASCII.GetString($magic) -ne "RWPENC1`n") {
+            throw 'GUI archive output does not have the encrypted RWPENC1 header'
+        }
+    } finally {
+        $encryptedStream.Dispose()
+    }
+    $archiveDigest = (Get-FileHash -LiteralPath $encryptedArchive -Algorithm SHA256).Hash
+    # Verify the negative case first so that the subsequent success status
+    # cannot be mistaken for the preceding export's still-visible status.
+    Enter-ArchivePassword $window 'Backup encryption password' 'DefinitelyWrongArchivePassword'
+    Invoke-AccessibleButton $window 'Verify encrypted project archive'
+    WaitForNameLike $window '*Status: *authentication failed*' 60000
+    if ((Get-FileHash -LiteralPath $encryptedArchive -Algorithm SHA256).Hash -ne $archiveDigest) {
+        throw 'Wrong-password verification modified the encrypted archive'
+    }
+    Enter-ArchivePassword $window 'Backup encryption password' $archivePassword
+    Invoke-AccessibleButton $window 'Verify encrypted project archive'
+    WaitForNameLike $window '*Status: Backup operation completed*' 60000
+    if ((Get-FileHash -LiteralPath $encryptedArchive -Algorithm SHA256).Hash -ne $archiveDigest) {
+        throw 'Read-only encrypted archive verification modified the file'
+    }
+    Write-Output 'PASS: installed GUI exports and authenticates an encrypted archive, rejects a wrong password and preserves archive bytes'
+
+    # Leave a newer, project-A-only writing draft after the archive snapshot.
+    # B must not acquire this draft even though the restored SQLite project
+    # retains the archive's original UUID.
+    $aOnlyDraft = 'uia_archive_A_' + [guid]::NewGuid().ToString('N')
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Manuscript')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Ensure-ManuscriptToolsVisible $window
+    $manuscriptBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
+    EnsureLiveFocus $manuscriptBody
+    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    [System.Windows.Forms.SendKeys]::SendWait($aOnlyDraft)
+    $aJournal = $null
+    for ($attempt = 0; $attempt -lt 80; $attempt++) {
+        $aJournal = @(Get-ChildItem -LiteralPath (Join-Path $hostData 'writing-drafts') -Filter 'scoped-*.json' -File | Where-Object {
+            (Read-JsonRetry $_.FullName).body -eq $aOnlyDraft
+        } | Select-Object -First 1)
+        if ($aJournal.Count -eq 1) { break }
+        Start-Sleep -Milliseconds 50
+    }
+    if ($aJournal.Count -ne 1) { throw 'Project A manuscript edit did not produce a scoped recovery journal' }
+    $aJournalPath = $aJournal[0].FullName
+
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Recovery')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $recoveryArchive = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Recovery archive path'
+    $recoveryDestination = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Recovery destination path'
+    ([System.Windows.Automation.ValuePattern]$recoveryArchive.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($encryptedArchive)
+    ([System.Windows.Automation.ValuePattern]$recoveryDestination.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($restoredDirectory)
+    Enter-ArchivePassword $window 'Recovery encryption password' 'DefinitelyWrongArchivePassword'
+    Invoke-AccessibleButton $window 'Restore encrypted project archive'
+    WaitForNameLike $window '*Status: *authentication failed*' 60000
+    if (Test-Path -LiteralPath $restoredDirectory) {
+        throw 'Wrong-password restore created a project destination'
+    }
+    if ((Get-FileHash -LiteralPath $encryptedArchive -Algorithm SHA256).Hash -ne $archiveDigest) {
+        throw 'Wrong-password recovery modified its source archive'
+    }
+    Enter-ArchivePassword $window 'Recovery encryption password' $archivePassword
+    Invoke-AccessibleButton $window 'Restore encrypted project archive'
+    WaitForNameLike $window '*Status: Recovered and opened encrypted backup*' 60000
+    if (-not (Test-Path -LiteralPath (Join-Path $restoredDirectory 'data/project.sqlite') -PathType Leaf)) {
+        throw 'Authenticated restore did not create a separate SQLite project'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $temporary 'data/project.sqlite') -PathType Leaf)) {
+        throw 'Archive restore damaged the original project directory'
+    }
+    Write-Output 'PASS: wrong password rejects restore without creating a directory; correct password restores an independent local project'
+
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Manuscript')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Ensure-ManuscriptToolsVisible $window
+    $restoredBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
+    $restoredValue = ([System.Windows.Automation.ValuePattern]$restoredBody.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($restoredValue -eq $aOnlyDraft) { throw 'Restored project B inherited project A manuscript draft' }
+    $restoredManuscriptId = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID'
+    ([System.Windows.Automation.ValuePattern]$restoredManuscriptId.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-paper')
+    Invoke-AccessibleButton $window 'Inspect manuscript'
+    WaitForNameLike $window '*Status: Persisted manuscript revisions loaded*' 10000
+    $restoredManuscriptNames = @((Children $window ([System.Windows.Automation.ControlType]::Text)) | ForEach-Object { $_.Current.Name })
+    if (-not ($restoredManuscriptNames | Where-Object { $_ -like "*$recoveredManuscript*" })) {
+        throw 'Restored project B did not retain the manuscript revision saved in the encrypted snapshot'
+    }
+    $bOnlyDraft = 'uia_archive_B_' + [guid]::NewGuid().ToString('N')
+    $restoredBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
+    EnsureLiveFocus $restoredBody
+    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    [System.Windows.Forms.SendKeys]::SendWait($bOnlyDraft)
+    $bJournal = $null
+    for ($attempt = 0; $attempt -lt 80; $attempt++) {
+        $bJournal = @(Get-ChildItem -LiteralPath (Join-Path $hostData 'writing-drafts') -Filter 'scoped-*.json' -File | Where-Object {
+            (Read-JsonRetry $_.FullName).body -eq $bOnlyDraft
+        } | Select-Object -First 1)
+        if ($bJournal.Count -eq 1) { break }
+        Start-Sleep -Milliseconds 50
+    }
+    if ($bJournal.Count -ne 1 -or $bJournal[0].FullName -eq $aJournalPath) {
+        throw 'Restored same-UUID project B did not receive an independent writing journal'
+    }
+    if ((Read-JsonRetry $aJournalPath).body -ne $aOnlyDraft) {
+        throw 'Writing in restored project B overwrote project A recovery draft'
+    }
+
+    # Return to A so the remainder of this existing UIA suite still exercises
+    # its original fixture, while checking the draft survives the project swap.
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Welcome')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $path = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project path'
+    ([System.Windows.Automation.ValuePattern]$path.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($temporary)
+    Invoke-AccessibleButton $window 'Open project'
+    WaitForNameLike $window '*Status: Project opened*' 10000
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Manuscript')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Ensure-ManuscriptToolsVisible $window
+    $aBodyAfterReturn = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
+    if (([System.Windows.Automation.ValuePattern]$aBodyAfterReturn.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value -ne $aOnlyDraft) {
+        throw 'Opening project A after restoring B lost its original scoped manuscript draft'
+    }
+    Write-Output 'PASS: same-UUID original and restored projects keep distinct manuscripts and scoped recovery journals'
+
     $sources = Named $window ([System.Windows.Automation.ControlType]::Button) 'Sources activity'
     ([System.Windows.Automation.InvokePattern]$sources.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
     Start-Sleep -Milliseconds 120
@@ -2009,14 +2204,14 @@ try {
             [IO.Path]::GetFullPath((Join-Path $repoRoot $PreserveProjectDirectory))
         }
         if (-not $preservePath.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Preserved UIA fixtures must stay under $allowedRoot"
+            throw 'Preserved UIA fixtures must stay under the approved performance-fixtures directory'
         }
         New-Item -ItemType Directory -Path (Split-Path -Parent $preservePath) -Force | Out-Null
         if (Test-Path -LiteralPath $preservePath) {
             Remove-Item -LiteralPath $preservePath -Recurse -Force
         }
         Copy-Item -LiteralPath $temporary -Destination $preservePath -Recurse
-        Write-Output "Preserved project fixture: $preservePath"
+        Write-Output 'Preserved isolated project fixture for local QA review'
     }
     foreach ($cleanupPath in @($temporary, $hostData)) {
         if (-not (Test-Path -LiteralPath $cleanupPath)) { continue }

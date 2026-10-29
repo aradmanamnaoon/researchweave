@@ -12,6 +12,32 @@ fn hash(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
 }
 
+/// Treat the optional title/ID search as literal user data, not SQL syntax or
+/// LIKE metacharacters. SQLite LIKE's default case folding is ASCII-only;
+/// non-ASCII titles still support exact Unicode substring matching.
+fn reference_search_pattern(args: &Value) -> Result<Option<String>, String> {
+    let Some(value) = args.get("query") else {
+        return Ok(None);
+    };
+    let query = value.as_str().ok_or("invalid reference query")?.trim();
+    if query.len() > 200 || query.chars().any(char::is_control) {
+        return Err("invalid reference query".into());
+    }
+    if query.is_empty() {
+        return Ok(None);
+    }
+    let mut literal = String::with_capacity(query.len() + 2);
+    literal.push('%');
+    for character in query.chars() {
+        if matches!(character, '%' | '_' | '\\') {
+            literal.push('\\');
+        }
+        literal.push(character);
+    }
+    literal.push('%');
+    Ok(Some(literal))
+}
+
 pub(super) fn run(
     store: &mut ProjectStore,
     op: &str,
@@ -149,9 +175,19 @@ pub(super) fn run(
     } else if op == "library.references" {
         let limit = bounded(args, "limit", 50, 200)?;
         let offset = bounded_offset(args)?;
-        let mut stmt=store.connection().prepare("SELECT id,title,authors_json,year,doi,kind,format,status,imported_at FROM reference ORDER BY imported_at,id LIMIT ? OFFSET ?").map_err(|_|"reference query failed")?;
+        let pattern = reference_search_pattern(args)?;
+        let mut stmt = store
+            .connection()
+            .prepare(
+                "SELECT id,title,authors_json,year,doi,kind,format,status,imported_at
+             FROM reference
+             WHERE (?1 IS NULL OR title LIKE ?1 ESCAPE '\\' COLLATE NOCASE
+                    OR id LIKE ?1 ESCAPE '\\' COLLATE NOCASE)
+             ORDER BY imported_at,id LIMIT ?2 OFFSET ?3",
+            )
+            .map_err(|_| "reference query failed")?;
         let rows = stmt
-            .query_map(params![limit, offset], |r| {
+            .query_map(params![pattern, limit, offset], |r| {
                 Ok((
                     r.get::<_, String>(0)?,
                     r.get::<_, String>(1)?,
