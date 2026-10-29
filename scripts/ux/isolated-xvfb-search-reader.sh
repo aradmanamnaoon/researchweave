@@ -453,19 +453,27 @@ try:
     screenshot("03-reader-exact-unicode-text", window)
     print(f"SEARCH_READER_EXACT_TEXT_OK unicode_characters={len(target_body)}", flush=True)
 
-    # An absent but syntactically valid source ID must show an error and clear
-    # previously loaded content, never retaining a misleading 'Verified' body.
+    # Clearing the ID immediately after a successful read must also clear the
+    # previously verified document, rather than pairing old text with an error.
+    paste("Reader source ID", "")
+    click("Read source by exact ID")
+    wait_name_fragment("Reader operation status Choose a valid source ID before reading.")
+    assert text_of(reader_label) == "", "stale verified text after empty source ID"
+    print("SEARCH_READER_EMPTY_AFTER_VALID_OK", flush=True)
+
+    # Reopen the verified document, then check the separately valid but absent
+    # source ID path against previously loaded real content.
+    click("Load local project sources for reader")
+    wait_name_fragment("Showing 2 source(s), starting at 1.")
+    click(f"Open source {target_title}")
+    wait_name_fragment("Reader operation status Verified text: characters 1–")
+    assert text_of(reader_label) == target_body, "source did not reopen after invalid input"
     paste("Reader source ID", "00000000-0000-4000-8000-000000000000")
     click("Read source by exact ID")
     wait_name_fragment("Reader operation status Unable to read source:")
     assert target_body not in text_of(reader_label), "stale source text after failed reader load"
     screenshot("04-reader-invalid-id", window)
     print("SEARCH_READER_INVALID_ID_OK", flush=True)
-
-    paste("Reader source ID", "")
-    click("Read source by exact ID")
-    wait_name_fragment("Reader operation status Choose a valid source ID before reading.")
-    print("SEARCH_READER_EMPTY_ID_OK", flush=True)
 
     # Independent browse path: a refreshed source list must reopen the intended
     # local text by title, with no reliance on the prior search result model.

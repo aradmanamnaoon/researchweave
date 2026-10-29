@@ -2570,6 +2570,14 @@ fn source_entries_from_result(
         .collect()
 }
 
+fn clear_reader_document(ui: &MainWindow) {
+    ui.set_reader_source_title("".into());
+    ui.set_reader_text("".into());
+    ui.set_reader_offset(0);
+    ui.set_reader_returned(0);
+    ui.set_reader_more(false);
+}
+
 fn reset_source_views(ui: &MainWindow, project_id: &str) {
     ui.set_source_project_id(project_id.into());
     ui.set_source_search_request(ui.get_source_search_request().wrapping_add(1));
@@ -2579,11 +2587,7 @@ fn reset_source_views(ui: &MainWindow, project_id: &str) {
     ui.set_source_search_results(ModelRc::new(VecModel::from(Vec::<SourceListEntry>::new())));
     ui.set_reader_source_list(ModelRc::new(VecModel::from(Vec::<SourceListEntry>::new())));
     ui.set_reader_source_id("".into());
-    ui.set_reader_source_title("".into());
-    ui.set_reader_text("".into());
-    ui.set_reader_offset(0);
-    ui.set_reader_returned(0);
-    ui.set_reader_more(false);
+    clear_reader_document(ui);
     ui.set_reader_list_offset(0);
     ui.set_reader_list_more(false);
     ui.set_source_search_status("Search this project's locally stored text.".into());
@@ -3050,6 +3054,18 @@ fn compact_stat_integer(value: Option<&serde_json::Value>) -> String {
         .unwrap_or_else(|| "n/a".into())
 }
 
+fn compact_stat_interval(value: Option<&serde_json::Value>) -> Option<String> {
+    let bounds = value?.as_array()?;
+    let [lower, upper] = bounds.as_slice() else {
+        return None;
+    };
+    let (lower, upper) = (lower.as_f64()?, upper.as_f64()?);
+    if !lower.is_finite() || !upper.is_finite() || lower > upper {
+        return None;
+    }
+    Some(format!("[{lower:.4}, {upper:.4}]"))
+}
+
 fn statistics_result_summary(
     operation: &str,
     result: &serde_json::Value,
@@ -3122,34 +3138,52 @@ fn statistics_result_summary(
                 provenance,
             )
         }
-        "statistics.correlate" => (
-            "Pearson correlation".into(),
-            format!(
-                "r = {} · p = {}",
-                compact_stat_number(data.get("estimate")),
-                compact_stat_number(data.get("p_value"))
-            ),
-            format!(
-                "n={} complete pairs · pairwise missingness · review independence/sampling assumptions",
-                compact_stat_integer(data.get("n_used"))
-            ),
-            provenance,
-        ),
-        "statistics.test" => (
-            "Welch two-group t test".into(),
-            format!(
-                "Mean difference {} · t = {} · p = {}",
-                compact_stat_number(data.get("estimate")),
-                compact_stat_number(data.get("statistic")),
-                compact_stat_number(data.get("p_value"))
-            ),
-            format!(
-                "n={} included · df={} · effect size and 95% CI retained in verified payload",
-                compact_stat_integer(data.get("n_used")),
-                compact_stat_number(data.get("degrees_freedom"))
-            ),
-            provenance,
-        ),
+        "statistics.correlate" => {
+            let confidence = compact_stat_interval(
+                data.pointer("/details/fisher_z_confidence_interval_95"),
+            )
+            .map(|bounds| format!("95% confidence interval for r {bounds}"))
+            .unwrap_or_else(|| "95% confidence interval unavailable for this sample".into());
+            (
+                "Pearson correlation".into(),
+                format!(
+                    "r = {} · p = {}",
+                    compact_stat_number(data.get("estimate")),
+                    compact_stat_number(data.get("p_value"))
+                ),
+                format!(
+                    "n={} complete pairs · {confidence} · association is not causation; review independence and sampling",
+                    compact_stat_integer(data.get("n_used"))
+                ),
+                provenance,
+            )
+        }
+        "statistics.test" => {
+            let confidence = compact_stat_interval(data.get("confidence_interval"))
+                .map(|bounds| format!("95% confidence interval {bounds}"))
+                .unwrap_or_else(|| "confidence interval unavailable".into());
+            let effect = data
+                .pointer("/effect/cohen_d")
+                .and_then(serde_json::Value::as_f64)
+                .filter(|value| value.is_finite())
+                .map(|value| format!(" · Cohen's d = {value:.4}"))
+                .unwrap_or_default();
+            (
+                "Welch two-group t test".into(),
+                format!(
+                    "Mean difference {} · {confidence} · p = {}",
+                    compact_stat_number(data.get("estimate")),
+                    compact_stat_number(data.get("p_value"))
+                ),
+                format!(
+                    "n={} included · df={}{} · statistical nonsignificance does not establish equivalence; review design assumptions",
+                    compact_stat_integer(data.get("n_used")),
+                    compact_stat_number(data.get("degrees_freedom")),
+                    effect
+                ),
+                provenance,
+            )
+        }
         "statistics.model" => (
             "OLS linear model · HC3 robust covariance".into(),
             format!(
@@ -8035,14 +8069,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let Some(ui) = weak.upgrade() else { return };
             let source_id = source_id.as_str().trim();
             if source_id.is_empty() || source_id.len() > 128 || source_id.contains('\0') {
+                // Invalidate any in-flight read before clearing its document.
+                // Keep the entered ID in the edit field so it can be corrected.
+                ui.set_reader_request(ui.get_reader_request().wrapping_add(1));
+                ui.set_reader_busy(false);
+                clear_reader_document(&ui);
                 ui.set_reader_status("Choose a valid source ID before reading.".into());
                 return;
             }
             ui.set_page(6);
             ui.set_reader_source_id(source_id.into());
-            ui.set_reader_source_title("".into());
-            ui.set_reader_text("".into());
-            ui.set_reader_more(false);
+            clear_reader_document(&ui);
             ui.invoke_load_reader_page(source_id.into(), 0);
         }
     });
@@ -8691,6 +8728,44 @@ mod tests {
         assert!(secondary.contains("n=42 complete cases"));
         assert!(provenance.contains("abcdef123456…"));
         assert!(!primary.contains("dataset_revision"));
+    }
+
+    #[test]
+    fn statistics_result_summary_shows_real_intervals_effect_and_cautions() {
+        let correlation = serde_json::json!({
+            "data": {
+                "dataset_revision": "1234567890abcdef", "n_used": 8,
+                "estimate": 0.08, "p_value": 0.72,
+                "details": {"fisher_z_confidence_interval_95": [-0.65, 0.72]}
+            }
+        });
+        let (_, primary, secondary, _) =
+            statistics_result_summary("statistics.correlate", &correlation);
+        assert!(primary.contains("r = 0.0800 · p = 0.7200"));
+        assert!(secondary.contains("95% confidence interval for r [-0.6500, 0.7200]"));
+        assert!(secondary.contains("association is not causation"));
+
+        let welch = serde_json::json!({
+            "data": {
+                "dataset_revision": "1234567890abcdef", "n_used": 26,
+                "estimate": 0.15, "p_value": 0.8, "degrees_freedom": 12.25,
+                "confidence_interval": [-1.2, 1.5],
+                "effect": {"cohen_d": 0.12}
+            }
+        });
+        let (_, primary, secondary, _) = statistics_result_summary("statistics.test", &welch);
+        assert!(primary.contains("Mean difference 0.1500"));
+        assert!(primary.contains("95% confidence interval [-1.2000, 1.5000]"));
+        assert!(secondary.contains("Cohen's d = 0.1200"));
+        assert!(secondary.contains("nonsignificance does not establish equivalence"));
+
+        let malformed = serde_json::json!({
+            "data": {"confidence_interval": [2.0, -2.0], "effect": {"cohen_d": "missing"}}
+        });
+        let (_, primary, secondary, _) = statistics_result_summary("statistics.test", &malformed);
+        assert!(primary.contains("confidence interval unavailable"));
+        assert!(!secondary.contains("Cohen's d"));
+        assert!(compact_stat_interval(Some(&serde_json::json!([0.0, 1.0, 2.0]))).is_none());
     }
 
     #[test]
