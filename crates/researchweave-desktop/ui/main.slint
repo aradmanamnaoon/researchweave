@@ -195,6 +195,44 @@ component SidebarItem inherits Button {
     horizontal-stretch: 1;
 }
 
+// Actionable destination card: a single native Button handles mouse, keyboard
+// and accessibility activation. Parent ScrollViews adapt to narrow work areas.
+component WorkflowLink inherits Rectangle {
+    in property <string> heading;
+    in property <string> detail;
+    in property <string> action-label;
+    callback activated;
+
+    background: Theme.surface;
+    border-color: Theme.divider;
+    border-width: 1px;
+    border-radius: Theme.panel-radius;
+    horizontal-stretch: 1;
+
+    VerticalLayout {
+        padding: Theme.space4;
+        spacing: Theme.space2;
+        Text {
+            text: root.heading;
+            color: Theme.ink;
+            font-weight: 650;
+            font-size: 15px * Theme.ui-scale / 100;
+            wrap: word-wrap;
+        }
+        Text {
+            text: root.detail;
+            color: Theme.muted-ink;
+            wrap: word-wrap;
+        }
+        Button {
+            text: root.action-label;
+            accessible-label: root.action-label + ": " + root.heading;
+            accessible-description: root.detail;
+            clicked => { root.activated(); }
+        }
+    }
+}
+
 export component MainWindow inherits Window {
     title: "ResearchWeave · Research workbench";
     icon: @image-url("../../../assets/branding/researchweave-icon.png");
@@ -231,6 +269,13 @@ export component MainWindow inherits Window {
     in-out property <float> pdf-render-height: 0;
     in-out property <int> pdf-job: 0;
     in-out property <string> library-results: "Open a project, then refresh its sources.";
+    in-out property <string> evidence-results: "Open a project. Choose an existing local source before recording human evidence notes.";
+    // In-memory drafts survive navigation across Slint conditional routes.
+    // A draft is not durable until explicitly recorded via the evidence router.
+    in-out property <string> evidence-draft-source-id: "";
+    in-out property <string> evidence-draft-title: "";
+    in-out property <string> evidence-draft-body: "";
+    in-out property <string> evidence-last-note-id: "";
     in-out property <string> source-project-id: "";
     in-out property <[SourceListEntry]> source-search-results: [];
     in-out property <string> source-search-status: "Open a project and search locally imported source text.";
@@ -354,6 +399,9 @@ export component MainWindow inherits Window {
     callback update-preference(string, bool);
     callback update-ui-scale(int);
     callback library-action(string, string, string);
+    callback preview-evidence-note(string, string, string);
+    callback apply-evidence-note-preview();
+    callback load-evidence-note-history(string);
     callback search-project-sources(string);
     callback load-reader-source-list(int);
     callback open-reader-source(string);
@@ -405,7 +453,8 @@ export component MainWindow inherits Window {
     callback publishing-action(string, string, string);
     callback preview-conversation-create(string, string);
     callback preview-assistant-message(string, string, string);
-    callback apply-ai-preview();
+    callback apply-agent-preview();
+    callback apply-provider-preview();
     callback load-assistant-history(string);
     callback list-assistant-conversations();
     callback preview-prompt-template(string, string, string);
@@ -1046,11 +1095,13 @@ export component MainWindow inherits Window {
                                     placeholder-text: "Text to find in local sources";
                                     accessible-label: "Local source search query";
                                     enabled: !root.source-search-busy;
+                                    accessible-enabled: !root.source-search-busy;
                                     accepted => { root.search-project-sources(self.text); }
                                 }
                                 Button {
                                     text: root.source-search-busy ? "Searching…" : "Search";
                                     enabled: !root.source-search-busy;
+                                    accessible-enabled: !root.source-search-busy;
                                     accessible-label: "Run local project source search";
                                     clicked => { root.search-project-sources(source-query.text); }
                                 }
@@ -1134,12 +1185,14 @@ export component MainWindow inherits Window {
                                 Button {
                                     text: "Open source";
                                     enabled: !root.reader-busy;
+                                    accessible-enabled: !root.reader-busy;
                                     accessible-label: "Read source by exact ID";
                                     clicked => { root.open-reader-source(reader-source-input.text); }
                                 }
                                 Button {
                                     text: "Refresh source list";
                                     enabled: !root.reader-busy;
+                                    accessible-enabled: !root.reader-busy;
                                     accessible-label: "Load local project sources for reader";
                                     clicked => { root.load-reader-source-list(0); }
                                 }
@@ -1183,12 +1236,14 @@ export component MainWindow inherits Window {
                                             Button {
                                                 text: "Previous";
                                                 enabled: root.reader-list-offset > 0 && !root.reader-busy;
+                                                accessible-enabled: root.reader-list-offset > 0 && !root.reader-busy;
                                                 accessible-label: "Previous 50 sources";
                                                 clicked => { root.load-reader-source-list(max(0, root.reader-list-offset - 50)); }
                                             }
                                             Button {
                                                 text: "Next";
                                                 enabled: root.reader-list-more && !root.reader-busy;
+                                                accessible-enabled: root.reader-list-more && !root.reader-busy;
                                                 accessible-label: "Next 50 sources";
                                                 clicked => { root.load-reader-source-list(root.reader-list-offset + 50); }
                                             }
@@ -1223,12 +1278,14 @@ export component MainWindow inherits Window {
                                             Button {
                                                 text: "Previous page";
                                                 enabled: root.reader-offset > 0 && !root.reader-busy;
+                                                accessible-enabled: root.reader-offset > 0 && !root.reader-busy;
                                                 accessible-label: "Read previous source text page";
                                                 clicked => { root.load-reader-page(root.reader-source-id, max(0, root.reader-offset - 8000)); }
                                             }
                                             Button {
                                                 text: "Next page";
                                                 enabled: root.reader-more && !root.reader-busy;
+                                                accessible-enabled: root.reader-more && !root.reader-busy;
                                                 accessible-label: "Read next source text page";
                                                 clicked => { root.load-reader-page(root.reader-source-id, root.reader-offset + root.reader-returned); }
                                             }
@@ -1266,6 +1323,7 @@ export component MainWindow inherits Window {
                                         text: "Browse PDF…";
                                         accessible-label: "Choose local PDF with native file picker";
                                         enabled: !root.local-file-dialog-busy;
+                                        accessible-enabled: !root.local-file-dialog-busy;
                                         clicked => { root.choose-local-file("pdf"); }
                                     }
                                 }
@@ -1303,6 +1361,7 @@ export component MainWindow inherits Window {
                                         text: "Find next page";
                                         accessible-label: "Find next PDF matching page";
                                         enabled: root.pdf-page-count > 0 && pdf-query.text != "";
+                                        accessible-enabled: root.pdf-page-count > 0 && pdf-query.text != "";
                                         clicked => {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Finding next matching PDF page…";
@@ -1317,6 +1376,7 @@ export component MainWindow inherits Window {
                                         text: "Previous";
                                         accessible-label: "Previous PDF page";
                                         enabled: root.pdf-page-number > 1;
+                                        accessible-enabled: root.pdf-page-number > 1;
                                         clicked => {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering previous PDF page…";
@@ -1333,6 +1393,7 @@ export component MainWindow inherits Window {
                                         text: "Next";
                                         accessible-label: "Next PDF page";
                                         enabled: root.pdf-page-count > 0 && root.pdf-page-number < root.pdf-page-count;
+                                        accessible-enabled: root.pdf-page-count > 0 && root.pdf-page-number < root.pdf-page-count;
                                         clicked => {
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering next PDF page…";
@@ -1448,8 +1509,8 @@ export component MainWindow inherits Window {
                             Text { text: "Interface text scale: " + Theme.ui-scale + "%"; accessible-label: "Interface text scale: " + Theme.ui-scale + "%"; color: Theme.ink; }
                             HorizontalLayout {
                                 spacing: Theme.space3;
-                                Button { text: "Smaller"; accessible-label: "Decrease interface scale"; enabled: Theme.ui-scale > 80; clicked => { root.update-ui-scale(Theme.ui-scale - 10); } }
-                                Button { text: "Larger"; accessible-label: "Increase interface scale"; enabled: Theme.ui-scale < 200; clicked => { root.update-ui-scale(Theme.ui-scale + 10); } }
+                                Button { text: "Smaller"; accessible-label: "Decrease interface scale"; enabled: Theme.ui-scale > 80; accessible-enabled: Theme.ui-scale > 80; clicked => { root.update-ui-scale(Theme.ui-scale - 10); } }
+                                Button { text: "Larger"; accessible-label: "Increase interface scale"; enabled: Theme.ui-scale < 200; accessible-enabled: Theme.ui-scale < 200; clicked => { root.update-ui-scale(Theme.ui-scale + 10); } }
                                 Button { text: "Reset scale"; accessible-label: "Reset interface scale"; clicked => { root.update-ui-scale(100); } }
                             }
                             Button {
@@ -1747,18 +1808,21 @@ export component MainWindow inherits Window {
                                         text: "Notes";
                                         accessible-label: "Show active quick notes";
                                         enabled: root.quick-note-view != 0;
+                                        accessible-enabled: root.quick-note-view != 0;
                                         clicked => { root.save-quick-note(); root.quick-note-view = 0; root.refresh-quick-notes(root.quick-note-search, 0); }
                                     }
                                     Button {
                                         text: "Archive";
                                         accessible-label: "Show archived quick notes";
                                         enabled: root.quick-note-view != 1;
+                                        accessible-enabled: root.quick-note-view != 1;
                                         clicked => { root.save-quick-note(); root.quick-note-view = 1; root.refresh-quick-notes(root.quick-note-search, 1); }
                                     }
                                     Button {
                                         text: "Trash";
                                         accessible-label: "Show recoverable trashed quick notes";
                                         enabled: root.quick-note-view != 2;
+                                        accessible-enabled: root.quick-note-view != 2;
                                         clicked => { root.save-quick-note(); root.quick-note-view = 2; root.refresh-quick-notes(root.quick-note-search, 2); }
                                     }
                                     Button {
@@ -2110,6 +2174,7 @@ export component MainWindow inherits Window {
                                         text: "Browse data…";
                                         accessible-label: "Choose scientific dataset with native file picker";
                                         enabled: !root.local-file-dialog-busy;
+                                        accessible-enabled: !root.local-file-dialog-busy;
                                         clicked => { root.choose-local-file("data"); }
                                     }
                                 }
@@ -2171,6 +2236,7 @@ export component MainWindow inherits Window {
                                                 columns: root.dataset-grid-columns;
                                                 rows: root.dataset-grid-rows;
                                                 enabled: !root.dataset-grid-busy;
+                                                accessible-enabled: !root.dataset-grid-busy;
                                                 accessible-label: "Read-only dataset revision rows; inspect header names and row values";
                                                 sort-ascending(column) => {
                                                     root.dataset-grid-status = "Sorting is not available in this preview. Row order is unchanged.";
@@ -2185,6 +2251,7 @@ export component MainWindow inherits Window {
                                                     text: "Previous 25";
                                                     accessible-label: "Load previous verified dataset page";
                                                     enabled: !root.dataset-grid-busy && root.dataset-grid-page > 0;
+                                                    accessible-enabled: !root.dataset-grid-busy && root.dataset-grid-page > 0;
                                                     clicked => {
                                                         root.request-dataset-page(analysis-dataset-id.text, analysis-revision.text, root.dataset-grid-page - 1, root.dataset-grid-page-size);
                                                     }
@@ -2201,6 +2268,10 @@ export component MainWindow inherits Window {
                                                     text: "Next 25";
                                                     accessible-label: "Load next verified dataset page";
                                                     enabled: !root.dataset-grid-busy &&
+                                                        (root.dataset-grid-total-rows >= 0 ?
+                                                        (root.dataset-grid-page + 1) * root.dataset-grid-page-size < root.dataset-grid-total-rows :
+                                                        root.dataset-grid-rows.length == root.dataset-grid-page-size);
+                                                    accessible-enabled: !root.dataset-grid-busy &&
                                                         (root.dataset-grid-total-rows >= 0 ?
                                                         (root.dataset-grid-page + 1) * root.dataset-grid-page-size < root.dataset-grid-total-rows :
                                                         root.dataset-grid-rows.length == root.dataset-grid-page-size);
@@ -3036,7 +3107,7 @@ export component MainWindow inherits Window {
                                 agent-conversation-id := LineEdit { placeholder-text: "Conversation ID (ASCII letters/numbers/-/_)"; accessible-label: "Assistant conversation ID"; }
                                 agent-conversation-title := LineEdit { placeholder-text: "Conversation title"; accessible-label: "Assistant conversation title"; }
                                 Button { text: "Preview conversation"; accessible-label: "Preview assistant conversation creation"; clicked => { root.preview-conversation-create(agent-conversation-id.text, agent-conversation-title.text); } }
-                                Button { text: "Record previewed action"; accessible-label: "Record previewed assistant action"; clicked => { root.apply-ai-preview(); } }
+                                Button { text: "Record previewed action"; accessible-label: "Record previewed assistant action"; clicked => { root.apply-agent-preview(); } }
                             }
                             HorizontalLayout {
                                 spacing: 8px;
@@ -3102,11 +3173,345 @@ export component MainWindow inherits Window {
                                 Button { text: "Preview disconnect"; accessible-label: "Preview disconnect provider profile"; clicked => { root.profile-action("disconnect", provider-id.text, provider-kind.text, provider-model.text, provider-endpoint.text, provider-local.text); } }
                             }
                             VerticalLayout {
-                                Button { text: "Record profile change"; accessible-label: "Record approved provider profile change"; clicked => { root.apply-ai-preview(); } }
+                                Button { text: "Record profile change"; accessible-label: "Record approved provider profile change"; clicked => { root.apply-provider-preview(); } }
                                 Button { text: "List profiles"; accessible-label: "List stored provider profiles"; clicked => { root.list-provider-profiles(); } }
                             }
                             Text { text: root.provider-results; accessible-label: "Provider validation result " + root.provider-results; wrap: word-wrap; color: Theme.ink; }
                          }
+                        }
+                    }
+                    if root.page == 25: Rectangle {
+                        background: Theme.raised;
+                        accessible-role: complementary;
+                        accessible-label: "Privacy and local permissions work area";
+                        ScrollView {
+                            VerticalLayout {
+                                padding: Theme.space5;
+                                spacing: Theme.space3;
+                                Text { text: "Privacy & approvals"; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                                Text {
+                                    text: "Projects live on this device. Optional encrypted archives are local. Provider profiles and assistant actions have separate review controls; this screen does not grant blanket network access or change permissions.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                Text { text: "Current project: " + root.project-title; color: Theme.ink; wrap: word-wrap; }
+                                WorkflowLink {
+                                    heading: "Review project privacy classification";
+                                    detail: "Inspect the current project's stored metadata; privacy can be private, restricted or public. Any edit uses preview and an explicit record action.";
+                                    action-label: "Inspect project metadata";
+                                    activated => { root.page = 39; root.inspect-project-metadata(); }
+                                }
+                                WorkflowLink {
+                                    heading: "Inspect local AI provider profiles";
+                                    detail: "View configured provider metadata or validate changes offline. A stored profile is not proof of connectivity or authorization to send research text.";
+                                    action-label: "Open provider settings";
+                                    activated => { root.page = 24; root.list-provider-profiles(); }
+                                }
+                                WorkflowLink {
+                                    heading: "Review assistant action approvals";
+                                    detail: "Inspect the local action timeline. Proposed tools require explicit preview, approval and separate execution; no approval happens here.";
+                                    action-label: "Open assistant review";
+                                    activated => { root.page = 23; root.load-agent-action-timeline(); }
+                                }
+                                WorkflowLink {
+                                    heading: "Prepare a local backup";
+                                    detail: "Open the actual archive export and verification workflow. Choose your own destination and optionally encrypt; no cloud upload occurs.";
+                                    action-label: "Open backups";
+                                    activated => { root.page = 28; }
+                                }
+                                WorkflowLink {
+                                    heading: "Recover from a saved archive";
+                                    detail: "Open the verified local restore workflow. Restoring makes a new project directory, without overwriting the existing project.";
+                                    action-label: "Open recovery";
+                                    activated => { root.page = 29; }
+                                }
+                                Text { text: "For display and accessibility settings, use Preferences. For a local event trail, use Activity; it does not authenticate user identity."; color: Theme.muted-ink; wrap: word-wrap; }
+                                WorkflowLink {
+                                    heading: "Display and activity controls";
+                                    detail: "Go to real theme, high-contrast, reduced-motion and interface scale settings. Review event history separately in Manage → Activity.";
+                                    action-label: "Open preferences";
+                                    activated => { root.page = 36; }
+                                }
+                            }
+                        }
+                    }
+                    if root.page == 26: Rectangle {
+                        background: Theme.raised;
+                        accessible-role: complementary;
+                        accessible-label: "Local integrations work area";
+                        ScrollView {
+                            VerticalLayout {
+                                padding: Theme.space5;
+                                spacing: Theme.space3;
+                                Text { text: "Integrations & connections"; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                                Text {
+                                    text: "Use existing local source, file and AI workflows. This build does not provide a cloud-sync account, third-party OAuth hub or automatic external data transfer.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                WorkflowLink {
+                                    heading: "AI provider profiles";
+                                    detail: "Validate local or remote provider metadata offline and review explicit configure, update or disconnect previews. Configuration does not start an AI request.";
+                                    action-label: "Manage provider profiles";
+                                    activated => { root.page = 24; root.list-provider-profiles(); }
+                                }
+                                WorkflowLink {
+                                    heading: "Assistant and human-approved tools";
+                                    detail: "Open the project-scoped assistant to manage conversations and review bounded retrieval proposals. Only approved operations can execute.";
+                                    action-label: "Open assistant";
+                                    activated => { root.page = 23; }
+                                }
+                                WorkflowLink {
+                                    heading: "Local source import";
+                                    detail: "Add stored text to the project's Source Library; search and read it using the separate Search and Reader destinations.";
+                                    action-label: "Open source library";
+                                    activated => { root.page = 5; }
+                                }
+                                WorkflowLink {
+                                    heading: "Local PDF and dataset files";
+                                    detail: "PDF Reader and Data View use the native file picker for supported local content. Neither is a background cloud connector.";
+                                    action-label: "Open PDF reader";
+                                    activated => { root.page = 7; }
+                                }
+                                WorkflowLink {
+                                    heading: "Inspect a local dataset";
+                                    detail: "Open the immutable data import/inspection workflow before running statistics. Review the dataset revision and original source.";
+                                    action-label: "Open Data View";
+                                    activated => { root.page = 12; }
+                                }
+                            }
+                        }
+                    }
+                    if root.page == 27: Rectangle {
+                        background: Theme.raised;
+                        accessible-role: complementary;
+                        accessible-label: "Local export workflows work area";
+                        ScrollView {
+                            VerticalLayout {
+                                padding: Theme.space5;
+                                spacing: Theme.space3;
+                                Text { text: "Exports & delivery"; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                                Text {
+                                    text: "Choose a completed workflow below to prepare its actual local output. Preparation and saving are separate; enter an explicit destination, review the receipt and verify the file. Nothing is submitted or uploaded by this page.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                WorkflowLink {
+                                    heading: "Manuscript documents";
+                                    detail: "Prepare Markdown, HTML, DOCX or PDF from a versioned manuscript section, then explicitly save it in the Manuscript workspace.";
+                                    action-label: "Open manuscript export";
+                                    activated => { root.page = 19; }
+                                }
+                                WorkflowLink {
+                                    heading: "Publishing draft packet";
+                                    detail: "Check readiness or prepare a draft submission ZIP. Saving is explicit; creating a packet never submits to a journal.";
+                                    action-label: "Open publishing";
+                                    activated => { root.page = 22; }
+                                }
+                                WorkflowLink {
+                                    heading: "Protocol Markdown";
+                                    detail: "Preview versioned protocol text and use the existing separate export/save controls on the Protocol page.";
+                                    action-label: "Open protocol";
+                                    activated => { root.page = 4; }
+                                }
+                                WorkflowLink {
+                                    heading: "Research notebook";
+                                    detail: "Review notebook revision history and its existing Markdown export workflow; this is separate from quick note cards.";
+                                    action-label: "Open notebook";
+                                    activated => { root.page = 21; }
+                                }
+                                WorkflowLink {
+                                    heading: "Analysis reports";
+                                    detail: "Inspect saved analyses and deterministic provenance reports before copying or sharing any research result; this is not a one-click file download.";
+                                    action-label: "Open analysis results";
+                                    activated => { root.page = 15; }
+                                }
+                                WorkflowLink {
+                                    heading: "Encrypted or plain local archives";
+                                    detail: "Choose a user-owned archive path, export and verify a local project backup. Archives can contain sensitive information.";
+                                    action-label: "Open backup exports";
+                                    activated => { root.page = 28; }
+                                }
+                                Text { text: "Before external delivery: confirm permissions, participant consent, anonymization, provenance, target instructions and actual file contents. No automatic external submission is available."; color: Theme.warning; wrap: word-wrap; }
+                            }
+                        }
+                    }
+                    if root.page == 33: Rectangle {
+                        background: Theme.raised;
+                        accessible-role: complementary;
+                        accessible-label: "Research workflow tutorials work area";
+                        ScrollView {
+                            VerticalLayout {
+                                padding: Theme.space5;
+                                spacing: Theme.space3;
+                                Text { text: "Guided starting points"; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                                Text { text: "Choose a task to open its real workspace. These are navigation guides, not simulated tutorials or saved completion badges. A project is required for project-specific actions."; color: Theme.muted-ink; wrap: word-wrap; }
+                                WorkflowLink {
+                                    heading: "01 · Begin a local research project";
+                                    detail: "Create or open a project in Start Center. Next visit Project Home → Project Metadata to inspect its privacy and research design.";
+                                    action-label: "Start a project";
+                                    activated => { root.page = 0; }
+                                }
+                                WorkflowLink {
+                                    heading: "02 · Search and read a source";
+                                    detail: "Add a text source in the library, then go to Search and open a result in the verified text Reader. PDFs have a separate reader.";
+                                    action-label: "Add a source";
+                                    activated => { root.page = 5; }
+                                }
+                                WorkflowLink {
+                                    heading: "03 · Explore reproducible data";
+                                    detail: "Import a local dataset to an immutable revision and inspect its visible rows before continuing to Statistics and Results.";
+                                    action-label: "Open Data View";
+                                    activated => { root.page = 12; }
+                                }
+                                WorkflowLink {
+                                    heading: "04 · Write and save a manuscript";
+                                    detail: "Open Manuscript, edit a section, review the preview, record a revision and separately prepare/save your chosen export format.";
+                                    action-label: "Open manuscript";
+                                    activated => { root.page = 19; }
+                                }
+                                WorkflowLink {
+                                    heading: "05 · Protect and restore research work";
+                                    detail: "Export and verify a local archive; use Recovery to restore a separate copy before relying on the backup.";
+                                    action-label: "Open backups";
+                                    activated => { root.page = 28; }
+                                }
+                            }
+                        }
+                    }
+                    if root.page == 34: Rectangle {
+                        background: Theme.raised;
+                        accessible-role: complementary;
+                        accessible-label: "Research help and guidance work area";
+                        ScrollView {
+                            VerticalLayout {
+                                padding: Theme.space5;
+                                spacing: Theme.space3;
+                                Text { text: "Guidance at the point of work"; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                                Text { text: "Use these practical routes when you need to inspect your project, reproduce a result or resolve a local issue. This guidance does not run automatic repairs or certify research conclusions."; color: Theme.muted-ink; wrap: word-wrap; }
+                                WorkflowLink {
+                                    heading: "What project and revision am I working on?";
+                                    detail: "Inspect the current project metadata before recording edits. Changes are previewed, revision-bound and explicitly recorded.";
+                                    action-label: "Inspect project";
+                                    activated => { root.page = 39; root.inspect-project-metadata(); }
+                                }
+                                WorkflowLink {
+                                    heading: "Where did a result come from?";
+                                    detail: "Open Results to inspect saved analysis inputs, immutable revision and deterministic provenance. A correct method still needs scientific interpretation.";
+                                    action-label: "Inspect analysis results";
+                                    activated => { root.page = 15; }
+                                }
+                                WorkflowLink {
+                                    heading: "How can I review approvals and actions?";
+                                    detail: "Open the assistant's actual proposal timeline. A proposal is not executed without the separate approval/execute workflow.";
+                                    action-label: "Review assistant actions";
+                                    activated => { root.page = 23; root.load-agent-action-timeline(); }
+                                }
+                                WorkflowLink {
+                                    heading: "How do I check a project problem?";
+                                    detail: "Run the existing structural diagnostics on the current project. It does not validate scientific findings or external sources.";
+                                    action-label: "Run project diagnostics";
+                                    activated => { root.page = 30; root.run-diagnostics(); }
+                                }
+                                WorkflowLink {
+                                    heading: "How do I change accessibility preferences?";
+                                    detail: "Adjust high contrast, theme, reduced motion and scaling using the actual stored Preferences controls.";
+                                    action-label: "Open preferences";
+                                    activated => { root.page = 36; }
+                                }
+                            }
+                        }
+                    }
+                    if root.page == 35: Rectangle {
+                        background: Theme.raised;
+                        accessible-role: complementary;
+                        accessible-label: "Verified keyboard shortcuts work area";
+                        ScrollView {
+                            VerticalLayout {
+                                padding: Theme.space5;
+                                spacing: Theme.space3;
+                                Text { text: "Keyboard shortcuts"; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                                Text { text: "Only shortcuts implemented by this desktop shell are listed. They act when the shell receives the keystroke; system and input-method shortcuts may differ."; color: Theme.muted-ink; wrap: word-wrap; }
+                                Rectangle {
+                                    background: Theme.surface;
+                                    border-radius: Theme.panel-radius;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    VerticalLayout {
+                                        padding: Theme.space4;
+                                        spacing: Theme.space3;
+                                        Text { text: "Ctrl + K   ·   Focus the destination command field"; color: Theme.ink; wrap: word-wrap; }
+                                        Text { text: "Enter   ·   Open a destination typed in the command field"; color: Theme.ink; wrap: word-wrap; }
+                                        Text { text: "F6   ·   Move between shell focus regions"; color: Theme.ink; wrap: word-wrap; }
+                                        Text { text: "Shift + F6   ·   Move between shell focus regions in reverse"; color: Theme.ink; wrap: word-wrap; }
+                                        Text { text: "Escape   ·   Clear the command field and focus the Home activity"; color: Theme.ink; wrap: word-wrap; }
+                                        Text { text: "Ctrl + 1   ·   Open Start Center"; color: Theme.ink; wrap: word-wrap; }
+                                        Text { text: "Ctrl + 2   ·   Open Project Home"; color: Theme.ink; wrap: word-wrap; }
+                                        Text { text: "Enter or Space   ·   Activate a focused activity rail button"; color: Theme.ink; wrap: word-wrap; }
+                                    }
+                                }
+                                WorkflowLink {
+                                    heading: "Try a destination search";
+                                    detail: "Navigate to a real source screen with the activity rail, or use Ctrl + K to type a registered destination such as Search.";
+                                    action-label: "Open source Search";
+                                    activated => { root.page = 3; }
+                                }
+                                WorkflowLink {
+                                    heading: "Adjust interface readability";
+                                    detail: "Preferences contain the real scale, high-contrast and density controls. These are not keyboard shortcut assignments.";
+                                    action-label: "Open preferences";
+                                    activated => { root.page = 36; }
+                                }
+                            }
+                        }
+                    }
+                    if root.page == 38: Rectangle {
+                        background: Theme.raised;
+                        accessible-role: complementary;
+                        accessible-label: "About ResearchWeave work area";
+                        ScrollView {
+                            VerticalLayout {
+                                padding: Theme.space5;
+                                spacing: Theme.space3;
+                                Text { text: "About ResearchWeave"; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                                Text {
+                                    text: "Native Rust + Slint research workbench. This running development source is an unreleased UX candidate; it is not evidence that a new release or installer has been published.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                Rectangle {
+                                    background: Theme.surface;
+                                    border-radius: Theme.panel-radius;
+                                    border-width: 1px;
+                                    VerticalLayout {
+                                        padding: Theme.space4;
+                                        spacing: Theme.space2;
+                                        Text { text: "Workspace version: 0.2.0 (Cargo manifest)"; color: Theme.ink; wrap: word-wrap; font-weight: 650; }
+                                        Text { text: "Published Rust release: v0.2.0. Unreleased UX work is not in that release."; color: Theme.muted-ink; wrap: word-wrap; }
+                                        Text { text: "License: GPL-3.0-only"; color: Theme.ink; wrap: word-wrap; }
+                                        Text { text: "Local projects · Optional encrypted local archives · Human-reviewed assistant actions"; color: Theme.muted-ink; wrap: word-wrap; }
+                                    }
+                                }
+                                Text { text: "Current project: " + root.project-title + " · revision " + root.project-revision; color: Theme.ink; wrap: word-wrap; }
+                                WorkflowLink {
+                                    heading: "Run real structural diagnostics";
+                                    detail: "Check the open project's local structures and view the diagnostics result. This is not a scientific validity or network health certificate.";
+                                    action-label: "Run diagnostics";
+                                    activated => { root.page = 30; root.run-diagnostics(); }
+                                }
+                                WorkflowLink {
+                                    heading: "Review local project activity";
+                                    detail: "Open the project event history and its provenance limitations. Events do not prove who physically performed an action.";
+                                    action-label: "Open activity history";
+                                    activated => { root.page = 37; }
+                                }
+                                WorkflowLink {
+                                    heading: "Review preferences";
+                                    detail: "Inspect or adjust actual display and accessibility preferences without changing research data.";
+                                    action-label: "Open preferences";
+                                    activated => { root.page = 36; }
+                                }
+                            }
                         }
                     }
                     if root.page == 31: Rectangle {
@@ -3201,7 +3606,169 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
-                    if root.page > 1 && root.page != 2 && root.page != 3 && root.page != 4 && root.page != 5 && root.page != 6 && root.page != 7 && root.page != 9 && root.page != 10 && root.page != 11 && root.page != 12 && root.page != 13 && root.page != 14 && root.page != 15 && root.page != 16 && root.page != 17 && root.page != 18 && root.page != 19 && root.page != 20 && root.page != 21 && root.page != 22 && root.page != 23 && root.page != 24 && root.page != 28 && root.page != 29 && root.page != 30 && root.page != 31 && root.page != 32 && root.page != 36 && root.page != 37 && root.page != 39: Rectangle {
+                    if root.page == 8: Rectangle {
+                        background: Theme.raised;
+                        ScrollView {
+                            VerticalLayout {
+                                padding: 24px;
+                                spacing: 12px;
+                                Text {
+                                    text: "Evidence notes";
+                                    font-size: 22px * Theme.ui-scale / 100;
+                                    font-weight: 700;
+                                    color: Theme.ink;
+                                }
+                                Text {
+                                    text: "Attach a human-authored note to an existing project source. This is not a verified research finding, quotation, citation, or PDF annotation. Preview before recording any change.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "Browse sources";
+                                        accessible-label: "Open local source library for evidence";
+                                        clicked => { root.page = 5; }
+                                    }
+                                    Button {
+                                        text: "Search sources";
+                                        accessible-label: "Find an existing local source for evidence";
+                                        clicked => { root.page = 3; }
+                                    }
+                                    Button {
+                                        text: "Back to notebook";
+                                        accessible-label: "Open research notebook";
+                                        clicked => { root.page = 21; }
+                                    }
+                                }
+                                Button {
+                                    text: "Choose from saved sources";
+                                    accessible-label: "Load project source list to link an evidence note";
+                                    clicked => { root.load-reader-source-list(0); }
+                                }
+                                Text {
+                                    text: root.reader-list-status;
+                                    accessible-label: "Evidence source chooser status " + root.reader-list-status;
+                                    wrap: word-wrap;
+                                    color: Theme.muted-ink;
+                                }
+                                if root.reader-source-list.length > 0: Rectangle {
+                                    min-height: 135px;
+                                    preferred-height: 170px;
+                                    max-height: 205px;
+                                    background: Theme.surface;
+                                    border-radius: Theme.panel-radius;
+                                    border-width: 1px;
+                                    border-color: Theme.divider;
+                                    ScrollView {
+                                        VerticalLayout {
+                                            padding: Theme.space2;
+                                            spacing: Theme.space2;
+                                            for source in root.reader-source-list: Button {
+                                                text: source.title;
+                                                accessible-label: "Use source " + source.title + " for evidence note";
+                                                clicked => { root.evidence-draft-source-id = source.source-id; }
+                                            }
+                                        }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "Previous sources";
+                                        enabled: root.reader-list-offset > 0 && !root.reader-busy;
+                                        accessible-enabled: root.reader-list-offset > 0 && !root.reader-busy;
+                                        accessible-label: "Previous evidence source list page";
+                                        clicked => { root.load-reader-source-list(max(0, root.reader-list-offset - 50)); }
+                                    }
+                                    Button {
+                                        text: "Next sources";
+                                        enabled: root.reader-list-more && !root.reader-busy;
+                                        accessible-enabled: root.reader-list-more && !root.reader-busy;
+                                        accessible-label: "Next evidence source list page";
+                                        clicked => { root.load-reader-source-list(root.reader-list-offset + 50); }
+                                    }
+                                }
+                                evidence-source-id := LineEdit {
+                                    text: root.evidence-draft-source-id;
+                                    edited(value) => { root.evidence-draft-source-id = value; }
+                                    placeholder-text: "Existing local source ID";
+                                    accessible-label: "Evidence note linked source ID";
+                                }
+                                Button {
+                                    text: "Read linked source";
+                                    accessible-label: "Open exact linked source in Reader";
+                                    clicked => {
+                                        root.reader-source-id = evidence-source-id.text;
+                                        root.page = 6;
+                                        root.open-reader-source(evidence-source-id.text);
+                                    }
+                                }
+                                Text {
+                                    text: "Source ID must refer to a saved source in this project. Read the source before making a claim; no source is invented or fetched remotely.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                evidence-note-title := LineEdit {
+                                    text: root.evidence-draft-title;
+                                    edited(value) => { root.evidence-draft-title = value; }
+                                    placeholder-text: "Short evidence note title";
+                                    accessible-label: "Human evidence note title";
+                                }
+                                evidence-note-body := TextEdit {
+                                    text: root.evidence-draft-body;
+                                    edited(value) => { root.evidence-draft-body = value; }
+                                    min-height: 135px;
+                                    preferred-height: 185px;
+                                    accessible-label: "Human evidence note text";
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "Preview note";
+                                        accessible-label: "Preview source-bound evidence note without saving";
+                                        clicked => {
+                                            root.preview-evidence-note(evidence-source-id.text, evidence-note-title.text, evidence-note-body.text);
+                                        }
+                                    }
+                                    Button {
+                                        text: "Record previewed note";
+                                        accessible-label: "Record only the most recently previewed evidence note";
+                                        clicked => { root.apply-evidence-note-preview(); }
+                                    }
+                                }
+                                Text {
+                                    text: "Draft text is kept while switching screens in this running app, but is not saved to disk until Record succeeds. Copy important text before closing the app.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                Text {
+                                    text: "Existing notes keep revision history. To inspect a saved note, enter its real note ID from the recording receipt. Nothing is sent to an AI provider.";
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                }
+                                evidence-note-history-id := LineEdit {
+                                    text: root.evidence-last-note-id;
+                                    edited(value) => { root.evidence-last-note-id = value; }
+                                    placeholder-text: "Recorded evidence note ID";
+                                    accessible-label: "Evidence history note ID";
+                                }
+                                Button {
+                                    text: "Load note history";
+                                    accessible-label: "Inspect persisted evidence note history";
+                                    clicked => { root.load-evidence-note-history(evidence-note-history-id.text); }
+                                }
+                                TextEdit {
+                                    text: root.evidence-results;
+                                    read-only: true;
+                                    min-height: 110px;
+                                    preferred-height: 210px;
+                                    accessible-label: "Evidence operation result and note history";
+                                }
+                            }
+                        }
+                    }
+                    if root.page > 1 && root.page != 2 && root.page != 3 && root.page != 4 && root.page != 5 && root.page != 6 && root.page != 7 && root.page != 8 && root.page != 9 && root.page != 10 && root.page != 11 && root.page != 12 && root.page != 13 && root.page != 14 && root.page != 15 && root.page != 16 && root.page != 17 && root.page != 18 && root.page != 19 && root.page != 20 && root.page != 21 && root.page != 22 && root.page != 23 && root.page != 24 && root.page != 25 && root.page != 26 && root.page != 27 && root.page != 28 && root.page != 29 && root.page != 30 && root.page != 31 && root.page != 32 && root.page != 33 && root.page != 34 && root.page != 35 && root.page != 36 && root.page != 37 && root.page != 38 && root.page != 39: Rectangle {
                         background: Theme.raised;
                         HorizontalLayout {
                             padding: 24px;
@@ -3298,12 +3865,14 @@ export component MainWindow inherits Window {
                                     text: "Preview context";
                                     accessible-label: "Preview the exact AI request without sending data";
                                     enabled: !root.context-ai-busy;
+                                    accessible-enabled: !root.context-ai-busy;
                                     clicked => { root.preview-context-ai(); }
                                 }
                                 Button {
                                     text: "Run locally";
                                     accessible-label: "Send the approved context to the selected local model";
                                     enabled: root.context-ai-ready && !root.context-ai-busy;
+                                    accessible-enabled: root.context-ai-ready && !root.context-ai-busy;
                                     clicked => { root.run-context-ai(); }
                                 }
                             }

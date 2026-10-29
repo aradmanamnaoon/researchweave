@@ -4,6 +4,8 @@
 
 <h1 align="center">ResearchWeave</h1>
 
+**Latest private Linux GUI acceptance (29 October 2026; not yet released):** The vendored AccessKit candidate (binary SHA-256 `9fa1269b23fc28516bf1564288bf00a7ee2a836641d5d6da1601d9dd2bee67b5`) **PASSED** [strict Reader r6](docs/ux/screenshots/search-reader-accesskit-pass-r6/results.json): **16,916 Unicode scalars / 29,252 UTF-8 bytes** across 8,000+8,000+916-character pages, **53 GUI-created sources** across 50+3 list pages, [**16/16 correct AT-SPI enabled/sensitive states**](docs/ux/screenshots/search-reader-accesskit-pass-r6/accessibility-states.json) with zero mismatches, **4/4 disabled-boundary clicks inert**, 13 screenshots. The same binary **PASSED [r9 40/40 routes, zero placeholders](docs/ux/screenshots/native-40-accesskit-r9/results.json)** (46 screenshots) and **[r10 7/7 utility links + source-bound human-approved Evidence note/history task](docs/ux/screenshots/utility-evidence-accesskit-r10/results.json)** (21 screenshots). **Earlier strict r4 6/16 accessibility FAIL on `499cfebb...` is historical, not current.** Slint `4437d03c...`, Rust host `e03ea640...`, [vendored adapter](vendor/accesskit_atspi_common/src/node.rs) `9eb3b85...`. The local MIT/Apache-2.0 `accesskit_atspi_common` 0.19.1 [Cargo override](Cargo.toml) preserves ReadOnly and gates Enabled/Sensitive on not-disabled; future upstream updates require a documented rebase/override-removal check and repeated regression tests. Final commit/hosted CI, human screen readers, installed Windows/macOS/Linux packages, complete workflow/citation/scientific/security acceptance and 100 skill-specific GUI signoffs are **still pending**. Published **v0.2.0 remains unchanged**.
+
 <p align="center">
   <strong>Your research, in one local Rust workspace.</strong><br/>
   Organize sources, analyze data, write with traceable revisions, and keep control of your files and AI actions.
@@ -46,8 +48,6 @@
 
 > [!IMPORTANT]
 > **Published release: Rust v0.2.0.** The current UX redesign is under development; the screenshots and downloads below refer to the previously published build, not an unverified new release. ResearchWeave stores projects locally; no cloud storage account is needed. The [archived Python v0.1.2 release](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.1.2) and Python-to-Rust compatibility fixtures remain available for historical recovery.
-
-> **Unreleased UX candidate (29 October 2026):** Sources now has working Rust-backed **Search (route 3)** and **Reader (route 6)** screens for project-local stored text. A newer private Linux/Xvfb navigation audit passed **40/40 routes**, with **eight remaining placeholder destinations**. The tested executable SHA-256 was `77295db0109768f108495a31d932238431aeb0a86988325a63dd4258318023c7`; `source_changed_during_audit=false`. A separate **real private Linux synthetic Search → Reader GUI test passed** on that executable, with exact 207-character Unicode text and six hashed captures. This does not establish larger-text pagination or other OSes. This candidate is not the published v0.2.0 installer. [Detailed source/QA boundaries](docs/ux/CROSS_PLATFORM_QA.md).
 
 ## Downloads and release status
 
@@ -94,7 +94,7 @@ Pick a single outcome and follow the workspace rather than learning every tool f
 |:---:|---|---|---|
 | **01** | **Home → Start Center** | A local project with an auditable revision history | Recent-project selection is limited; custom paths are manual |
 | **02** | **Home → Research Question / Protocol** | A versioned question and protocol with preview-before-save | You may need to enter object IDs between screens |
-| **03** | **Sources → Library / Search / Reader / PDF Reader** | Local source records; unreleased branch adds literal stored-text search, source list and paged verified text reading; PDF page viewing/search remains separate | Short Unicode Search → Reader GUI test passed on Linux Xvfb; long pagination, source-linked Evidence and PDF selection/annotation remain incomplete |
+| **03** | **Sources → Library / Search / Reader / Evidence / PDF Reader** | Local source records and stored-text search; the unreleased branch adds human-authored, source-bound Evidence notes with preview-before-record and actual note history | The unreleased AccessKit candidate passed strict long-text Reader pagination and source-index paging plus one approved, source-bound Evidence note/history task in private Linux GUI; PDF quote anchors, full citation validation, adversarial cases and installed cross-OS tests remain pending |
 | **04** | **Analyze → Data / Statistics** | Imported dataset revisions and reproducible basic statistical results | Advanced analysis methods are richer in Rust libraries than in the desktop UI |
 | **05** | **Synthesize → Manuscript** | Versioned section text and prepared DOCX/HTML/Markdown/PDF export | This is currently a structured text editor, not a Word-style page editor |
 | **06** | **Manage → Backups / Recovery** | An optional encrypted local archive and restore-as-copy | Archive paths are currently entered manually |
@@ -125,7 +125,7 @@ The Rust UI uses six persistent activity roots. Each has its own original icon a
 | Activity | Visual | Research responsibility |
 | --- | :---: | --- |
 | **Home** | <img src="assets/icons/home.svg" width="24" alt="Home icon"/> | Start Center, project home, research question, protocol and project context |
-| **Sources** | <img src="assets/icons/sources.svg" width="24" alt="Sources icon"/> | Library, references, native PDF page reading, review and extraction forms; the evidence reader remains incomplete |
+| **Sources** | <img src="assets/icons/sources.svg" width="24" alt="Sources icon"/> | Library, Search, stored-text Reader, source-bound human Evidence notes, references, native PDF page reading, review and extraction; quote anchoring and citation navigation remain incomplete |
 | **Analyze** | <img src="assets/icons/analyze.svg" width="24" alt="Analyze icon"/> | Data import, immutable datasets, five basic statistics forms, qualitative coding and mixed methods; additional analysis kernels are accessible through Rust |
 | **Synthesize** | <img src="assets/icons/synthesize.svg" width="24" alt="Synthesize icon"/> | Versioned plain-text notebook/manuscript, local exports, bibliography and publishing readiness checks |
 | **Automate** | <img src="assets/icons/automate.svg" width="24" alt="Automate icon"/> | Assistant conversations, retrieval, agent proposals and controlled tool execution |
@@ -153,6 +153,38 @@ The AI panel previews bounded, user-reviewed context and requires an explicitly 
 
 This **actual native Rust/Slint screenshot** is from a later synthetic Search → Reader GUI test on executable SHA-256 `77295db0109768f108495a31d932238431aeb0a86988325a63dd4258318023c7`. The scoped harness passed text equality, empty/no-result search feedback, invalid IDs, source-list reopening and return navigation. The [test receipt](docs/ux/screenshots/search-reader-xvfb/results.json) and [cross-platform QA report](docs/ux/CROSS_PLATFORM_QA.md) record provenance and exclusions. **It does not represent the published v0.2.0 release or prove long pagination, PDF selection, assistive technology, or macOS/Windows operation.**
 
+### Current accessibility-fix candidate — actual private Linux GUI
+
+The **newest** independent Linux/Xvfb route and workflow captures were taken from accessibility-fixed executable `499cfebbe7012d679143f9c9371103ea92619ff50813dcd18fa6aac6aff1df76` (Slint `4437d03c...`, host `e03ea640...`). The [r7 route manifest](docs/ux/screenshots/native-40-accessible-r7/results.json) records **40/40 routes and zero explicit placeholders** with 46 actual captures; the [r8 utility/Evidence manifest](docs/ux/screenshots/utility-evidence-accessible-r8/results.json) records **7/7 utility links and source-bound note approval/record/history PASS**, with 21 captures. All 67 screenshot hashes and sizes were checked against these manifests.
+
+| Current Evidence workspace (r7) | Persisted source-bound Evidence note history (r8) |
+| --- | --- |
+| ![Latest private r7 actual native Linux Evidence work area after accessibility source fix](docs/ux/screenshots/native-40-accessible-r7/route-08.png) | ![Latest private r8 native Linux Evidence note history after scoped approval and persistence](docs/ux/screenshots/utility-evidence-accessible-r8/evidence-05-persisted-note-history.png) |
+
+**Historical pre-vendor accessibility follow-up:** An earlier long Reader r3 test passed a **16,916-character, 53-source** content/pagination task but found six disabled AT-SPI controls incorrectly announcing enabled. The present Slint source specifies `accessible-enabled` for those controls, and strict post-fix Reader r4 still FAILED six of sixteen native AT-SPI checks. These GUI captures do not establish human Orca, Windows/macOS installed operation or complete research workflow acceptance.
+
+### Earlier utility and Evidence screens — historical private Linux audits
+
+The [new r6 full-route result](docs/ux/screenshots/native-40-final-source-r6/results.json) and [actual Evidence route 8](docs/ux/screenshots/native-40-final-source-r6/route-08.png) are retained alongside the pre-safety captures below. This **newer** set contains 40 route, four keyboard and two resize screenshots from binary `707b1c...`; the older images remain for historical comparison.
+
+| Evidence notes (route 8) | Privacy & approvals (route 25) |
+| --- | --- |
+| ![Actual native Linux Evidence route 8 source-bound note controls, from an uncommitted pre-safety-fix snapshot](docs/ux/screenshots/native-40-routes-20261029/route-08.png) | ![Actual native Linux Privacy route 25 linked utility cards, from an uncommitted pre-safety-fix snapshot](docs/ux/screenshots/native-40-routes-20261029/route-25.png) |
+
+| Exports (route 27) | Tutorials (route 33) | About (route 38) |
+| --- | --- | --- |
+| ![Uncommitted Linux Exports utility route 27](docs/ux/screenshots/native-40-routes-20261029/route-27.png) | ![Uncommitted Linux Tutorials utility route 33](docs/ux/screenshots/native-40-routes-20261029/route-33.png) | ![Uncommitted Linux About utility route 38](docs/ux/screenshots/native-40-routes-20261029/route-38.png) |
+
+These are **real native AT-SPI/Xvfb route screenshots** from the *uncommitted* binary `72ebceea6d67d758e223712ab01daa28083d2ebf514249554599463927a290e3`, before the subsequent Evidence/Provider approval and project-restore safety changes. The [40-route receipt](docs/ux/screenshots/native-40-routes-20261029/results.json) reports 40/40 route activations and zero explicit placeholders; it does **not** establish correctness of any link or approval action. Separate, earlier scoped private GUI tests observed seven linked utility cards and creation/history of a real source-bound Evidence note; **the full r3 utility/Evidence harness did not pass** because its revision assertion confused different revision meanings. These images are not current final-source acceptance or published v0.2.0 screenshots.
+
+**Later r5 functional capture (different binary):** the [r5 results manifest](docs/ux/screenshots/utility-evidence-xvfb/results.json) reports PASS for all seven linked utility destinations and the scoped Evidence record flow on executable `707b1c43446cc86f8e25da28954b90b18864613434b7600e1c57296a0180916d`. The **21 actual PNG captures** have matching retained SHA-256 digests. The audit recorded unchanged Slint/host source files during execution, and their SHA-256 values match the inspected worktree; an independent binary build record is still outstanding. The earlier combined r3 harness **failed** and is retained as historical evidence, not relabeled as passing.
+
+| Source → Reader | Preview before recording | Approved, persisted Evidence note |
+| --- | --- | --- |
+| ![Real stored source opened in native Reader during private r5 functional test](docs/ux/screenshots/utility-evidence-xvfb/evidence-02-reader-real-source-id.png) | ![Actual r5 source-bound human Evidence note preview before approval and save](docs/ux/screenshots/utility-evidence-xvfb/evidence-03-human-note-preview-not-saved.png) | ![Actual r5 Evidence note history showing recorded note ID and revision](docs/ux/screenshots/utility-evidence-xvfb/evidence-05-persisted-note-history.png) |
+
+This demonstrates one synthetic source-bound human note, approval, record and history lookup. It does not establish PDF text-selection anchors, claim-level citation provenance, multiple note revisions, accessibility with Orca or native Windows/macOS packages.
+
 ### Previously published Rust interface
 
 The images below were captured from **earlier running Rust/Slint builds** and are retained as historical UI examples. They are not mockups or Python/PyQt screenshots, and they do not demonstrate completion or visual QA of the ongoing UX transformation.
@@ -178,7 +210,7 @@ The **Rust domain library**, **desktop screen** and **release evidence** have di
 | Area | Working in the current Rust desktop | Present in Rust or partially wired | Not yet available as the requested UX |
 |---|---|---|---|
 | **Projects and local safety** | Managed create/open, metadata preview/record, archives and recovery | Audit/activity, diagnostics, project migration | Recent-project dashboard, complete guided recovery |
-| **Sources and reviews** | Local source entry, references, PDF page search, review votes, PRISMA text counts, extraction JSON forms; **unreleased UX branch:** local source Search and paged Reader backed by `search.query` and `source.full_text` | Anchors, source relationships, review algorithms | Longer Reader pagination, visual evidence anchoring, cross-OS Search/Reader and screening queue |
+| **Sources and reviews** | Local source entry, references, PDF page search, review votes, PRISMA text counts, extraction JSON forms; **unreleased UX branch:** local source Search and paged Reader plus a dedicated, source-bound human Evidence note preview/record/history screen | Anchor storage, source relationships, review algorithms, seven linked utility pages | Longer Reader pagination, selected quotation anchoring, broad post-safety approval rejection/restore GUI testing, cross-OS Search/Reader and screening queue |
 | **Data and methods** | Import/inspect datasets, variable metadata, descriptives, frequency, Pearson, Welch t, HC3 OLS; **unreleased UX branch:** read-only `StandardTableView` with 25-row paging controls | Additional statistical methods, plots and reproducible results in Rust crates | Editable spreadsheet features and visual interactive analysis across every method; multi-page and cross-OS grid acceptance pending |
 | **Qualitative and mixed methods** | Codebook/annotation/mapping forms, kappa, verified joint-display action | Project-scoped coder state and quality/provenance checks | Visual transcript coding and rich joint-display table |
 | **Notes and writing** | Project notebook editor; versioned manuscript sections, recovery and DOCX/HTML/PDF/Markdown exports | Unreleased UX branch has quick-note cards/list, pin/archive/trash/restore, labels/search and durable drafts | Word-style rich, paginated editing and complete citations-in-context |
@@ -186,8 +218,6 @@ The **Rust domain library**, **desktop screen** and **release evidence** have di
 | **Display and accessibility** | Six navigation roots, Ctrl+K, display themes, density, scale and basic keyboard semantics | Windows UIA scripts and native OS accessibility probes | Complete NVDA/VoiceOver/Orca, real RTL IME and all-state visual QA |
 
 **Reading this table:** “Working” means the current Slint screen has a concrete handler, not that every variation passed a new user study. “Present in Rust” describes implementation or infrastructure without promising a mature, clickable desktop workflow. Historical screenshots and test reports are not proof for unreviewed UX branch changes.
-
-**Current local QA boundary:** The newer 40-route private native Linux audit passed on the exact executable hash recorded above, with eight placeholders: **Evidence (8), Privacy (25), Integrations (26), Exports (27), Tutorials (33), Guidance (34), Shortcuts (35), About (38)**. Source Search/Reader backend tests and desktop compilation passed. A separate private Linux/Xvfb Search → Reader GUI harness passed source creation, empty/no-match queries, one Unicode match, exact 207-character Reader text, invalid/empty IDs and return navigation; the evidence is in the private WSL directory `/home/saba/researchweave-gui-audits/search-reader-worker1-r4/` (six hashed screenshots). Fresh isolated Xvfb runs also passed the synthetic 15-page Unicode manuscript round-trip, populated Data View grid and found-text contextual AI preview scenarios. **Longer Reader pagination, human screen-reader and Windows/macOS package behavior remain untested.** Windows workspace tests were reported **188 passing**, with formatting and strict Clippy passing, but a single frozen-commit cross-platform installed-package matrix remains outstanding.
 
 See [the route-by-route screen inventory](docs/ux/SCREEN_INVENTORY.md), [workflow handoff audit](docs/ux/WORKFLOW_INVENTORY.md) and [contextual AI audit](docs/ux/AI_INTEGRATION_AUDIT.md) for the dated pre-transformation baseline.
 
@@ -411,7 +441,7 @@ cargo +1.94.1 run --locked -p researchweave-cli -- --help
 
 ResearchWeave intentionally distinguishes **implemented**, **tested**, **locally verified**, and **release verified**. Historical candidate reports document test runs and screenshots from specific commits; those records are useful evidence for their tested sources and must not be carried forward as a pass for the new UX worktree.
 
-The latest unreleased Linux native route audit reached **40/40 destinations** on executable SHA-256 `77295db0109768f108495a31d932238431aeb0a86988325a63dd4258318023c7`, with source unchanged during the run and eight placeholder routes. The separate Search → Reader **private Xvfb functional GUI harness passed** the scoped 207-character Unicode test, malformed-input feedback and return navigation, with six hashed screenshots; it did not test long paging. Fresh Xvfb 15-page manuscript, Data View grid and found-text AI cases passed; Windows workspace tests **188 passed** and formatting/strict Clippy passed on the reported working candidate. These checks do **not** constitute final exact-commit native installer, source-to-evidence or accessibility acceptance.
+The earlier Linux native `77295db...` binary reached **40/40 navigation with eight then-placeholders** and separately passed a short 207-character Unicode Search → Reader test. A later `72ebceea...` binary reached **40/40 route activations with zero explicit placeholders**. The **newest `707b1c...` binary passed r6 full 40/40 route navigation with zero explicit placeholders and r5 7/7 utility-link plus source-bound Evidence approval/record/history functional checks**. These are distinct runs; both new manifests record unchanged Slint/host source hashes, with independent binary-to-source build provenance still needed. Separate private Xvfb 15-page manuscript, Data View and found-text AI tasks passed on their own candidate snapshots; Windows working-source **193 tests**, formatting and strict Clippy passed locally. None constitutes final exact-commit native installer, complete source-to-claim citation or accessibility acceptance.
 
 **Before declaring a new build ready**, execute and record exit codes for the following commands at the exact new source commit:
 

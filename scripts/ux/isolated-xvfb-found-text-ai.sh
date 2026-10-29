@@ -63,6 +63,20 @@ dbus-send --session --print-reply --dest=org.a11y.Bus /org/a11y/bus \
 sleep 0.4
 
 click() { python3 scripts/ux/atspi_control.py click "$1"; }
+wait_click() {
+  local label="$1"
+  local attempt
+  for attempt in $(seq 1 40); do
+    if python3 scripts/ux/atspi_control.py click "$label" >"$output/last-action.log" 2>&1; then
+      return 0
+    fi
+    sleep 0.2
+  done
+  import -window "$window" "$output/FAIL-action-not-visible.png" || true
+  cat "$output/last-action.log" >&2
+  echo "FAILED_TO_FIND_NATIVE_ACTION: $label" >&2
+  return 1
+}
 paste_to() {
   local xy x y
   xy="$(python3 scripts/ux/atspi_control.py center "$1")"
@@ -86,9 +100,9 @@ click "Show manuscript editing and export tools"
 sleep 0.3
 paste_to "Find text in manuscript" "پژوهش"
 click "Find and select the next manuscript match"
-click "Preview AI help for this exact found manuscript text"
+wait_click "Preview AI help for this exact found manuscript text"
 sleep 0.3
-click "Preview the exact AI request without sending data"
+wait_click "Preview the exact AI request without sending data"
 sleep 0.5
 
 python3 - "$output/preview.txt" <<'PY'

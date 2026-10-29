@@ -1,0 +1,979 @@
+{
+  "kind": "isolated-native-linux-xvfb-route-audit",
+  "no_network": "LD_PRELOAD blocks dynamically linked AF_INET/AF_INET6 socket/connect; not kernel seccomp",
+  "no_visible_display": true,
+  "synthetic_private_profile": true,
+  "binary": "/home/saba/researchweave-linux/target/release/researchweave-desktop",
+  "binary_sha256": "707b1c43446cc86f8e25da28954b90b18864613434b7600e1c57296a0180916d",
+  "ui_source_sha256": "1d8092dd054c6c3ce0dd6b26aefe9d15840faa13f8354fb0dc8955c0a750218f",
+  "host_source_sha256": "e03ea640f8cb2bee64cc87604da2bca58a9084001cacd06a960817063f24360b",
+  "window": "2097156",
+  "pages": [
+    "Welcome",
+    "Dashboard",
+    "Question",
+    "Search",
+    "Protocol",
+    "Library",
+    "Reader",
+    "PDF Reader",
+    "Evidence",
+    "Review",
+    "PRISMA",
+    "Extraction",
+    "Data View",
+    "Variable View",
+    "Statistics",
+    "Analysis Results",
+    "Qualitative",
+    "Codebook",
+    "Mixed Methods",
+    "Manuscript",
+    "References",
+    "Notebook",
+    "Publishing",
+    "Agent",
+    "Providers",
+    "Privacy",
+    "Integrations",
+    "Exports",
+    "Backups",
+    "Recovery",
+    "Diagnostics",
+    "Jobs",
+    "Notifications",
+    "Tutorials",
+    "Guidance",
+    "Shortcuts",
+    "Preferences",
+    "Activity",
+    "About",
+    "Project Metadata"
+  ],
+  "routes": [
+    {
+      "id": 0,
+      "page": "Welcome",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 55,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-00.png",
+        "sha256": "801c436c9c2f32fef840c2ddc41ac453c76238463cc787f0f9e50e2730b09d78",
+        "bytes": 101436
+      },
+      "observed_heading": [
+        "Welcome work area"
+      ],
+      "accessibility_excerpt": [
+        "Welcome work area"
+      ]
+    },
+    {
+      "id": 1,
+      "page": "Dashboard",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 65,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-01.png",
+        "sha256": "f4543d2fc4a3c19f1689985df8fff48a1dd7523d0fd512502e3f7281d8339da8",
+        "bytes": 97343
+      },
+      "observed_heading": [
+        "Dashboard work area"
+      ],
+      "accessibility_excerpt": [
+        "Dashboard work area"
+      ]
+    },
+    {
+      "id": 2,
+      "page": "Question",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 47,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-02.png",
+        "sha256": "76e7f87d97d91912c66a78ed613f2607467a95b9bae3ed67a4055e0515304a9f",
+        "bytes": 81645
+      },
+      "observed_heading": [
+        "Question work area"
+      ],
+      "accessibility_excerpt": [
+        "Question work area"
+      ]
+    },
+    {
+      "id": 3,
+      "page": "Search",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 45,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-03.png",
+        "sha256": "85357d8348b2f33534c6deee8ecf08f58c36ed83935b34f08a4e4092b851c7d8",
+        "bytes": 86841
+      },
+      "observed_heading": [
+        "Search work area"
+      ],
+      "accessibility_excerpt": [
+        "Search work area"
+      ]
+    },
+    {
+      "id": 4,
+      "page": "Protocol",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 52,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-04.png",
+        "sha256": "364ee42731e5cf7c65a9cab092e1143e55f640898a20d172408ebed525119f0a",
+        "bytes": 130668
+      },
+      "observed_heading": [
+        "Protocol work area"
+      ],
+      "accessibility_excerpt": [
+        "Protocol work area"
+      ]
+    },
+    {
+      "id": 5,
+      "page": "Library",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 43,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-05.png",
+        "sha256": "d2c70607cf504f200d05844e6cda2d0b4f44a864d90779d7c3cd36d44675ab3c",
+        "bytes": 63199
+      },
+      "observed_heading": [
+        "Library work area"
+      ],
+      "accessibility_excerpt": [
+        "Library work area"
+      ]
+    },
+    {
+      "id": 6,
+      "page": "Reader",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 53,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-06.png",
+        "sha256": "f0c4e5ac1dae66e6da87b69493cb51efafd56dfa00361647d601742cb0ddb3bb",
+        "bytes": 93318
+      },
+      "observed_heading": [
+        "Reader work area"
+      ],
+      "accessibility_excerpt": [
+        "Reader work area"
+      ]
+    },
+    {
+      "id": 7,
+      "page": "PDF Reader",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 56,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-07.png",
+        "sha256": "1663e716d0f1e8a438117494ad2f39f9eecf1057991b6f1d525680a877839e28",
+        "bytes": 84229
+      },
+      "observed_heading": [
+        "PDF Reader work area"
+      ],
+      "accessibility_excerpt": [
+        "PDF Reader work area"
+      ]
+    },
+    {
+      "id": 8,
+      "page": "Evidence",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 54,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-08.png",
+        "sha256": "7dc766e97eeed360dd2a44577ebbbe1ac8780e1f29b37914a1ad8643d60c8a20",
+        "bytes": 112529
+      },
+      "observed_heading": [
+        "Evidence work area"
+      ],
+      "accessibility_excerpt": [
+        "Evidence work area"
+      ]
+    },
+    {
+      "id": 9,
+      "page": "Review",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 52,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-09.png",
+        "sha256": "7e985b5c387e71c62be9d0e9a14b9f5844d1a45c9d71e5be6dd97f2799cb8efb",
+        "bytes": 93041
+      },
+      "observed_heading": [
+        "Review work area"
+      ],
+      "accessibility_excerpt": [
+        "Review work area"
+      ]
+    },
+    {
+      "id": 10,
+      "page": "PRISMA",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 42,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-10.png",
+        "sha256": "0361c420ca7ffa9f8f87d4bea87cfa4168ab3dd4996763d6119f84fdc94e8758",
+        "bytes": 71055
+      },
+      "observed_heading": [
+        "PRISMA work area"
+      ],
+      "accessibility_excerpt": [
+        "PRISMA work area"
+      ]
+    },
+    {
+      "id": 11,
+      "page": "Extraction",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 55,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-11.png",
+        "sha256": "e1c8f2bbce4089d6ad145fcf13dbd36d84cb4d8dbf7f796a6f08c21758e6754d",
+        "bytes": 95504
+      },
+      "observed_heading": [
+        "Extraction work area"
+      ],
+      "accessibility_excerpt": [
+        "Extraction work area"
+      ]
+    },
+    {
+      "id": 12,
+      "page": "Data View",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 57,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-12.png",
+        "sha256": "644b36e6f2dac55793ab4bbc535425ad2d60b15c9406a28ff678b654f282fc2c",
+        "bytes": 141777
+      },
+      "observed_heading": [
+        "Data View work area"
+      ],
+      "accessibility_excerpt": [
+        "Data View work area"
+      ]
+    },
+    {
+      "id": 13,
+      "page": "Variable View",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 51,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-13.png",
+        "sha256": "ba3074d1cb7d354e9df35b65f5d2cf2b40545b6bd5b9fafdf4011733fb0f3e64",
+        "bytes": 108046
+      },
+      "observed_heading": [
+        "Variable View work area"
+      ],
+      "accessibility_excerpt": [
+        "Variable View work area"
+      ]
+    },
+    {
+      "id": 14,
+      "page": "Statistics",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 60,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-14.png",
+        "sha256": "8be616854485317748569889da1dab91025bec7177358a8ae83d917d77336d06",
+        "bytes": 152564
+      },
+      "observed_heading": [
+        "Statistics work area"
+      ],
+      "accessibility_excerpt": [
+        "Statistics work area"
+      ]
+    },
+    {
+      "id": 15,
+      "page": "Analysis Results",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 56,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-15.png",
+        "sha256": "65cb9bcb106013042ae5541fd2c540e4112b496bb9516c4da7e5b2b51e93a996",
+        "bytes": 115833
+      },
+      "observed_heading": [
+        "Analysis Results work area"
+      ],
+      "accessibility_excerpt": [
+        "Analysis Results work area"
+      ]
+    },
+    {
+      "id": 16,
+      "page": "Qualitative",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 65,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-16.png",
+        "sha256": "4e0809c61a09e5b539a86b903e3a732208218c577b9247226c5c74411ce37c09",
+        "bytes": 139754
+      },
+      "observed_heading": [
+        "Qualitative work area"
+      ],
+      "accessibility_excerpt": [
+        "Qualitative work area"
+      ]
+    },
+    {
+      "id": 17,
+      "page": "Codebook",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 51,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-17.png",
+        "sha256": "4922c04bab9893d91f03bda5dfdeac109c3048a2fe1a1cf740b4382de60d81f4",
+        "bytes": 88353
+      },
+      "observed_heading": [
+        "Codebook work area"
+      ],
+      "accessibility_excerpt": [
+        "Codebook work area"
+      ]
+    },
+    {
+      "id": 18,
+      "page": "Mixed Methods",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 50,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-18.png",
+        "sha256": "f3946c826cf493bc1274f1968adceaf3da466be101732c5baaac852af8bbac45",
+        "bytes": 110766
+      },
+      "observed_heading": [
+        "Mixed Methods work area"
+      ],
+      "accessibility_excerpt": [
+        "Mixed Methods work area"
+      ]
+    },
+    {
+      "id": 19,
+      "page": "Manuscript",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 42,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-19.png",
+        "sha256": "ae65a756edb3e088fb7f92e4931dd764b230479af575418d4a249db63f9c1839",
+        "bytes": 64257
+      },
+      "observed_heading": [
+        "Manuscript work area"
+      ],
+      "accessibility_excerpt": [
+        "Manuscript work area"
+      ]
+    },
+    {
+      "id": 20,
+      "page": "References",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 50,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-20.png",
+        "sha256": "3ed82cedfc1cc548b8bc9ab5c9040626fbafdadf5a26d2d268c9774a1438ef80",
+        "bytes": 85195
+      },
+      "observed_heading": [
+        "References work area"
+      ],
+      "accessibility_excerpt": [
+        "References work area"
+      ]
+    },
+    {
+      "id": 21,
+      "page": "Notebook",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 44,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-21.png",
+        "sha256": "f04808fef743bd9fc4096fdbf61f348917c6e0578306b7f27acb59304e0a2693",
+        "bytes": 68913
+      },
+      "observed_heading": [
+        "Notebook work area"
+      ],
+      "accessibility_excerpt": [
+        "Notebook work area"
+      ]
+    },
+    {
+      "id": 22,
+      "page": "Publishing",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 45,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-22.png",
+        "sha256": "82fbb29d0460441efc257b9fd096e3ce6a8a17ab494302baf49b138c0908457e",
+        "bytes": 102118
+      },
+      "observed_heading": [
+        "Publishing work area"
+      ],
+      "accessibility_excerpt": [
+        "Publishing work area"
+      ]
+    },
+    {
+      "id": 23,
+      "page": "Agent",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 61,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-23.png",
+        "sha256": "4475187d3ce238482ade570f031b66f5b7bd71330395123bf3ed781774646c3e",
+        "bytes": 143683
+      },
+      "observed_heading": [
+        "Agent work area"
+      ],
+      "accessibility_excerpt": [
+        "Agent work area"
+      ]
+    },
+    {
+      "id": 24,
+      "page": "Providers",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 50,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-24.png",
+        "sha256": "c4e4158780209e3272c932eaf7f4fd2c36007408294f1c0534df658dafab73ac",
+        "bytes": 96695
+      },
+      "observed_heading": [
+        "Providers work area"
+      ],
+      "accessibility_excerpt": [
+        "Providers work area"
+      ]
+    },
+    {
+      "id": 25,
+      "page": "Privacy",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 52,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-25.png",
+        "sha256": "0a3c1b0372cb9c4b6cf70d43234bf2ffdd8d3c90b44d152177895dc5776b6ae5",
+        "bytes": 146732
+      },
+      "observed_heading": [
+        "Privacy work area"
+      ],
+      "accessibility_excerpt": [
+        "Privacy work area",
+        "Privacy and local permissions work area"
+      ]
+    },
+    {
+      "id": 26,
+      "page": "Integrations",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 51,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-26.png",
+        "sha256": "98d7f3141a37bbf35abe8a6ab0dea59d234b4ff7523496d0c351e7cba2a666a0",
+        "bytes": 136759
+      },
+      "observed_heading": [
+        "Integrations work area"
+      ],
+      "accessibility_excerpt": [
+        "Integrations work area",
+        "Local integrations work area"
+      ]
+    },
+    {
+      "id": 27,
+      "page": "Exports",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 50,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-27.png",
+        "sha256": "f86bd056087934c65bdfb5f12a2e4412efed3f3c4bd37736354a2122600bc1e7",
+        "bytes": 129714
+      },
+      "observed_heading": [
+        "Exports work area"
+      ],
+      "accessibility_excerpt": [
+        "Exports work area",
+        "Local export workflows work area"
+      ]
+    },
+    {
+      "id": 28,
+      "page": "Backups",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 45,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-28.png",
+        "sha256": "e48c678fcfee74e91e8e8490537b804f40ee82b22161eade9e2c934871aa0c84",
+        "bytes": 85200
+      },
+      "observed_heading": [
+        "Backups work area"
+      ],
+      "accessibility_excerpt": [
+        "Backups work area"
+      ]
+    },
+    {
+      "id": 29,
+      "page": "Recovery",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 44,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-29.png",
+        "sha256": "b4c606a8820b20b4a7f21363f34226c48dbe1f4af6416539bb5cb5bdbd8174c3",
+        "bytes": 82552
+      },
+      "observed_heading": [
+        "Recovery work area"
+      ],
+      "accessibility_excerpt": [
+        "Recovery work area"
+      ]
+    },
+    {
+      "id": 30,
+      "page": "Diagnostics",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 40,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-30.png",
+        "sha256": "bed97c47feef3049526ae893b6e95afc162fd886c8a7492431717bdbdcd120f9",
+        "bytes": 69264
+      },
+      "observed_heading": [
+        "Diagnostics work area"
+      ],
+      "accessibility_excerpt": [
+        "Diagnostics work area"
+      ]
+    },
+    {
+      "id": 31,
+      "page": "Jobs",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 36,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-31.png",
+        "sha256": "fc21d8f44841ed44a165f231dd614131bba4c8c0b47bb2f2ddec430249f90903",
+        "bytes": 54407
+      },
+      "observed_heading": [
+        "Jobs work area"
+      ],
+      "accessibility_excerpt": [
+        "Jobs work area"
+      ]
+    },
+    {
+      "id": 32,
+      "page": "Notifications",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 36,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-32.png",
+        "sha256": "a999b7e966d64c34456775eaecb89a0ea0d2cf60b269c7140dff7a6a73f46cc4",
+        "bytes": 55955
+      },
+      "observed_heading": [
+        "Notifications work area"
+      ],
+      "accessibility_excerpt": [
+        "Notifications work area"
+      ]
+    },
+    {
+      "id": 33,
+      "page": "Tutorials",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 51,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-33.png",
+        "sha256": "8cfa8fc779672bf13867ceb50387728da2456c13f5810dad3f17b83fdf4adc85",
+        "bytes": 133150
+      },
+      "observed_heading": [
+        "Tutorials work area"
+      ],
+      "accessibility_excerpt": [
+        "Tutorials work area",
+        "Research workflow tutorials work area"
+      ]
+    },
+    {
+      "id": 34,
+      "page": "Guidance",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 51,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-34.png",
+        "sha256": "4d2049da2beb4df7c48bd1e24e5771ef7035d947d6df325664bfea18be5bdad4",
+        "bytes": 142258
+      },
+      "observed_heading": [
+        "Guidance work area"
+      ],
+      "accessibility_excerpt": [
+        "Guidance work area",
+        "Research help and guidance work area"
+      ]
+    },
+    {
+      "id": 35,
+      "page": "Shortcuts",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 53,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-35.png",
+        "sha256": "1141306d0d81c489813f8e24d462a290a7d2af0e7168182549cc2cda39422be3",
+        "bytes": 130649
+      },
+      "observed_heading": [
+        "Shortcuts work area"
+      ],
+      "accessibility_excerpt": [
+        "Shortcuts work area",
+        "Verified keyboard shortcuts work area"
+      ]
+    },
+    {
+      "id": 36,
+      "page": "Preferences",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 48,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-36.png",
+        "sha256": "a828e11d712ba2f175e99ea019f7f923b592099af86735937c740f400d8d5eae",
+        "bytes": 81108
+      },
+      "observed_heading": [
+        "Preferences work area"
+      ],
+      "accessibility_excerpt": [
+        "Preferences work area"
+      ]
+    },
+    {
+      "id": 37,
+      "page": "Activity",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 44,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-37.png",
+        "sha256": "84fef1bde3736f52304fb03e5f995a07a51318045389ecc581d5b0b580164efe",
+        "bytes": 76819
+      },
+      "observed_heading": [
+        "Activity work area"
+      ],
+      "accessibility_excerpt": [
+        "Activity work area"
+      ]
+    },
+    {
+      "id": 38,
+      "page": "About",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 53,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-38.png",
+        "sha256": "a48f720a84c6cf08bfb176e433f101301f2d1c35575fddd75d2d3fafbd162a63",
+        "bytes": 140601
+      },
+      "observed_heading": [
+        "About work area"
+      ],
+      "accessibility_excerpt": [
+        "About work area",
+        "About ResearchWeave work area"
+      ]
+    },
+    {
+      "id": 39,
+      "page": "Project Metadata",
+      "method": "Ctrl+K; type exact registry label; Enter",
+      "navigation": "PASS",
+      "atspi_work_area": true,
+      "atspi_nodes": 47,
+      "placeholder_expected": false,
+      "placeholder_text_seen": false,
+      "screenshot": {
+        "path": "route-39.png",
+        "sha256": "bc2a80cb227b2743669d3386a112c31d7af9773fd978a3c9571e666f13626874",
+        "bytes": 112736
+      },
+      "observed_heading": [
+        "Project Metadata work area"
+      ],
+      "accessibility_excerpt": [
+        "Project Metadata work area"
+      ]
+    }
+  ],
+  "resize": {
+    "compact": {
+      "requested": [
+        900,
+        620
+      ],
+      "actual_xdotool": "WINDOW=2097156\nX=10\nY=48\nWIDTH=900\nHEIGHT=620\nSCREEN=0",
+      "atspi_nodes": 37,
+      "image": {
+        "path": "resize-compact.png",
+        "sha256": "2f141e3884b09d88730d1a5e19fad91a64b8ed193d9f7c77a7f4215fac86cbd3",
+        "bytes": 94002
+      }
+    },
+    "large": {
+      "requested": [
+        1280,
+        800
+      ],
+      "actual_xdotool": "WINDOW=2097156\nX=10\nY=48\nWIDTH=1280\nHEIGHT=800\nSCREEN=0",
+      "atspi_nodes": 47,
+      "image": {
+        "path": "resize-large.png",
+        "sha256": "d96dca40a88839ddfe9401acb00fddf06a96c4726faa07616460da1944db5e1e",
+        "bytes": 112703
+      }
+    }
+  },
+  "keyboard": [
+    {
+      "key": "F6",
+      "window_alive": true,
+      "atspi_nodes": 47,
+      "image": {
+        "path": "key-F6.png",
+        "sha256": "bc2a80cb227b2743669d3386a112c31d7af9773fd978a3c9571e666f13626874",
+        "bytes": 112736
+      }
+    },
+    {
+      "key": "shift+F6",
+      "window_alive": true,
+      "atspi_nodes": 47,
+      "image": {
+        "path": "key-shift-F6.png",
+        "sha256": "d96dca40a88839ddfe9401acb00fddf06a96c4726faa07616460da1944db5e1e",
+        "bytes": 112703
+      }
+    },
+    {
+      "key": "ctrl+k",
+      "window_alive": true,
+      "atspi_nodes": 47,
+      "image": {
+        "path": "key-ctrl-k.png",
+        "sha256": "d96dca40a88839ddfe9401acb00fddf06a96c4726faa07616460da1944db5e1e",
+        "bytes": 112703
+      }
+    },
+    {
+      "key": "Escape",
+      "window_alive": true,
+      "atspi_nodes": 47,
+      "image": {
+        "path": "key-Escape.png",
+        "sha256": "d8dadfd3898036a0491208515a9c3c4aa63a1db3a3df1232d6de95237bca50ff",
+        "bytes": 112610
+      }
+    }
+  ],
+  "placeholder_ids_from_source_inventory": [],
+  "passes": 40,
+  "unverified": 0,
+  "ui_source_sha256_after": "1d8092dd054c6c3ce0dd6b26aefe9d15840faa13f8354fb0dc8955c0a750218f",
+  "host_source_sha256_after": "e03ea640f8cb2bee64cc87604da2bca58a9084001cacd06a960817063f24360b",
+  "source_changed_during_audit": false,
+  "placeholder_source_disagreement": []
+}

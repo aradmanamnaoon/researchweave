@@ -126,10 +126,10 @@ if not match:
 pages = re.findall(r'^\s*"([^"]+)",\s*$', match.group(1), re.M)
 if len(pages) != 40 or len(set(pages)) != 40:
     raise SystemExit(f"Wrong page registry: {len(pages)}")
-# Search (3) and Reader (6) are real native workflows in the UX candidate.
-# This inventory is independent of the screenshot/AT-SPI observations;
-# disagreement fails below rather than silently accepting a placeholder.
-placeholders = {8, 25, 26, 27, 33, 34, 35, 38}
+# All forty destinations now have dedicated UI actions in the candidate.
+# Functional acceptance is handled separately; source presence is NOT task
+# completion. The static set is checked against the native AT-SPI content.
+placeholders = set()
 def run(*args, timeout=10, check=True):
     return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                           text=True, timeout=timeout, check=check)

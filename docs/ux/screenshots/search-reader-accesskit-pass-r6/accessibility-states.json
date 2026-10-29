@@ -1,0 +1,272 @@
+{
+  "result": "PASS",
+  "checks": [
+    {
+      "control": "Read previous source text page",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read next source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read previous source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read next source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read previous source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read next source text page",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read previous source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read next source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read previous source text page",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read next source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Previous 50 sources",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Next 50 sources",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Previous 50 sources",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Next 50 sources",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Previous 50 sources",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Next 50 sources",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    }
+  ],
+  "mismatches": [],
+  "disabled_boundary_clicks": [
+    {
+      "control": "Read previous source text page",
+      "status_unchanged": true,
+      "content_unchanged": true
+    },
+    {
+      "control": "Read next source text page",
+      "status_unchanged": true,
+      "content_unchanged": true
+    },
+    {
+      "control": "Previous 50 sources",
+      "status_unchanged": true,
+      "content_unchanged": true
+    },
+    {
+      "control": "Next 50 sources",
+      "status_unchanged": true,
+      "content_unchanged": true
+    }
+  ]
+}

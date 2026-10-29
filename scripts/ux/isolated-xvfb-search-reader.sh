@@ -157,7 +157,20 @@ target_body = (
 decoy_body = "Control material: colour, music, baseline. No matching Persian term."
 absent_query = "NO_MATCH_7e2d9f_random"
 unicode_query = "پژوهش"
+long_title = "Synthetic long Reader · یونیکد Ελληνικά 🧠"
+long_query = "LONG_PAGE_SENTINEL_8421"
+long_line = "یادگیری و حافظه · γνωστική επιστήμη · 研究資料 🧠 📚 · café naïve β Ω · e\u0301 | "
+long_body = (
+    f"LONG_PAGE_SENTINEL_8421 — private GUI paging fixture.\n"
+    + (long_line * 250)[:16835]
+    + "\nEND_OF_LONG_SOURCE_8421 🧪\n"
+)
+assert len(long_body) > 16000 and len(long_body.encode("utf-8")) > len(long_body)
+assert len(target_body) == 207, "preserve the original 207-character Reader test"
 observations: list[dict[str, str]] = []
+accessibility_state_checks: list[dict[str, Any]] = []
+accessibility_state_mismatches: list[dict[str, Any]] = []
+disabled_boundary_click_checks: list[dict[str, str | bool]] = []
 
 
 def run(*args: str, timeout: float = 12, input_text: str | None = None) -> subprocess.CompletedProcess[str]:
@@ -287,6 +300,70 @@ def text_of(label: str) -> str:
     return result
 
 
+def require_enabled(label: str, expected: bool) -> None:
+    node = find(label)
+    state = node.getState()
+    actual = state.contains(pyatspi.STATE_ENABLED)
+    check = {
+        "control": label,
+        "role": str(node.getRoleName()),
+        "expected_enabled": expected,
+        "actual_enabled": actual,
+        "actual_sensitive": state.contains(pyatspi.STATE_SENSITIVE),
+        "actual_showing": state.contains(pyatspi.STATE_SHOWING),
+        "actual_visible": state.contains(pyatspi.STATE_VISIBLE),
+        "atspi_states": [str(value) for value in state.getStates()],
+    }
+    accessibility_state_checks.append(check)
+    if actual != expected:
+        accessibility_state_mismatches.append(check)
+        print(f"SEARCH_READER_ATSPI_ENABLED_MISMATCH {json.dumps(check)}", flush=True)
+
+
+def disabled_boundary_click_is_inert(label: str, status_fragment: str, *, reader: bool) -> None:
+    """Physically click the Xvfb button and verify no source/page navigation."""
+    before_status = wait_name_fragment(status_fragment)
+    reader_label = "Checksum-verified local source text; selectable and read-only"
+    before_content = (text_of(reader_label) if reader else
+                      sorted(n for n in names() if n.startswith("Open source ")))
+    node = find(label)
+    rect = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+    assert rect.width > 0 and rect.height > 0, f"NO HIT TARGET FOR DISABLED BOUNDARY: {label}"
+    run("xdotool", "mousemove", str(rect.x + rect.width // 2),
+        str(rect.y + rect.height // 2), "click", "1")
+    time.sleep(0.35)
+    assert_running()
+    after_status = wait_name_fragment(status_fragment)
+    after_content = (text_of(reader_label) if reader else
+                     sorted(n for n in names() if n.startswith("Open source ")))
+    assert before_status == after_status and before_content == after_content, (
+        f"DISABLED BOUNDARY CLICK CHANGED PAGE: {label!r}; "
+        f"before={before_status!r}, after={after_status!r}"
+    )
+    disabled_boundary_click_checks.append({"control": label, "status_unchanged": True,
+                                           "content_unchanged": True})
+    print(f"SEARCH_READER_DISABLED_BOUNDARY_CLICK_INERT_OK {label}", flush=True)
+
+
+def exact_reader_page(body: str, offset: int, label: str) -> None:
+    expected = body[offset:offset + 8000]
+    status = wait_name_fragment(
+        f"Reader operation status Verified text: characters {offset + 1}–{offset + len(expected)} of {len(body)}."
+    )
+    actual = text_of("Checksum-verified local source text; selectable and read-only")
+    assert actual == expected, (
+        f"{label}: expected Unicode scalars {offset + 1}–{offset + len(expected)}, "
+        f"actual {len(actual)}; expected_sha256="
+        f"{hashlib.sha256(expected.encode('utf-8')).hexdigest()} actual_sha256="
+        f"{hashlib.sha256(actual.encode('utf-8')).hexdigest()}"
+    )
+    assert ("More text available." if offset + len(expected) < len(body) else "End of source.") in status
+    require_enabled("Read previous source text page", offset > 0)
+    require_enabled("Read next source text page", offset + len(expected) < len(body))
+    print(f"SEARCH_READER_{label}_OK offset={offset} scalars={len(actual)} "
+          f"sha256={hashlib.sha256(actual.encode('utf-8')).hexdigest()}", flush=True)
+
+
 def screenshot(label: str, window: str) -> None:
     path = out / f"{label}.png"
     run("import", "-window", window, str(path), timeout=25)
@@ -410,6 +487,118 @@ try:
     )
     print("SEARCH_READER_LIST_AND_RETURN_OK", flush=True)
 
+    # Preserve the above 207-character test and independently exercise a real
+    # multiline, multilingual source exceeding two complete Reader pages.
+    click("Sources activity")
+    click("Library workspace screen")
+    paste("Source title", long_title)
+    paste("Source text", long_body)
+    click("Add source")
+    time.sleep(0.45)
+    click("Command palette")
+    paste("Command palette", "Search")
+    run("xdotool", "key", "--clearmodifiers", "Return")
+    find("Search work area")
+    paste("Local source search query", long_query)
+    click("Run local project source search")
+    wait_name_fragment("Local source search status 1 result(s).")
+    click(f"Read local source {long_title}")
+    find("Reader work area")
+    exact_reader_page(long_body, 0, "LONG_PAGE_1")
+    screenshot("07-reader-long-page-1", window)
+    disabled_boundary_click_is_inert(
+        "Read previous source text page",
+        "Reader operation status Verified text: characters 1–8000 of",
+        reader=True,
+    )
+    click("Read next source text page")
+    exact_reader_page(long_body, 8000, "LONG_PAGE_2")
+    screenshot("08-reader-long-page-2", window)
+    click("Read next source text page")
+    exact_reader_page(long_body, 16000, "LONG_PAGE_3")
+    screenshot("09-reader-long-page-3-end", window)
+    disabled_boundary_click_is_inert(
+        "Read next source text page",
+        "Reader operation status Verified text: characters 16001–16916 of",
+        reader=True,
+    )
+    click("Read previous source text page")
+    exact_reader_page(long_body, 8000, "LONG_PREVIOUS_TO_2")
+    click("Read previous source text page")
+    exact_reader_page(long_body, 0, "LONG_PREVIOUS_TO_1")
+    screenshot("10-reader-long-page-return", window)
+    print(f"SEARCH_READER_LONG_UNICODE_PAGING_OK scalars={len(long_body)} "
+          f"utf8_bytes={len(long_body.encode('utf-8'))}", flush=True)
+
+    # Add 50 distinct short sources using actual Library controls and then
+    # exercise 50-row source-list paging from the Reader, including reversal.
+    click("Sources activity")
+    click("Library workspace screen")
+    for number in range(1, 51):
+        title = f"Synthetic Reader List {number:03d}"
+        paste("Source title", title)
+        paste("Source text", f"Private GUI-created list fixture {number:03d}: حافظه 🧪")
+        click("Add source")
+        time.sleep(0.12)
+        if number % 10 == 0:
+            assert_running()
+            print(f"SEARCH_READER_LIST_CREATION_PROGRESS {number}/50", flush=True)
+    click("Command palette")
+    paste("Command palette", "Reader")
+    run("xdotool", "key", "--clearmodifiers", "Return")
+    find("Reader work area")
+    click("Load local project sources for reader")
+    wait_name_fragment("Showing 50 source(s), starting at 1.")
+    require_enabled("Previous 50 sources", False)
+    require_enabled("Next 50 sources", True)
+    first_page_titles = {name for name in names() if name.startswith("Open source ")}
+    screenshot("11-reader-source-list-1-to-50", window)
+    disabled_boundary_click_is_inert(
+        "Previous 50 sources", "Showing 50 source(s), starting at 1.", reader=False
+    )
+    click("Next 50 sources")
+    wait_name_fragment("Showing 3 source(s), starting at 51.")
+    require_enabled("Previous 50 sources", True)
+    require_enabled("Next 50 sources", False)
+    second_page_titles = {name for name in names() if name.startswith("Open source ")}
+    assert second_page_titles and not first_page_titles.intersection(second_page_titles), (
+        "source pagination returned stale or overlapping accessible rows"
+    )
+    screenshot("12-reader-source-list-51-to-53", window)
+    disabled_boundary_click_is_inert(
+        "Next 50 sources", "Showing 3 source(s), starting at 51.", reader=False
+    )
+    click("Previous 50 sources")
+    wait_name_fragment("Showing 50 source(s), starting at 1.")
+    require_enabled("Previous 50 sources", False)
+    require_enabled("Next 50 sources", True)
+    assert {name for name in names() if name.startswith("Open source ")} == first_page_titles, (
+        "source list did not return the original 50-row model"
+    )
+    screenshot("13-reader-source-list-back-to-1", window)
+    print("SEARCH_READER_50_SOURCE_LIST_PAGING_OK first=50 second=3 total=53", flush=True)
+
+    # Check native accessibility *after* the entire real-GUI workflow so a
+    # mismatch still leaves complete Reader and source-list paging evidence.
+    # Slint's accessibility enabled state is a separate property from its
+    # widget enabled state; never accept a false positive at a disabled edge.
+    accessibility_receipt = {
+        "result": "FAIL" if accessibility_state_mismatches else "PASS",
+        "checks": accessibility_state_checks,
+        "mismatches": accessibility_state_mismatches,
+        "disabled_boundary_clicks": disabled_boundary_click_checks,
+    }
+    (out / "accessibility-states.json").write_text(
+        json.dumps(accessibility_receipt, ensure_ascii=False, indent=2), encoding="utf-8"
+    )
+    assert accessibility_state_checks, "no AT-SPI enabled-state checks executed"
+    assert not accessibility_state_mismatches, (
+        f"AT-SPI enabled-state FAIL: {len(accessibility_state_mismatches)} mismatch(es) "
+        f"in {len(accessibility_state_checks)} checks; "
+        f"see {out / 'accessibility-states.json'}"
+    )
+    print(f"SEARCH_READER_ATSPI_ENABLED_OK checks={len(accessibility_state_checks)}", flush=True)
+
     assert_running()
     project_sqlites = list(Path(os.environ["RESEARCHWEAVE_HOST_DATA_DIR"]).glob("projects/*/data/project.sqlite"))
     assert len(project_sqlites) == 1 and project_sqlites[0].stat().st_size > 0, (
@@ -430,8 +619,14 @@ try:
         "slint_sha256": os.environ["RW_SR_SLINT_SHA"],
         "main_rs_sha256": os.environ["RW_SR_HOST_SHA"],
         "script_sha256": os.environ["RW_SR_SCRIPT_SHA"],
-        "synthetic_source_count": 2,
+        "synthetic_source_count": 53,
         "exact_reader_text_sha256": hashlib.sha256(target_body.encode("utf-8")).hexdigest(),
+        "long_reader_text_sha256": hashlib.sha256(long_body.encode("utf-8")).hexdigest(),
+        "long_reader_unicode_scalars": len(long_body),
+        "long_reader_utf8_bytes": len(long_body.encode("utf-8")),
+        "accessibility_state_checks": accessibility_state_checks,
+        "accessibility_state_mismatches": accessibility_state_mismatches,
+        "disabled_boundary_clicks": disabled_boundary_click_checks,
         "tested": [
             "actual project creation and source library add",
             "empty and zero-result search statuses",
@@ -439,12 +634,15 @@ try:
             "click search result opens Reader with exact Unicode text",
             "Reader missing/empty IDs fail visibly without stale text",
             "Reader source list reopens correct text and returns to Search",
+            "multilingual Reader content is exact across three 8,000-character pages",
+            "Reader Next/Previous actions, boundaries and return pages are exact",
+            "real GUI-created 53-source list paginates 50+3 with Previous reversal",
+            "Reader and source-list enabled/disabled states match AT-SPI STATE_ENABLED",
         ],
         "not_tested": [
             "PDF/OCR search",
             "human screen-reader navigation",
             "10,000 source performance",
-            "8,000-character source pagination",
             "Windows and macOS native packages",
         ],
         "captures": observations,

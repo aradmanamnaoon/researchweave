@@ -2884,6 +2884,147 @@ fn evidence_read_at(
     Ok(result)
 }
 
+/// Evidence notes are explicitly attached to an existing project source. A
+/// note is a human interpretation, not a verified quotation or anchor.
+fn evidence_note_arguments(
+    source_id: &str,
+    title: &str,
+    body: &str,
+) -> Result<serde_json::Value, String> {
+    let source_id = source_id.trim();
+    let title = title.trim();
+    let body = body.trim();
+    if source_id.is_empty() || source_id.len() > 128 || source_id.chars().any(char::is_control) {
+        return Err("Enter a valid existing source ID (at most 128 UTF-8 bytes)".into());
+    }
+    if title.is_empty() || title.chars().count() > 300 {
+        return Err("Evidence note title must contain 1–300 characters".into());
+    }
+    if body.is_empty() || body.chars().count() > 250_000 {
+        return Err("Evidence note body must contain 1–250,000 characters".into());
+    }
+    Ok(serde_json::json!({
+        "source_id": source_id,
+        "title": title,
+        "body": body,
+    }))
+}
+
+fn require_matching_evidence_note_preview(
+    pending: &PendingEvidenceAction,
+    source_id: &str,
+    title: &str,
+    body: &str,
+) -> Result<(), String> {
+    if pending.surface != "evidence" || pending.operation != "evidence.note" {
+        return Err("The active approval is for another research workflow. Preview this evidence note again.".into());
+    }
+    let current = evidence_note_arguments(source_id, title, body)?;
+    for field in ["source_id", "title", "body"] {
+        if pending.arguments[field] != current[field] {
+            return Err("Evidence note fields changed after preview. Preview the current text again before recording.".into());
+        }
+    }
+    Ok(())
+}
+
+fn require_ai_preview_surface(pending: &PendingAiAction, expected: &str) -> Result<(), String> {
+    if pending.surface != expected {
+        return Err(
+            "The active preview belongs to another workspace. Preview this action again before recording.".into(),
+        );
+    }
+    Ok(())
+}
+
+fn clear_evidence_draft_on_project_switch(ui: &MainWindow) {
+    ui.set_evidence_draft_source_id("".into());
+    ui.set_evidence_draft_title("".into());
+    ui.set_evidence_draft_body("".into());
+    ui.set_evidence_last_note_id("".into());
+}
+
+/// Drop previous-project result text and UI-only selections before exposing
+/// another project's workspaces. This does not modify stored project data.
+fn clear_project_scoped_view_state(ui: &MainWindow) {
+    clear_evidence_draft_on_project_switch(ui);
+    ui.set_notebook_draft("".into());
+    ui.set_manuscript_draft_id("".into());
+    ui.set_manuscript_draft_section("".into());
+    ui.set_manuscript_draft_citations("".into());
+    ui.set_manuscript_draft_body("".into());
+    ui.set_manuscript_word_count(0);
+    ui.set_manuscript_character_count(0);
+    ui.set_writing_find_match(false);
+    ui.set_writing_ai_use_found_text(false);
+    ui.set_manuscript_headings(ModelRc::new(
+        VecModel::from(Vec::<ManuscriptHeading>::new()),
+    ));
+    ui.set_research_summary("Refresh the current project's research metadata.".into());
+    ui.set_project_metadata_results("Inspect the current project before editing metadata.".into());
+    ui.set_question_results("Preview a question in the current project.".into());
+    ui.set_protocol_results("Preview a protocol in the current project.".into());
+    ui.set_protocol_export_id("".into());
+    ui.set_protocol_export_receipt("".into());
+    ui.set_library_results("Refresh sources in this project.".into());
+    ui.set_reference_results("Refresh references in this project.".into());
+    ui.set_review_results("Load this project's review records.".into());
+    ui.set_extraction_results("Load this project's extraction records.".into());
+    ui.set_analysis_results("Import or inspect a dataset in the current project.".into());
+    ui.set_variable_results("Inspect variables in the current project.".into());
+    ui.set_statistics_result_title("No analysis run for this project yet".into());
+    ui.set_statistics_result_primary("Choose a dataset revision and method.".into());
+    ui.set_statistics_result_secondary("".into());
+    ui.set_statistics_result_provenance("".into());
+    ui.set_analysis_report_results("Load reports from this project.".into());
+    ui.set_mixed_methods_results("Load this project's mixed-methods records.".into());
+    ui.set_qualitative_results("Inspect this project's qualitative records.".into());
+    ui.set_agent_results("Open this project's assistant history or preview an action.".into());
+    ui.set_agent_action_results("No action selected for this project.".into());
+    ui.set_project_activity_results("Load current project activity.".into());
+    ui.set_diagnostics_results("Run diagnostics for the current project.".into());
+    ui.set_context_ai_open(false);
+    ui.set_context_ai_ready(false);
+    ui.set_context_ai_busy(false);
+    ui.set_context_ai_output("".into());
+    ui.set_context_ai_preview_summary(
+        "Select a current-project context before previewing AI.".into(),
+    );
+    ui.set_writing_results("Load or preview a current-project manuscript section.".into());
+    ui.set_notebook_results("Load or edit this project's notebook.".into());
+    ui.set_pdf_local_path("".into());
+    ui.set_pdf_page_count(0);
+    ui.set_pdf_page_number(1);
+    ui.set_pdf_matches(0);
+    ui.set_pdf_highlight_visible(false);
+    ui.set_pdf_image(slint::Image::default());
+    ui.set_pdf_status("Choose a PDF for the current project.".into());
+}
+
+fn evidence_note_history_at(
+    project: &Path,
+    note_id: &str,
+    data_root: &Path,
+) -> Result<serde_json::Value, String> {
+    let note_id = note_id.trim();
+    let parsed = Uuid::parse_str(note_id)
+        .map_err(|_| "Enter the actual UUID returned when an evidence note was recorded")?;
+    let result = evidence_read_at(
+        project,
+        "evidence.note_history",
+        serde_json::json!({"note_id": parsed.to_string()}),
+        data_root,
+    )?;
+    let data = &result["data"];
+    if data["note_id"].as_str() != Some(parsed.to_string().as_str())
+        || data["source_id"].as_str().is_none_or(str::is_empty)
+        || data["revisions"].as_array().is_none_or(Vec::is_empty)
+    {
+        return Err("Evidence note history is incomplete or does not match this ID".into());
+    }
+    Ok(result)
+}
+
 fn pretty_result_data(result: &serde_json::Value) -> String {
     serde_json::to_string_pretty(&result["data"])
         .unwrap_or_else(|_| "Operation completed, but its result could not be formatted".into())
@@ -4337,6 +4478,79 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pending_ai: Rc<RefCell<Option<PendingAiAction>>> = Rc::new(RefCell::new(None));
     let selected_agent_action: Rc<RefCell<Option<SelectedAgentAction>>> =
         Rc::new(RefCell::new(None));
+    app.on_preview_evidence_note({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        move |source_id, title, body| {
+            let Some(ui) = weak.upgrade() else { return };
+            // Any new preview attempt invalidates the previous approval.
+            pending_evidence.borrow_mut().take();
+            let result = evidence_note_arguments(
+                source_id.as_str(),
+                title.as_str(),
+                body.as_str(),
+            )
+            .and_then(|arguments| {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or_else(|| "Open a project before creating evidence notes".to_owned())?;
+                let root = host_data_root()?;
+                evidence_preview_at(&project, "evidence.note", "evidence", arguments, &root)
+            });
+            match result {
+                Ok((pending, preview)) => {
+                    *pending_evidence.borrow_mut() = Some(pending);
+                    ui.set_evidence_results(
+                        format!(
+                            "Preview only: human-authored note linked to the selected, existing source. No text anchor or verified quotation was created. Recording requires explicit approval and the same project revision.\n{}",
+                            pretty_result_data(&preview)
+                        )
+                        .into(),
+                    );
+                    ui.set_status("Evidence note preview ready; nothing recorded yet".into());
+                }
+                Err(error) => {
+                    ui.set_evidence_results(format!("Cannot preview evidence note: {error}").into());
+                    ui.set_status(error.into());
+                }
+            }
+        }
+    });
+    app.on_load_evidence_note_history({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |note_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = active_project
+                .borrow()
+                .clone()
+                .ok_or_else(|| "Open a project before loading evidence note history".to_owned())
+                .and_then(|project| {
+                    let root = host_data_root()?;
+                    evidence_note_history_at(&project, note_id.as_str(), &root)
+                });
+            match result {
+                Ok(history) => {
+                    ui.set_evidence_results(
+                        format!(
+                            "Recorded evidence note history, read from the current project:\n{}",
+                            pretty_result_data(&history)
+                        )
+                        .into(),
+                    );
+                    ui.set_status("Evidence note history loaded by exact ID".into());
+                }
+                Err(error) => {
+                    ui.set_evidence_results(
+                        format!("Unable to load evidence note history: {error}").into(),
+                    );
+                    ui.set_status(error.into());
+                }
+            }
+        }
+    });
     app.on_preview_question({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -4488,6 +4702,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_apply_evidence_note_preview({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<(serde_json::Value, i64), String> {
+                if ui.get_page() != 8 {
+                    return Err("Open Evidence to approve a note".into());
+                }
+                let pending = pending_evidence
+                    .borrow()
+                    .clone()
+                    .ok_or("Preview this evidence note before recording")?;
+                require_matching_evidence_note_preview(
+                    &pending,
+                    ui.get_evidence_draft_source_id().as_str(),
+                    ui.get_evidence_draft_title().as_str(),
+                    ui.get_evidence_draft_body().as_str(),
+                )?;
+                let path = active_project.borrow().clone().ok_or("Open a project first")?;
+                let root = host_data_root()?;
+                evidence_execute_pending(&pending, &path, &root)
+            })();
+            match result {
+                Ok((executed, revision)) => {
+                    pending_evidence.borrow_mut().take();
+                    if let Some(note_id) = executed.pointer("/data/note_id").and_then(serde_json::Value::as_str) {
+                        ui.set_evidence_last_note_id(note_id.into());
+                    }
+                    ui.set_evidence_results(
+                        format!(
+                            "Human-authored evidence note recorded in the current project. The note ID above can be used to inspect immutable revision history; this is not a verified quote or text anchor.\n{}",
+                            pretty_result_data(&executed)
+                        ).into(),
+                    );
+                    ui.set_project_revision(revision as i32);
+                    ui.set_status("Evidence note recorded through exact preview and approval".into());
+                }
+                Err(error) => {
+                    // A failed or stale approval cannot be reused. Other
+                    // operation previews must be prepared on their own route.
+                    pending_evidence.borrow_mut().take();
+                    ui.set_evidence_results(error.clone().into());
+                    ui.set_status(error.into());
+                }
+            }
+        }
+    });
     app.on_apply_evidence_preview({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -4498,6 +4761,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ui) = weak.upgrade() {
                 let pending = pending_evidence.borrow().clone();
                 let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                    (Some(_), Some(pending)) if pending.surface == "evidence" => {
+                        Err("Evidence notes require the Evidence-specific preview and approval button".into())
+                    }
                     (Some(path), Some(pending)) => host_data_root()
                         .and_then(|root| evidence_execute_pending(pending, path, &root)),
                     (None, _) => Err("Open a project first".into()),
@@ -4552,6 +4818,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ui.set_notebook_results(message.into());
                         } else if surface == "qualitative" {
                             ui.set_qualitative_results(message.into());
+                        } else if surface == "evidence" {
+                            ui.set_evidence_results(
+                                format!(
+                                    "{message}\nUse the returned note_id to load its real revision history. This is a human note, not a verified quotation or anchor."
+                                )
+                                .into(),
+                            );
                         } else {
                             ui.set_review_results(message.into());
                         }
@@ -4583,6 +4856,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 ui.set_notebook_results(error.into());
                             } else if pending.surface == "qualitative" {
                                 ui.set_qualitative_results(error.into());
+                            } else if pending.surface == "evidence" {
+                                ui.set_evidence_results(error.into());
                             } else {
                                 ui.set_review_results(error.into());
                             }
@@ -6150,53 +6425,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-    app.on_apply_ai_preview({
+    // A provider button must never approve an assistant proposal and vice
+    // versa. Their shared pending store is always matched to the invoking
+    // surface before the canonical revision/approval-checked executor runs.
+    let make_scoped_ai_apply = {
         let weak = app.as_weak();
         let active_project = active_project.clone();
         let pending_ai = pending_ai.clone();
-        move || {
-            if let Some(ui) = weak.upgrade() {
-                let pending = pending_ai.borrow().clone();
-                let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
-                    (Some(path), Some(pending)) => {
-                        host_data_root().and_then(|root| ai_execute_pending(pending, path, &root))
-                    }
-                    (None, _) => Err("Open a project first".into()),
-                    (_, None) => Err("Preview an assistant action before recording it".into()),
-                };
+        move |expected_surface: &'static str| {
+            let weak = weak.clone();
+            let active_project = active_project.clone();
+            let pending_ai = pending_ai.clone();
+            move || {
+                let Some(ui) = weak.upgrade() else { return };
+                let result = (|| -> Result<serde_json::Value, String> {
+                    let pending = pending_ai
+                        .borrow()
+                        .clone()
+                        .ok_or("Preview an action in this workspace before recording")?;
+                    require_ai_preview_surface(&pending, expected_surface)?;
+                    let path = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a project first")?;
+                    let root = host_data_root()?;
+                    ai_execute_pending(&pending, &path, &root)
+                })();
+                // Every click consumes the pending approval, including failed
+                // surface matches, preventing replay after navigation.
+                pending_ai.borrow_mut().take();
                 match result {
                     Ok(executed) => {
-                        let surface = pending
-                            .as_ref()
-                            .map(|item| item.surface.as_str())
-                            .unwrap_or_default();
-                        let message = format!(
-                            "Recorded through approved local assistant command:\n{}",
-                            pretty_result_data(&executed)
-                        );
-                        if surface == "agent" {
-                            ui.set_agent_results(message.into());
-                        } else if surface == "provider" {
-                            // Never display the preview arguments or endpoint in status.
+                        if expected_surface == "provider" {
                             ui.set_provider_results("Approved provider metadata change recorded locally; connectivity not checked. Refresh the profile list to verify state.".into());
+                        } else {
+                            ui.set_agent_results(
+                                format!(
+                                    "Recorded through approved local assistant command:\n{}",
+                                    pretty_result_data(&executed)
+                                )
+                                .into(),
+                            );
                         }
-                        ui.set_status("Previewed assistant operation recorded and audited".into());
-                        pending_ai.borrow_mut().take();
+                        ui.set_status("Scoped preview action recorded and audited".into());
+                    }
+                    Err(error) if expected_surface == "provider" => {
+                        ui.set_provider_results("Provider profile approval was not recorded. Preview this exact provider change in Providers again.".into());
+                        ui.set_status(format!("Provider approval blocked: {error}").into());
                     }
                     Err(error) => {
-                        let provider = pending.as_ref().is_some_and(|item| item.surface == "provider");
-                        if provider {
-                            ui.set_provider_results("Provider change failed; no connectivity or credential check performed.".into());
-                            ui.set_status("Provider change failed".into());
-                        } else {
-                            ui.set_agent_results(error.clone().into());
-                            ui.set_status(error.into());
-                        }
+                        ui.set_agent_results(error.clone().into());
+                        ui.set_status(error.into());
                     }
                 }
             }
         }
-    });
+    };
+    app.on_apply_agent_preview(make_scoped_ai_apply("agent"));
+    app.on_apply_provider_preview(make_scoped_ai_apply("provider"));
     app.on_load_assistant_history({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -7859,11 +8145,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_restore_backup({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        let pending_ai = pending_ai.clone();
+        let draft_session = quick_note_draft_session.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
+        let quick_timer = quick_note_timer.clone();
         move |encrypted, archive, destination, password| {
+            if let Some(ui) = weak.upgrade() {
+                if let Err(error) = finish_quick_note_before_project_switch(
+                    &ui,
+                    active_project.borrow().as_deref(),
+                    &quick_timer,
+                ) {
+                    ui.set_status(format!("Restore canceled: current note could not be saved: {error}").into());
+                    return;
+                }
+            }
             if let Some(ui) = weak.upgrade() {
                 match restore_backup(encrypted, &archive, &destination, &password) {
                     Ok((info, path, message)) => {
-                        *active_project.borrow_mut() = Some(path);
+                        timer.stop();
+                        pending_evidence.borrow_mut().take();
+                        pending_physical_export.borrow_mut().take();
+                        pending_ai.borrow_mut().take();
+                        *active_project.borrow_mut() = Some(path.clone());
+                        clear_project_scoped_view_state(&ui);
+                        reset_quick_notes_for_project(&ui, &path);
+                        *draft_session.borrow_mut() = quick_notes::DraftSession::open(&path).ok();
+                        if let Err(error) = restore_writing_drafts(&ui, &path, &drafts) {
+                            ui.set_writing_results(format!("Restored project opened, but writing draft recovery needs attention: {error}").into());
+                        } else {
+                            resume_recovered_writing(&timer, &path, drafts.clone(), weak.clone());
+                        }
+                        reset_source_views(&ui, &info.id);
+                        ui.set_evidence_results(
+                            "Project changed. Preview a new evidence note or load its history from this project.".into(),
+                        );
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_recovery_results(message.clone().into());
@@ -8106,6 +8425,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
         let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
@@ -8129,10 +8449,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(info) => {
                         timer.stop();
+                        pending_evidence.borrow_mut().take();
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
+                        clear_project_scoped_view_state(&ui);
                         reset_quick_notes_for_project(&ui, Path::new(path.as_str()));
                         *draft_session.borrow_mut() =
                             quick_notes::DraftSession::open(Path::new(path.as_str())).ok();
@@ -8149,6 +8471,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             );
                         }
                         reset_source_views(&ui, &info.id);
+                        ui.set_evidence_results("Project changed. Evidence previews from another project are invalid. Enter an existing source ID to begin.".into());
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status("Project created".into());
@@ -8162,6 +8485,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_default_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
         let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
@@ -8185,10 +8509,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(info) => {
                         timer.stop();
+                        pending_evidence.borrow_mut().take();
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = find_managed_project(&info.id).ok();
+                        clear_project_scoped_view_state(&ui);
                         if let Some(project) = active_project.borrow().as_ref() {
                             reset_quick_notes_for_project(&ui, project);
                             *draft_session.borrow_mut() =
@@ -8205,6 +8531,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         }
                         reset_source_views(&ui, &info.id);
+                        ui.set_evidence_results("Project changed. Evidence previews from another project are invalid. Enter an existing source ID to begin.".into());
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status("Project created in managed local storage".into());
@@ -8218,6 +8545,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_open_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
         let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
@@ -8241,10 +8569,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(info) => {
                         timer.stop();
+                        pending_evidence.borrow_mut().take();
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
+                        clear_project_scoped_view_state(&ui);
                         reset_quick_notes_for_project(&ui, Path::new(path.as_str()));
                         *draft_session.borrow_mut() =
                             quick_notes::DraftSession::open(Path::new(path.as_str())).ok();
@@ -8261,6 +8591,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             );
                         }
                         reset_source_views(&ui, &info.id);
+                        ui.set_evidence_results("Project changed. Evidence previews from another project are invalid. Enter an existing source ID to begin.".into());
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status("Project opened".into());
@@ -8570,6 +8901,215 @@ mod tests {
         assert!(library_operation_at(&target, "add", "", "", &host).is_err());
         let reopened = ProjectStore::open(&target).unwrap().info().unwrap();
         assert_eq!(reopened.revision, revision);
+        std::fs::remove_dir_all(host).unwrap();
+    }
+
+    #[test]
+    fn evidence_note_rejects_empty_oversized_and_unbound_inputs() {
+        assert!(evidence_note_arguments("", "Title", "Body").is_err());
+        assert!(evidence_note_arguments("source", " ", "Body").is_err());
+        assert!(evidence_note_arguments("source", "Title", " ").is_err());
+        assert!(evidence_note_arguments("source\nother", "Title", "Body").is_err());
+        assert!(evidence_note_arguments("source", &"T".repeat(301), "Body").is_err());
+        assert!(evidence_note_arguments("source", "Title", &"B".repeat(250_001)).is_err());
+        let valid = evidence_note_arguments(" source-1 ", " عنوان ", " پژوهش ").unwrap();
+        assert_eq!(valid["source_id"], "source-1");
+        assert_eq!(valid["title"], "عنوان");
+        assert_eq!(valid["body"], "پژوهش");
+    }
+
+    #[test]
+    fn evidence_approval_rejects_cross_surface_and_changed_visible_draft() {
+        let id = Uuid::new_v4();
+        let mut pending = PendingEvidenceAction {
+            project_id: id,
+            project_path: PathBuf::from("synthetic-only"),
+            operation: "evidence.note".into(),
+            surface: "evidence".into(),
+            arguments: evidence_note_arguments("source-1", "Title", "Persian متن").unwrap(),
+            expected_revision: 2,
+        };
+        assert!(require_matching_evidence_note_preview(
+            &pending,
+            "source-1",
+            "Title",
+            "Persian متن"
+        )
+        .is_ok());
+        for (source, title, body) in [
+            ("source-2", "Title", "Persian متن"),
+            ("source-1", "Changed", "Persian متن"),
+            ("source-1", "Title", "Changed"),
+        ] {
+            assert!(require_matching_evidence_note_preview(&pending, source, title, body).is_err());
+        }
+        pending.surface = "question".into();
+        assert!(require_matching_evidence_note_preview(
+            &pending,
+            "source-1",
+            "Title",
+            "Persian متن"
+        )
+        .is_err());
+        pending.surface = "evidence".into();
+        pending.operation = "writing.section_save".into();
+        assert!(require_matching_evidence_note_preview(
+            &pending,
+            "source-1",
+            "Title",
+            "Persian متن"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn provider_and_assistant_approval_surfaces_cannot_be_interchanged() {
+        let mut pending = PendingAiAction {
+            project_id: Uuid::new_v4(),
+            project_path: PathBuf::from("synthetic-only"),
+            operation: "provider.configure".into(),
+            surface: "provider".into(),
+            arguments: serde_json::json!({}),
+            project_revision: 1,
+        };
+        assert!(require_ai_preview_surface(&pending, "provider").is_ok());
+        assert!(require_ai_preview_surface(&pending, "agent").is_err());
+        pending.surface = "agent".into();
+        assert!(require_ai_preview_surface(&pending, "agent").is_ok());
+        assert!(require_ai_preview_surface(&pending, "provider").is_err());
+    }
+
+    #[test]
+    fn evidence_note_preview_history_and_project_isolation_use_real_source() {
+        let host = std::env::temp_dir().join(format!("rw-evidence-note-ui-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&host).unwrap();
+        let project = host.join("alpha");
+        let other_project = host.join("beta");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Alpha",
+            true,
+            &host.join("create-alpha.sqlite"),
+        )
+        .unwrap();
+        load_project_with_audit(
+            other_project.to_str().unwrap(),
+            "Beta",
+            true,
+            &host.join("create-beta.sqlite"),
+        )
+        .unwrap();
+        let data_root = host.join("host-data");
+        library_operation_at(
+            &project,
+            "add",
+            "Local source",
+            "ثبت دادهٔ پژوهش",
+            &data_root,
+        )
+        .unwrap();
+        let sources = library_read_at(
+            &project,
+            "library.list",
+            serde_json::json!({"limit":10}),
+            &data_root,
+        )
+        .unwrap();
+        let source_id = sources["data"]["sources"][0]["source_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let revision_before = ProjectStore::open(&project)
+            .unwrap()
+            .info()
+            .unwrap()
+            .revision;
+        let arguments =
+            evidence_note_arguments(&source_id, "یادداشت نخست", "تفسیر انسانی").unwrap();
+        let (pending, preview) =
+            evidence_preview_at(&project, "evidence.note", "evidence", arguments, &data_root)
+                .unwrap();
+        assert_eq!(pending.surface, "evidence");
+        assert_eq!(preview["data"]["preview"], true);
+        assert_eq!(preview["data"]["simulated_result"]["source_id"], source_id);
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            revision_before,
+            "preview must not write the original project"
+        );
+        assert!(
+            evidence_execute_pending(&pending, &other_project, &data_root).is_err(),
+            "approval from another active project must fail"
+        );
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            revision_before
+        );
+        let (executed, revision) =
+            evidence_execute_pending(&pending, &project, &data_root).unwrap();
+        assert_eq!(revision, revision_before + 1);
+        assert_eq!(executed["data"]["source_id"], source_id);
+        assert_eq!(executed["data"]["evidence_class"], "human_note_unverified");
+        let note_id = executed["data"]["note_id"].as_str().unwrap();
+        Uuid::parse_str(note_id).unwrap();
+        let history = evidence_note_history_at(&project, note_id, &data_root).unwrap();
+        assert_eq!(history["data"]["note_id"], note_id);
+        assert_eq!(history["data"]["source_id"], source_id);
+        assert_eq!(history["data"]["revisions"][0]["title"], "یادداشت نخست");
+        assert_eq!(history["data"]["revisions"][0]["body"], "تفسیر انسانی");
+        assert_eq!(history["data"]["revisions"][0]["revision"], 1);
+        assert!(evidence_note_history_at(&other_project, note_id, &data_root).is_err());
+        assert!(evidence_note_history_at(&project, "invented-anchor", &data_root).is_err());
+        assert!(
+            evidence_note_history_at(&project, &Uuid::new_v4().to_string(), &data_root).is_err()
+        );
+        assert!(
+            evidence_execute_pending(&pending, &project, &data_root).is_err(),
+            "the approved preview must be revision-bound and cannot be replayed"
+        );
+        std::fs::remove_dir_all(host).unwrap();
+    }
+
+    #[test]
+    fn evidence_note_preview_rejects_nonexistent_source_without_mutating_project() {
+        let host = std::env::temp_dir().join(format!("rw-evidence-foreign-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&host).unwrap();
+        let project = host.join("project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "No sources",
+            true,
+            &host.join("created.sqlite"),
+        )
+        .unwrap();
+        let info_before = ProjectStore::open(&project).unwrap().info().unwrap();
+        let arguments = evidence_note_arguments(
+            &Uuid::new_v4().to_string(),
+            "Unverified note",
+            "This text must never be committed without its real source",
+        )
+        .unwrap();
+        let result = evidence_preview_at(
+            &project,
+            "evidence.note",
+            "evidence",
+            arguments,
+            &host.join("host-data"),
+        );
+        assert!(
+            result.is_err(),
+            "missing source ID should fail in the preview"
+        );
+        let info_after = ProjectStore::open(&project).unwrap().info().unwrap();
+        assert_eq!(info_after.revision, info_before.revision);
         std::fs::remove_dir_all(host).unwrap();
     }
 

@@ -157,6 +157,38 @@ import -window root "$screenshots/07-new-note.png"
 if [[ "${4:-}" == atspi ]]; then
   a11y_type "Quick note title" "Synthetic research plan"
   a11y_type "Quick note labels" "study, draft"
+  # Diagnose whether the editor is absent or merely deeper than the generic
+  # AT-SPI helper's 15-level traversal; capture the private tree, not user data.
+  python3 - "$screenshots/07a-note-editor-atspi.log" <<'PY'
+import pyatspi, sys
+lines = []
+def walk(node, depth=0):
+    if depth > 30: return
+    try:
+        name = str(node.name or '')
+        if any(token in name.lower() for token in ('quick note', 'expanded', 'save note', 'choose a note')):
+            rect = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+            lines.append(f'depth={depth} role={node.getRoleName()} name={name!r} rect=({rect.x},{rect.y},{rect.width},{rect.height})')
+        count = min(node.childCount, 300)
+    except Exception:
+        return
+    for index in range(count):
+        try:
+            child = node.getChildAtIndex(index)
+            if child is not None: walk(child, depth+1)
+        except Exception:
+            continue
+desk = pyatspi.Registry.getDesktop(0)
+for i in range(desk.childCount):
+    try:
+        app = desk.getChildAtIndex(i)
+        if 'researchweave' in str(app.name).lower(): walk(app)
+    except Exception:
+        continue
+open(sys.argv[1], 'w').write('\n'.join(lines)+'\n')
+print('NOTE_EDITOR_ATSPI_DIAGNOSTIC',len(lines),'\n'.join(lines),flush=True)
+PY
+  import -window root "$screenshots/07a-after-note-title-labels.png"
   a11y_type "Expanded quick note editor" "This is an isolated Xvfb note. Preserve every edit and revision."
 else
   xdotool mousemove --sync 945 "$((333-offset))" click 1
@@ -287,7 +319,67 @@ if [[ "${4:-}" == atspi ]]; then
   a11y_click "Preview the exact AI request without sending data"
   sleep 0.4
   import -window root "$screenshots/14-context-preview.png"
-  python3 scripts/ux/atspi_screen_walk.py "$screenshots/all-pages" | tee "$screenshots/all-pages.log"
+  # Restore the full workbench navigator before the separate 40-route audit.
+  # An open contextual assistant compresses the routed sidebar.
+  a11y_click "Close contextual AI panel"
+  sleep 0.35
+  # AT-SPI sometimes locates a valid SidebarItem but its D-Bus doAction()
+  # reports an empty invocation error. Keep the independent 40-route audit's
+  # real page-label assertions; fall back to an Xvfb-only physical click at
+  # the accessible node's actual hit target for that one rejected action.
+  # This never interacts with the visible Windows desktop or fabricates pages.
+  python3 - "$screenshots/all-pages" "$screenshots/all-pages/fallback-activations.log" <<'PY' | tee "$screenshots/all-pages.log"
+import sys
+import subprocess
+import time
+from pathlib import Path
+import pyatspi
+
+sys.path.insert(0, "scripts/ux")
+import atspi_screen_walk as walker
+
+original_activate = walker.activate
+fallbacks = []
+
+def activate_with_pointer_fallback(app, name):
+    ok, reason = original_activate(app, name)
+    if ok:
+        # The 40-route walker switches activity before opening a destination;
+        # its final Home -> Dashboard -> Project Metadata path otherwise races
+        # sidebar recreation on the Xvfb/AT-SPI event loop.
+        if name == "Home activity" or name == "Dashboard workspace screen":
+            time.sleep(0.4)
+        return ok, reason
+    if not reason.startswith("AT-SPI invocation failed:"):
+        return ok, reason
+    node = walker.find(app, name)
+    if node is None:
+        return False, reason
+    try:
+        rect = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+        if rect.width <= 0 or rect.height <= 0:
+            return False, f"AT-SPI action failed and hit target unavailable: {name}"
+        subprocess.run([
+            "xdotool", "mousemove", "--sync",
+            str(rect.x + rect.width // 2), str(rect.y + rect.height // 2),
+            "click", "1",
+        ], check=True, timeout=8)
+        fallbacks.append(name)
+        print(f"AT_SPI_REJECTED_ACTION_POINTER_FALLBACK {name}", flush=True)
+        return True, "Native Xvfb pointer activated an accessible control"
+    except Exception as exc:
+        return False, f"AT-SPI action and native Xvfb pointer failed: {name}: {exc}"
+
+walker.activate = activate_with_pointer_fallback
+sys.argv = ["atspi_screen_walk.py", sys.argv[1]]
+try:
+    raise SystemExit(walker.main())
+finally:
+    Path(sys.argv[1]).mkdir(parents=True, exist_ok=True)
+    Path(sys.argv[1], "fallback-activations.log").write_text(
+        "\n".join(fallbacks) + ("\n" if fallbacks else ""), encoding="utf-8"
+    )
+PY
 else
   xdotool mousemove --sync 408 240 click 1
   sleep 0.2

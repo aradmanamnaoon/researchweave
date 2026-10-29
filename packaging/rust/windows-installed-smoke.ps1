@@ -66,6 +66,32 @@ function Get-DirectoryDigest([string]$Path) {
     }
 }
 
+# A Windows GUI-subsystem executable has no console. A direct PowerShell
+# pipeline can close its stdout handle while CLI smoke is still writing,
+# causing a spurious Rust broken-pipe panic (Windows os error 232). Keep
+# independently owned log handles open for the entire native child process.
+function Invoke-InstalledCliSmoke([string]$Name, [string]$Arguments) {
+    $logs = Join-Path $targetRoot 'installed-smoke-cli-logs'
+    Assert-InTarget $logs
+    New-Item -ItemType Directory -Force -Path $logs | Out-Null
+    $stdout = Join-Path $logs "$Name.stdout.log"
+    $stderr = Join-Path $logs "$Name.stderr.log"
+    foreach ($path in @($stdout, $stderr)) {
+        Assert-InTarget $path
+        if (Test-Path -LiteralPath $path) { Remove-Item -LiteralPath $path -Force }
+    }
+    $process = Start-Process -FilePath $exe -ArgumentList $Arguments -PassThru -Wait -RedirectStandardOutput $stdout -RedirectStandardError $stderr -WindowStyle Hidden
+    if (Test-Path -LiteralPath $stdout) {
+        Get-Content -LiteralPath $stdout | ForEach-Object { Write-Output $_ }
+    }
+    if ((Test-Path -LiteralPath $stderr) -and (Get-Item -LiteralPath $stderr).Length -gt 0) {
+        Get-Content -LiteralPath $stderr | ForEach-Object { Write-Output "CLI_STDERR[$Name] $_" }
+    }
+    if ($process.ExitCode -ne 0) {
+        throw "Installed $Name smoke failed: exit=$($process.ExitCode)"
+    }
+}
+
 Assert-InTarget $installRoot
 Assert-InTarget $acceptanceDataRoot
 Remove-PriorInstall
@@ -99,19 +125,15 @@ try {
         throw "Installed executable differs from the staged Rust release binary"
     }
 
-    & $exe '--smoke-project'
-    if ($LASTEXITCODE -ne 0) { throw "Installed project smoke failed: $LASTEXITCODE" }
-    & $exe '--smoke-pdf' $fixturePath $Query
-    if ($LASTEXITCODE -ne 0) { throw "Installed PDF smoke failed: $LASTEXITCODE" }
+    Invoke-InstalledCliSmoke -Name 'project' -Arguments '--smoke-project'
+    Invoke-InstalledCliSmoke -Name 'pdf' -Arguments ('--smoke-pdf ' + [char]34 + $fixturePath + [char]34 + ' ' + [char]34 + $Query + [char]34)
 
     New-Item -ItemType Directory -Path $acceptanceDataRoot | Out-Null
     $priorHostData = $env:RESEARCHWEAVE_HOST_DATA_DIR
     try {
         $env:RESEARCHWEAVE_HOST_DATA_DIR = $acceptanceDataRoot
-        & $exe '--smoke-native-workflow' 'init'
-        if ($LASTEXITCODE -ne 0) { throw "Installed native workflow init failed: $LASTEXITCODE" }
-        & $exe '--smoke-native-workflow' 'verify'
-        if ($LASTEXITCODE -ne 0) { throw "Installed native workflow verify failed: $LASTEXITCODE" }
+        Invoke-InstalledCliSmoke -Name 'native-init' -Arguments '--smoke-native-workflow init'
+        Invoke-InstalledCliSmoke -Name 'native-verify' -Arguments '--smoke-native-workflow verify'
     }
     finally {
         if ($null -eq $priorHostData) {

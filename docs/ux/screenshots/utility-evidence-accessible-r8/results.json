@@ -1,0 +1,180 @@
+{
+  "kind": "native-linux-private-xvfb-utility-evidence",
+  "result": "PASS",
+  "source_state": "worktree snapshot only; independent build logs required for binary-to-source provenance",
+  "binary_sha256": "499cfebbe7012d679143f9c9371103ea92619ff50813dcd18fa6aac6aff1df76",
+  "slint_sha256": "4437d03c2ef6a5a6b972244ee0ff8361f45c70373edd9d6ee67d932e39352a91",
+  "host_sha256": "e03ea640f8cb2bee64cc87604da2bca58a9084001cacd06a960817063f24360b",
+  "shell_script_sha256": "f147a1f52f224c3496c6a94b2456fb3ef0aa900ed9381b2207934dddc64db5a5",
+  "python_script_sha256": "696261842f745f445142a31bfeb808521322908df5c09d7156bc87c93f4d9867",
+  "source_changed_during_audit": false,
+  "utility_routes": [
+    {
+      "route": "Privacy",
+      "linked_action": "Inspect project metadata: Review project privacy classification",
+      "verified_destination": "Project Metadata",
+      "status": "PASS"
+    },
+    {
+      "route": "Integrations",
+      "linked_action": "Manage provider profiles: AI provider profiles",
+      "verified_destination": "Providers",
+      "status": "PASS"
+    },
+    {
+      "route": "Exports",
+      "linked_action": "Open manuscript export: Manuscript documents",
+      "verified_destination": "Manuscript",
+      "status": "PASS"
+    },
+    {
+      "route": "Tutorials",
+      "linked_action": "Start a project: 01 · Begin a local research project",
+      "verified_destination": "Welcome",
+      "status": "PASS"
+    },
+    {
+      "route": "Guidance",
+      "linked_action": "Inspect project: What project and revision am I working on?",
+      "verified_destination": "Project Metadata",
+      "status": "PASS"
+    },
+    {
+      "route": "Shortcuts",
+      "linked_action": "Open source Search: Try a destination search",
+      "verified_destination": "Search",
+      "status": "PASS"
+    },
+    {
+      "route": "About",
+      "linked_action": "Run diagnostics: Run real structural diagnostics",
+      "verified_destination": "Diagnostics",
+      "status": "PASS"
+    }
+  ],
+  "evidence": {
+    "source_id": "43b6b417-38e6-459c-b01f-74ea507e4611",
+    "note_id": "f095eb1a-b972-477f-8b9a-23de4189136c",
+    "source_sha256": "b4761b00e9e354db3ffb59e151239f149bbdb390c92f95a21e96fd9818ebf7fe",
+    "note_body_sha256": "8a1d304e03ff552b99c180b791a830a56c14eb4c2ef131507058658e39c34b9f",
+    "revision_count": 1,
+    "recorded_project_revision": 2,
+    "recorded_note_revision": 1
+  },
+  "screenshots": [
+    {
+      "name": "00-native-managed-project.png",
+      "sha256": "a2bee2132dc2e71a0d7ff345c23e23ca29b3b3f335750f53d2f752d174a5bbac",
+      "bytes": 104323
+    },
+    {
+      "name": "utility-privacy-before.png",
+      "sha256": "244292cb73e7f6b550c7ecddcc321e6c212bac7b83c71cafcfb4aa1358d94c2c",
+      "bytes": 166823
+    },
+    {
+      "name": "utility-privacy-linked-project-metadata.png",
+      "sha256": "9678b1e4d3c457e0ca3bacad73e07a05ed927743a522558a8d89f52fbc2e35ad",
+      "bytes": 124753
+    },
+    {
+      "name": "utility-integrations-before.png",
+      "sha256": "db8bd8285556af5d78ca9bbdd87147f59f803b4772612720543556252da64840",
+      "bytes": 153398
+    },
+    {
+      "name": "utility-integrations-linked-providers.png",
+      "sha256": "6c3e07e470b4244826fd296abef2284644dc148579c53127482e74b7bec95115",
+      "bytes": 97750
+    },
+    {
+      "name": "utility-exports-before.png",
+      "sha256": "86f1092034f86007d405d10e2eced76e2bd17b6559680eeb9442b9418be6b897",
+      "bytes": 148628
+    },
+    {
+      "name": "utility-exports-linked-manuscript.png",
+      "sha256": "6f1c546bebd56f9f0540da0df174dc9f1e1b2cbcfdd3535a5cc16850b01b89b6",
+      "bytes": 67973
+    },
+    {
+      "name": "utility-tutorials-before.png",
+      "sha256": "d63b564d65c06f5c36d2230302b9d103ce6bb6dc20169583d4150e24bd2d9bbe",
+      "bytes": 152062
+    },
+    {
+      "name": "utility-tutorials-linked-welcome.png",
+      "sha256": "0a917e8d01cef815f515c1f6145fa9db6171d03df2b254eb48626c181743ae14",
+      "bytes": 105700
+    },
+    {
+      "name": "utility-guidance-before.png",
+      "sha256": "35064ae916f687edc0e9a12f34225d8011ce1569775f6916843d426339ee8735",
+      "bytes": 160521
+    },
+    {
+      "name": "utility-guidance-linked-project-metadata.png",
+      "sha256": "9678b1e4d3c457e0ca3bacad73e07a05ed927743a522558a8d89f52fbc2e35ad",
+      "bytes": 124753
+    },
+    {
+      "name": "utility-shortcuts-before.png",
+      "sha256": "4c6081e8c3a387eb4f7a4aa3e0af1382d48376a0dfc027f6bc47785f6ddd62d8",
+      "bytes": 134812
+    },
+    {
+      "name": "utility-shortcuts-linked-search.png",
+      "sha256": "bd0ab6ced32c6e579628da89f98101f4ad0268ccc2a1cc293f7edbc59e32825d",
+      "bytes": 88061
+    },
+    {
+      "name": "utility-about-before.png",
+      "sha256": "ee5822212290a7518579b0fe5e0ad739c63654e5cef081fbcec796b8d564fee7",
+      "bytes": 145172
+    },
+    {
+      "name": "utility-about-linked-diagnostics.png",
+      "sha256": "d6aa3d5c9833d6748554a278ab2e3ee0f99b4aa68ba481f9d3d3505a6947a2d4",
+      "bytes": 103588
+    },
+    {
+      "name": "evidence-01-library-created-real-source.png",
+      "sha256": "1fce718c1cce4ce597d87e5aca6b630dc73eee245c8cbd52458382f1b1cfa4d1",
+      "bytes": 86175
+    },
+    {
+      "name": "evidence-02-reader-real-source-id.png",
+      "sha256": "549a063106cb66cd25f125972aa6a66f485b0d9cf408ae8c01995f23c3eb6a4f",
+      "bytes": 116498
+    },
+    {
+      "name": "evidence-03-human-note-preview-not-saved.png",
+      "sha256": "7d07ffc57bbf5e7bace5435aff763c1edbd998fd55a412c0a1c9ba18b47881e4",
+      "bytes": 142478
+    },
+    {
+      "name": "evidence-04-approved-real-note-recorded.png",
+      "sha256": "5e3aabb1a9abcfb9bb727c98733f98af202fb7169ef1994163bd0c474d7d0558",
+      "bytes": 148634
+    },
+    {
+      "name": "evidence-05-persisted-note-history.png",
+      "sha256": "917417dab647c7ff507f3172c1554855a840926a56eaa413d14406819d7c1235",
+      "bytes": 139831
+    },
+    {
+      "name": "evidence-06-linked-reader-real-text.png",
+      "sha256": "c649497978cba34aaf28bc12e6f6cab4d069f7e3aa3ccf98289284ca1c580a40",
+      "bytes": 117756
+    }
+  ],
+  "network_guard": "LD_PRELOAD blocks conventional AF_INET/AF_INET6 socket/connect in application; not kernel isolation",
+  "not_tested": [
+    "human screen reader/Orca",
+    "Windows/macOS native packages and IME",
+    "PDF selection and quotation anchors",
+    "evidence note edit with multiple revisions",
+    "responsive layouts at every scale",
+    "a final committed/hosted source or release"
+  ]
+}
