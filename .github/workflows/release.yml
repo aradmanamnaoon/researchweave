@@ -367,7 +367,9 @@ jobs:
         run: |
           set -euo pipefail
           version="${GITHUB_REF_NAME#v}"
-          windows_signing="$(cut -d= -f2 dist/SIGNING-windows-x64.txt)"
+          # Windows PowerShell Set-Content writes CRLF; strip the carriage return
+          # before validating the signing status on the Linux publisher.
+          windows_signing="$(cut -d= -f2 dist/SIGNING-windows-x64.txt | tr -d '\r')"
           arm_codesign="$(grep '^MACOS_CODESIGN=' dist/SIGNING-macos-arm64.txt | cut -d= -f2)"
           arm_notary="$(grep '^MACOS_NOTARIZATION=' dist/SIGNING-macos-arm64.txt | cut -d= -f2)"
           arm_gatekeeper="$(grep '^MACOS_GATEKEEPER=' dist/SIGNING-macos-arm64.txt | cut -d= -f2)"
