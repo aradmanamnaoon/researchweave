@@ -83,6 +83,19 @@ pub fn find_next(body: &str, needle: &str, previous_end: usize) -> Option<Search
     })
 }
 
+/// Return only the exact, user-selected find result; never fall back to the
+/// entire manuscript if a stale or malformed range is provided.
+pub fn found_text(body: &str, start: i32, end: i32, match_valid: bool) -> Option<&str> {
+    if !match_valid || start < 0 || end <= start {
+        return None;
+    }
+    let (start, end) = (start as usize, end as usize);
+    if end - start > 4096 {
+        return None;
+    }
+    body.get(start..end).filter(|text| !text.trim().is_empty())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -121,5 +134,21 @@ mod tests {
         assert_eq!(&text[matches.start..matches.end], "observation");
         assert_eq!(text, original);
         assert!(find_next(&text, "", 0).is_none());
+    }
+
+    #[test]
+    fn selected_ai_context_is_exact_utf8_find_result_and_fails_closed() {
+        let body = "Confidential introduction. Findings: پژوهش 🧠.";
+        let start = body.find("پژوهش").unwrap();
+        let end = start + "پژوهش".len();
+        assert_eq!(
+            found_text(body, start as i32, end as i32, true),
+            Some("پژوهش")
+        );
+        assert_eq!(found_text(body, start as i32, end as i32, false), None);
+        assert_eq!(found_text(body, start as i32 + 1, end as i32, true), None);
+        assert_eq!(found_text(body, 0, body.len() as i32 + 1, true), None);
+        assert_eq!(found_text(body, 5, 5, true), None);
+        assert_eq!(found_text(body, -1, 2, true), None);
     }
 }

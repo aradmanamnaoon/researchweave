@@ -17,6 +17,12 @@ export struct ManuscriptHeading {
     offset: int,
 }
 
+export struct SourceListEntry {
+    source-id: string,
+    title: string,
+    snippet: string,
+}
+
 export global Theme {
     in-out property <bool> dark-mode: false;
     in-out property <bool> high-contrast: false;
@@ -225,6 +231,24 @@ export component MainWindow inherits Window {
     in-out property <float> pdf-render-height: 0;
     in-out property <int> pdf-job: 0;
     in-out property <string> library-results: "Open a project, then refresh its sources.";
+    in-out property <string> source-project-id: "";
+    in-out property <[SourceListEntry]> source-search-results: [];
+    in-out property <string> source-search-status: "Open a project and search locally imported source text.";
+    in-out property <bool> source-search-busy: false;
+    in-out property <int> source-search-request: 0;
+    in-out property <[SourceListEntry]> reader-source-list: [];
+    in-out property <string> reader-list-status: "Load sources from the current project.";
+    in-out property <int> reader-list-offset: 0;
+    in-out property <bool> reader-list-more: false;
+    in-out property <string> reader-source-id: "";
+    in-out property <string> reader-source-title: "";
+    in-out property <string> reader-text: "";
+    in-out property <string> reader-status: "Choose a source to read its verified text.";
+    in-out property <int> reader-offset: 0;
+    in-out property <int> reader-returned: 0;
+    in-out property <bool> reader-more: false;
+    in-out property <bool> reader-busy: false;
+    in-out property <int> reader-request: 0;
     in-out property <string> research-summary: "Open a project to inspect its recorded research question and design.";
     in-out property <string> project-metadata-results: "Open a project, enter only fields you want to change, and preview before recording.";
     in-out property <string> question-results: "Preview a structured question before recording it.";
@@ -330,6 +354,10 @@ export component MainWindow inherits Window {
     callback update-preference(string, bool);
     callback update-ui-scale(int);
     callback library-action(string, string, string);
+    callback search-project-sources(string);
+    callback load-reader-source-list(int);
+    callback open-reader-source(string);
+    callback load-reader-page(string, int);
     callback refresh-research();
     callback inspect-project-metadata();
     callback preview-project-metadata(string, string, string, string, string);
@@ -995,6 +1023,223 @@ export component MainWindow inherits Window {
                                     Text { text: "Local first"; color: Theme.success; }
                                     Text { text: "Network"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     Text { text: "Explicit approval required"; color: Theme.ink; font-size: 11px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.page == 3: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: Theme.space5;
+                            spacing: Theme.space3;
+                            Text { text: "Search local sources"; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                            Text {
+                                text: "Search text imported into this project. Literal case-folded substring search scans up to 10,000 sources; results are not ranked, and excerpts begin at the start of each source.";
+                                color: Theme.muted-ink;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                spacing: Theme.space2;
+                                source-query := LineEdit {
+                                    horizontal-stretch: 1;
+                                    placeholder-text: "Text to find in local sources";
+                                    accessible-label: "Local source search query";
+                                    enabled: !root.source-search-busy;
+                                    accepted => { root.search-project-sources(self.text); }
+                                }
+                                Button {
+                                    text: root.source-search-busy ? "Searching…" : "Search";
+                                    enabled: !root.source-search-busy;
+                                    accessible-label: "Run local project source search";
+                                    clicked => { root.search-project-sources(source-query.text); }
+                                }
+                                Button {
+                                    text: "Source library";
+                                    accessible-label: "Open local source library to import text";
+                                    clicked => { root.page = 5; }
+                                }
+                            }
+                            Text {
+                                text: root.source-search-status;
+                                accessible-label: "Local source search status " + root.source-search-status;
+                                color: Theme.muted-ink;
+                                wrap: word-wrap;
+                            }
+                            Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                vertical-stretch: 1;
+                                accessible-role: list;
+                                accessible-label: "Real local source search results";
+                                ScrollView {
+                                    VerticalLayout {
+                                        padding: Theme.space3;
+                                        spacing: Theme.space3;
+                                        if root.source-search-results.length == 0: Text {
+                                            text: "No results loaded. Enter a search term to find locally stored sources.";
+                                            wrap: word-wrap;
+                                            color: Theme.muted-ink;
+                                        }
+                                        for hit in root.source-search-results: Rectangle {
+                                            background: Theme.raised;
+                                            border-radius: Theme.panel-radius;
+                                            border-color: Theme.divider;
+                                            border-width: 1px;
+                                            min-height: 94px;
+                                            VerticalLayout {
+                                                padding: Theme.space3;
+                                                spacing: Theme.space2;
+                                                Button {
+                                                    text: hit.title;
+                                                    accessible-label: "Read local source " + hit.title;
+                                                    clicked => { root.open-reader-source(hit.source-id); }
+                                                }
+                                                Text {
+                                                    text: hit.snippet;
+                                                    wrap: word-wrap;
+                                                    color: Theme.muted-ink;
+                                                    font-size: 12px * Theme.ui-scale / 100;
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    if root.page == 6: Rectangle {
+                        background: Theme.raised;
+                        VerticalLayout {
+                            padding: Theme.space5;
+                            spacing: Theme.space3;
+                            Text { text: "Source reader"; font-size: 22px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
+                            Text {
+                                text: "Read checksum-verified text stored in this project, 8,000 Unicode characters per page. PDF rendering and page-specific PDF search are in PDF Reader.";
+                                color: Theme.muted-ink;
+                                wrap: word-wrap;
+                            }
+                            HorizontalLayout {
+                                spacing: Theme.space2;
+                                reader-source-input := LineEdit {
+                                    horizontal-stretch: 1;
+                                    text: root.reader-source-id;
+                                    placeholder-text: "Source ID from library or search";
+                                    accessible-label: "Reader source ID";
+                                    edited(value) => { root.reader-source-id = value; }
+                                }
+                                Button {
+                                    text: "Open source";
+                                    enabled: !root.reader-busy;
+                                    accessible-label: "Read source by exact ID";
+                                    clicked => { root.open-reader-source(reader-source-input.text); }
+                                }
+                                Button {
+                                    text: "Refresh source list";
+                                    enabled: !root.reader-busy;
+                                    accessible-label: "Load local project sources for reader";
+                                    clicked => { root.load-reader-source-list(0); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: Theme.space3;
+                                Rectangle {
+                                    min-width: 180px;
+                                    preferred-width: 235px;
+                                    max-width: 260px;
+                                    horizontal-stretch: 0;
+                                    background: Theme.surface;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    border-radius: Theme.panel-radius;
+                                    VerticalLayout {
+                                        padding: Theme.space2;
+                                        spacing: Theme.space2;
+                                        Text { text: "Available sources"; color: Theme.ink; font-weight: 600; }
+                                        Text { text: root.reader-list-status; color: Theme.muted-ink; font-size: 11px * Theme.ui-scale / 100; wrap: word-wrap; }
+                                        Rectangle {
+                                            vertical-stretch: 1;
+                                            ScrollView {
+                                                VerticalLayout {
+                                                    spacing: Theme.space2;
+                                                    if root.reader-source-list.length == 0: Text {
+                                                        text: "Refresh to load sources.";
+                                                        color: Theme.muted-ink;
+                                                        wrap: word-wrap;
+                                                    }
+                                                    for source in root.reader-source-list: Button {
+                                                        text: source.title;
+                                                        accessible-label: "Open source " + source.title;
+                                                        clicked => { root.open-reader-source(source.source-id); }
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        HorizontalLayout {
+                                            spacing: Theme.space2;
+                                            Button {
+                                                text: "Previous";
+                                                enabled: root.reader-list-offset > 0 && !root.reader-busy;
+                                                accessible-label: "Previous 50 sources";
+                                                clicked => { root.load-reader-source-list(max(0, root.reader-list-offset - 50)); }
+                                            }
+                                            Button {
+                                                text: "Next";
+                                                enabled: root.reader-list-more && !root.reader-busy;
+                                                accessible-label: "Next 50 sources";
+                                                clicked => { root.load-reader-source-list(root.reader-list-offset + 50); }
+                                            }
+                                        }
+                                    }
+                                }
+                                Rectangle {
+                                    background: Theme.surface;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    border-radius: Theme.panel-radius;
+                                    horizontal-stretch: 1;
+                                    VerticalLayout {
+                                        padding: Theme.space3;
+                                        spacing: Theme.space2;
+                                        Text { text: root.reader-source-title == "" ? "No source selected" : root.reader-source-title; color: Theme.ink; font-weight: 600; wrap: word-wrap; }
+                                        Text {
+                                            text: root.reader-status;
+                                            accessible-label: "Reader operation status " + root.reader-status;
+                                            color: Theme.muted-ink;
+                                            wrap: word-wrap;
+                                        }
+                                        TextEdit {
+                                            text: root.reader-text;
+                                            read-only: true;
+                                            vertical-stretch: 1;
+                                            min-height: 160px;
+                                            accessible-label: "Checksum-verified local source text; selectable and read-only";
+                                        }
+                                        HorizontalLayout {
+                                            spacing: Theme.space2;
+                                            Button {
+                                                text: "Previous page";
+                                                enabled: root.reader-offset > 0 && !root.reader-busy;
+                                                accessible-label: "Read previous source text page";
+                                                clicked => { root.load-reader-page(root.reader-source-id, max(0, root.reader-offset - 8000)); }
+                                            }
+                                            Button {
+                                                text: "Next page";
+                                                enabled: root.reader-more && !root.reader-busy;
+                                                accessible-label: "Read next source text page";
+                                                clicked => { root.load-reader-page(root.reader-source-id, root.reader-offset + root.reader-returned); }
+                                            }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            Button {
+                                                text: "Search sources";
+                                                accessible-label: "Open local source search";
+                                                clicked => { root.page = 3; }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                         }
@@ -2556,6 +2801,7 @@ export component MainWindow inherits Window {
                                     text: "Find next";
                                     accessible-label: "Find and select the next manuscript match";
                                     clicked => {
+                                        root.writing-ai-use-found-text = false;
                                         root.find-next-manuscript(manuscript-find-query.text);
                                         if root.writing-find-match {
                                             manuscript-body.set-selection-offsets(root.writing-find-offset, root.writing-find-end);
@@ -2955,7 +3201,7 @@ export component MainWindow inherits Window {
                             }
                         }
                     }
-                    if root.page > 1 && root.page != 2 && root.page != 4 && root.page != 5 && root.page != 7 && root.page != 9 && root.page != 10 && root.page != 11 && root.page != 12 && root.page != 13 && root.page != 14 && root.page != 15 && root.page != 16 && root.page != 17 && root.page != 18 && root.page != 19 && root.page != 20 && root.page != 21 && root.page != 22 && root.page != 23 && root.page != 24 && root.page != 28 && root.page != 29 && root.page != 30 && root.page != 31 && root.page != 32 && root.page != 36 && root.page != 37 && root.page != 39: Rectangle {
+                    if root.page > 1 && root.page != 2 && root.page != 3 && root.page != 4 && root.page != 5 && root.page != 6 && root.page != 7 && root.page != 9 && root.page != 10 && root.page != 11 && root.page != 12 && root.page != 13 && root.page != 14 && root.page != 15 && root.page != 16 && root.page != 17 && root.page != 18 && root.page != 19 && root.page != 20 && root.page != 21 && root.page != 22 && root.page != 23 && root.page != 24 && root.page != 28 && root.page != 29 && root.page != 30 && root.page != 31 && root.page != 32 && root.page != 36 && root.page != 37 && root.page != 39: Rectangle {
                         background: Theme.raised;
                         HorizontalLayout {
                             padding: 24px;

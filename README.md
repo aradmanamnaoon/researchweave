@@ -47,6 +47,8 @@
 > [!IMPORTANT]
 > **Published release: Rust v0.2.0.** The current UX redesign is under development; the screenshots and downloads below refer to the previously published build, not an unverified new release. ResearchWeave stores projects locally; no cloud storage account is needed. The [archived Python v0.1.2 release](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.1.2) and Python-to-Rust compatibility fixtures remain available for historical recovery.
 
+> **Unreleased UX candidate (29 October 2026):** Sources now has working Rust-backed **Search (route 3)** and **Reader (route 6)** screens for project-local stored text. A newer private Linux/Xvfb navigation audit passed **40/40 routes**, with **eight remaining placeholder destinations**. The tested executable SHA-256 was `77295db0109768f108495a31d932238431aeb0a86988325a63dd4258318023c7`; `source_changed_during_audit=false`. A separate **real private Linux synthetic Search → Reader GUI test passed** on that executable, with exact 207-character Unicode text and six hashed captures. This does not establish larger-text pagination or other OSes. This candidate is not the published v0.2.0 installer. [Detailed source/QA boundaries](docs/ux/CROSS_PLATFORM_QA.md).
+
 ## Downloads and release status
 
 **Current published Rust build:** [ResearchWeave v0.2.0](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.2.0). The [latest release page](https://github.com/aradmanamnaoon/researchweave/releases/latest) shows the currently designated version; confirm its files and checksums before installation.
@@ -92,7 +94,7 @@ Pick a single outcome and follow the workspace rather than learning every tool f
 |:---:|---|---|---|
 | **01** | **Home → Start Center** | A local project with an auditable revision history | Recent-project selection is limited; custom paths are manual |
 | **02** | **Home → Research Question / Protocol** | A versioned question and protocol with preview-before-save | You may need to enter object IDs between screens |
-| **03** | **Sources → Library / PDF Reader** | Saved source records and local PDF page viewing/search | The full Reader and Evidence destinations remain incomplete |
+| **03** | **Sources → Library / Search / Reader / PDF Reader** | Local source records; unreleased branch adds literal stored-text search, source list and paged verified text reading; PDF page viewing/search remains separate | Short Unicode Search → Reader GUI test passed on Linux Xvfb; long pagination, source-linked Evidence and PDF selection/annotation remain incomplete |
 | **04** | **Analyze → Data / Statistics** | Imported dataset revisions and reproducible basic statistical results | Advanced analysis methods are richer in Rust libraries than in the desktop UI |
 | **05** | **Synthesize → Manuscript** | Versioned section text and prepared DOCX/HTML/Markdown/PDF export | This is currently a structured text editor, not a Word-style page editor |
 | **06** | **Manage → Backups / Recovery** | An optional encrypted local archive and restore-as-copy | Archive paths are currently entered manually |
@@ -145,6 +147,12 @@ These screenshots were captured by launching the native Rust/Slint executable in
 
 The AI panel previews bounded, user-reviewed context and requires an explicitly configured local model before inference. It does not silently transmit research content or replace manuscripts. The [100-skill source audit](docs/ux/100_SKILLS_APPLICATION_MATRIX.md), [screen inventory](docs/ux/SCREEN_INVENTORY.md) and [long-form persistence measurements](docs/ux/LONG_FORM_EDITOR.md) distinguish tested behavior from unfinished work.
 
+### Newer unreleased source Search / Reader — actual private Linux GUI
+
+![Actual private Linux Xvfb ResearchWeave Reader displaying a verified 207-Unicode-character synthetic source after local search](docs/ux/screenshots/search-reader-xvfb/03-reader-exact-unicode-text.png)
+
+This **actual native Rust/Slint screenshot** is from a later synthetic Search → Reader GUI test on executable SHA-256 `77295db0109768f108495a31d932238431aeb0a86988325a63dd4258318023c7`. The scoped harness passed text equality, empty/no-result search feedback, invalid IDs, source-list reopening and return navigation. The [test receipt](docs/ux/screenshots/search-reader-xvfb/results.json) and [cross-platform QA report](docs/ux/CROSS_PLATFORM_QA.md) record provenance and exclusions. **It does not represent the published v0.2.0 release or prove long pagination, PDF selection, assistive technology, or macOS/Windows operation.**
+
 ### Previously published Rust interface
 
 The images below were captured from **earlier running Rust/Slint builds** and are retained as historical UI examples. They are not mockups or Python/PyQt screenshots, and they do not demonstrate completion or visual QA of the ongoing UX transformation.
@@ -170,14 +178,16 @@ The **Rust domain library**, **desktop screen** and **release evidence** have di
 | Area | Working in the current Rust desktop | Present in Rust or partially wired | Not yet available as the requested UX |
 |---|---|---|---|
 | **Projects and local safety** | Managed create/open, metadata preview/record, archives and recovery | Audit/activity, diagnostics, project migration | Recent-project dashboard, complete guided recovery |
-| **Sources and reviews** | Local source entry, references, PDF page search, review votes, PRISMA text counts, extraction JSON forms | Anchors, source relationships, review algorithms | Complete reader, visual evidence anchoring, screening queue |
-| **Data and methods** | Import/inspect datasets, variable metadata, descriptives, frequency, Pearson, Welch t, HC3 OLS | Additional statistical methods, plots and reproducible results in Rust crates | Spreadsheet-like data grid and visual interactive analysis across every method |
+| **Sources and reviews** | Local source entry, references, PDF page search, review votes, PRISMA text counts, extraction JSON forms; **unreleased UX branch:** local source Search and paged Reader backed by `search.query` and `source.full_text` | Anchors, source relationships, review algorithms | Longer Reader pagination, visual evidence anchoring, cross-OS Search/Reader and screening queue |
+| **Data and methods** | Import/inspect datasets, variable metadata, descriptives, frequency, Pearson, Welch t, HC3 OLS; **unreleased UX branch:** read-only `StandardTableView` with 25-row paging controls | Additional statistical methods, plots and reproducible results in Rust crates | Editable spreadsheet features and visual interactive analysis across every method; multi-page and cross-OS grid acceptance pending |
 | **Qualitative and mixed methods** | Codebook/annotation/mapping forms, kappa, verified joint-display action | Project-scoped coder state and quality/provenance checks | Visual transcript coding and rich joint-display table |
 | **Notes and writing** | Project notebook editor; versioned manuscript sections, recovery and DOCX/HTML/PDF/Markdown exports | Unreleased UX branch has quick-note cards/list, pin/archive/trash/restore, labels/search and durable drafts | Word-style rich, paginated editing and complete citations-in-context |
 | **Assistant and automation** | Local conversation/template forms, offline provider profiles, human-reviewed retrieval tool proposals | Unreleased UX branch has optional contextual AI preview and explicit local-model generation | Selection-grounded editing, end-to-end streaming chat and consented hosted-provider UX |
 | **Display and accessibility** | Six navigation roots, Ctrl+K, display themes, density, scale and basic keyboard semantics | Windows UIA scripts and native OS accessibility probes | Complete NVDA/VoiceOver/Orca, real RTL IME and all-state visual QA |
 
 **Reading this table:** “Working” means the current Slint screen has a concrete handler, not that every variation passed a new user study. “Present in Rust” describes implementation or infrastructure without promising a mature, clickable desktop workflow. Historical screenshots and test reports are not proof for unreviewed UX branch changes.
+
+**Current local QA boundary:** The newer 40-route private native Linux audit passed on the exact executable hash recorded above, with eight placeholders: **Evidence (8), Privacy (25), Integrations (26), Exports (27), Tutorials (33), Guidance (34), Shortcuts (35), About (38)**. Source Search/Reader backend tests and desktop compilation passed. A separate private Linux/Xvfb Search → Reader GUI harness passed source creation, empty/no-match queries, one Unicode match, exact 207-character Reader text, invalid/empty IDs and return navigation; the evidence is in the private WSL directory `/home/saba/researchweave-gui-audits/search-reader-worker1-r4/` (six hashed screenshots). Fresh isolated Xvfb runs also passed the synthetic 15-page Unicode manuscript round-trip, populated Data View grid and found-text contextual AI preview scenarios. **Longer Reader pagination, human screen-reader and Windows/macOS package behavior remain untested.** Windows workspace tests were reported **188 passing**, with formatting and strict Clippy passing, but a single frozen-commit cross-platform installed-package matrix remains outstanding.
 
 See [the route-by-route screen inventory](docs/ux/SCREEN_INVENTORY.md), [workflow handoff audit](docs/ux/WORKFLOW_INVENTORY.md) and [contextual AI audit](docs/ux/AI_INTEGRATION_AUDIT.md) for the dated pre-transformation baseline.
 
@@ -401,6 +411,8 @@ cargo +1.94.1 run --locked -p researchweave-cli -- --help
 
 ResearchWeave intentionally distinguishes **implemented**, **tested**, **locally verified**, and **release verified**. Historical candidate reports document test runs and screenshots from specific commits; those records are useful evidence for their tested sources and must not be carried forward as a pass for the new UX worktree.
 
+The latest unreleased Linux native route audit reached **40/40 destinations** on executable SHA-256 `77295db0109768f108495a31d932238431aeb0a86988325a63dd4258318023c7`, with source unchanged during the run and eight placeholder routes. The separate Search → Reader **private Xvfb functional GUI harness passed** the scoped 207-character Unicode test, malformed-input feedback and return navigation, with six hashed screenshots; it did not test long paging. Fresh Xvfb 15-page manuscript, Data View grid and found-text AI cases passed; Windows workspace tests **188 passed** and formatting/strict Clippy passed on the reported working candidate. These checks do **not** constitute final exact-commit native installer, source-to-evidence or accessibility acceptance.
+
 **Before declaring a new build ready**, execute and record exit codes for the following commands at the exact new source commit:
 
 ```powershell
@@ -460,7 +472,7 @@ scripts/rust_rewrite/       Rust migration/recovery census and performance helpe
 
 ## Current product boundaries
 
-ResearchWeave already has broad working infrastructure, but important gaps remain visible. The unreleased Rust UX branch implements Keep-inspired quick-note cards and a project-scoped local note archive, while drag-and-drop note organization and full structured knowledge linking remain future work. Other gaps include Word-class track changes/comments, a rich document tree, evidence reader/annotation controls, selection-grounded contextual AI actions, reversible reference deduplication, semantic/hybrid retrieval, AI screening/extraction evaluation, executable notebook kernels, Bayesian/multilevel breadth, media timeline coding, external knowledge-base round-trip and advanced knowledge-graph workflows.
+ResearchWeave already has broad working infrastructure, but important gaps remain visible. The unreleased Rust UX branch implements Keep-inspired quick-note cards, a project-scoped local note archive, **literal project-local source Search and paged verified-text Reader screens**, while drag-and-drop note organization and full structured knowledge linking remain future work. The **short synthetic Search → Reader native GUI task passed on private Linux Xvfb**, but long-text pagination and cross-platform integration remain unverified. Other gaps include Word-class track changes/comments, a rich document tree, evidence anchoring and PDF selection/annotation controls, selection-grounded citation workflows, reversible reference deduplication, semantic/hybrid retrieval, AI screening/extraction evaluation, executable notebook kernels, Bayesian/multilevel breadth, media timeline coding, external knowledge-base round-trip and advanced knowledge-graph workflows.
 
 Those are tracked as product work rather than represented by placeholder buttons or inflated README claims.
 

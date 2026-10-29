@@ -398,16 +398,37 @@ fn contextual_request_from_ui(
         .info()
         .map_err(|error| error.to_string())?;
     let (kind, object, title, content): (ContextKind, &str, String, String) = match ui.get_page() {
-        19 => (
-            ContextKind::Manuscript,
-            "manuscript",
-            format!(
-                "Manuscript: {} · {}",
-                ui.get_manuscript_draft_id(),
-                ui.get_manuscript_draft_section()
-            ),
-            ui.get_manuscript_draft_body().to_string(),
-        ),
+        19 => {
+            let body = ui.get_manuscript_draft_body();
+            let selected = ui.get_writing_ai_use_found_text();
+            let content = if selected {
+                document_navigation::found_text(
+                    body.as_str(),
+                    ui.get_writing_find_offset(),
+                    ui.get_writing_find_end(),
+                    ui.get_writing_find_match(),
+                )
+                .ok_or("Found-text selection is stale or invalid; find the text again before previewing AI context.")?
+                .to_string()
+            } else {
+                body.to_string()
+            };
+            (
+                ContextKind::Manuscript,
+                "manuscript",
+                format!(
+                    "Manuscript: {} · {}{}",
+                    ui.get_manuscript_draft_id(),
+                    ui.get_manuscript_draft_section(),
+                    if selected {
+                        " · exact found text only"
+                    } else {
+                        ""
+                    }
+                ),
+                content,
+            )
+        }
         21 => (
             ContextKind::Notes,
             "note",
@@ -2517,6 +2538,130 @@ fn library_read_at(
     Ok(result)
 }
 
+fn source_entries_from_result(
+    response: &serde_json::Value,
+    field: &str,
+) -> Result<Vec<SourceListEntry>, String> {
+    let rows = response
+        .pointer(&format!("/data/{field}"))
+        .and_then(serde_json::Value::as_array)
+        .ok_or("Library returned an invalid source list")?;
+    rows.iter()
+        .map(|row| {
+            let id = row
+                .get("source_id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or("Source list contains an invalid ID")?;
+            let title = row
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("Source list contains an invalid title")?;
+            Ok(SourceListEntry {
+                source_id: id.into(),
+                title: title.into(),
+                snippet: row
+                    .get("snippet")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .into(),
+            })
+        })
+        .collect()
+}
+
+fn reset_source_views(ui: &MainWindow, project_id: &str) {
+    ui.set_source_project_id(project_id.into());
+    ui.set_source_search_request(ui.get_source_search_request().wrapping_add(1));
+    ui.set_reader_request(ui.get_reader_request().wrapping_add(1));
+    ui.set_source_search_busy(false);
+    ui.set_reader_busy(false);
+    ui.set_source_search_results(ModelRc::new(VecModel::from(Vec::<SourceListEntry>::new())));
+    ui.set_reader_source_list(ModelRc::new(VecModel::from(Vec::<SourceListEntry>::new())));
+    ui.set_reader_source_id("".into());
+    ui.set_reader_source_title("".into());
+    ui.set_reader_text("".into());
+    ui.set_reader_offset(0);
+    ui.set_reader_returned(0);
+    ui.set_reader_more(false);
+    ui.set_reader_list_offset(0);
+    ui.set_reader_list_more(false);
+    ui.set_source_search_status("Search this project's locally stored text.".into());
+    ui.set_reader_status("Choose a source from this project to read.".into());
+    ui.set_reader_list_status("Refresh to list the project's sources.".into());
+}
+
+struct SourceReaderPage {
+    title: String,
+    text: String,
+    offset: i32,
+    returned: i32,
+    total: i32,
+    more: bool,
+}
+
+fn source_reader_page_at(
+    project: &Path,
+    source_id: &str,
+    offset: i32,
+    data_root: &Path,
+) -> Result<SourceReaderPage, String> {
+    if source_id.trim().is_empty() || source_id.len() > 128 || source_id.contains('\0') {
+        return Err("Select a valid source ID".into());
+    }
+    if !(0..=10_000_000).contains(&offset) {
+        return Err("Reader offset is outside the supported range".into());
+    }
+    let arguments = serde_json::json!({"source_id":source_id});
+    let metadata = library_read_at(project, "library.source_get", arguments, data_root)?;
+    let page = library_read_at(
+        project,
+        "source.full_text",
+        serde_json::json!({"source_id":source_id,"offset":offset,"limit":8000}),
+        data_root,
+    )?;
+    let meta = &metadata["data"];
+    let body = &page["data"];
+    let title = meta["title"].as_str().ok_or("Invalid source metadata")?;
+    let text = body["text"]
+        .as_str()
+        .ok_or("Invalid source text response")?;
+    let returned = body["returned_characters"]
+        .as_u64()
+        .and_then(|number| i32::try_from(number).ok())
+        .ok_or("Invalid source page length")?;
+    let total = body["total_characters"]
+        .as_u64()
+        .and_then(|number| i32::try_from(number).ok())
+        .ok_or("Invalid source text length")?;
+    let actual_offset = body["offset"]
+        .as_u64()
+        .and_then(|number| i32::try_from(number).ok())
+        .ok_or("Invalid source page offset")?;
+    let more = body["truncated"]
+        .as_bool()
+        .ok_or("Invalid source pagination status")?;
+    if actual_offset != offset
+        || returned != text.chars().count() as i32
+        || returned > 8000
+        || offset.saturating_add(returned) > total
+        || more != (offset.saturating_add(returned) < total)
+        || meta["source_id"].as_str() != Some(source_id)
+        || body["source_id"].as_str() != Some(source_id)
+        || meta["characters"].as_u64() != Some(total as u64)
+    {
+        return Err("Source metadata and page content are inconsistent".into());
+    }
+    Ok(SourceReaderPage {
+        title: title.into(),
+        text: text.into(),
+        offset,
+        returned,
+        total,
+        more,
+    })
+}
+
 fn evidence_router(
     project_id: Uuid,
     project_path: &Path,
@@ -4047,6 +4192,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 ui.set_writing_find_next_from(0);
                 ui.set_writing_find_match(false);
+                ui.set_writing_ai_use_found_text(false);
                 if ui.get_writing_show_outline() {
                     update_manuscript_outline(&ui, body.as_str());
                 }
@@ -4178,6 +4324,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
             }
             ui.set_writing_find_match(false);
+            ui.set_writing_ai_use_found_text(false);
         }
     });
     let pending_evidence: Rc<RefCell<Option<PendingEvidenceAction>>> = Rc::new(RefCell::new(None));
@@ -7460,6 +7607,232 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_search_project_sources({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |query| {
+            let Some(ui) = weak.upgrade() else { return };
+            let query = query.as_str().trim().to_owned();
+            ui.set_source_search_results(ModelRc::new(VecModel::from(
+                Vec::<SourceListEntry>::new(),
+            )));
+            if query.is_empty() || query.len() > 200 {
+                ui.set_source_search_status("Enter a search query of 1–200 UTF-8 bytes.".into());
+                return;
+            }
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_source_search_status("Open a project before searching sources.".into());
+                return;
+            };
+            let project_id = ui.get_source_project_id().to_string();
+            if project_id.is_empty() {
+                ui.set_source_search_status("Project source state unavailable. Reopen the project.".into());
+                return;
+            }
+            let request = ui.get_source_search_request().wrapping_add(1);
+            ui.set_source_search_request(request);
+            ui.set_source_search_busy(true);
+            ui.set_source_search_status("Searching project sources locally…".into());
+            let weak_task = weak.clone();
+            std::thread::spawn(move || {
+                let result = host_data_root()
+                    .and_then(|root| {
+                        library_read_at(
+                            &project,
+                            "search.query",
+                            serde_json::json!({"query":query,"limit":100}),
+                            &root,
+                        )
+                    })
+                    .and_then(|response| source_entries_from_result(&response, "records"));
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak_task.upgrade() else { return };
+                    if ui.get_source_search_request() != request
+                        || ui.get_source_project_id().as_str() != project_id
+                    {
+                        return;
+                    }
+                    ui.set_source_search_busy(false);
+                    match result {
+                        Ok(entries) => {
+                            let count = entries.len();
+                            ui.set_source_search_results(ModelRc::new(VecModel::from(entries)));
+                            ui.set_source_search_status(
+                                format!("{count} result(s). Up to 100 shown; at most 10,000 locally stored sources scanned. Open a result to read its verified text.").into(),
+                            );
+                        }
+                        Err(error) => {
+                            ui.set_source_search_status(
+                                format!("Local source search failed: {error}").into(),
+                            );
+                        }
+                    }
+                });
+            });
+        }
+    });
+    app.on_load_reader_source_list({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |offset| {
+            let Some(ui) = weak.upgrade() else { return };
+            if !(0..=10_000_000).contains(&offset) {
+                ui.set_reader_list_status(
+                    "Source list offset is outside the supported range.".into(),
+                );
+                return;
+            }
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_reader_source_list(ModelRc::new(VecModel::from(
+                    Vec::<SourceListEntry>::new(),
+                )));
+                ui.set_reader_list_status("Open a project to browse sources.".into());
+                return;
+            };
+            let project_id = ui.get_source_project_id().to_string();
+            if project_id.is_empty() {
+                ui.set_reader_list_status(
+                    "Project source state unavailable. Reopen the project.".into(),
+                );
+                return;
+            }
+            let request = ui.get_reader_request().wrapping_add(1);
+            ui.set_reader_request(request);
+            ui.set_reader_busy(true);
+            ui.set_reader_list_status("Loading local source index…".into());
+            let weak_task = weak.clone();
+            std::thread::spawn(move || {
+                let result = host_data_root()
+                    .and_then(|root| {
+                        library_read_at(
+                            &project,
+                            "library.list",
+                            serde_json::json!({"limit":51,"offset":offset}),
+                            &root,
+                        )
+                    })
+                    .and_then(|response| source_entries_from_result(&response, "sources"));
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak_task.upgrade() else {
+                        return;
+                    };
+                    if ui.get_reader_request() != request
+                        || ui.get_source_project_id().as_str() != project_id
+                    {
+                        return;
+                    }
+                    ui.set_reader_busy(false);
+                    match result {
+                        Ok(mut entries) => {
+                            let more = entries.len() > 50;
+                            entries.truncate(50);
+                            let count = entries.len();
+                            ui.set_reader_source_list(ModelRc::new(VecModel::from(entries)));
+                            ui.set_reader_list_offset(offset);
+                            ui.set_reader_list_more(more);
+                            ui.set_reader_list_status(
+                                format!("Showing {count} source(s), starting at {}.", offset + 1)
+                                    .into(),
+                            );
+                        }
+                        Err(error) => ui.set_reader_list_status(
+                            format!("Unable to list sources: {error}").into(),
+                        ),
+                    }
+                });
+            });
+        }
+    });
+    app.on_open_reader_source({
+        let weak = app.as_weak();
+        move |source_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let source_id = source_id.as_str().trim();
+            if source_id.is_empty() || source_id.len() > 128 || source_id.contains('\0') {
+                ui.set_reader_status("Choose a valid source ID before reading.".into());
+                return;
+            }
+            ui.set_page(6);
+            ui.set_reader_source_id(source_id.into());
+            ui.set_reader_source_title("".into());
+            ui.set_reader_text("".into());
+            ui.set_reader_more(false);
+            ui.invoke_load_reader_page(source_id.into(), 0);
+        }
+    });
+    app.on_load_reader_page({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |source_id, offset| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_reader_status("Open a project before reading a source.".into());
+                return;
+            };
+            let project_id = ui.get_source_project_id().to_string();
+            if project_id.is_empty() {
+                ui.set_reader_status(
+                    "Project source state unavailable. Reopen the project.".into(),
+                );
+                return;
+            }
+            let source_id = source_id.as_str().trim().to_owned();
+            if source_id.is_empty() || source_id.len() > 128 || !(0..=10_000_000).contains(&offset)
+            {
+                ui.set_reader_status("Invalid source ID or source text offset.".into());
+                return;
+            }
+            let request = ui.get_reader_request().wrapping_add(1);
+            ui.set_reader_request(request);
+            ui.set_reader_busy(true);
+            ui.set_reader_text("".into());
+            ui.set_reader_status("Reading and checking locally stored source text…".into());
+            let weak_task = weak.clone();
+            std::thread::spawn(move || {
+                let result = host_data_root()
+                    .and_then(|root| source_reader_page_at(&project, &source_id, offset, &root));
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak_task.upgrade() else {
+                        return;
+                    };
+                    if ui.get_reader_request() != request
+                        || ui.get_source_project_id().as_str() != project_id
+                        || ui.get_reader_source_id().as_str() != source_id
+                    {
+                        return;
+                    }
+                    ui.set_reader_busy(false);
+                    match result {
+                        Ok(page) => {
+                            ui.set_reader_source_title(page.title.into());
+                            ui.set_reader_text(page.text.into());
+                            ui.set_reader_offset(page.offset);
+                            ui.set_reader_returned(page.returned);
+                            ui.set_reader_more(page.more);
+                            ui.set_reader_status(
+                                format!(
+                                    "Verified text: characters {}–{} of {}. {}",
+                                    page.offset.saturating_add(1),
+                                    page.offset.saturating_add(page.returned),
+                                    page.total,
+                                    if page.more {
+                                        "More text available."
+                                    } else {
+                                        "End of source."
+                                    }
+                                )
+                                .into(),
+                            );
+                        }
+                        Err(error) => {
+                            ui.set_reader_more(false);
+                            ui.set_reader_status(format!("Unable to read source: {error}").into());
+                        }
+                    }
+                });
+            });
+        }
+    });
     app.on_backup_action({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -7775,6 +8148,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 weak.clone(),
                             );
                         }
+                        reset_source_views(&ui, &info.id);
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status("Project created".into());
@@ -7830,6 +8204,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                             }
                         }
+                        reset_source_views(&ui, &info.id);
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status("Project created in managed local storage".into());
@@ -7885,6 +8260,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 weak.clone(),
                             );
                         }
+                        reset_source_views(&ui, &info.id);
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status("Project opened".into());

@@ -1,0 +1,3 @@
+77295db0109768f108495a31d932238431aeb0a86988325a63dd4258318023c7  /home/saba/researchweave-linux/target/release/researchweave-desktop
+ff9160396c9d3ff206388f7e1a8f89e53f2469efe1ab907bf26d45576e3a9868  crates/researchweave-desktop/ui/main.slint
+d48e78bad3615d193fb037e8afe860dcc6f8c93f35df73f19426f43f837b11b8  crates/researchweave-desktop/src/main.rs

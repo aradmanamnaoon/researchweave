@@ -126,7 +126,10 @@ if not match:
 pages = re.findall(r'^\s*"([^"]+)",\s*$', match.group(1), re.M)
 if len(pages) != 40 or len(set(pages)) != 40:
     raise SystemExit(f"Wrong page registry: {len(pages)}")
-placeholders = {3, 6, 8, 25, 26, 27, 33, 34, 35, 38}
+# Search (3) and Reader (6) are real native workflows in the UX candidate.
+# This inventory is independent of the screenshot/AT-SPI observations;
+# disagreement fails below rather than silently accepting a placeholder.
+placeholders = {8, 25, 26, 27, 33, 34, 35, 38}
 def run(*args, timeout=10, check=True):
     return subprocess.run(args, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
                           text=True, timeout=timeout, check=check)
@@ -285,6 +288,13 @@ with (out / "routes.csv").open("w", newline="", encoding="utf-8") as handle:
                          r["screenshot"]["sha256"]])
 if final["source_changed_during_audit"]:
     raise SystemExit("ERROR: Source changed during native audit; run again on stable snapshot")
+if final["placeholder_source_disagreement"]:
+    raise SystemExit(
+        "ERROR: Unexpected native placeholder state at routes "
+        + str(final["placeholder_source_disagreement"])
+    )
+if final["unverified"]:
+    raise SystemExit(f"ERROR: {final['unverified']} routes lack verified AT-SPI work areas")
 print(f"GUI_AUDIT_RESULTS routes={len(rows)} atspi_verified={final['passes']} "
       f"unverified={final['unverified']} evidence={out}", flush=True)
 PY

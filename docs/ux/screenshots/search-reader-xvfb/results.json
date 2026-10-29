@@ -1,0 +1,58 @@
+{
+  "kind": "native-linux-private-xvfb-search-reader",
+  "result": "PASS",
+  "source_state": "snapshot only; binary-to-source provenance requires independent build log",
+  "binary_sha256": "77295db0109768f108495a31d932238431aeb0a86988325a63dd4258318023c7",
+  "slint_sha256": "ff9160396c9d3ff206388f7e1a8f89e53f2469efe1ab907bf26d45576e3a9868",
+  "main_rs_sha256": "d48e78bad3615d193fb037e8afe860dcc6f8c93f35df73f19426f43f837b11b8",
+  "script_sha256": "e0fa9e02970b6628b4e1485befdc1425b76792a1b833cb28e34e7a757601df21",
+  "synthetic_source_count": 2,
+  "exact_reader_text_sha256": "b2a13ebcb449fbc0e661539ddfbce09489401c741b4ab16942b574ebf42703c6",
+  "tested": [
+    "actual project creation and source library add",
+    "empty and zero-result search statuses",
+    "Unicode source search yields one correct source",
+    "click search result opens Reader with exact Unicode text",
+    "Reader missing/empty IDs fail visibly without stale text",
+    "Reader source list reopens correct text and returns to Search"
+  ],
+  "not_tested": [
+    "PDF/OCR search",
+    "human screen-reader navigation",
+    "10,000 source performance",
+    "8,000-character source pagination",
+    "Windows and macOS native packages"
+  ],
+  "captures": [
+    {
+      "step": "01-native-search-route",
+      "image": "01-native-search-route.png",
+      "sha256": "f8ce747cae2d343184ce8a253e490662f819e75259bf97f109750f6601239cc1"
+    },
+    {
+      "step": "02-unicode-search-result",
+      "image": "02-unicode-search-result.png",
+      "sha256": "782db20a75dbc154d8af2d0726b358d2b09aa2543b0886948e32938468d9b5e1"
+    },
+    {
+      "step": "03-reader-exact-unicode-text",
+      "image": "03-reader-exact-unicode-text.png",
+      "sha256": "56f0c788d84bf1ded01662f46cc1810c9b44c4ae8db8afadb9f7dc6c95ed9e65"
+    },
+    {
+      "step": "04-reader-invalid-id",
+      "image": "04-reader-invalid-id.png",
+      "sha256": "e2d66655faa4141637ee1148ad8871d87cdcb5cc1b0b169728a57083ba933ba2"
+    },
+    {
+      "step": "05-reader-list-reopen",
+      "image": "05-reader-list-reopen.png",
+      "sha256": "1714ac3bcf830635a099eb19216fc187f84f71246479b636611d83e7d87c15b4"
+    },
+    {
+      "step": "06-reader-back-to-search",
+      "image": "06-reader-back-to-search.png",
+      "sha256": "0fb0a009646d90eecb522ad0a3f899b54855541baa8616fdec114d998b97f4db"
+    }
+  ]
+}

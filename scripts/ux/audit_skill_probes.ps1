@@ -110,7 +110,7 @@ $moreSpecs = @'
 061|ui|root.preview-analysis-import(&&root.apply-analysis-preview()|Dataset import uses a preview and apply boundary; error and row-count display need full flow test|Dataset import lacks paired preview/commit in UI.
 062|analysis|parent_revision: Some(dataset.revision.clone())&&pub fn transform(dataset: &Dataset|Analysis crate creates a child dataset with parent revision and exposes a typed transform; UI revision history remains to verify|Immutable transform lineage not represented by the expected source witnesses.
 063|ui|root.inspect-variable-view(&&root.preview-variable-update(|Variable inspector and preview-update actions exist; missing-data presentation needs fixture|Variable metadata inspect/update controls absent.
-064|ui|if root.page == 12: Rectangle&&dataset-grid := ListView|A dataset grid with row list is explicitly rendered; verify headers and keyboard semantics|Data page exists, but no dedicated dataset-grid ListView is found; the data screen shows text output and revision inputs, not a verifiable row grid.
+064|ui|if root.page == 12: Rectangle&&StandardTableView {&&rows: root.dataset-grid-rows;|Data View includes a native Slint table bound to verified dataset rows; actual columns and pagination need GUI checking|Data View exists, but no row-bound StandardTableView was found; inspect whether only a text preview is rendered.
 065|ui|statistics-mode&&stats-model-outcome := LineEdit&&stats-correlation-x := LineEdit|Statistics supports method state and distinct regression/correlation fields; scientific method hints not demonstrated|Method and input selection markers missing.
 066|ui|statistics-result-secondary&&statistics-result-provenance|Statistics has separate secondary and provenance outputs; actual assumption warnings need computed result inspection|Statistics output fields for caveats/provenance missing.
 067|host|fn statistics_result_summary&&confidence|Rust result formatting mentions confidence-related text and has a summary helper; wording accuracy needs numerical fixture|No confidence-related result formatting witness located.
@@ -169,7 +169,7 @@ function Markdown([string]$value) {
 if ($SelfTest) {
     $fixture = @('Button { text: "+ New note"; }', 'clicked => { root.create-quick-note(); }')
     $matched = @(Find-Literal -Lines $fixture -Needle 'text: "+ New note"')
-    $missing = @(Find-Literal -Lines $fixture -Needle 'dataset-grid := ListView')
+    $missing = @(Find-Literal -Lines $fixture -Needle 'rows: root.dataset-grid-rows;')
     $mutated = @('Button { text: "+ Another note"; }', 'clicked => { root.create-quick-note(); }')
     $afterMutation = @(Find-Literal -Lines $mutated -Needle 'text: "+ New note"')
     if ($matched.Count -ne 1 -or $matched[0] -ne 1 -or $missing.Count -ne 0 -or $afterMutation.Count -ne 0) {
@@ -292,9 +292,9 @@ $spacingTokens = @($uiLines | Where-Object { $_ -match 'Theme\.space[1-8]' }).Co
 $spacingLiterals = @($uiLines | Where-Object { $_ -match '\b(spacing|padding): [0-9]+px' }).Count
 $measurements['023'] = "$spacingTokens lines use named spacing tokens; $spacingLiterals lines use direct pixel spacing/padding."
 $dataBody = @(Source-Section -Lines $uiLines -StartText 'if root.page == 12: Rectangle' -EndText 'if root.page == 13: Rectangle')
-$dataViewList = @($dataBody | Where-Object { $_ -match '\bListView\s*\{' }).Count
+$dataViewList = @($dataBody | Where-Object { $_ -match '\bStandardTableView\s*\{' }).Count
 $dataViewFields = @($dataBody | Where-Object { $_ -match 'LineEdit\s*\{' }).Count
-$measurements['064'] = "Data View section: $dataViewList rendered ListView controls, $dataViewFields LineEdit controls. (Importing ListView globally does not count as data-grid rendering.)"
+$measurements['064'] = "Data View section: $dataViewList rendered StandardTableView controls, $dataViewFields LineEdit controls. (Importing a table globally does not count as actual row-grid rendering.)"
 $notesBody = @(Source-Section -Lines $uiLines -StartText 'if root.page == 21: Rectangle' -EndText 'if root.page == 9: Rectangle')
 $noteSearches = @($notesBody | Where-Object { $_ -match 'quick-note-search-field' }).Count
 $noteActionButtons = @($notesBody | Where-Object { $_ -match 'root.quick-note-action\(' }).Count

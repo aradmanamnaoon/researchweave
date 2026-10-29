@@ -1,6 +1,19 @@
 # ResearchWeave — current workflow inventory and broken handoffs
 
-**Basis:** Rust desktop Slint and callback handlers at initial `976656d` snapshot. Status terms: **wired** means a concrete UI callback exists, **partial** means a major handoff/user experience is missing, **placeholder** means no dedicated UI. These are static observations; historical tests are linked separately.
+**Historical baseline basis:** Rust desktop Slint and callback handlers at initial `976656d` snapshot. The first table and diagram preserve that snapshot's observed handoffs; their old statements about the absence of Search, Reader, contextual AI and a data grid have been superseded by later source changes. Status terms: **wired** means a concrete UI callback exists, **partial** means a major handoff/user experience is missing, **placeholder** means no dedicated UI.
+
+## Current candidate changes — 29 October 2026
+
+| Workflow | Current verified source behavior | Test boundary |
+|---|---|---|
+| Library → Search (3) → Reader (6) | Rust-backed, project-local literal text search with result-to-reader navigation; Reader has a 50-item paginated source index and 8,000-Unicode-character verified-text pages. See `main.slint` and desktop `on_search_project_sources`, `on_load_reader_source_list`, `on_open_reader_source`, `on_load_reader_page` calling library `search.query`, `library.list` and `source.full_text`. | **Compiled, backend-tested, and passed a real isolated Linux/Xvfb synthetic Search → Reader GUI run** on 207 Unicode characters, including empty/invalid input, list reopen and return navigation. Long pagination and Windows/macOS remain unverified. |
+| Reader / PDF → Evidence (8) | Readers remain separate: Reader shows imported stored text; PDF Reader renders native PDF pages. Existing Rust `evidence.anchor` and note operations are backend capabilities, but Evidence (8) remains a generic placeholder. | No integrated source selection → note/anchor → manuscript citation native GUI pass. |
+| Dataset → Data View | Newer unreleased UI binds verified immutable data to a read-only `StandardTableView` with 25-row page controls. | Fresh private Linux/Xvfb populated-grid case **PASS**; second-page, large-dataset, installed-package and complete analysis workflow acceptance still pending. |
+| Manuscript and contextual AI | Unreleased UI includes long-form manuscript editing, optional local-model-only AI panel and a selected found-text preview path. | Fresh private Xvfb synthetic 15-page Unicode manuscript and exact found-text AI preview cases **PASS**; no Word-class layout, citation-grounded model response or hosted inference verified. |
+
+The **later 40/40 native Linux route audit** ran with executable SHA-256 `77295db0109768f108495a31d932238431aeb0a86988325a63dd4258318023c7` and `source_changed_during_audit=false`. Exactly **eight placeholders** remain (8, 25, 26, 27, 33, 34, 35, 38). The **separate** Search → Reader real native Linux synthetic task passed on that binary; see [actual GUI receipt](screenshots/search-reader-xvfb/results.json). Windows workspace tests were reported **188 PASS**, with formatting and strict Clippy passing. No new release: published Rust `v0.2.0` is unchanged. See [cross-platform QA](CROSS_PLATFORM_QA.md) for earlier versus later candidate boundaries.
+
+## Original workflow comparison — historical `976656d` source
 
 | Workflow | Actual UI route and action sequence | Existing state/authority behavior | Missing handoff / usability issue | Baseline |
 |---|---|---|---|---|
@@ -17,7 +30,7 @@
 | Troubleshoot/work status | Manage → Diagnostics (30): run checks; Activity (37): filter/paginate local events; Automate → Jobs (31), Notifications (32); global tray | Structured diagnostics read and persisted PDF job/notification history (`main.slint:2187-2238,2326-2403`) | General long-running job/cancel/retry, error diagnostics, artifact links, guided repair and persistent problem center absent. | Wired; service-level UX partial |
 | Personalization/navigation | Manage → Preferences (36): dark/contrast/compact/reduced motion/scale; F6 focus landmark cycle; Ctrl+K + prefix + Enter route; Shift+F6 reverse | Local display persistence, 40 destination registry (`main.slint:378-444,1102-1143`, `main.rs:576-648`) | No interactive command result list, recent-object history, configurable shortcuts, keyboard tests on all OSes. | Wired; command UX partial |
 
-## Cross-workflow dependency map
+## Cross-workflow dependency map — historical missing handoffs
 
 ```mermaid
 flowchart LR
@@ -42,8 +55,8 @@ flowchart LR
     AI -. "no embedded actions" .-> W
 ```
 
-**Most consequential missing links:** source selection→evidence anchor→verified manuscript citation; selected dataset revision→one analysis document→saved result; note card→writing document; current task context→AI proposal. `docs/ux/SCREEN_INVENTORY.md` provides route-level details, `AI_INTEGRATION_AUDIT.md` records permission constraints, and `UX_ACCEPTANCE_CRITERIA.md` provides the future stage gate.
+**Still-consequential missing or unverified links:** Reader selection→evidence anchor→verified manuscript citation; selected dataset revision→one analysis document→saved result; note card→writing document; optional AI preview→a verified, provenance-aware model response. Source Search → Reader passed a limited synthetic Linux GUI task; long documents and cross-OS behavior remain untested. `docs/ux/SCREEN_INVENTORY.md` provides route-level details, `AI_INTEGRATION_AUDIT.md` records permission constraints, and `UX_ACCEPTANCE_CRITERIA.md` provides the future stage gate.
 
 ## Test evidence policy
 
-`docs/verification/INTERACTION_TEST_MATRIX.md` reports previously observed Windows UIA workflows and explicitly identifies native macOS/Linux gaps. No workflow in this document is labeled **passed now**: this is a code-inspected initial audit, with no new binary launch or UIA run. For future testing, use one synthetic dataset/review and capture the exact project ID/revision, event/audit trail, task completion, error and screenshot on the same candidate build.
+`docs/verification/INTERACTION_TEST_MATRIX.md` reports previously observed Windows UIA workflows and explicitly identifies native macOS/Linux gaps. The **original baseline table** is a code-inspected audit and certifies no new workflows. The **later candidate addendum** above records separately reported scoped native/Xvfb passes, including a real synthetic Search → Reader run with a short Unicode source. For future testing, use one synthetic dataset/review and capture the exact project ID/revision, event/audit trail, task completion, error and screenshot on the same candidate build.
