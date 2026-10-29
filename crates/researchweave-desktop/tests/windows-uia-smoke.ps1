@@ -58,16 +58,33 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
 function Read-DatasetPageJson([System.Windows.Automation.AutomationElement]$parent) {
     # Data View exposes the exact read-only page JSON through an accessible
     # TextEdit so users and UIA clients can inspect/copy unabridged cell values.
-    # Slint materializes only the visible portion of Data View's ScrollView in
-    # its UIA tree. The table is taller than the viewport on hosted runners,
-    # so reveal the lower inspector with real keyboard scrolling first.
+    # Slint only materializes the visible viewport in UIA. Keyboard Tab moves
+    # through native focusable controls and scrolls the TextEdit into view; a
+    # PageDown-only probe can leave the wrong nested widget handling scrolling.
     $name = 'Verified current dataset page JSON; select and copy complete values including shortened table cells'
     $anchor = Named $parent ([System.Windows.Automation.ControlType]::Button) 'Inspect dataset revision and request preview'
     EnsureLiveFocus $anchor
     $scrolled = 0
+    $tabbed = 0
     try {
         $details = $null
+        for ($step = 0; $step -le 12; $step++) {
+            foreach ($edit in (Children $parent ([System.Windows.Automation.ControlType]::Edit))) {
+                if ($edit.Current.Name -eq $name) {
+                    $details = $edit
+                    break
+                }
+            }
+            if ($details) { break }
+            if ($step -lt 12) {
+                [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
+                $tabbed++
+                Start-Sleep -Milliseconds 120
+            }
+        }
+        if (-not $details) { EnsureLiveFocus $anchor }
         for ($step = 0; $step -le 10; $step++) {
+            if ($details) { break }
             foreach ($edit in (Children $parent ([System.Windows.Automation.ControlType]::Edit))) {
                 if ($edit.Current.Name -eq $name) {
                     $details = $edit
@@ -80,16 +97,18 @@ function Read-DatasetPageJson([System.Windows.Automation.AutomationElement]$pare
             Start-Sleep -Milliseconds 120
         }
         if (-not $details) {
-            throw "Verified dataset page JSON editor did not appear after $scrolled viewport scrolls"
+            throw "Verified dataset page JSON editor did not appear after $tabbed keyboard tabs and $scrolled viewport scrolls"
         }
         return ([System.Windows.Automation.ValuePattern]$details.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
     }
     finally {
-        # Subsequent import checks start at the top of the same Data View.
-        # Keep focus on the button so PageUp scrolls the containing viewport.
-        for ($step = 0; $step -lt $scrolled; $step++) {
-            [System.Windows.Forms.SendKeys]::SendWait('{PGUP}')
-            Start-Sleep -Milliseconds 100
+        # Subsequent import checks start from the Inspect dataset control.
+        EnsureLiveFocus $anchor
+        if ($scrolled -gt 0) {
+            for ($step = 0; $step -lt $scrolled; $step++) {
+                [System.Windows.Forms.SendKeys]::SendWait('{PGUP}')
+                Start-Sleep -Milliseconds 100
+            }
         }
     }
 }
@@ -960,16 +979,16 @@ try {
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Record previewed immutable analysis dataset').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 300
-    $analysisResult = Read-DatasetPageJson $window
-    $datasetMatch = [regex]::Match([string]$analysisResult, '"dataset_id": "([0-9a-f]{24})"')
-    $revisionMatch = [regex]::Match([string]$analysisResult, '"revision": "([0-9a-f]{64})"')
-    if (-not $datasetMatch.Success -or -not $revisionMatch.Success) {
-        throw 'Analysis import did not expose immutable dataset identity and revision'
-    }
-    $datasetId = $datasetMatch.Groups[1].Value
-    $datasetRevision = $revisionMatch.Groups[1].Value
     $datasetIdEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis dataset ID'
     $datasetRevisionEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis dataset revision'
+    # Import populates both fields from the trusted result. Its compact initial
+    # state has no loaded rows, so inspect the full page only after requesting
+    # a specific immutable revision (which expands the real table/inspector).
+    $datasetId = ([System.Windows.Automation.ValuePattern]$datasetIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    $datasetRevision = ([System.Windows.Automation.ValuePattern]$datasetRevisionEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($datasetId -notmatch '^[0-9a-f]{24}$' -or $datasetRevision -notmatch '^[0-9a-f]{64}$') {
+        throw 'Analysis import did not populate a valid immutable dataset identity and revision'
+    }
     ([System.Windows.Automation.ValuePattern]$datasetIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($datasetId)
     ([System.Windows.Automation.ValuePattern]$datasetRevisionEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($datasetRevision)
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect dataset revision and request preview').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -989,9 +1008,21 @@ try {
         WaitForNameLike $window '*Analysis import preview ready*' 5000
         (Named $window ([System.Windows.Automation.ControlType]::Button) 'Record previewed immutable analysis dataset').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         WaitForNameLike $window '*Analysis dataset imported and audited*' 5000
+        # Every native import returns to the compact preview. The page inspector
+        # is only a meaningful row assertion after loading its immutable revision.
+        $nativeIdEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis dataset ID'
+        $nativeRevisionEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis dataset revision'
+        $nativeId = ([System.Windows.Automation.ValuePattern]$nativeIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $nativeRevision = ([System.Windows.Automation.ValuePattern]$nativeRevisionEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        if ($nativeId -notmatch '^[0-9a-f]{24}$' -or $nativeRevision -notmatch '^[0-9a-f]{64}$') {
+            throw "Native data import $nativeName did not populate an immutable dataset identity"
+        }
+        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect dataset revision and request preview').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        WaitForNameLike $window '*Immutable dataset revision loaded*' 5000
         $nativeResult = Read-DatasetPageJson $window
-        if (-not ([regex]::Match([string]$nativeResult, '"dataset_id": "([0-9a-f]{24})"')).Success) {
-            throw "Native data import $nativeName did not persist an immutable dataset identity"
+        if ($nativeResult -notlike "*`"dataset_id`": `"$nativeId`"*" -or
+            $nativeResult -notlike "*`"revision`": `"$nativeRevision`"*") {
+            throw "Native data import $nativeName did not reopen the exact verified immutable revision"
         }
     }
     Write-Output 'PASS: native Parquet/SPSS SAV/ZSAV/Stata DTA imports preview and persist via installed GUI'

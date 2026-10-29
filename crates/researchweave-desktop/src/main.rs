@@ -23,7 +23,7 @@ use researchweave_core::{
 use researchweave_evidence::EvidenceHandler;
 use researchweave_library::LibraryHandler;
 use researchweave_project::{
-    quick_notes::{self, NoteFlag, QuickNote},
+    quick_notes::{self, ConflictingQuickNoteDraft, NoteFlag, QuickNote},
     verify_archive, verify_encrypted_archive, ProjectHandler, ProjectInfo, ProjectStore,
 };
 use sha2::{Digest, Sha256};
@@ -37,7 +37,7 @@ use std::{
     rc::Rc,
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, Mutex,
     },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
@@ -450,6 +450,87 @@ struct PendingContextAi {
     preview: PromptPreview,
 }
 
+/// The identity of one explicitly requested local-model run. Project paths
+/// alone are insufficient: a project can be reopened, or an earlier canceled
+/// request can finish after a newer request in that same project.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ContextAiRunIdentity {
+    id: Uuid,
+    project: PathBuf,
+    project_generation: u64,
+}
+
+struct ContextAiInFlight {
+    identity: ContextAiRunIdentity,
+    stop: Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+struct ContextAiRunLifecycle {
+    project: Option<PathBuf>,
+    project_generation: u64,
+    current: Option<ContextAiInFlight>,
+}
+
+fn context_ai_completion_is_current(
+    state: &ContextAiRunLifecycle,
+    completed: &ContextAiRunIdentity,
+) -> bool {
+    state.current.as_ref().is_some_and(|run| {
+        !run.stop.load(Ordering::SeqCst)
+            && run.identity == *completed
+            && state.project.as_deref() == Some(completed.project.as_path())
+            && state.project_generation == completed.project_generation
+    })
+}
+
+/// Invalidate before clearing the UI. A canceled worker can still finish, but
+/// its delayed event-loop completion can no longer affect any later request.
+fn invalidate_context_ai_run(state: &mut ContextAiRunLifecycle) -> bool {
+    if let Some(run) = state.current.take() {
+        run.stop.store(true, Ordering::SeqCst);
+        true
+    } else {
+        false
+    }
+}
+
+fn change_context_ai_project(
+    state: &mut ContextAiRunLifecycle,
+    project: Option<PathBuf>,
+    project_generation: u64,
+) {
+    invalidate_context_ai_run(state);
+    state.project = project;
+    state.project_generation = project_generation;
+}
+
+fn begin_context_ai_run(
+    state: &mut ContextAiRunLifecycle,
+    identity: ContextAiRunIdentity,
+    stop: Arc<AtomicBool>,
+) -> bool {
+    if state.project.as_deref() != Some(identity.project.as_path())
+        || state.project_generation != identity.project_generation
+        || state.current.is_some()
+    {
+        return false;
+    }
+    state.current = Some(ContextAiInFlight { identity, stop });
+    true
+}
+
+fn finish_context_ai_run(
+    state: &mut ContextAiRunLifecycle,
+    completed: &ContextAiRunIdentity,
+) -> bool {
+    if !context_ai_completion_is_current(state, completed) {
+        return false;
+    }
+    state.current.take();
+    true
+}
+
 const LOCAL_ONLY_AI_POLICY: EgressPolicy = EgressPolicy {
     offline: true,
     external_allowed: false,
@@ -631,6 +712,122 @@ fn populate_quick_notes(
     Ok(())
 }
 
+/// Host-owned, project-scoped recovery choices. The UI receives only
+/// read-only display fields; it never supplies a recovery token or draft body
+/// to a mutating action.
+#[derive(Default)]
+struct QuickNoteRecoverySelection {
+    project: Option<PathBuf>,
+    drafts: Vec<ConflictingQuickNoteDraft>,
+    selected: usize,
+}
+
+impl QuickNoteRecoverySelection {
+    fn refresh(&mut self, project: &Path) -> Result<(), String> {
+        // Never retain another project's private draft in host/UI memory when
+        // opening a project whose journal cannot be read. Failure also clears
+        // potentially stale snapshots for the same project.
+        if self.project.as_deref() != Some(project) {
+            self.reset();
+        }
+        let drafts = match quick_notes::list_conflicting_drafts(project) {
+            Ok(drafts) => drafts,
+            Err(error) => {
+                self.reset();
+                return Err(error.to_string());
+            }
+        };
+        let previous_token = self
+            .current(project)
+            .map(|draft| draft.recovery_token.clone());
+        let selected = previous_token
+            .and_then(|token| {
+                drafts
+                    .iter()
+                    .position(|draft| draft.recovery_token == token)
+            })
+            .unwrap_or_else(|| self.selected.min(drafts.len().saturating_sub(1)));
+        self.project = Some(project.to_path_buf());
+        self.drafts = drafts;
+        self.selected = selected;
+        Ok(())
+    }
+
+    fn reset(&mut self) {
+        self.project = None;
+        self.drafts.clear();
+        self.selected = 0;
+    }
+
+    fn current(&self, project: &Path) -> Option<&ConflictingQuickNoteDraft> {
+        (self.project.as_deref() == Some(project))
+            .then(|| self.drafts.get(self.selected))
+            .flatten()
+    }
+
+    fn shift(&mut self, project: &Path, direction: i32) -> bool {
+        if self.project.as_deref() != Some(project) || self.drafts.is_empty() {
+            return false;
+        }
+        let last = self.drafts.len() - 1;
+        self.selected = if direction < 0 {
+            self.selected.saturating_sub(1)
+        } else if direction > 0 {
+            (self.selected + 1).min(last)
+        } else {
+            self.selected
+        };
+        true
+    }
+}
+
+fn display_quick_note_recovery(ui: &MainWindow, choices: &QuickNoteRecoverySelection) {
+    ui.set_quick_note_recovery_count(choices.drafts.len().try_into().unwrap_or(i32::MAX));
+    let Some(draft) = choices.drafts.get(choices.selected) else {
+        ui.set_quick_note_recovery_index(0);
+        ui.set_quick_note_recovery_title("".into());
+        ui.set_quick_note_recovery_body("".into());
+        ui.set_quick_note_recovery_labels("".into());
+        ui.set_quick_note_recovery_source("".into());
+        ui.set_quick_note_recovery_status("".into());
+        return;
+    };
+    ui.set_quick_note_recovery_index(
+        choices
+            .selected
+            .saturating_add(1)
+            .try_into()
+            .unwrap_or(i32::MAX),
+    );
+    ui.set_quick_note_recovery_title(draft.title.clone().into());
+    ui.set_quick_note_recovery_body(draft.body.clone().into());
+    ui.set_quick_note_recovery_labels(draft.labels.clone().into());
+    ui.set_quick_note_recovery_source(
+        format!(
+            "Original note {} · draft revision {} · newer saved revision {}",
+            draft.source_note_id, draft.expected_revision, draft.current_revision
+        )
+        .into(),
+    );
+    ui.set_quick_note_recovery_status(
+        "This is the exact staged draft. Recovery creates a different note; it never replaces the newer saved original."
+            .into(),
+    );
+}
+
+fn recovered_draft_matches_visible_editor(
+    draft: &ConflictingQuickNoteDraft,
+    selected_note_id: &str,
+    title: &str,
+    body: &str,
+    labels: &str,
+) -> bool {
+    selected_note_id == draft.source_note_id
+        && title == draft.title
+        && body == draft.body
+        && labels == draft.labels
+}
+
 fn select_quick_note(ui: &MainWindow, note: &QuickNote) {
     ui.set_quick_note_id(note.id.clone().into());
     ui.set_quick_note_revision(note.revision as i32);
@@ -666,6 +863,9 @@ fn reset_quick_notes_for_project(ui: &MainWindow, project: &Path) {
             _ => {}
         }
     }
+    // Called only after the host has bound the new active project. A failed
+    // automatic recovery must remain inspectable rather than disappearing.
+    ui.invoke_refresh_quick_note_recovery();
 }
 
 fn save_selected_quick_note(ui: &MainWindow, project: &Path) -> Result<(), String> {
@@ -681,9 +881,17 @@ fn save_selected_quick_note(ui: &MainWindow, project: &Path) -> Result<(), Strin
         ui.get_quick_note_body().as_str(),
         ui.get_quick_note_labels().as_str(),
     )
-    .map_err(|error| error.to_string())?;
-    quick_notes::flush_draft(project, &id).map_err(|error| error.to_string())?;
+    .map_err(|error| {
+        ui.invoke_refresh_quick_note_recovery();
+        error.to_string()
+    })?;
+    // A revision may have committed even if clearing the draft journal fails.
+    // Keep the editor's optimistic revision in sync before reporting that error.
     ui.set_quick_note_revision(updated.revision as i32);
+    quick_notes::flush_draft(project, &id).map_err(|error| {
+        ui.invoke_refresh_quick_note_recovery();
+        error.to_string()
+    })?;
     ui.set_quick_note_status("Saved locally · Revision history retained".into());
     populate_quick_notes(
         ui,
@@ -691,6 +899,18 @@ fn save_selected_quick_note(ui: &MainWindow, project: &Path) -> Result<(), Strin
         ui.get_quick_note_search().as_str(),
         ui.get_quick_note_view(),
     )
+}
+
+/// A note transition may replace the editor, change the active filter, or
+/// mutate a note. None of those effects may occur if the current edit fails to
+/// save. Keeping the gate separate allows real optimistic-revision conflicts
+/// to be checked without constructing a native GUI in tests.
+fn after_quick_note_save<T>(
+    save: impl FnOnce() -> Result<(), String>,
+    transition: impl FnOnce() -> T,
+) -> Result<T, String> {
+    save()?;
+    Ok(transition())
 }
 
 /// Save the active quick note before changing projects. A pending timer could
@@ -4062,7 +4282,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let quick_note_draft_session: Rc<RefCell<Option<quick_notes::DraftSession>>> =
         Rc::new(RefCell::new(None));
     let pending_context_ai: Rc<RefCell<Option<PendingContextAi>>> = Rc::new(RefCell::new(None));
-    let context_ai_cancellation: Rc<RefCell<Option<Arc<AtomicBool>>>> = Rc::new(RefCell::new(None));
+    let active_context_ai_run = Arc::new(Mutex::new(ContextAiRunLifecycle::default()));
     app.on_preview_context_ai({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -4123,37 +4343,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_run_context_ai({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let project_generation = project_generation.clone();
         let pending = pending_context_ai.clone();
-        let cancellation = context_ai_cancellation.clone();
+        let active_run = active_context_ai_run.clone();
         move || {
             let Some(ui) = weak.upgrade() else { return };
-            if ui.get_context_ai_busy() { return; }
+            if ui.get_context_ai_busy() {
+                return;
+            }
             let Some(approved) = pending.borrow().clone() else {
                 ui.set_context_ai_output("Preview a valid local-model request first.".into());
                 return;
             };
-            let valid = active_project.borrow().as_ref().is_some_and(|current| {
-                current == &approved.project
-            }) && ui.get_page() == approved.page
-                && contextual_request_from_ui(&ui, &approved.project).is_ok_and(|current| {
-                    current == approved.request
-                });
+            let valid = active_project
+                .borrow()
+                .as_ref()
+                .is_some_and(|current| current == &approved.project)
+                && ui.get_page() == approved.page
+                && contextual_request_from_ui(&ui, &approved.project)
+                    .is_ok_and(|current| current == approved.request);
             if !valid {
                 ui.set_context_ai_ready(false);
                 pending.borrow_mut().take();
                 ui.set_context_ai_output(
-                    "Your project, page or writing changed after preview. Review context again.".into(),
+                    "Your project, page or writing changed after preview. Review context again."
+                        .into(),
                 );
                 return;
             }
             // One explicit user action authorizes one local inference. Remote
             // profiles cannot pass the offline egress policy.
+            let identity = ContextAiRunIdentity {
+                id: Uuid::new_v4(),
+                project: approved.project.clone(),
+                project_generation: project_generation.get(),
+            };
             let stop = Arc::new(AtomicBool::new(false));
-            *cancellation.borrow_mut() = Some(stop.clone());
+            {
+                let mut state = active_run.lock().unwrap();
+                if !begin_context_ai_run(&mut state, identity.clone(), stop.clone()) {
+                    ui.set_context_ai_ready(false);
+                    pending.borrow_mut().take();
+                    ui.set_context_ai_output(
+                        "The active local AI request or project changed. Preview again.".into(),
+                    );
+                    return;
+                }
+            }
+            pending.borrow_mut().take();
             ui.set_context_ai_busy(true);
             ui.set_context_ai_ready(false);
             ui.set_context_ai_output("Contacting the approved local model…".into());
             let weak_task = weak.clone();
+            let active_run_task = active_run.clone();
             std::thread::spawn(move || {
                 let result = NativeHttpTransport::new(Duration::from_secs(30))
                     .and_then(|transport| {
@@ -4168,23 +4410,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .map_err(|error| error.to_string());
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak_task.upgrade() {
+                        // Never let an older request clear the busy state or
+                        // render into another request's or project's panel.
+                        if !finish_context_ai_run(&mut active_run_task.lock().unwrap(), &identity) {
+                            return;
+                        }
                         ui.set_context_ai_busy(false);
-                        if stop.load(Ordering::SeqCst) {
-                            ui.set_context_ai_output(
-                                "Local AI request canceled. Research content is unchanged.".into(),
-                            );
-                        } else {
-                            match result {
-                                Ok(response) => ui.set_context_ai_output(
-                                    format!(
-                                        "Model-generated draft · Verify against actual sources.\n\n{}",
-                                        response.text
-                                    ).into(),
-                                ),
-                                Err(error) => ui.set_context_ai_output(
-                                    format!("Local model unavailable: {error}. Your project is unchanged.").into(),
-                                ),
-                            }
+                        match result {
+                            Ok(response) => ui.set_context_ai_output(
+                                format!(
+                                    "Model-generated draft · Verify against actual sources.\n\n{}",
+                                    response.text
+                                )
+                                .into(),
+                            ),
+                            Err(error) => ui.set_context_ai_output(
+                                format!(
+                                    "Local model unavailable: {error}. Your project is unchanged."
+                                )
+                                .into(),
+                            ),
                         }
                     }
                 });
@@ -4193,15 +4438,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     app.on_cancel_context_ai({
         let weak = app.as_weak();
-        let cancellation = context_ai_cancellation.clone();
+        let active_run = active_context_ai_run.clone();
+        let pending = pending_context_ai.clone();
         move || {
-            if let Some(stop) = cancellation.borrow().as_ref() {
-                stop.store(true, Ordering::SeqCst);
-            }
-            if let Some(ui) = weak.upgrade() {
+            if invalidate_context_ai_run(&mut active_run.lock().unwrap()) {
+                pending.borrow_mut().take();
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_context_ai_busy(false);
+                    ui.set_context_ai_ready(false);
+                    ui.set_context_ai_output(
+                        "Local AI request canceled. Research content is unchanged. Preview again to retry."
+                            .into(),
+                    );
+                }
+            } else if let Some(ui) = weak.upgrade() {
                 ui.set_context_ai_output(
-                    "Cancellation requested. The local request will be discarded when it ends."
-                        .into(),
+                    "No local AI request is running.".into(),
                 );
             }
         }
@@ -4210,6 +4462,142 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     // revisioned notebook/manuscript editor. Switching editors cannot cancel
     // a pending save in an unrelated writing surface.
     let quick_note_timer = Rc::new(slint::Timer::default());
+    let quick_note_recovery = Rc::new(RefCell::new(QuickNoteRecoverySelection::default()));
+    app.on_refresh_quick_note_recovery({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let recovery = quick_note_recovery.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                recovery.borrow_mut().reset();
+                display_quick_note_recovery(&ui, &recovery.borrow());
+                return;
+            };
+            let result = recovery.borrow_mut().refresh(&project);
+            display_quick_note_recovery(&ui, &recovery.borrow());
+            match result {
+                Ok(()) if !recovery.borrow().drafts.is_empty() => {
+                    ui.set_quick_note_recovery_status(
+                        "Inspect the exact draft text, then choose Recover as new note copy. Nothing is replaced automatically."
+                            .into(),
+                    );
+                }
+                Ok(()) => {}
+                Err(error) => ui.set_quick_note_status(
+                    format!("Cannot inspect retained note drafts; they have not been removed: {error}")
+                        .into(),
+                ),
+            }
+        }
+    });
+    app.on_navigate_quick_note_recovery({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let recovery = quick_note_recovery.clone();
+        move |action| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                return;
+            };
+            let direction = match action.as_str() {
+                "previous" => -1,
+                "next" => 1,
+                _ => {
+                    ui.set_quick_note_recovery_status(
+                        "Unknown recovery choice. No note was changed.".into(),
+                    );
+                    return;
+                }
+            };
+            if recovery.borrow_mut().shift(&project, direction) {
+                display_quick_note_recovery(&ui, &recovery.borrow());
+            }
+        }
+    });
+    app.on_recover_quick_note_as_copy({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let recovery = quick_note_recovery.clone();
+        let timer = quick_note_timer.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_quick_note_status("Open a project to recover a note draft.".into());
+                return;
+            };
+            // Never accept UI text, draft ID or hash from the callback:
+            // only the exact snapshot inspected and held by this host.
+            let inspected = recovery.borrow().current(&project).cloned();
+            let Some(inspected) = inspected else {
+                ui.set_quick_note_status(
+                    "No inspected conflicting draft is ready. Refresh recovery drafts first."
+                        .into(),
+                );
+                return;
+            };
+            let can_switch_editor = recovered_draft_matches_visible_editor(
+                &inspected,
+                ui.get_quick_note_id().as_str(),
+                ui.get_quick_note_title().as_str(),
+                ui.get_quick_note_body().as_str(),
+                ui.get_quick_note_labels().as_str(),
+            );
+            match quick_notes::recover_conflicting_draft_as_copy(&project, &inspected) {
+                Ok(copy) => {
+                    if can_switch_editor {
+                        // Rebind only when no newer unsaved editor content
+                        // would be replaced. Otherwise leave all fields
+                        // untouched and let the writer resolve them manually.
+                        timer.stop();
+                        select_quick_note(&ui, &copy);
+                        ui.set_quick_note_grid(false);
+                        ui.set_quick_note_search("".into());
+                        ui.set_quick_note_view(0);
+                    }
+                    let refresh = recovery.borrow_mut().refresh(&project);
+                    display_quick_note_recovery(&ui, &recovery.borrow());
+                    let listing = populate_quick_notes(
+                        &ui, &project, ui.get_quick_note_search().as_str(),
+                        ui.get_quick_note_view(),
+                    );
+                    let mut message = format!(
+                        "Recovered a separate note copy: {}. The newer original was not changed.",
+                        copy.title,
+                    );
+                    if !can_switch_editor {
+                        message.push_str(
+                            " Your current editor text was kept; open the recovered copy from Notes when ready.",
+                        );
+                    }
+                    if let Err(error) = refresh {
+                        message.push_str(&format!(
+                            " The copy is safe, but recovery-list refresh failed: {error}."
+                        ));
+                    }
+                    if let Err(error) = listing {
+                        message.push_str(&format!(" Note-list refresh failed: {error}."));
+                    }
+                    ui.set_quick_note_status(message.clone().into());
+                    ui.set_quick_note_recovery_status(message.into());
+                }
+                Err(error) => {
+                    let refresh = recovery.borrow_mut().refresh(&project);
+                    display_quick_note_recovery(&ui, &recovery.borrow());
+                    let message = match refresh {
+                        Ok(()) => format!(
+                            "No copy created: {error}. The draft and newer saved original are unchanged. Inspect the refreshed draft before retrying."
+                        ),
+                        Err(refresh_error) => format!(
+                            "No copy created: {error}. Draft inspection failed: {refresh_error}. Existing work was not removed."
+                        ),
+                    };
+                    ui.set_quick_note_status(message.clone().into());
+                    ui.set_quick_note_recovery_status(message.into());
+                }
+            }
+        }
+    });
     app.on_refresh_quick_notes({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -4228,15 +4616,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_navigate_quick_notes({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let timer = quick_note_timer.clone();
+        move |destination| {
+            let Some(ui) = weak.upgrade() else { return };
+            let view = match destination.as_str() {
+                "active" => Some(0),
+                "archived" => Some(1),
+                "trash" => Some(2),
+                "toggle-grid" | "toggle-notebook" => None,
+                _ => {
+                    ui.set_quick_note_status("Unknown note destination".into());
+                    return;
+                }
+            };
+            let project = active_project.borrow().clone();
+            let result = after_quick_note_save(
+                || finish_quick_note_before_project_switch(&ui, project.as_deref(), &timer),
+                || {
+                    if let Some(view) = view {
+                        if let Some(project) = project.as_deref() {
+                            populate_quick_notes(
+                                &ui,
+                                project,
+                                ui.get_quick_note_search().as_str(),
+                                view,
+                            )?;
+                        }
+                        ui.set_quick_note_view(view);
+                    } else if destination == "toggle-grid" {
+                        ui.set_quick_note_grid(!ui.get_quick_note_grid());
+                    } else {
+                        ui.set_show_research_notebook(!ui.get_show_research_notebook());
+                    }
+                    Ok::<(), String>(())
+                },
+            );
+            match result {
+                Err(error) => ui.set_quick_note_status(
+                    format!("Cannot switch notes; current edit was preserved: {error}").into(),
+                ),
+                Ok(Err(error)) => ui.set_quick_note_status(
+                    format!("Cannot load note destination; current edit was preserved: {error}")
+                        .into(),
+                ),
+                Ok(Ok(())) => {}
+            }
+        }
+    });
     app.on_create_quick_note({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let timer = quick_note_timer.clone();
         move || {
             let Some(ui) = weak.upgrade() else { return };
             let Some(project) = active_project.borrow().clone() else {
                 ui.set_quick_note_status("Open a project before creating a note".into());
                 return;
             };
+            if let Err(error) = after_quick_note_save(
+                || finish_quick_note_before_project_switch(&ui, Some(&project), &timer),
+                || (),
+            ) {
+                ui.set_quick_note_status(
+                    format!("Cannot create a note; current edit was preserved: {error}").into(),
+                );
+                return;
+            }
             match quick_notes::save(&project, None, None, "", "", "") {
                 Ok(note) => {
                     select_quick_note(&ui, &note);
@@ -4257,11 +4705,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_select_quick_note({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let timer = quick_note_timer.clone();
         move |id| {
             let Some(ui) = weak.upgrade() else { return };
             let Some(project) = active_project.borrow().clone() else {
                 return;
             };
+            if let Err(error) = after_quick_note_save(
+                || finish_quick_note_before_project_switch(&ui, Some(&project), &timer),
+                || (),
+            ) {
+                ui.set_quick_note_status(
+                    format!("Cannot open another note; current edit was preserved: {error}").into(),
+                );
+                return;
+            }
             match quick_notes::get(&project, id.as_str()) {
                 Ok(note) if !note.deleted => {
                     ui.set_quick_note_grid(false);
@@ -4332,6 +4790,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_quick_note_status(
                         format!("Save failed. Keep this note open and retry: {error}").into(),
                     );
+                    ui.invoke_refresh_quick_note_recovery();
                     return;
                 }
             }
@@ -4354,6 +4813,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     )
                                     .into(),
                                 );
+                                ui.invoke_refresh_quick_note_recovery();
                                 return;
                             }
                         }
@@ -4375,6 +4835,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_quick_note_action({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let timer = quick_note_timer.clone();
         move |action, id, revision| {
             let Some(ui) = weak.upgrade() else { return };
             let Some(project) = active_project.borrow().clone() else {
@@ -4389,6 +4850,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     return;
                 }
             };
+            if let Err(error) = after_quick_note_save(
+                || finish_quick_note_before_project_switch(&ui, Some(&project), &timer),
+                || (),
+            ) {
+                ui.set_quick_note_status(
+                    format!("Cannot change note; current edit was preserved: {error}").into(),
+                );
+                return;
+            }
             let selected = ui.get_quick_note_id().as_str() == id.as_str();
             let expected = if selected {
                 i64::from(ui.get_quick_note_revision())
@@ -8886,7 +9356,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let project_generation = project_generation.clone();
         let pending_evidence = pending_evidence.clone();
         let pending_ai = pending_ai.clone();
-        let context_ai_cancellation = context_ai_cancellation.clone();
+        let pending_context_ai = pending_context_ai.clone();
+        let active_context_ai_run = active_context_ai_run.clone();
         let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
@@ -8913,9 +9384,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         timer.stop();
                         pending_evidence.borrow_mut().take();
                         pending_ai.borrow_mut().take();
-                        if let Some(stop) = context_ai_cancellation.borrow_mut().take() {
-                            stop.store(true, Ordering::SeqCst);
-                        }
+                        pending_context_ai.borrow_mut().take();
+                        change_context_ai_project(
+                            &mut active_context_ai_run.lock().unwrap(),
+                            Some(PathBuf::from(path.as_str())),
+                            project_generation.get(),
+                        );
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
@@ -8957,7 +9431,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let project_generation = project_generation.clone();
         let pending_evidence = pending_evidence.clone();
         let pending_ai = pending_ai.clone();
-        let context_ai_cancellation = context_ai_cancellation.clone();
+        let pending_context_ai = pending_context_ai.clone();
+        let active_context_ai_run = active_context_ai_run.clone();
         let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
@@ -8984,13 +9459,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         timer.stop();
                         pending_evidence.borrow_mut().take();
                         pending_ai.borrow_mut().take();
-                        if let Some(stop) = context_ai_cancellation.borrow_mut().take() {
-                            stop.store(true, Ordering::SeqCst);
-                        }
+                        pending_context_ai.borrow_mut().take();
+                        // The managed-project locator below may fail. Bind
+                        // the AI lifecycle to the actual opened path, not the
+                        // new project's UUID or a guessed storage location.
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = find_managed_project(&info.id).ok();
+                        change_context_ai_project(
+                            &mut active_context_ai_run.lock().unwrap(),
+                            active_project.borrow().clone(),
+                            project_generation.get(),
+                        );
                         clear_project_scoped_view_state(&ui);
                         let mut draft_warning = None;
                         if let Some(project) = active_project.borrow().as_ref() {
@@ -9028,7 +9509,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let project_generation = project_generation.clone();
         let pending_evidence = pending_evidence.clone();
         let pending_ai = pending_ai.clone();
-        let context_ai_cancellation = context_ai_cancellation.clone();
+        let pending_context_ai = pending_context_ai.clone();
+        let active_context_ai_run = active_context_ai_run.clone();
         let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
@@ -9055,9 +9537,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         timer.stop();
                         pending_evidence.borrow_mut().take();
                         pending_ai.borrow_mut().take();
-                        if let Some(stop) = context_ai_cancellation.borrow_mut().take() {
-                            stop.store(true, Ordering::SeqCst);
-                        }
+                        pending_context_ai.borrow_mut().take();
+                        change_context_ai_project(
+                            &mut active_context_ai_run.lock().unwrap(),
+                            Some(PathBuf::from(path.as_str())),
+                            project_generation.get(),
+                        );
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
@@ -9139,6 +9624,322 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn quick_note_recovery_selection_keeps_exact_draft_and_never_crosses_projects() {
+        let root = std::env::temp_dir().join(format!("rw-note-recovery-ui-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Host recovery selection",
+            true,
+            &root.join("audit.sqlite"),
+        )
+        .unwrap();
+        for index in 0..2 {
+            let note = quick_notes::save(
+                &project,
+                None,
+                None,
+                &format!("Original {index}"),
+                "before",
+                "",
+            )
+            .unwrap();
+            quick_notes::stage_draft(
+                &project,
+                &note.id,
+                note.revision,
+                &format!("Title \u{067E}\u{0698}\u{0648}\u{0647}\u{0634} {index}"),
+                &format!("Exact journal body 🧠 漢字 {index}"),
+                "lab, qualitative",
+            )
+            .unwrap();
+            quick_notes::save(
+                &project,
+                Some(&note.id),
+                Some(note.revision),
+                "External writer",
+                "newer saved",
+                "",
+            )
+            .unwrap();
+        }
+        let mut choices = QuickNoteRecoverySelection::default();
+        choices.refresh(&project).unwrap();
+        assert_eq!(choices.drafts.len(), 2);
+        // An unreadable second project must never show the first project's
+        // retained private draft, even if loading the new project fails.
+        assert!(choices.refresh(&root.join("missing-project")).is_err());
+        assert!(choices.drafts.is_empty());
+        assert!(choices.project.is_none());
+        choices.refresh(&project).unwrap();
+        assert_eq!(choices.drafts.len(), 2);
+        let first = choices.current(&project).unwrap().clone();
+        assert!(first.body.contains("漢字"));
+        assert!(!choices.shift(&root.join("other-project"), 1));
+        assert!(choices.current(&root.join("other-project")).is_none());
+        assert!(choices.shift(&project, 1));
+        let second = choices.current(&project).unwrap().clone();
+        assert_ne!(first.recovery_token, second.recovery_token);
+        choices.refresh(&project).unwrap();
+        assert_eq!(choices.current(&project), Some(&second));
+        assert!(choices.shift(&project, 1));
+        assert_eq!(
+            choices.current(&project),
+            Some(&second),
+            "last choice clamps"
+        );
+        assert!(choices.shift(&project, -1));
+        assert_eq!(choices.current(&project), Some(&first));
+        assert!(recovered_draft_matches_visible_editor(
+            &first,
+            &first.source_note_id,
+            &first.title,
+            &first.body,
+            &first.labels
+        ));
+        assert!(!recovered_draft_matches_visible_editor(
+            &first,
+            &first.source_note_id,
+            &first.title,
+            "newer unsaved text must not be discarded",
+            &first.labels
+        ));
+        // A recovery button must use the host-held inspected choice, not
+        // whatever text is currently displayed in the editable note.
+        let newer_original = quick_notes::get(&project, &first.source_note_id).unwrap();
+        let recovered = quick_notes::recover_conflicting_draft_as_copy(
+            &project,
+            choices.current(&project).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(recovered.body, first.body);
+        assert_eq!(
+            quick_notes::get(&project, &first.source_note_id).unwrap(),
+            newer_original
+        );
+        choices.refresh(&project).unwrap();
+        assert_eq!(choices.drafts.len(), 1);
+        assert_eq!(choices.current(&project), Some(&second));
+        choices.reset();
+        assert!(choices.current(&project).is_none());
+        assert!(choices.drafts.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn contextual_ai_cancel_then_retry_blocks_old_completion_from_clearing_new_busy_state() {
+        let project = PathBuf::from("private-local-project");
+        let mut state = ContextAiRunLifecycle::default();
+        change_context_ai_project(&mut state, Some(project.clone()), 7);
+        let first = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project: project.clone(),
+            project_generation: 7,
+        };
+        let old_stop = Arc::new(AtomicBool::new(false));
+        assert!(begin_context_ai_run(
+            &mut state,
+            first.clone(),
+            old_stop.clone()
+        ));
+        assert!(context_ai_completion_is_current(&state, &first));
+
+        assert!(invalidate_context_ai_run(&mut state));
+        assert!(old_stop.load(Ordering::SeqCst));
+        let second = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project,
+            project_generation: 7,
+        };
+        assert!(begin_context_ai_run(
+            &mut state,
+            second.clone(),
+            Arc::new(AtomicBool::new(false))
+        ));
+
+        // Same event-loop guard as production. The first worker is permitted
+        // to finish later but cannot overwrite the second request's panel.
+        let busy = Cell::new(true);
+        let output = RefCell::new("New local request in progress".to_owned());
+        if finish_context_ai_run(&mut state, &first) {
+            busy.set(false);
+            output.replace("Stale model output".to_owned());
+        }
+        assert!(busy.get());
+        assert_eq!(*output.borrow(), "New local request in progress");
+        assert!(context_ai_completion_is_current(&state, &second));
+        assert!(finish_context_ai_run(&mut state, &second));
+        assert!(!finish_context_ai_run(&mut state, &second));
+    }
+
+    #[test]
+    fn contextual_ai_project_switch_and_same_path_reopen_invalidate_late_worker() {
+        let project_a = PathBuf::from("project-a");
+        let project_b = PathBuf::from("project-b");
+        let mut state = ContextAiRunLifecycle::default();
+        change_context_ai_project(&mut state, Some(project_a.clone()), 2);
+        let old = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project: project_a.clone(),
+            project_generation: 2,
+        };
+        let old_stop = Arc::new(AtomicBool::new(false));
+        assert!(begin_context_ai_run(
+            &mut state,
+            old.clone(),
+            old_stop.clone()
+        ));
+        change_context_ai_project(&mut state, Some(project_b.clone()), 3);
+        assert!(old_stop.load(Ordering::SeqCst));
+        assert!(!finish_context_ai_run(&mut state, &old));
+        assert!(!begin_context_ai_run(
+            &mut state,
+            old.clone(),
+            Arc::new(AtomicBool::new(false))
+        ));
+
+        let other_project = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project: project_b.clone(),
+            project_generation: 3,
+        };
+        let other_stop = Arc::new(AtomicBool::new(false));
+        assert!(begin_context_ai_run(
+            &mut state,
+            other_project.clone(),
+            other_stop.clone()
+        ));
+        // Reopening the identical directory must still invalidate the old
+        // completion: project identity is path AND generation.
+        change_context_ai_project(&mut state, Some(project_b.clone()), 4);
+        assert!(other_stop.load(Ordering::SeqCst));
+        assert!(!finish_context_ai_run(&mut state, &other_project));
+
+        let reloaded = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project: project_b,
+            project_generation: 4,
+        };
+        assert!(begin_context_ai_run(
+            &mut state,
+            reloaded.clone(),
+            Arc::new(AtomicBool::new(false))
+        ));
+        assert!(!finish_context_ai_run(&mut state, &old));
+        assert!(finish_context_ai_run(&mut state, &reloaded));
+    }
+
+    #[test]
+    fn quick_note_navigation_stays_put_when_current_editor_save_conflicts() {
+        let root = std::env::temp_dir().join(format!("rw-note-navigation-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Quick note transition conflict",
+            true,
+            &root.join("audit.sqlite"),
+        )
+        .unwrap();
+        let original = quick_notes::save(&project, None, None, "My note", "Original", "").unwrap();
+        quick_notes::stage_draft(
+            &project,
+            &original.id,
+            original.revision,
+            "My note",
+            "Uncommitted Persian draft پژوهش",
+            "",
+        )
+        .unwrap();
+        let other_writer = quick_notes::save(
+            &project,
+            Some(&original.id),
+            Some(original.revision),
+            "My note",
+            "Concurrent writer",
+            "",
+        )
+        .unwrap();
+
+        let selected_id = RefCell::new(original.id.clone());
+        let visible_draft = RefCell::new("Uncommitted Persian draft پژوهش".to_owned());
+        let transition = after_quick_note_save(
+            || {
+                quick_notes::save(
+                    &project,
+                    Some(&original.id),
+                    Some(original.revision),
+                    "My note",
+                    visible_draft.borrow().as_str(),
+                    "",
+                )
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+            },
+            || {
+                selected_id.replace("next-note".into());
+                visible_draft.replace("Next note body".into());
+            },
+        );
+        assert!(transition.is_err());
+        assert_eq!(*selected_id.borrow(), original.id);
+        assert_eq!(*visible_draft.borrow(), "Uncommitted Persian draft پژوهش");
+        assert_eq!(
+            quick_notes::get(&project, &original.id).unwrap().revision,
+            other_writer.revision
+        );
+        assert_eq!(
+            quick_notes::get(&project, &original.id).unwrap().body,
+            "Concurrent writer"
+        );
+        // The already-staged local draft remains recoverable, not discarded
+        // or silently forced over a newer project revision.
+        assert!(quick_notes::recover_drafts(&project).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn quick_note_navigation_runs_after_successful_persist() {
+        let root = std::env::temp_dir().join(format!("rw-note-transition-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Quick note successful navigation",
+            true,
+            &root.join("audit.sqlite"),
+        )
+        .unwrap();
+        let note = quick_notes::save(&project, None, None, "Note", "Before", "").unwrap();
+        let switched = Cell::new(false);
+        after_quick_note_save(
+            || {
+                quick_notes::save(
+                    &project,
+                    Some(&note.id),
+                    Some(note.revision),
+                    "Note",
+                    "Saved before switch",
+                    "",
+                )
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+            },
+            || {
+                assert_eq!(
+                    quick_notes::get(&project, &note.id).unwrap().body,
+                    "Saved before switch"
+                );
+                switched.set(true);
+            },
+        )
+        .unwrap();
+        assert!(switched.get());
+        std::fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn citation_picker_inserts_canonical_reference_once_without_discarding_existing_ids() {

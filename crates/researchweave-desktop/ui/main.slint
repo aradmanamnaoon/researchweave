@@ -371,6 +371,18 @@ export component MainWindow inherits Window {
     in-out property <string> quick-note-body: "";
     in-out property <string> quick-note-labels: "";
     in-out property <string> quick-note-status: "Open a project to create notes.";
+    // Retained conflicting journals are inspected read-only. The exact
+    // recovery token and staged content stay in the Rust host, never in UI.
+    in-out property <int> quick-note-recovery-count: 0;
+    in-out property <int> quick-note-recovery-index: 0;
+    in-out property <string> quick-note-recovery-title: "";
+    in-out property <string> quick-note-recovery-body: "";
+    in-out property <string> quick-note-recovery-labels: "";
+    in-out property <string> quick-note-recovery-source: "";
+    in-out property <string> quick-note-recovery-status: "";
+    callback refresh-quick-note-recovery();
+    callback navigate-quick-note-recovery(string);
+    callback recover-quick-note-as-copy();
     in-out property <bool> show-research-notebook: false;
     // One restrained, optional AI entry point for all research activities.
     in-out property <bool> context-ai-open: false;
@@ -388,6 +400,7 @@ export component MainWindow inherits Window {
     callback create-quick-note();
     callback select-quick-note(string);
     callback save-quick-note();
+    callback navigate-quick-notes(string);
     callback quick-note-action(string, string, int);
     callback quick-note-draft-edited(string, string, string);
     callback notebook-draft-edited(string);
@@ -1325,14 +1338,22 @@ export component MainWindow inherits Window {
                         HorizontalLayout {
                             padding: 16px;
                             spacing: 14px;
+                            // Keep the inspector separate from the scrollable
+                            // Reader column. Scrolling the outer HorizontalLayout
+                            // makes its children adopt a very large content
+                            // height at 200% and pushes even Open PDF out of view.
+                            ScrollView {
                             VerticalLayout {
                                 spacing: 8px;
+                                alignment: start;
                                 Text { text: "PDF source"; font-size: 18px * Theme.ui-scale / 100; font-weight: 700; color: Theme.ink; }
                                 HorizontalLayout {
                                     spacing: 8px;
                                     pdf-path := LineEdit {
                                         text <=> root.pdf-local-path;
                                         horizontal-stretch: 1;
+                                        min-width: 80px;
+                                        max-width: root.show-inspector ? 450px : 410px;
                                         placeholder-text: "Absolute path to a local PDF";
                                         accessible-label: "PDF file path";
                                         accessible-description: "Absolute path to the PDF file to display";
@@ -1351,6 +1372,10 @@ export component MainWindow inherits Window {
                                     }
                                     Button {
                                         text: "Browse PDF…";
+                                        horizontal-stretch: 0;
+                                        min-width: 0px;
+                                        preferred-width: 155px;
+                                        max-width: 170px;
                                         accessible-label: "Choose local PDF with native file picker";
                                         enabled: !root.local-file-dialog-busy;
                                         accessible-enabled: !root.local-file-dialog-busy;
@@ -1361,12 +1386,17 @@ export component MainWindow inherits Window {
                                     spacing: 8px;
                                     pdf-query := LineEdit {
                                         text: "PDFium";
+                                        min-width: 80px;
+                                        preferred-width: root.show-inspector ? 220px : 140px;
+                                        max-width: root.show-inspector ? 260px : 150px;
+                                        horizontal-stretch: 0;
                                         placeholder-text: "Search current page";
                                         accessible-label: "PDF search query";
                                     }
                                     Button {
                                         text: "Open";
                                         primary: true;
+                                        horizontal-stretch: 0;
                                         accessible-label: "Open PDF";
                                         clicked => {
                                             root.pdf-job += 1;
@@ -1379,8 +1409,19 @@ export component MainWindow inherits Window {
                                             root.load-pdf(pdf-path.text, pdf-query.text, 1);
                                         }
                                     }
+                                }
+                                // Keep these two frequent actions fully reachable at
+                                // 200% UI scale in the minimum-size workbench. A single
+                                // row with query, Open, Search, and Find next overflows
+                                // the Reader column and silently clips Find next.
+                                HorizontalLayout {
+                                    spacing: 8px;
                                     Button {
                                         text: "Search";
+                                        horizontal-stretch: 0;
+                                        min-width: 0px;
+                                        preferred-width: 100px;
+                                        max-width: 120px;
                                         accessible-label: "Search PDF";
                                         clicked => {
                                             root.pdf-job += 1;
@@ -1392,7 +1433,11 @@ export component MainWindow inherits Window {
                                         }
                                     }
                                     Button {
-                                        text: "Find next page";
+                                        text: "Next match";
+                                        horizontal-stretch: 0;
+                                        min-width: 0px;
+                                        preferred-width: 165px;
+                                        max-width: 190px;
                                         accessible-label: "Find next PDF matching page";
                                         enabled: root.pdf-page-count > 0 && pdf-query.text != "";
                                         accessible-enabled: root.pdf-page-count > 0 && pdf-query.text != "";
@@ -1410,6 +1455,7 @@ export component MainWindow inherits Window {
                                     spacing: 8px;
                                     Button {
                                         text: "Previous";
+                                        horizontal-stretch: 0;
                                         accessible-label: "Previous PDF page";
                                         enabled: root.pdf-page-number > 1;
                                         accessible-enabled: root.pdf-page-number > 1;
@@ -1429,6 +1475,7 @@ export component MainWindow inherits Window {
                                     }
                                     Button {
                                         text: "Next";
+                                        horizontal-stretch: 0;
                                         accessible-label: "Next PDF page";
                                         enabled: root.pdf-page-count > 0 && root.pdf-page-number < root.pdf-page-count;
                                         accessible-enabled: root.pdf-page-count > 0 && root.pdf-page-number < root.pdf-page-count;
@@ -1447,40 +1494,10 @@ export component MainWindow inherits Window {
                                     color: Theme.muted-ink;
                                     accessible-label: "PDF search status: " + root.pdf-status + " matches: " + root.pdf-matches;
                                 }
-                                Rectangle {
-                                    background: Theme.reader-canvas;
-                                    clip: true;
-                                    pdf-fit := Rectangle {
-                                        width: root.pdf-render-width > 0 && root.pdf-render-height > 0
-                                            ? min(parent.width, parent.height * root.pdf-render-width / root.pdf-render-height)
-                                            : parent.width;
-                                        height: root.pdf-render-width > 0 && root.pdf-render-height > 0
-                                            ? min(parent.height, parent.width * root.pdf-render-height / root.pdf-render-width)
-                                            : parent.height;
-                                        x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2;
-                                        pdf-view := Image {
-                                            source: root.pdf-image;
-                                            visible: root.pdf-page-count > 0;
-                                            width: parent.width;
-                                            height: parent.height;
-                                            image-fit: contain;
-                                            accessible-label: "Rendered PDF page";
-                                        }
-                                        if root.pdf-highlight-visible: Rectangle {
-                                            x: root.pdf-highlight-x * parent.width;
-                                            y: root.pdf-highlight-y * parent.height;
-                                            width: root.pdf-highlight-w * parent.width;
-                                            height: root.pdf-highlight-h * parent.height;
-                                            background: Theme.accent-subtle;
-                                            border-color: Theme.warning;
-                                            border-width: 2px;
-                                        }
-                                    }
-                                }
-                                // The right inspector collapses at narrow widths and
-                                // high UI scale. Keep actual extracted text reachable
-                                // on the Reader page instead of hiding it entirely.
+                                // At compact widths show the extracted text
+                                // immediately after the page controls; the
+                                // canvas follows in the scrollable Reader
+                                // column so long previews cannot bury text.
                                 if !root.show-inspector: Rectangle {
                                     background: Theme.surface;
                                     border-radius: Theme.panel-radius;
@@ -1515,6 +1532,39 @@ export component MainWindow inherits Window {
                                         }
                                     }
                                 }
+                                Rectangle {
+                                    background: Theme.reader-canvas;
+                                    clip: true;
+                                    height: root.show-inspector ? 360px : 220px;
+                                    pdf-fit := Rectangle {
+                                        width: root.pdf-render-width > 0 && root.pdf-render-height > 0
+                                            ? min(parent.width, parent.height * root.pdf-render-width / root.pdf-render-height)
+                                            : parent.width;
+                                        height: root.pdf-render-width > 0 && root.pdf-render-height > 0
+                                            ? min(parent.height, parent.width * root.pdf-render-height / root.pdf-render-width)
+                                            : parent.height;
+                                        x: (parent.width - self.width) / 2;
+                                        y: (parent.height - self.height) / 2;
+                                        pdf-view := Image {
+                                            source: root.pdf-image;
+                                            visible: root.pdf-page-count > 0;
+                                            width: parent.width;
+                                            height: parent.height;
+                                            image-fit: contain;
+                                            accessible-label: "Rendered PDF page";
+                                        }
+                                        if root.pdf-highlight-visible: Rectangle {
+                                            x: root.pdf-highlight-x * parent.width;
+                                            y: root.pdf-highlight-y * parent.height;
+                                            width: root.pdf-highlight-w * parent.width;
+                                            height: root.pdf-highlight-h * parent.height;
+                                            background: Theme.accent-subtle;
+                                            border-color: Theme.warning;
+                                            border-width: 2px;
+                                        }
+                                    }
+                                }
+                            }
                             }
                             Rectangle {
                                 visible: root.show-inspector;
@@ -1887,17 +1937,106 @@ export component MainWindow inherits Window {
                                 Button {
                                     text: root.show-research-notebook ? "Back to notes" : "Research notebook";
                                     accessible-label: "Switch between quick notes and revisioned research notebook";
-                                    clicked => { root.save-quick-note(); root.show-research-notebook = !root.show-research-notebook; }
+                                    clicked => { root.navigate-quick-notes("toggle-notebook"); }
                                 }
                             }
                             if !root.show-research-notebook: VerticalLayout {
                                 spacing: Theme.space3;
+                                if root.quick-note-recovery-count > 0: Rectangle {
+                                    background: Theme.surface;
+                                    border-color: Theme.warning;
+                                    border-width: 1px;
+                                    border-radius: Theme.panel-radius;
+                                    min-height: 172px;
+                                    preferred-height: 236px;
+                                    max-height: 300px;
+                                    VerticalLayout {
+                                        padding: Theme.space3;
+                                        spacing: Theme.space2;
+                                        HorizontalLayout {
+                                            spacing: Theme.space2;
+                                            Text {
+                                                text: "Unsaved note conflict · " + root.quick-note-recovery-count + " recoverable draft(s)";
+                                                color: Theme.ink;
+                                                font-weight: 700;
+                                                wrap: word-wrap;
+                                                horizontal-stretch: 1;
+                                                accessible-label: "Recoverable conflicting Quick Note drafts " + root.quick-note-recovery-count;
+                                            }
+                                            Button {
+                                                text: "Refresh";
+                                                accessible-label: "Recheck Quick Note recovery drafts";
+                                                clicked => { root.refresh-quick-note-recovery(); }
+                                            }
+                                        }
+                                        Text {
+                                            text: "A newer saved version exists. Inspect this older draft, then choose whether to make a separate copy. The newer note will stay unchanged.";
+                                            color: Theme.muted-ink;
+                                            wrap: word-wrap;
+                                        }
+                                        HorizontalLayout {
+                                            spacing: Theme.space2;
+                                            Button {
+                                                text: "Previous";
+                                                enabled: root.quick-note-recovery-index > 1;
+                                                accessible-enabled: root.quick-note-recovery-index > 1;
+                                                accessible-label: "Inspect previous conflicting note draft";
+                                                clicked => { root.navigate-quick-note-recovery("previous"); }
+                                            }
+                                            Text {
+                                                text: "Draft " + root.quick-note-recovery-index + " of " + root.quick-note-recovery-count;
+                                                color: Theme.ink;
+                                                vertical-alignment: center;
+                                                accessible-label: "Selected recovery draft " + root.quick-note-recovery-index + " of " + root.quick-note-recovery-count;
+                                            }
+                                            Button {
+                                                text: "Next";
+                                                enabled: root.quick-note-recovery-index < root.quick-note-recovery-count;
+                                                accessible-enabled: root.quick-note-recovery-index < root.quick-note-recovery-count;
+                                                accessible-label: "Inspect next conflicting note draft";
+                                                clicked => { root.navigate-quick-note-recovery("next"); }
+                                            }
+                                            Rectangle { horizontal-stretch: 1; }
+                                            Button {
+                                                text: "Recover as new note copy";
+                                                primary: true;
+                                                accessible-label: "Recover inspected draft as a separate new Quick Note without changing the newer saved original";
+                                                clicked => { root.recover-quick-note-as-copy(); }
+                                            }
+                                        }
+                                        Text {
+                                            text: "Draft title: " + root.quick-note-recovery-title;
+                                            color: Theme.ink;
+                                            wrap: word-wrap;
+                                            accessible-label: "Staged recovery title " + root.quick-note-recovery-title;
+                                        }
+                                        Text {
+                                            text: "Draft labels: " + root.quick-note-recovery-labels + " · " + root.quick-note-recovery-source;
+                                            color: Theme.muted-ink;
+                                            wrap: word-wrap;
+                                            accessible-label: "Staged recovery labels and revision " + root.quick-note-recovery-labels + " " + root.quick-note-recovery-source;
+                                        }
+                                        TextEdit {
+                                            text: root.quick-note-recovery-body;
+                                            read-only: true;
+                                            accessible-label: "Exact recovered Quick Note draft body, selectable and read-only";
+                                            horizontal-stretch: 1;
+                                            vertical-stretch: 1;
+                                            min-height: 40px;
+                                        }
+                                        Text {
+                                            text: root.quick-note-recovery-status;
+                                            color: Theme.muted-ink;
+                                            wrap: word-wrap;
+                                        }
+                                    }
+                                }
                                 HorizontalLayout {
                                     spacing: Theme.space2;
                                     Button {
                                         text: "+ New note";
                                         accessible-label: "Create a new quick note in the open project";
-                                        clicked => { root.save-quick-note(); root.create-quick-note(); }
+                                        clicked => { root.create-quick-note(); }
                                     }
                                     quick-note-search-field := LineEdit {
                                         placeholder-text: "Search notes and labels";
@@ -1917,26 +2056,26 @@ export component MainWindow inherits Window {
                                         accessible-label: "Show active quick notes";
                                         enabled: root.quick-note-view != 0;
                                         accessible-enabled: root.quick-note-view != 0;
-                                        clicked => { root.save-quick-note(); root.quick-note-view = 0; root.refresh-quick-notes(root.quick-note-search, 0); }
+                                        clicked => { root.navigate-quick-notes("active"); }
                                     }
                                     Button {
                                         text: "Archive";
                                         accessible-label: "Show archived quick notes";
                                         enabled: root.quick-note-view != 1;
                                         accessible-enabled: root.quick-note-view != 1;
-                                        clicked => { root.save-quick-note(); root.quick-note-view = 1; root.refresh-quick-notes(root.quick-note-search, 1); }
+                                        clicked => { root.navigate-quick-notes("archived"); }
                                     }
                                     Button {
                                         text: "Trash";
                                         accessible-label: "Show recoverable trashed quick notes";
                                         enabled: root.quick-note-view != 2;
                                         accessible-enabled: root.quick-note-view != 2;
-                                        clicked => { root.save-quick-note(); root.quick-note-view = 2; root.refresh-quick-notes(root.quick-note-search, 2); }
+                                        clicked => { root.navigate-quick-notes("trash"); }
                                     }
                                     Button {
                                         text: root.quick-note-grid ? "Open list view" : "Card view";
                                         accessible-label: root.quick-note-grid ? "Switch to list and expanded editor" : "Switch to multi-column note cards";
-                                        clicked => { root.save-quick-note(); root.quick-note-grid = !root.quick-note-grid; }
+                                        clicked => { root.navigate-quick-notes("toggle-grid"); }
                                     }
                                     Rectangle { horizontal-stretch: 1; }
                                     Text {
@@ -1981,7 +2120,7 @@ export component MainWindow inherits Window {
                                                         text: (note.pinned ? "● " : "") + (note.title == "" ? "Untitled" : note.title);
                                                         accessible-label: "Open quick note " + note.title + " for expanded editing";
                                                         max-height: 36px;
-                                                        clicked => { root.save-quick-note(); root.quick-note-grid = false; root.select-quick-note(note.id); }
+                                                        clicked => { root.select-quick-note(note.id); }
                                                     }
                                                     Text {
                                                         text: note.preview;
@@ -2043,7 +2182,7 @@ export component MainWindow inherits Window {
                                                             min-height: 30px;
                                                             preferred-height: 30px;
                                                             max-height: 30px;
-                                                            clicked => { root.save-quick-note(); root.select-quick-note(note.id); }
+                                                            clicked => { root.select-quick-note(note.id); }
                                                         }
                                                         Text {
                                                             text: note.preview;
@@ -2071,14 +2210,13 @@ export component MainWindow inherits Window {
                                                                 text: note.pinned ? "Unpin" : "Pin";
                                                                 accessible-label: note.pinned ? "Unpin note" : "Pin note";
                                                                 max-height: 30px;
-                                                                clicked => { root.save-quick-note(); root.quick-note-action("pin", note.id, note.revision); }
+                                                                clicked => { root.quick-note-action("pin", note.id, note.revision); }
                                                             }
                                                             Button {
                                                                 text: root.quick-note-view == 2 ? "Restore" : (root.quick-note-view == 1 ? "Unarchive" : "Archive");
                                                                 accessible-label: (root.quick-note-view == 2 ? "Restore note " : (root.quick-note-view == 1 ? "Unarchive note " : "Archive note ")) + note.title;
                                                                 max-height: 30px;
                                                                 clicked => {
-                                                                    root.save-quick-note();
                                                                     root.quick-note-action(root.quick-note-view == 2 ? "restore" : (root.quick-note-view == 1 ? "unarchive" : "archive"), note.id, note.revision);
                                                                 }
                                                             }
@@ -2130,7 +2268,6 @@ export component MainWindow inherits Window {
                                                         text: "Move to trash";
                                                         accessible-label: "Move selected note to recoverable trash";
                                                         clicked => {
-                                                            root.save-quick-note();
                                                             root.quick-note-action("delete", root.quick-note-id, root.quick-note-revision);
                                                         }
                                                     }

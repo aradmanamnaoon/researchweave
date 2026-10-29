@@ -3,6 +3,7 @@
 use crate::{ProjectError, ProjectStore};
 use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use uuid::Uuid;
 
@@ -28,6 +29,20 @@ pub enum NoteFlag {
     Pinned,
     Archived,
     Deleted,
+}
+
+/// An unchanged, durable snapshot of a draft that could not safely replace a
+/// newer/deleted note. The exact token must be supplied for an explicit copy
+/// recovery; the original note is never overwritten by this action.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ConflictingQuickNoteDraft {
+    pub source_note_id: String,
+    pub expected_revision: i64,
+    pub current_revision: i64,
+    pub title: String,
+    pub body: String,
+    pub labels: String,
+    pub recovery_token: String,
 }
 
 fn ensure_schema(store: &ProjectStore) -> Result<(), ProjectError> {
@@ -57,6 +72,12 @@ fn ensure_schema(store: &ProjectStore) -> Result<(), ProjectError> {
            note_id TEXT PRIMARY KEY REFERENCES quick_notes(id),
            expected_revision INTEGER NOT NULL,
            title TEXT NOT NULL, body TEXT NOT NULL, labels TEXT NOT NULL
+         );
+         CREATE TABLE IF NOT EXISTS quick_note_draft_recoveries (
+           recovery_token TEXT PRIMARY KEY,
+           source_note_id TEXT NOT NULL REFERENCES quick_notes(id),
+           recovered_note_id TEXT NOT NULL UNIQUE REFERENCES quick_notes(id),
+           recorded_at TEXT NOT NULL
          );",
     )?;
     Ok(())
@@ -230,6 +251,193 @@ pub fn recover_drafts(project: &Path) -> Result<usize, ProjectError> {
         flush_draft(project, id)?;
     }
     Ok(ids.len())
+}
+
+fn recovery_token(
+    note_id: &str,
+    expected_revision: i64,
+    current_revision: i64,
+    title: &str,
+    body: &str,
+    labels: &str,
+) -> Result<String, ProjectError> {
+    // JSON length-delimits each field, including arbitrary UTF-8 and
+    // embedded separators; this also keeps tokens stable across restarts.
+    let payload = serde_json::to_vec(&(
+        note_id,
+        expected_revision,
+        current_revision,
+        title,
+        body,
+        labels,
+    ))?;
+    Ok(hex::encode(Sha256::digest(payload)))
+}
+
+fn is_conflicting_draft(
+    expected_revision: i64,
+    title: &str,
+    body: &str,
+    labels: &str,
+    current: &QuickNote,
+) -> bool {
+    current.deleted
+        || (current.revision != expected_revision
+            && !(current.revision == expected_revision + 1
+                && current.title == title
+                && current.body == body
+                && current.labels == labels))
+}
+
+/// List the drafts that automatic recovery intentionally refused to overwrite.
+/// The full UTF-8 title/body/labels remain in SQLite until an explicit
+/// recovery action successfully commits a *separate* note. This read never
+/// changes the draft journal or the current saved note.
+pub fn list_conflicting_drafts(
+    project: &Path,
+) -> Result<Vec<ConflictingQuickNoteDraft>, ProjectError> {
+    let store = ProjectStore::open(project)?;
+    ensure_schema(&store)?;
+    let mut statement = store.connection().prepare(
+        "SELECT d.note_id,d.expected_revision,d.title,d.body,d.labels,
+                n.id,n.title,n.body,n.labels,n.pinned,n.archived,n.deleted,n.revision,n.updated_at
+         FROM quick_note_drafts d JOIN quick_notes n ON n.id=d.note_id
+         ORDER BY d.note_id",
+    )?;
+    let rows = statement.query_map([], |row| {
+        let note_id: String = row.get(0)?;
+        let expected: i64 = row.get(1)?;
+        let title: String = row.get(2)?;
+        let body: String = row.get(3)?;
+        let labels: String = row.get(4)?;
+        let current = QuickNote {
+            id: row.get(5)?,
+            title: row.get(6)?,
+            body: row.get(7)?,
+            labels: row.get(8)?,
+            pinned: row.get::<_, i64>(9)? != 0,
+            archived: row.get::<_, i64>(10)? != 0,
+            deleted: row.get::<_, i64>(11)? != 0,
+            revision: row.get(12)?,
+            updated_at: row.get(13)?,
+        };
+        Ok((note_id, expected, title, body, labels, current))
+    })?;
+    let mut conflicts = Vec::new();
+    for row in rows {
+        let (note_id, expected, title, body, labels, current) = row?;
+        if !is_conflicting_draft(expected, &title, &body, &labels, &current) {
+            continue;
+        }
+        conflicts.push(ConflictingQuickNoteDraft {
+            recovery_token: recovery_token(
+                &note_id,
+                expected,
+                current.revision,
+                &title,
+                &body,
+                &labels,
+            )?,
+            source_note_id: note_id,
+            expected_revision: expected,
+            current_revision: current.revision,
+            title,
+            body,
+            labels,
+        });
+    }
+    Ok(conflicts)
+}
+
+/// Explicitly copy exactly the previously inspected conflicting draft into a
+/// new note. The newer original is not updated or unarchived. Copy creation,
+/// history, durable idempotence receipt, and journal removal commit together
+/// in one transaction. A stale/changed draft fails closed; retrying an already
+/// successful request returns its original copy rather than making duplicates.
+pub fn recover_conflicting_draft_as_copy(
+    project: &Path,
+    inspected: &ConflictingQuickNoteDraft,
+) -> Result<QuickNote, ProjectError> {
+    let expected_token = recovery_token(
+        &inspected.source_note_id,
+        inspected.expected_revision,
+        inspected.current_revision,
+        &inspected.title,
+        &inspected.body,
+        &inspected.labels,
+    )?;
+    if expected_token != inspected.recovery_token {
+        return Err(ProjectError::Conflict);
+    }
+    let mut store = ProjectStore::open(project)?;
+    ensure_schema(&store)?;
+    // All writes remain in one SQLite transaction, including the idempotence
+    // receipt and journal removal; a racing writer cannot commit duplicates.
+    let tx = store.transaction()?;
+    let previous: Option<String> = tx
+        .query_row(
+            "SELECT recovered_note_id FROM quick_note_draft_recoveries
+             WHERE recovery_token=?1 AND source_note_id=?2",
+            params![inspected.recovery_token, inspected.source_note_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    if let Some(copy_id) = previous {
+        drop(tx);
+        return load(&store, &copy_id);
+    }
+    let staged: Option<(i64, String, String, String)> = tx
+        .query_row(
+            "SELECT expected_revision,title,body,labels FROM quick_note_drafts WHERE note_id=?1",
+            [&inspected.source_note_id],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+        )
+        .optional()?;
+    let Some((expected, title, body, labels)) = staged else {
+        return Err(ProjectError::Conflict);
+    };
+    let current: QuickNote = tx
+        .query_row(
+            "SELECT id,title,body,labels,pinned,archived,deleted,revision,updated_at
+             FROM quick_notes WHERE id=?1",
+            [&inspected.source_note_id],
+            row_note,
+        )
+        .optional()?
+        .ok_or(ProjectError::Conflict)?;
+    if current.revision != inspected.current_revision
+        || expected != inspected.expected_revision
+        || title != inspected.title
+        || body != inspected.body
+        || labels != inspected.labels
+        || !is_conflicting_draft(expected, &title, &body, &labels, &current)
+    {
+        return Err(ProjectError::Conflict);
+    }
+    validate(&title, &body, &labels)?;
+    let copy_id = Uuid::new_v4().to_string();
+    tx.execute(
+        "INSERT INTO quick_notes (id,title,body,labels,revision,updated_at)
+         VALUES (?1,?2,?3,?4,1,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        params![copy_id, title, body, labels],
+    )?;
+    record_history(&tx, &copy_id)?;
+    let deleted = tx.execute(
+        "DELETE FROM quick_note_drafts
+         WHERE note_id=?1 AND expected_revision=?2 AND title=?3 AND body=?4 AND labels=?5",
+        params![inspected.source_note_id, expected, title, body, labels],
+    )?;
+    if deleted != 1 {
+        return Err(ProjectError::Conflict);
+    }
+    tx.execute(
+        "INSERT INTO quick_note_draft_recoveries
+         (recovery_token,source_note_id,recovered_note_id,recorded_at)
+         VALUES (?1,?2,?3,strftime('%Y-%m-%dT%H:%M:%fZ','now'))",
+        params![inspected.recovery_token, inspected.source_note_id, copy_id],
+    )?;
+    tx.commit()?;
+    load(&store, &copy_id)
 }
 
 pub fn get(project: &Path, id: &str) -> Result<QuickNote, ProjectError> {
@@ -469,6 +677,203 @@ mod tests {
             })
             .unwrap();
         assert_eq!(count, 1, "conflicting draft is retained for recovery");
+    }
+
+    #[test]
+    fn conflicted_unicode_draft_survives_restart_and_recovers_only_as_new_copy() {
+        let (_temp, project) = fixture();
+        let original = save(&project, None, None, "Original", "newest stored", "").unwrap();
+        {
+            let session = DraftSession::open(&project).unwrap();
+            session
+                .stage(
+                    &original.id,
+                    original.revision,
+                    "Recovered پژوهش 🧠",
+                    "Second draft فارسی \n漢字 ✅ — careful research",
+                    "qualitative, یادداشت",
+                )
+                .unwrap();
+        } // Simulate closing the app before the staged note is committed.
+        let newer = save(
+            &project,
+            Some(&original.id),
+            Some(original.revision),
+            "Newer saved",
+            "Keep my newer changes",
+            "current",
+        )
+        .unwrap();
+        assert!(matches!(
+            recover_drafts(&project),
+            Err(ProjectError::Conflict)
+        ));
+        let listed = list_conflicting_drafts(&project).unwrap();
+        assert_eq!(listed.len(), 1);
+        let snapshot = listed[0].clone();
+        assert_eq!(snapshot.source_note_id, original.id);
+        assert_eq!(snapshot.expected_revision, original.revision);
+        assert_eq!(snapshot.current_revision, newer.revision);
+        assert_eq!(snapshot.title, "Recovered پژوهش 🧠");
+        assert!(snapshot.body.contains("漢字 ✅"));
+        assert_eq!(
+            list_conflicting_drafts(&project).unwrap(),
+            vec![snapshot.clone()],
+            "recovery tokens are stable across reopened SQLite connections"
+        );
+        assert_eq!(get(&project, &original.id).unwrap(), newer);
+        let copy = recover_conflicting_draft_as_copy(&project, &snapshot).unwrap();
+        assert_ne!(copy.id, original.id);
+        assert_eq!(copy.revision, 1);
+        assert_eq!(copy.title, snapshot.title);
+        assert_eq!(copy.body, snapshot.body);
+        assert_eq!(copy.labels, snapshot.labels);
+        assert!(!copy.deleted && !copy.archived && !copy.pinned);
+        assert_eq!(get(&project, &original.id).unwrap(), newer);
+        assert_eq!(list_conflicting_drafts(&project).unwrap().len(), 0);
+        assert_eq!(recover_drafts(&project).unwrap(), 0);
+        assert_eq!(
+            recover_conflicting_draft_as_copy(&project, &snapshot)
+                .unwrap()
+                .id,
+            copy.id,
+            "a second click or restart returns the same copy ID"
+        );
+        let store = ProjectStore::open(&project).unwrap();
+        let copies: i64 = store
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM quick_notes WHERE title=?1",
+                [&snapshot.title],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(copies, 1);
+        let history: i64 = store
+            .connection()
+            .query_row(
+                "SELECT COUNT(*) FROM quick_note_history WHERE note_id=?1",
+                [&copy.id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(history, 1);
+    }
+
+    #[test]
+    fn recovery_rejects_stale_or_tampered_confirmation_and_preserves_journal() {
+        let (_temp, project) = fixture();
+        let original = save(&project, None, None, "Original", "A", "").unwrap();
+        stage_draft(&project, &original.id, original.revision, "Draft", "B", "").unwrap();
+        let newer = save(&project, Some(&original.id), Some(1), "New", "C", "").unwrap();
+        let snapshot = list_conflicting_drafts(&project).unwrap().remove(0);
+        let mut forged = snapshot.clone();
+        forged.body.push_str(" changed by caller");
+        assert!(matches!(
+            recover_conflicting_draft_as_copy(&project, &forged),
+            Err(ProjectError::Conflict)
+        ));
+        // The other session updates the same note before the user confirms.
+        let newest = save(
+            &project,
+            Some(&original.id),
+            Some(newer.revision),
+            "New",
+            "D",
+            "",
+        )
+        .unwrap();
+        assert!(matches!(
+            recover_conflicting_draft_as_copy(&project, &snapshot),
+            Err(ProjectError::Conflict)
+        ));
+        let updated = list_conflicting_drafts(&project).unwrap().remove(0);
+        assert_ne!(updated.recovery_token, snapshot.recovery_token);
+        let copy = recover_conflicting_draft_as_copy(&project, &updated).unwrap();
+        assert_eq!(copy.body, "B");
+        assert_eq!(get(&project, &original.id).unwrap(), newest);
+        assert_eq!(
+            list_with_deleted(&project, "", false, false).unwrap().len(),
+            2
+        );
+    }
+
+    #[test]
+    fn recovery_rolls_back_copy_and_retains_draft_if_history_write_fails() {
+        let (_temp, project) = fixture();
+        let original = save(&project, None, None, "Original", "A", "").unwrap();
+        stage_draft(&project, &original.id, original.revision, "Draft", "B", "").unwrap();
+        let newer = save(&project, Some(&original.id), Some(1), "Newer", "C", "").unwrap();
+        let snapshot = list_conflicting_drafts(&project).unwrap().remove(0);
+        let store = ProjectStore::open(&project).unwrap();
+        // A valid fail-injection trigger prevents the new copy's history row,
+        // after the copy INSERT, so the enclosing transaction must roll back.
+        store
+            .connection()
+            .execute_batch(
+                "CREATE TRIGGER block_recovery_history BEFORE INSERT ON quick_note_history
+                 BEGIN SELECT RAISE(ABORT, 'simulate failed write'); END;",
+            )
+            .unwrap();
+        drop(store);
+        assert!(recover_conflicting_draft_as_copy(&project, &snapshot).is_err());
+        assert_eq!(get(&project, &original.id).unwrap(), newer);
+        assert_eq!(
+            list_conflicting_drafts(&project).unwrap(),
+            vec![snapshot.clone()]
+        );
+        let store = ProjectStore::open(&project).unwrap();
+        let total_notes: i64 = store
+            .connection()
+            .query_row("SELECT COUNT(*) FROM quick_notes", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(
+            total_notes, 1,
+            "unverified copy cannot remain without history"
+        );
+        store
+            .connection()
+            .execute_batch("DROP TRIGGER block_recovery_history;")
+            .unwrap();
+        drop(store);
+        assert!(recover_conflicting_draft_as_copy(&project, &snapshot).is_ok());
+    }
+
+    #[test]
+    fn concurrent_double_recover_cannot_insert_two_copies() {
+        let (_temp, project) = fixture();
+        let original = save(&project, None, None, "Original", "A", "").unwrap();
+        stage_draft(&project, &original.id, original.revision, "Draft", "B", "").unwrap();
+        save(&project, Some(&original.id), Some(1), "Newer", "C", "").unwrap();
+        let snapshot = list_conflicting_drafts(&project).unwrap().remove(0);
+        let barrier = std::sync::Arc::new(std::sync::Barrier::new(2));
+        let handles: Vec<_> = (0..2)
+            .map(|_| {
+                let project = project.clone();
+                let snapshot = snapshot.clone();
+                let barrier = barrier.clone();
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    recover_conflicting_draft_as_copy(&project, &snapshot)
+                })
+            })
+            .collect();
+        let results: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert!(
+            results.iter().any(Result::is_ok),
+            "at least one racing request must commit"
+        );
+        let copy = recover_conflicting_draft_as_copy(&project, &snapshot).unwrap();
+        assert!(results
+            .into_iter()
+            .flatten()
+            .all(|found| found.id == copy.id));
+        let notes = list(&project, "", false).unwrap();
+        assert_eq!(notes.len(), 2, "only one recovered copy and original exist");
+        assert_eq!(list_conflicting_drafts(&project).unwrap().len(), 0);
     }
 
     #[test]
