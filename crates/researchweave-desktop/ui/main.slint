@@ -2289,7 +2289,7 @@ export component MainWindow inherits Window {
                                         }
                                     }
                                 }
-                                Text { text: "Inspection details · raw host result"; color: Theme.ink; font-weight: 700; }
+                                Text { text: "Inspection details · complete verified current page (select and copy)"; color: Theme.ink; font-weight: 700; }
                                 Rectangle {
                                     background: Theme.surface;
                                     border-width: 1px;
@@ -2297,11 +2297,11 @@ export component MainWindow inherits Window {
                                     border-radius: Theme.panel-radius;
                                     min-height: 110px;
                                     preferred-height: 150px;
-                                    ScrollView {
-                                        VerticalLayout {
-                                            padding: 10px;
-                                            Text { text: root.analysis-results; accessible-label: "Analysis operation result " + root.analysis-results; wrap: word-wrap; color: Theme.ink; }
-                                        }
+                                    TextEdit {
+                                        text: root.analysis-results;
+                                        read-only: true;
+                                        min-height: 105px;
+                                        accessible-label: "Verified current dataset page JSON; select and copy complete values including shortened table cells";
                                     }
                                 }
                                 Text {

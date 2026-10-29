@@ -7,14 +7,14 @@
 Major UI implementation begins automatically when all of the following are true:
 
 1. Shared `CommandRouter` contracts are integrated for project lifecycle and the currently implemented library/evidence/analysis surfaces.
-2. Current stateful cloud work has a defined UI-facing contract that does not require the shell to retain an unsafe/discarded verification state.
+2. Offline local project storage and encrypted archive recovery have explicit authority, preview and error-state contracts; cloud synchronization is retired from the product scope.
 3. AI has a shared-core proposal/chat operation contract preserving offline/egress/approval behavior.
 4. A fresh `cargo fmt --all -- --check`, workspace Clippy `-D warnings`, and `cargo test --workspace` are green after those integrations.
 5. The Windows packaged baseline remains able to create/open projects and launch the real app; current UIA baseline is retained for regression comparison.
 6. No active worker is modifying `crates/researchweave-desktop/ui/**` or the shell portions of `src/main.rs`.
 7. No incompatible project-schema migration is actively being landed in parallel.
 
-Why this milestone: backend contracts are stable enough to design against, but most domain screens are still placeholders. Delaying much longer would create large duplicate UI work; starting earlier would force the redesign to chase moving cloud/AI/authority interfaces.
+Why this milestone: backend contracts are stable enough to design against, but most domain screens are still placeholders. Delaying much longer would create large duplicate UI work; starting earlier would force the redesign to chase moving AI/authority interfaces.
 
 ## Pre-M1 allowed UX work
 
@@ -51,7 +51,7 @@ Deliver:
 - Focused New/Open/Import/Recent start flow.
 - Native folder/file selection where supported, retaining typed path fallback for automation/accessibility.
 - Project Home based on real profile/revision/recent activity rather than synthetic list.
-- Clear local/cloud/privacy status.
+- Clear offline local storage, encrypted backup/recovery and privacy status.
 - Contextual next actions and onboarding.
 
 Metrics:

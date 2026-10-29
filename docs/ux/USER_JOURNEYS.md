@@ -14,7 +14,7 @@
 
 1. Start Center presents New Project, Open Project, Import/Migrate and Recents.
 2. New Project asks for title and optional research template; location is selected with native folder UI/default storage.
-3. A compact disclosure explains local-first storage, privacy and optional sync.
+3. A compact disclosure explains offline project storage, encrypted backup/restore and privacy; optional provider AI requests use separate explicit consent.
 4. Create previews the local-write effect through existing authority semantics.
 5. Project Home opens with meaningful next actions: define question, import sources/data, or create protocol.
 

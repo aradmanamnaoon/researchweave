@@ -40,6 +40,12 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
     ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName + ' :: ' + $_.Current.Name })
     throw "UIA element missing: $type '$name'. Available: $($available -join ' | ')"
 }
+function Read-DatasetPageJson([System.Windows.Automation.AutomationElement]$parent) {
+    # Data View exposes the exact read-only page JSON through an accessible
+    # TextEdit so users and UIA clients can inspect/copy unabridged cell values.
+    $details = Named $parent ([System.Windows.Automation.ControlType]::Edit) 'Verified current dataset page JSON; select and copy complete values including shortened table cells'
+    return ([System.Windows.Automation.ValuePattern]$details.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+}
 function Invoke-AccessibleButton([System.Windows.Automation.AutomationElement]$parent, [string]$name) {
     $button = Named $parent ([System.Windows.Automation.ControlType]::Button) $name
     $scroll = $null
@@ -849,7 +855,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
-    $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+    $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Local dataset path to preview'
     if (-not (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled) {
         throw 'Scientific import native file picker is not exposed as an enabled accessible button'
     }
@@ -860,7 +866,7 @@ try {
         # The Slint accessibility provider may replace the LineEdit node when
         # the asynchronous native chooser completes. Never poll the pre-dialog
         # AutomationElement: it can retain the manually entered sentinel.
-        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Local dataset path to preview'
         $value = ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
         $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled
         if ((Test-SelectedFixturePath $value $analysisInput) -and $ready) {
@@ -870,7 +876,7 @@ try {
         Start-Sleep -Milliseconds 100
     }
     if (-not $dataSelected) {
-        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Local dataset path to preview'
         $observed = ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
         $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled
         $statuses = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
@@ -879,7 +885,7 @@ try {
         throw "Native scientific dataset selection did not update the path and restore the UI (value=$observed, expected=$analysisInput, observed_length=$($observed.Length), expected_length=$($analysisInput.Length), ready=$ready, status=$($statuses -join ' | '))"
     }
     Write-Output 'PASS: native Windows dataset selection updates the path before preview/import'
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import without modifying project').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 260
     $analysisPreviewNames = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
@@ -888,13 +894,9 @@ try {
     if (-not ($analysisPreviewNames | Where-Object { $_ -like '*Analysis import preview ready*' })) {
         throw 'Analysis import preview did not complete through the native workbench'
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Import previewed analysis data').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Record previewed immutable analysis dataset').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 300
-    $analysisNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    $analysisResult = $analysisNames | Where-Object { $_ -like 'Analysis operation result*' } | Select-Object -First 1
+    $analysisResult = Read-DatasetPageJson $window
     $datasetMatch = [regex]::Match([string]$analysisResult, '"dataset_id": "([0-9a-f]{24})"')
     $revisionMatch = [regex]::Match([string]$analysisResult, '"revision": "([0-9a-f]{64})"')
     if (-not $datasetMatch.Success -or -not $revisionMatch.Success) {
@@ -906,13 +908,9 @@ try {
     $datasetRevisionEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis dataset revision'
     ([System.Windows.Automation.ValuePattern]$datasetIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($datasetId)
     ([System.Windows.Automation.ValuePattern]$datasetRevisionEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($datasetRevision)
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect analysis dataset').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect dataset revision and request preview').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
-    $inspectNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($inspectNames | Where-Object { $_ -like '*"score": "1"*' })) {
+    if ((Read-DatasetPageJson $window) -notlike '*"score": "1"*') {
         throw 'Imported immutable dataset rows were not visible through Data View'
     }
 
@@ -921,17 +919,13 @@ try {
     $nativeFixtures = (Resolve-Path (Join-Path $PSScriptRoot '../../researchweave-analysis/tests/fixtures')).Path
     foreach ($nativeName in @('nullable.parquet','labelled.sav','labelled.zsav','labelled.dta')) {
         $nativeSource = Join-Path $nativeFixtures $nativeName
-        $nativePath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+        $nativePath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Local dataset path to preview'
         ([System.Windows.Automation.ValuePattern]$nativePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($nativeSource)
-        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import without modifying project').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         WaitForNameLike $window '*Analysis import preview ready*' 5000
-        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Import previewed analysis data').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Record previewed immutable analysis dataset').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         WaitForNameLike $window '*Analysis dataset imported and audited*' 5000
-        $nativeNames = @($window.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition
-        ) | ForEach-Object { $_.Current.Name })
-        $nativeResult = $nativeNames | Where-Object { $_ -like 'Analysis operation result*' } | Select-Object -First 1
+        $nativeResult = Read-DatasetPageJson $window
         if (-not ([regex]::Match([string]$nativeResult, '"dataset_id": "([0-9a-f]{24})"')).Success) {
             throw "Native data import $nativeName did not persist an immutable dataset identity"
         }

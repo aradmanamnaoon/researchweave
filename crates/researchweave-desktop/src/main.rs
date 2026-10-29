@@ -265,6 +265,26 @@ fn update_manuscript_outline(ui: &MainWindow, body: &str) {
     ui.set_manuscript_headings(ModelRc::new(VecModel::from(headings)));
 }
 
+fn dataset_cell_preview(value: &serde_json::Value) -> String {
+    const LIMIT: usize = 300;
+    const SUFFIX: &str = "… [shortened; full value in inspection details]";
+    let text = match value {
+        serde_json::Value::Null => "Missing (null)".to_owned(),
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) => value.to_string(),
+        _ => "[Structured value; inspect full JSON below]".to_owned(),
+    };
+    if text.chars().count() <= LIMIT {
+        return text;
+    }
+    let prefix_length = LIMIT - SUFFIX.chars().count();
+    format!(
+        "{}{}",
+        text.chars().take(prefix_length).collect::<String>(),
+        SUFFIX
+    )
+}
+
 fn set_verified_dataset_grid(
     ui: &MainWindow,
     response: &serde_json::Value,
@@ -308,39 +328,37 @@ fn set_verified_dataset_grid(
     if headers.len() > 200 {
         return Err("Dataset preview exceeds the 200-column UI limit".into());
     }
-    let columns = headers
-        .iter()
-        .map(|name| {
+    let mut row_number_column = TableColumn::default();
+    row_number_column.title = "Row #".into();
+    row_number_column.min_width = 70.0;
+    row_number_column.width = 80.0;
+    row_number_column.horizontal_stretch = 0.0;
+    let columns = std::iter::once(row_number_column)
+        .chain(headers.iter().map(|name| {
             let mut column = TableColumn::default();
             column.title = name.clone().into();
             column.min_width = 85.0;
             column.width = 140.0;
             column.horizontal_stretch = 1.0;
             column
-        })
+        }))
         .collect::<Vec<_>>();
     let mut rows: Vec<ModelRc<StandardListViewItem>> = Vec::with_capacity(records.len());
-    for record in records {
+    for (row_index, record) in records.iter().enumerate() {
         let values = record
             .as_object()
             .ok_or("Dataset record is not an object")?;
         if values.len() != headers.len() || headers.iter().any(|name| !values.contains_key(name)) {
             return Err("Dataset row schema differs from the selected column headers".into());
         }
-        let cells = headers
-            .iter()
-            .map(|name| {
-                let value = &values[name];
-                let text = match value {
-                    serde_json::Value::Null => "Missing".to_owned(),
-                    serde_json::Value::String(value) => value.clone(),
-                    serde_json::Value::Number(_) | serde_json::Value::Bool(_) => value.to_string(),
-                    _ => "[structured value; inspect JSON below]".to_owned(),
-                };
+        let mut row_number = StandardListViewItem::default();
+        row_number.text = (offset + row_index as u64 + 1).to_string().into();
+        let cells = std::iter::once(row_number)
+            .chain(headers.iter().map(|name| {
                 let mut cell = StandardListViewItem::default();
-                cell.text = text.chars().take(300).collect::<String>().into();
+                cell.text = dataset_cell_preview(&values[name]).into();
                 cell
-            })
+            }))
             .collect::<Vec<_>>();
         rows.push(ModelRc::new(VecModel::from(cells)));
     }
@@ -352,7 +370,7 @@ fn set_verified_dataset_grid(
     ui.set_dataset_grid_ready(!records.is_empty());
     ui.set_dataset_grid_status(
         format!(
-            "Verified revision {} · Rows {}–{} of {} · Read-only, original row order",
+            "Verified revision {} · Rows {}–{} of {} · Read-only, original row order · Shortened cells have full values in Inspection details",
             &revision[..revision.len().min(12)],
             offset.saturating_add(1),
             offset.saturating_add(records.len() as u64),
@@ -5678,7 +5696,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     )
                 });
             match result.and_then(|result| {
-                set_verified_dataset_grid(&ui, &result, revision.trim(), page_index, page_size)
+                set_verified_dataset_grid(&ui, &result, revision.trim(), page_index, page_size)?;
+                // The table is intentionally a bounded preview. Preserve the
+                // entire verified current page for inspection and copying,
+                // including long cells and non-string dataset values.
+                ui.set_analysis_results(pretty_result_data(&result).into());
+                Ok(())
             }) {
                 Ok(()) => {}
                 Err(error) => {
@@ -5686,6 +5709,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         &ui,
                         &format!("Unable to display this exact dataset revision: {error}"),
                     );
+                    ui.set_analysis_results(format!("No verified dataset page: {error}").into());
                 }
             }
             ui.set_dataset_grid_busy(false);
@@ -8766,6 +8790,27 @@ mod tests {
         assert!(primary.contains("confidence interval unavailable"));
         assert!(!secondary.contains("Cohen's d"));
         assert!(compact_stat_interval(Some(&serde_json::json!([0.0, 1.0, 2.0]))).is_none());
+    }
+
+    #[test]
+    fn dataset_cell_preview_exposes_truncation_without_losing_full_page_json() {
+        let long_text = "آزمایش🧠Alpha".repeat(85);
+        let long_value = serde_json::Value::String(long_text.clone());
+        let cell = dataset_cell_preview(&long_value);
+        assert!(cell.chars().count() <= 300);
+        assert!(cell.starts_with("آزمایش🧠Alpha"));
+        assert!(cell.ends_with("… [shortened; full value in inspection details]"));
+        assert_ne!(cell, long_text);
+        assert_eq!(
+            dataset_cell_preview(&serde_json::Value::Null),
+            "Missing (null)"
+        );
+        assert_eq!(dataset_cell_preview(&serde_json::json!(true)), "true");
+        assert_eq!(dataset_cell_preview(&serde_json::json!(42)), "42");
+        let short_text = serde_json::Value::String("سلام🧠".into());
+        assert_eq!(dataset_cell_preview(&short_text), "سلام🧠");
+        let page = serde_json::json!({"data": {"rows": [{"notes": long_value}]}});
+        assert!(pretty_result_data(&page).contains(&long_text));
     }
 
     #[test]
