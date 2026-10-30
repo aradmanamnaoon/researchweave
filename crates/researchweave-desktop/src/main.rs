@@ -448,6 +448,7 @@ struct PendingContextAi {
     request: ContextualRequest,
     profile: ProviderProfile,
     preview: PromptPreview,
+    pdf_source: Option<(PathBuf, String)>,
 }
 
 /// Created only when a PDF render actually completes on the UI event loop.
@@ -460,6 +461,9 @@ struct PdfPageSnapshot {
     page_count: i32,
     render_job: i32,
     visible_text: String,
+    /// The source file's actual bytes, verified unchanged across rendering.
+    /// This is distinct from the hash of displayed extracted Unicode text.
+    file_sha256: Option<String>,
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -470,6 +474,64 @@ struct PdfPassageAnchor {
 }
 
 const MAX_PDF_PASSAGE_BYTES: usize = 4_096;
+const MAX_GROUNDED_PDF_FILE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// File digest computation is only used on background worker threads. Do not
+/// hash potentially large documents from the Slint event loop.
+fn pdf_file_sha256(path: &Path) -> Result<String, String> {
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(path)
+        .map_err(|_| "Cannot open the displayed PDF for source verification".to_string())?;
+    let mut digest = Sha256::new();
+    let mut total = 0_u64;
+    let mut chunk = [0_u8; 64 * 1024];
+    loop {
+        let count = file
+            .read(&mut chunk)
+            .map_err(|_| "Cannot read the displayed PDF for source verification".to_string())?;
+        if count == 0 {
+            break;
+        }
+        total += count as u64;
+        if total > MAX_GROUNDED_PDF_FILE_BYTES {
+            return Err("PDF is too large for verified local-AI source grounding".into());
+        }
+        digest.update(&chunk[..count]);
+    }
+    Ok(hex::encode(digest.finalize()))
+}
+
+fn verify_pdf_file_sha256(path: &Path, expected: &str) -> Result<(), String> {
+    let actual = pdf_file_sha256(path)?;
+    if actual != expected {
+        return Err("The source PDF changed on disk after rendering. Reopen its page and preview the passage again; nothing was sent.".into());
+    }
+    Ok(())
+}
+
+/// The dispatch closure is deliberately unreachable when the file bytes no
+/// longer match the page shown during approval. The check runs off the UI
+/// event loop. Cancellation after an HTTP send begins remains best-effort.
+fn with_verified_pdf_ai_source<T>(
+    pdf_source: Option<&(PathBuf, String)>,
+    cancelled: impl Fn() -> bool,
+    dispatch: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    if let Some((path, digest)) = pdf_source {
+        verify_pdf_file_sha256(path, digest)?;
+    }
+    if cancelled() {
+        return Err("Local AI request canceled before dispatch".into());
+    }
+    let result = dispatch()?;
+    // A local model can take seconds to respond; fail closed if the source
+    // file changes while inference is in flight rather than displaying text
+    // as though it described the current on-disk document.
+    if let Some((path, digest)) = pdf_source {
+        verify_pdf_file_sha256(path, digest)?;
+    }
+    Ok(result)
+}
 
 /// The pasted passage must occur exactly once in the text that the host
 /// actually rendered. Indices are UTF-8 bytes in that bounded display text,
@@ -494,6 +556,7 @@ fn verified_pdf_passage(
         || current_page_count < current_page
         || visible_text.is_empty()
         || source.visible_text != visible_text
+        || source.file_sha256.is_none()
     {
         return Err("The PDF file, page or displayed text changed. Open the current page and copy the passage again.".into());
     }
@@ -672,6 +735,7 @@ fn contextual_screen_payload(
                     rendered.page,
                     rendered.render_job,
                     &source.source_sha256,
+                    &rendered.file_sha256,
                 ))
                 .map_err(|error| error.to_string())?,
             ));
@@ -4504,10 +4568,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     let snapshot = pdf_page_snapshot.lock().unwrap();
                     let rendered = snapshot.as_ref().ok_or("PDF page was not rendered")?;
                     format!(
-                        "\nPDF file path: {}\nPage: {} of {}\nShown extracted-text SHA-256: {}\nThe byte range above refers only to the displayed extracted text, not PDF file bytes or a saved citation.\n",
+                        "\nPDF file path: {}\nPage: {} of {}\nPDF file SHA-256 at rendering: {}\nShown extracted-text SHA-256: {}\nThe byte range above refers to displayed extracted text, not PDF file bytes or a saved citation. The PDF file is reverified before any local-model request.\n",
                         rendered.path,
                         rendered.page,
                         rendered.page_count,
+                        rendered.file_sha256.as_deref().ok_or("PDF file identity is unverified; render the page again")?,
                         hex::encode(Sha256::digest(rendered.visible_text.as_bytes())),
                     )
                 } else {
@@ -4535,6 +4600,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             request,
                             profile,
                             preview: permitted_preview,
+                            pdf_source: if ui.get_page() == 7 {
+                                let snapshot = pdf_page_snapshot.lock().unwrap();
+                                let source = snapshot.as_ref().ok_or("PDF page is unavailable")?;
+                                Some((
+                                    PathBuf::from(&source.path),
+                                    source.file_sha256.clone().ok_or("PDF file identity is unverified")?,
+                                ))
+                            } else {
+                                None
+                            },
                         });
                         ui.set_context_ai_preview_summary(preview_text.into());
                         ui.set_context_ai_ready(true);
@@ -4639,17 +4714,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let active_run_task = active_run.clone();
             let pdf_snapshot_task = pdf_page_snapshot.clone();
             std::thread::spawn(move || {
-                let result = NativeHttpTransport::new(Duration::from_secs(30))
-                    .and_then(|transport| {
-                        ai_chat(
-                            &transport,
-                            &approved.profile,
-                            LOCAL_ONLY_AI_POLICY,
-                            &approved.preview.messages_json(),
-                            &|| stop.load(Ordering::SeqCst),
-                        )
-                    })
-                    .map_err(|error| error.to_string());
+                let result = with_verified_pdf_ai_source(
+                    approved.pdf_source.as_ref(),
+                    || stop.load(Ordering::SeqCst),
+                    || {
+                    let transport = NativeHttpTransport::new(Duration::from_secs(30))
+                        .map_err(|error| error.to_string())?;
+                    ai_chat(
+                        &transport,
+                        &approved.profile,
+                        LOCAL_ONLY_AI_POLICY,
+                        &approved.preview.messages_json(),
+                        &|| stop.load(Ordering::SeqCst),
+                    )
+                    .map_err(|error| error.to_string())
+                    },
+                );
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak_task.upgrade() {
                         // Never let an older request clear the busy state or
@@ -9448,6 +9528,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let activity_path = activity_path.clone();
             let pdf_page_snapshot = pdf_page_snapshot.clone();
             std::thread::spawn(move || {
+                // Capture the actual PDF bytes on both sides of rendering.
+                // If another process writes the same path during this job,
+                // keep the Reader usable but fail closed for AI grounding.
+                let source_before = pdf_file_sha256(Path::new(path.as_str())).ok();
                 let result = usize::try_from(page_number)
                     .ok()
                     .filter(|number| *number > 0)
@@ -9459,6 +9543,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             number - 1,
                         )
                     });
+                let verified_source_sha = source_before.and_then(|before| {
+                    pdf_file_sha256(Path::new(path.as_str()))
+                        .ok()
+                        .filter(|after| after == &before)
+                });
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak.upgrade() {
                         let succeeded = result.is_ok();
@@ -9527,6 +9616,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     page_count: i32::try_from(rendered.page_count).unwrap_or(i32::MAX),
                                     render_job: job_id,
                                     visible_text: copyable_text.clone(),
+                                    file_sha256: verified_source_sha,
                                 });
                                 ui.set_pdf_page_extracted_text(copyable_text.into());
                                 ui.set_pdf_page_extraction_status(
@@ -10021,7 +10111,87 @@ mod tests {
             page_count: 4,
             render_job: 19,
             visible_text: text.into(),
+            file_sha256: Some("synthetic-pdf-file-digest".into()),
         }
+    }
+
+    #[test]
+    fn replaced_pdf_at_identical_path_never_reaches_ai_dispatch() {
+        use std::cell::Cell;
+
+        let directory = std::env::temp_dir().join(format!("rw-pdf-source-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let file = directory.join("research-paper.pdf");
+        std::fs::write(&file, b"%PDF-1.7\nsynthetic source A\n").unwrap();
+        let original = pdf_file_sha256(&file).unwrap();
+        let invoked = Cell::new(0);
+        let verified = (file.clone(), original.clone());
+        let ok = with_verified_pdf_ai_source(
+            Some(&verified),
+            || false,
+            || {
+                invoked.set(invoked.get() + 1);
+                Ok(())
+            },
+        );
+        assert!(ok.is_ok());
+        assert_eq!(invoked.get(), 1);
+
+        // Same pathname, new bytes: preserve the displayed-text snapshot but
+        // reject its now-stale request before constructing any HTTP transport.
+        std::fs::write(&file, b"%PDF-1.7\nsynthetic source B\n").unwrap();
+        let rejected = with_verified_pdf_ai_source(
+            Some(&verified),
+            || false,
+            || {
+                invoked.set(invoked.get() + 1);
+                Ok(())
+            },
+        );
+        assert!(rejected.unwrap_err().contains("changed on disk"));
+        assert_eq!(invoked.get(), 1, "no model dispatch after file replacement");
+        assert_ne!(pdf_file_sha256(&file).unwrap(), original);
+
+        let replacement_digest = pdf_file_sha256(&file).unwrap();
+        let in_flight_source = (file.clone(), replacement_digest);
+        let in_flight = with_verified_pdf_ai_source(
+            Some(&in_flight_source),
+            || false,
+            || {
+                std::fs::write(&file, b"%PDF-1.7\nmodified during inference\n").unwrap();
+                Ok("synthetic model output")
+            },
+        );
+        assert!(in_flight.unwrap_err().contains("changed on disk"));
+
+        let missing = directory.join("deleted.pdf");
+        let missing_request = (missing, original);
+        assert!(with_verified_pdf_ai_source(
+            Some(&missing_request),
+            || false,
+            || {
+                invoked.set(invoked.get() + 1);
+                Ok(())
+            }
+        )
+        .is_err());
+        assert_eq!(invoked.get(), 1);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn canceled_pdf_dispatch_does_not_invoke_transport() {
+        let transport_called = std::cell::Cell::new(false);
+        let result = with_verified_pdf_ai_source(
+            None,
+            || true,
+            || {
+                transport_called.set(true);
+                Ok(())
+            },
+        );
+        assert!(result.unwrap_err().contains("canceled"));
+        assert!(!transport_called.get());
     }
 
     fn pdf_selection(

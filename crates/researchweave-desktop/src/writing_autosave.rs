@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
-use std::io::Read;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
 
 const MAX_DRAFT_BYTES: usize = 256 * 1024;
@@ -166,6 +166,16 @@ pub fn load(path: &Path) -> Result<Drafts, String> {
 }
 
 pub fn save(path: &Path, drafts: &Drafts) -> Result<(), String> {
+    save_with_writer(path, drafts, |file, data| file.write_all(data))
+}
+
+// Keep the staging writer injectable so failures before the atomic replacement
+// can be tested without depending on disk exhaustion or filesystem timing.
+fn save_with_writer(
+    path: &Path,
+    drafts: &Drafts,
+    write_stage: impl FnOnce(&mut std::fs::File, &[u8]) -> std::io::Result<()>,
+) -> Result<(), String> {
     let data = serde_json::to_vec(drafts).map_err(|error| error.to_string())?;
     if data.len() > MAX_DRAFT_BYTES {
         return Err("Writing recovery draft exceeds size limit".into());
@@ -173,12 +183,41 @@ pub fn save(path: &Path, drafts: &Drafts) -> Result<(), String> {
     let parent = path.parent().ok_or("Invalid recovery path")?;
     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
-    std::fs::write(&temporary, &data).map_err(|error| error.to_string())?;
-    let result = replace_file(&temporary, path).map_err(|error| error.to_string());
+    let result = (|| {
+        let mut file = std::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)?;
+        write_stage(&mut file, &data)?;
+        file.sync_all()?;
+        // Windows ReplaceFileW requires all handles to the staging file closed.
+        drop(file);
+        replace_file(&temporary, path)?;
+        #[cfg(unix)]
+        sync_parent_directory(parent)?;
+        Ok::<(), std::io::Error>(())
+    })()
+    .map_err(|error| error.to_string());
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
     result
+}
+
+#[cfg(unix)]
+fn sync_parent_directory(parent: &Path) -> std::io::Result<()> {
+    let directory = std::fs::File::open(parent)?;
+    match directory.sync_all() {
+        Ok(()) => Ok(()),
+        // Directory fsync is unsupported on some Unix-backed filesystems.
+        Err(error)
+            if error.kind() == std::io::ErrorKind::Unsupported
+                || matches!(error.raw_os_error(), Some(22 | 45 | 95)) =>
+        {
+            Ok(())
+        }
+        Err(error) => Err(error),
+    }
 }
 
 #[cfg(windows)]
@@ -567,6 +606,51 @@ mod tests {
         // must not masquerade as a clean, empty draft.
         std::fs::write(&destination, b"{\"body\":").unwrap();
         assert!(load(&destination).unwrap_err().contains("corrupt"));
+    }
+
+    #[test]
+    fn injected_partial_staging_failure_keeps_previous_bytes_and_cleans_temporary() {
+        let root = TempDraftRoot::new();
+        let destination = root.path("partial-stage-failure");
+        let previous = synthetic_drafts(1);
+        save(&destination, &previous).unwrap();
+        let original_bytes = std::fs::read(&destination).unwrap();
+        let mut updated = previous.clone();
+        updated.body.push_str(EDIT);
+
+        let error = save_with_writer(&destination, &updated, |file, bytes| {
+            file.write_all(&bytes[..bytes.len() / 2])?;
+            Err(std::io::Error::other("injected partial staging failure"))
+        })
+        .unwrap_err();
+        assert!(error.contains("injected partial staging failure"));
+        assert_eq!(std::fs::read(&destination).unwrap(), original_bytes);
+        assert_eq!(load(&destination).unwrap(), previous);
+        assert!(std::fs::read_dir(destination.parent().unwrap())
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")));
+
+        // A failed journal update cannot prevent a later valid edit/restart.
+        save(&destination, &updated).unwrap();
+        assert_eq!(load(&destination).unwrap(), updated);
+
+        let fresh = root.path("failed-first-save");
+        assert!(save_with_writer(&fresh, &updated, |_, _| {
+            Err(std::io::Error::other("injected first staging failure"))
+        })
+        .is_err());
+        assert!(!fresh.exists());
+        assert!(std::fs::read_dir(fresh.parent().unwrap())
+            .unwrap()
+            .all(|entry| !entry
+                .unwrap()
+                .file_name()
+                .to_string_lossy()
+                .ends_with(".tmp")));
     }
 
     #[test]

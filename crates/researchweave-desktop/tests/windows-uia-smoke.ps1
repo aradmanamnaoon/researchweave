@@ -57,6 +57,7 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
     # provider response. CI failures must never dump arbitrary UIA names.
     $staticTargets = @(
         'Command palette', 'Project path', 'Project title',
+        'Create default project', 'Create project', 'Open project',
         'Manuscript section body', 'Manuscript citations', 'Manuscript ID',
         'Backup archive path', 'Backup encryption password',
         'Recovery archive path', 'Recovery destination path',
@@ -72,7 +73,12 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
     $counts = @($availableTypes | Group-Object | Sort-Object Name | ForEach-Object {
         $_.Name + '=' + $_.Count
     })
-    throw "UIA element missing: $type '$safeTarget'. Tree controls=$($availableTypes.Count): $($counts -join ', ')"
+    # A name can contain confidential user text. Report only this script's
+    # stable caller line number, never the caller command or its arguments;
+    # CI can then locate a failing action without exposing private content.
+    $frames = @(Get-PSCallStack)
+    $callerLine = if ($frames.Count -gt 1) { [int]$frames[1].ScriptLineNumber } else { 0 }
+    throw "UIA element missing: $type '$safeTarget' (script_caller_line=$callerLine). Tree controls=$($availableTypes.Count): $($counts -join ', ')"
 }
 function Read-DatasetPageJson([System.Windows.Automation.AutomationElement]$parent) {
     # Data View exposes the exact read-only page JSON through an accessible
