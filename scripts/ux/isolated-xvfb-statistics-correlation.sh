@@ -144,6 +144,17 @@ for attempt in range(40):
         'sample': any(n.startswith('Latest statistics sample and details: ' + expected_sample) for n in names),
         'provenance': any(n.startswith('Latest statistics provenance: Immutable dataset revision ' + revision)
                           and 'native deterministic analysis' in n for n in names),
+        # The persistent footer must expose all four fields together, even
+        # when the tall visible result card is outside a scroll viewport.
+        'live_summary': any(
+            n.startswith('Latest statistics live summary: ')
+            and 'Latest statistics result title: ' + expected_title in n
+            and 'Latest statistics estimate: ' + expected_estimate in n
+            and 'Latest statistics sample and details: ' + expected_sample in n
+            and 'Latest statistics provenance: Immutable dataset revision ' + revision in n
+            and 'native deterministic analysis' in n
+            for n in names
+        ),
     }
     if all(checks.values()):
         break

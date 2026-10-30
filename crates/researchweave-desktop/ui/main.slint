@@ -4382,7 +4382,17 @@ export component MainWindow inherits Window {
                         color: Theme.surface;
                         font-size: 11px * Theme.ui-scale / 100;
                         vertical-alignment: center;
-                        accessible-label: "Status: " + root.status;
+                        // A result card may be outside the scroll viewport on a
+                        // narrow or heavily zoomed workbench. Keep the latest
+                        // verified estimate, sample and dataset revision
+                        // available to assistive technology in the fixed status
+                        // bar without changing its compact visible text.
+                        accessible-label: root.page == 14 && root.statistics-result-provenance != ""
+                            ? "Latest statistics live summary: Latest statistics result title: " + root.statistics-result-title
+                              + " | Latest statistics estimate: " + root.statistics-result-primary
+                              + " | Latest statistics sample and details: " + root.statistics-result-secondary
+                              + " | Latest statistics provenance: " + root.statistics-result-provenance
+                            : "Status: " + root.status;
                         accessible-live-region: polite;
                     }
                     Text {

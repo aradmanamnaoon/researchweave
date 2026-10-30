@@ -5,6 +5,17 @@ param(
     [string]$PreserveProjectDirectory = ""
 )
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 treats a script without a UTF-8 BOM as local ANSI.
+# Reject new non-ASCII source bytes before a result assertion silently
+# compares garbled text, while allowing a properly BOM-marked script.
+$scriptSource = [IO.File]::ReadAllBytes($PSCommandPath)
+$hasUtf8Bom = $scriptSource.Length -ge 3 -and $scriptSource[0] -eq 0xEF -and
+    $scriptSource[1] -eq 0xBB -and $scriptSource[2] -eq 0xBF
+if (-not $hasUtf8Bom) {
+    foreach ($sourceByte in $scriptSource) {
+        if ($sourceByte -gt 127) { throw 'BOM-less Windows UIA smoke script must use ASCII-safe source literals' }
+    }
+}
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Drawing
@@ -144,10 +155,16 @@ function Read-StatisticsResultSnapshot(
         } catch {
             continue
         }
-        if ($name -like $expectedTitle) { $seen.title = $true }
-        if ($name -like $expectedEstimate) { $seen.estimate = $true }
-        if ($name -like $expectedSample) { $seen.sample = $true }
-        if ($name -like $expectedProvenance) { $seen.provenance = $true }
+        # The fixed native status bar carries a single accessible live summary
+        # when the tall result card is outside the visible Slint ScrollView.
+        # Require all four values from this same current result snapshot;
+        # the individual card labels remain independently valid as well.
+        if ($null -eq $name) { continue }
+        $isLiveSummary = $name.StartsWith('Latest statistics live summary: ')
+        if ($name -like $expectedTitle -or ($isLiveSummary -and $name -like ('*' + $expectedTitle + '*'))) { $seen.title = $true }
+        if ($name -like $expectedEstimate -or ($isLiveSummary -and $name -like ('*' + $expectedEstimate + '*'))) { $seen.estimate = $true }
+        if ($name -like $expectedSample -or ($isLiveSummary -and $name -like ('*' + $expectedSample + '*'))) { $seen.sample = $true }
+        if ($name -like $expectedProvenance -or ($isLiveSummary -and $name -like ('*' + $expectedProvenance + '*'))) { $seen.provenance = $true }
     }
     return $seen
 }
@@ -1309,7 +1326,11 @@ try {
         ([System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($pair[1])
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Run linear model with HC3 covariance').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Assert-StatisticsResult $window 'Run linear model with HC3 covariance' 'Latest statistics result title: OLS linear model*HC3 robust covariance' 'Latest statistics estimate: R² = 0.4000*' 'Latest statistics sample and details: n=4 complete cases*' $datasetRevision 'HC3 linear model did not execute through the native Statistics workspace'
+    # powershell.exe 5.1 reads a BOM-less .ps1 as the system ANSI code page.
+    # Construct superscript two from its code point; a literal UTF-8 code
+    # point would otherwise be decoded as mojibake on the Windows runner.
+    $expectedOlsEstimate = 'Latest statistics estimate: R' + [char]0x00B2 + ' = 0.4000*'
+    Assert-StatisticsResult $window 'Run linear model with HC3 covariance' 'Latest statistics result title: OLS linear model*HC3 robust covariance' $expectedOlsEstimate 'Latest statistics sample and details: n=4 complete cases*' $datasetRevision 'HC3 linear model did not execute through the native Statistics workspace'
     Write-Output 'PASS: immutable Statistics workspace runs descriptives, frequency, Pearson correlation, Welch t test, and HC3 OLS'
     Capture-WindowScreenshot $window $StatisticsScreenshot
 

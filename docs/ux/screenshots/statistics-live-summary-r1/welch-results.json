@@ -1,0 +1,17 @@
+{
+  "checks": {
+    "title": true,
+    "estimate": true,
+    "sample": true,
+    "provenance": true,
+    "live_summary": true
+  },
+  "attempts": 1,
+  "names": [
+    "Latest statistics result title: Welch two-group t test",
+    "Latest statistics estimate: Mean difference -2.0000 · 95% confidence interval [-8.0849, 4.0849] · p = 0.2929",
+    "Latest statistics sample and details: n=4 included · df=2.0000 · Cohen's d = -1.4142 · statistical nonsignificance does not establish equivalence; review design assumptions",
+    "Latest statistics provenance: Immutable dataset revision bc104dff3947… · native deterministic analysis",
+    "Latest statistics live summary: Latest statistics result title: Welch two-group t test | Latest statistics estimate: Mean difference -2.0000 · 95% confidence interval [-8.0849, 4.0849] · p = 0.2929 | Latest statistics sample and details: n=4 included · df=2.0000 · Cohen's d = -1.4142 · statistical nonsignificance does not establish equivalence; review design assumptions | Latest statistics provenance: Immutable dataset revision bc104dff3947… · native deterministic analysis"
+  ]
+}
