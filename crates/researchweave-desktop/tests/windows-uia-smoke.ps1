@@ -2072,9 +2072,12 @@ try {
     ([System.Windows.Automation.ValuePattern]$agentOperation.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('assistant.retrieval.index')
     $agentPrivateSentinel = 'AGENT_PRIVATE_SENTINEL_91D7'
     ([System.Windows.Automation.ValuePattern]$agentArguments.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('{"citation_id":"agent-uia-citation","source_id":"agent-uia-source","revision":"r1","content":"' + $agentPrivateSentinel + '"}')
-    $previewPlanButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview inert agent plan'
-    $stageProposalButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Stage agent tool proposal'
-    $timelineButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Load agent action timeline'
+    # The proposal buttons follow the three input fields inside a virtualized
+    # Slint ScrollView. Tab from the last visible field to materialize the
+    # native controls before querying them through UIA.
+    $previewPlanButton = FocusByTab $agentArguments ([System.Windows.Automation.ControlType]::Button) 'Preview inert agent plan' 4
+    $stageProposalButton = FocusByTab $previewPlanButton ([System.Windows.Automation.ControlType]::Button) 'Stage agent tool proposal' 4
+    $timelineButton = FocusByTab $stageProposalButton ([System.Windows.Automation.ControlType]::Button) 'Load agent action timeline' 4
     $previewPlanButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     # The result summary lives below the proposal row in the virtualized ScrollView.
     # Traverse through real keyboard focus so both the lower controls and result are
