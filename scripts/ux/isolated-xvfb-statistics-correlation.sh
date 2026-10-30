@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Private native GUI reproduction of Statistics' accessible Pearson result.
+# Private native GUI reproduction of the Statistics inferential result cards.
 # Does not run the Windows desktop, mutate repo data or contact providers.
 set -euo pipefail
 [[ $# == 3 ]] || { echo 'Usage: <linux-binary> <NEW-evidence-dir> <frozen-source-root>' >&2; exit 2; }
@@ -105,49 +105,73 @@ mapfile -t identifiers <"$out/dataset-identity.txt"
 navigate 'Statistics'
 paste 'Statistics dataset ID' "${identifiers[0]}"
 paste 'Statistics dataset revision' "${identifiers[1]}"
+assert_result() {
+  local method="$1" title="$2" estimate="$3" sample="$4"
+  python3 - "$out/${method}-results.json" "$title" "$estimate" "$sample" "${identifiers[1]:0:12}" <<'PY'
+from collections import deque
+from pathlib import Path
+import json
+import sys
+import time
+import pyatspi
+
+output, expected_title, expected_estimate, expected_sample, revision = sys.argv[1:]
+
+def labels():
+    desktop = pyatspi.Registry.getDesktop(0)
+    for i in range(desktop.childCount):
+        app = desktop.getChildAtIndex(i)
+        if 'researchweave' not in str(app.name).lower():
+            continue
+        q = deque([(app, 0)])
+        while q:
+            node, depth = q.popleft()
+            try:
+                name = str(node.name or '')
+                if name.startswith('Latest statistics'):
+                    yield name
+                if depth < 20:
+                    for j in range(min(node.childCount, 250)):
+                        q.append((node.getChildAtIndex(j), depth + 1))
+            except Exception:
+                pass
+
+for attempt in range(40):
+    names = list(labels())
+    checks = {
+        'title': any(n == 'Latest statistics result title: ' + expected_title for n in names),
+        'estimate': any(n.startswith('Latest statistics estimate: ' + expected_estimate) for n in names),
+        'sample': any(n.startswith('Latest statistics sample and details: ' + expected_sample) for n in names),
+        'provenance': any(n.startswith('Latest statistics provenance: Immutable dataset revision ' + revision)
+                          and 'native deterministic analysis' in n for n in names),
+    }
+    if all(checks.values()):
+        break
+    time.sleep(0.15)
+result = {'checks': checks, 'attempts': attempt + 1, 'names': names}
+Path(output).write_text(json.dumps(result, ensure_ascii=False, indent=2))
+assert all(checks.values()), result
+print('NATIVE_' + expected_title.upper().replace(' ', '_') + '_PASS')
+PY
+}
 click 'Show correlation form'
 paste 'Statistics correlation X column' score
 paste 'Statistics correlation Y column' aux
 click 'Run Pearson correlation'
-sleep 0.5
-python3 - "$out/correlation-results.json" <<'PY'
-from pathlib import Path
-from collections import deque
-import json,sys,time,pyatspi
-def labels():
-    desktop=pyatspi.Registry.getDesktop(0)
-    for i in range(desktop.childCount):
-        app=desktop.getChildAtIndex(i)
-        if 'researchweave' not in str(app.name).lower():continue
-        q=deque([(app,0)])
-        while q:
-            node,d=q.popleft()
-            try:
-                name=str(node.name or '')
-                if name.startswith('Latest statistics') or name.startswith('Pearson correlation computed'):
-                    yield name
-                if d < 20:
-                    for j in range(min(node.childCount,250)): q.append((node.getChildAtIndex(j),d+1))
-            except Exception:pass
-for attempt in range(35):
-    names=list(labels())
-    title=any(n=='Latest statistics result title: Pearson correlation' for n in names)
-    # Golden fixture: x=[1,3,5,3], y=[10,20,30,40]. The Pearson
-    # coefficient is 1/sqrt(2.5) and the two-sided t(df=2) p-value is
-    # approximately 0.3675445. Verify the estimate, not just the label.
-    estimate=any(n.startswith('Latest statistics estimate: r = 0.6325')
-                 and 'p = 0.3675' in n for n in names)
-    sample=any(n.startswith('Latest statistics sample and details: n=4 complete pairs') for n in names)
-    provenance=any(n.startswith('Latest statistics provenance: Immutable dataset revision ')
-                   and 'native deterministic analysis' in n for n in names)
-    if title and estimate and sample and provenance:break
-    time.sleep(0.15)
-result={'title':title,'estimate':estimate,'sample':sample,
-        'provenance':provenance,'attempts':attempt+1,
-        'names':names}
-Path(sys.argv[1]).write_text(json.dumps(result,ensure_ascii=False,indent=2))
-assert title and estimate and sample and provenance, result
-print('NATIVE_PEARSON_ACCESSIBLE_RESULT_PASS')
-PY
+assert_result correlation 'Pearson correlation' 'r = 0.6325 · p = 0.3675' 'n=4 complete pairs'
 import -window root "$out/pearson.png"
-echo 'ISOLATED_PEARSON_GUI_PASS'
+click 'Show Welch t test form'
+paste 'Statistics t test outcome column' score
+paste 'Statistics t test group column' group
+paste 'Statistics t test first group' A
+paste 'Statistics t test second group' B
+click 'Run Welch t test'
+assert_result welch 'Welch two-group t test' 'Mean difference -2.0000' 'n=4 included'
+import -window root "$out/welch.png"
+click 'Show linear model form'
+paste 'Statistics linear model outcome' score
+paste 'Statistics linear model predictors' aux
+click 'Run linear model with HC3 covariance'
+assert_result ols 'OLS linear model · HC3 robust covariance' 'R² = 0.4000' 'n=4 complete cases'
+import -window root "$out/ols.png"
+echo 'ISOLATED_STATISTICS_GUI_PASS pearson=PASS welch=PASS ols=PASS'

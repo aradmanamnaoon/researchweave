@@ -2716,11 +2716,11 @@ export component MainWindow inherits Window {
                                     color: Theme.muted-ink;
                                     wrap: word-wrap;
                                 }
-                                Text { text: "1 · Dataset and revision (required for every method)"; color: Theme.ink; font-weight: 700; }
+                                Text { text: "1 · Dataset and revision (required for every method)"; color: Theme.ink; font-weight: 700; wrap: word-wrap; }
                                 HorizontalLayout {
                                     spacing: 8px;
-                                    stats-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Statistics dataset ID"; }
-                                    stats-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Statistics dataset revision"; }
+                                    stats-dataset-id := LineEdit { min-width: 0px; preferred-width: root.width < 950px ? 295px : 380px; max-width: root.width < 950px ? 305px : 760px; horizontal-stretch: 1; placeholder-text: "Dataset ID"; accessible-label: "Statistics dataset ID"; }
+                                    stats-revision := LineEdit { min-width: 0px; preferred-width: root.width < 950px ? 295px : 380px; max-width: root.width < 950px ? 305px : 760px; horizontal-stretch: 1; placeholder-text: "Dataset revision"; accessible-label: "Statistics dataset revision"; }
                                 }
                                 Text {
                                     text: "Use the immutable dataset ID and exact revision returned by Data View. Results never overwrite source values. To understand missing data and variable units, inspect Variable View first.";
@@ -2732,14 +2732,14 @@ export component MainWindow inherits Window {
                                 Text { text: "2 · Choose a method"; color: Theme.ink; font-weight: 700; }
                                 HorizontalLayout {
                                     spacing: 8px;
-                                    Button { text: root.statistics-mode == 0 ? "› Descriptives" : "Descriptives"; accessible-label: "Show descriptive statistics form"; clicked => { root.statistics-mode = 0; } }
-                                    Button { text: root.statistics-mode == 1 ? "› Frequency" : "Frequency"; accessible-label: "Show frequency table form"; clicked => { root.statistics-mode = 1; } }
-                                    Button { text: root.statistics-mode == 2 ? "› Correlation" : "Correlation"; accessible-label: "Show correlation form"; clicked => { root.statistics-mode = 2; } }
+                                    Button { min-width: 0px; preferred-width: root.width < 950px ? 205px : 250px; max-width: root.width < 950px ? 205px : 400px; horizontal-stretch: 1; text: root.statistics-mode == 0 ? "› Descriptives" : "Descriptives"; accessible-label: "Show descriptive statistics form"; clicked => { root.statistics-mode = 0; } }
+                                    Button { min-width: 0px; preferred-width: root.width < 950px ? 205px : 250px; max-width: root.width < 950px ? 205px : 400px; horizontal-stretch: 1; text: root.statistics-mode == 1 ? "› Frequency" : "Frequency"; accessible-label: "Show frequency table form"; clicked => { root.statistics-mode = 1; } }
+                                    Button { min-width: 0px; preferred-width: root.width < 950px ? 205px : 250px; max-width: root.width < 950px ? 205px : 400px; horizontal-stretch: 1; text: root.statistics-mode == 2 ? "› Correlation" : "Correlation"; accessible-label: "Show correlation form"; clicked => { root.statistics-mode = 2; } }
                                 }
                                 HorizontalLayout {
                                     spacing: 8px;
-                                    Button { text: root.statistics-mode == 3 ? "› Welch t" : "Welch t"; accessible-label: "Show Welch t test form"; clicked => { root.statistics-mode = 3; } }
-                                    Button { text: root.statistics-mode == 4 ? "› Linear model" : "Linear model"; accessible-label: "Show linear model form"; clicked => { root.statistics-mode = 4; } }
+                                    Button { min-width: 0px; preferred-width: root.width < 950px ? 300px : 360px; max-width: root.width < 950px ? 300px : 500px; horizontal-stretch: 1; text: root.statistics-mode == 3 ? "› Welch t" : "Welch t"; accessible-label: "Show Welch t test form"; clicked => { root.statistics-mode = 3; } }
+                                    Button { min-width: 0px; preferred-width: root.width < 950px ? 300px : 360px; max-width: root.width < 950px ? 300px : 500px; horizontal-stretch: 1; text: root.statistics-mode == 4 ? "› Linear model" : "Linear model"; accessible-label: "Show linear model form"; clicked => { root.statistics-mode = 4; } }
                                 }
 
                                 if root.statistics-mode == 0: VerticalLayout {
@@ -2748,8 +2748,8 @@ export component MainWindow inherits Window {
                                     Text { text: "Summarize one numeric column. Mean measures average; median is the middle value; sample SD describes spread. Inspect valid n, missing n and observed range before interpreting the average."; color: Theme.muted-ink; wrap: word-wrap; }
                                     HorizontalLayout {
                                         spacing: 8px;
-                                        stats-column := LineEdit { placeholder-text: "Numeric column"; accessible-label: "Statistics numeric column"; }
-                                        Button { text: "Run descriptives"; accessible-label: "Run descriptive statistics"; clicked => { root.run-descriptives(stats-dataset-id.text, stats-revision.text, stats-column.text); } }
+                                        stats-column := LineEdit { min-width: 0px; horizontal-stretch: 1; placeholder-text: "Numeric column"; accessible-label: "Statistics numeric column"; }
+                                        Button { min-width: 0px; horizontal-stretch: 0; text: "Run descriptives"; accessible-label: "Run descriptive statistics"; clicked => { root.run-descriptives(stats-dataset-id.text, stats-revision.text, stats-column.text); } }
                                     }
                                 }
                                 if root.statistics-mode == 1: VerticalLayout {
@@ -2758,8 +2758,8 @@ export component MainWindow inherits Window {
                                     Text { text: "Count observed category levels. A valid percentage excludes missing responses from its denominator; inspect missing counts and sample selection before comparing groups."; color: Theme.muted-ink; wrap: word-wrap; }
                                     HorizontalLayout {
                                         spacing: 8px;
-                                        stats-frequency-column := LineEdit { placeholder-text: "Categorical column"; accessible-label: "Statistics frequency column"; }
-                                        Button { text: "Run frequency"; accessible-label: "Run frequency table"; clicked => { root.run-frequency(stats-dataset-id.text, stats-revision.text, stats-frequency-column.text); } }
+                                        stats-frequency-column := LineEdit { min-width: 0px; horizontal-stretch: 1; placeholder-text: "Categorical column"; accessible-label: "Statistics frequency column"; }
+                                        Button { min-width: 0px; horizontal-stretch: 0; text: "Run frequency"; accessible-label: "Run frequency table"; clicked => { root.run-frequency(stats-dataset-id.text, stats-revision.text, stats-frequency-column.text); } }
                                     }
                                 }
                                 if root.statistics-mode == 2: VerticalLayout {
@@ -2768,9 +2768,9 @@ export component MainWindow inherits Window {
                                     Text { text: "Estimate linear association between two numeric columns using complete pairs. r describes direction/strength, not causation. Review n, unusual points, independence and p-value assumptions."; color: Theme.muted-ink; wrap: word-wrap; }
                                     HorizontalLayout {
                                         spacing: 8px;
-                                        stats-correlation-x := LineEdit { placeholder-text: "X column"; accessible-label: "Statistics correlation X column"; }
-                                        stats-correlation-y := LineEdit { placeholder-text: "Y column"; accessible-label: "Statistics correlation Y column"; }
-                                        Button { text: "Run Pearson r"; accessible-label: "Run Pearson correlation"; clicked => { root.run-correlation(stats-dataset-id.text, stats-revision.text, stats-correlation-x.text, stats-correlation-y.text); } }
+                                        stats-correlation-x := LineEdit { min-width: 0px; horizontal-stretch: 1; placeholder-text: "X column"; accessible-label: "Statistics correlation X column"; }
+                                        stats-correlation-y := LineEdit { min-width: 0px; horizontal-stretch: 1; placeholder-text: "Y column"; accessible-label: "Statistics correlation Y column"; }
+                                        Button { min-width: 0px; horizontal-stretch: 0; text: "Run Pearson r"; accessible-label: "Run Pearson correlation"; clicked => { root.run-correlation(stats-dataset-id.text, stats-revision.text, stats-correlation-x.text, stats-correlation-y.text); } }
                                     }
                                 }
                                 if root.statistics-mode == 3: VerticalLayout {
@@ -2779,14 +2779,14 @@ export component MainWindow inherits Window {
                                     Text { text: "Compare means of two explicitly named groups; unequal group variances are allowed. Other levels are excluded with a warning. Read the mean difference, degrees of freedom and interval, if present, with sample sizes and design assumptions."; color: Theme.muted-ink; wrap: word-wrap; }
                                     HorizontalLayout {
                                         spacing: 8px;
-                                        stats-test-outcome := LineEdit { placeholder-text: "Outcome"; accessible-label: "Statistics t test outcome column"; }
-                                        stats-test-group := LineEdit { placeholder-text: "Group column"; accessible-label: "Statistics t test group column"; }
+                                        stats-test-outcome := LineEdit { min-width: 0px; horizontal-stretch: 1; placeholder-text: "Outcome"; accessible-label: "Statistics t test outcome column"; }
+                                        stats-test-group := LineEdit { min-width: 0px; horizontal-stretch: 1; placeholder-text: "Group column"; accessible-label: "Statistics t test group column"; }
                                     }
                                     HorizontalLayout {
                                         spacing: 8px;
-                                        stats-test-first := LineEdit { placeholder-text: "First group"; accessible-label: "Statistics t test first group"; }
-                                        stats-test-second := LineEdit { placeholder-text: "Second group"; accessible-label: "Statistics t test second group"; }
-                                        Button { text: "Run Welch t"; accessible-label: "Run Welch t test"; clicked => { root.run-t-test(stats-dataset-id.text, stats-revision.text, stats-test-outcome.text, stats-test-group.text, stats-test-first.text, stats-test-second.text); } }
+                                        stats-test-first := LineEdit { min-width: 0px; horizontal-stretch: 1; placeholder-text: "First group"; accessible-label: "Statistics t test first group"; }
+                                        stats-test-second := LineEdit { min-width: 0px; horizontal-stretch: 1; placeholder-text: "Second group"; accessible-label: "Statistics t test second group"; }
+                                        Button { min-width: 0px; horizontal-stretch: 0; text: "Run Welch t"; accessible-label: "Run Welch t test"; clicked => { root.run-t-test(stats-dataset-id.text, stats-revision.text, stats-test-outcome.text, stats-test-group.text, stats-test-first.text, stats-test-second.text); } }
                                     }
                                 }
                                 if root.statistics-mode == 4: VerticalLayout {
@@ -2795,9 +2795,9 @@ export component MainWindow inherits Window {
                                     Text { text: "Ordinary least squares (OLS) with HC3 robust standard errors. Enter predictors separated by commas. R² is model fit, not predictive validity; check residuals, sample size, assumptions and coefficient uncertainty in the payload."; color: Theme.muted-ink; wrap: word-wrap; }
                                     HorizontalLayout {
                                         spacing: 8px;
-                                        stats-model-outcome := LineEdit { placeholder-text: "Outcome"; accessible-label: "Statistics linear model outcome"; }
-                                        stats-model-predictors := LineEdit { placeholder-text: "Predictors, comma-separated"; accessible-label: "Statistics linear model predictors"; }
-                                        Button { text: "Fit OLS"; accessible-label: "Run linear model with HC3 covariance"; clicked => { root.run-linear-model(stats-dataset-id.text, stats-revision.text, stats-model-outcome.text, stats-model-predictors.text); } }
+                                        stats-model-outcome := LineEdit { min-width: 0px; horizontal-stretch: 1; placeholder-text: "Outcome"; accessible-label: "Statistics linear model outcome"; }
+                                        stats-model-predictors := LineEdit { min-width: 0px; horizontal-stretch: 1; placeholder-text: "Predictors, comma-separated"; accessible-label: "Statistics linear model predictors"; }
+                                        Button { min-width: 0px; horizontal-stretch: 0; text: "Fit OLS"; accessible-label: "Run linear model with HC3 covariance"; clicked => { root.run-linear-model(stats-dataset-id.text, stats-revision.text, stats-model-outcome.text, stats-model-predictors.text); } }
                                     }
                                 }
 

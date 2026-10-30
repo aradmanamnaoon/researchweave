@@ -1,0 +1,154 @@
+[
+  {
+    "step": 0,
+    "controls": {
+      "Statistics dataset ID": {
+        "found": true,
+        "rect": [
+          211,
+          539,
+          305,
+          33
+        ]
+      },
+      "Statistics dataset revision": {
+        "found": true,
+        "rect": [
+          524,
+          539,
+          305,
+          33
+        ]
+      },
+      "Show correlation form": {
+        "found": false
+      },
+      "Show Welch t test form": {
+        "found": false
+      },
+      "Show linear model form": {
+        "found": false
+      }
+    }
+  },
+  {
+    "step": 1,
+    "controls": {
+      "Statistics dataset ID": {
+        "found": true,
+        "rect": [
+          211,
+          419,
+          305,
+          33
+        ]
+      },
+      "Statistics dataset revision": {
+        "found": true,
+        "rect": [
+          524,
+          419,
+          305,
+          33
+        ]
+      },
+      "Show correlation form": {
+        "found": false
+      },
+      "Show Welch t test form": {
+        "found": false
+      },
+      "Show linear model form": {
+        "found": false
+      }
+    }
+  },
+  {
+    "step": 2,
+    "controls": {
+      "Statistics dataset ID": {
+        "found": true,
+        "rect": [
+          211,
+          298,
+          305,
+          33
+        ]
+      },
+      "Statistics dataset revision": {
+        "found": true,
+        "rect": [
+          524,
+          298,
+          305,
+          33
+        ]
+      },
+      "Show correlation form": {
+        "found": true,
+        "rect": [
+          637,
+          545,
+          205,
+          43
+        ]
+      },
+      "Show Welch t test form": {
+        "found": false
+      },
+      "Show linear model form": {
+        "found": false
+      }
+    }
+  },
+  {
+    "step": 3,
+    "controls": {
+      "Statistics dataset ID": {
+        "found": true,
+        "rect": [
+          211,
+          178,
+          305,
+          33
+        ]
+      },
+      "Statistics dataset revision": {
+        "found": true,
+        "rect": [
+          524,
+          178,
+          305,
+          33
+        ]
+      },
+      "Show correlation form": {
+        "found": true,
+        "rect": [
+          637,
+          424,
+          205,
+          43
+        ]
+      },
+      "Show Welch t test form": {
+        "found": true,
+        "rect": [
+          211,
+          479,
+          300,
+          43
+        ]
+      },
+      "Show linear model form": {
+        "found": true,
+        "rect": [
+          519,
+          479,
+          300,
+          43
+        ]
+      }
+    }
+  }
+]

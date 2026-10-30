@@ -9,6 +9,14 @@ Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ResearchWeaveUiaWheel {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern void mouse_event(uint flags, uint dx, uint dy, int wheelDelta, UIntPtr extraInfo);
+}
+'@
 function UnicodeString([int[]]$CodePoints) {
     return -join ($CodePoints | ForEach-Object { [char]$_ })
 }
@@ -191,6 +199,7 @@ function Assert-StatisticsResult(
     $seen = @{ title = $false; estimate = $false; sample = $false; provenance = $false }
     $passed = $false
     $scanCount = 0
+    $wheelSteps = 0
     try {
         # Poll once before scrolling; otherwise inspect bounded real scroll
         # offsets, including the bottom where long result cards materialize.
@@ -240,6 +249,43 @@ function Assert-StatisticsResult(
                 # exception containing an accessible name or research text.
             }
         }
+        if (-not $passed) {
+            # Slint/AccessKit can expose a scrollable viewport to pointer
+            # events even when Windows UIA reports no usable ScrollPattern.
+            # Move to a bounded point inside the Statistics content pane and
+            # use real native wheel messages, observing the card after each.
+            $originalCursor = [System.Windows.Forms.Cursor]::Position
+            try {
+                $bounds = $window.Current.BoundingRectangle
+                if ($bounds.Width -gt 450 -and $bounds.Height -gt 350) {
+                    $cursorX = [int]($bounds.Left + $bounds.Width * 0.72)
+                    $cursorY = [int]($bounds.Top + $bounds.Height * 0.65)
+                    [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($cursorX, $cursorY)
+                    for ($step = 0; $step -lt 18; $step++) {
+                        $seen = Read-StatisticsResultSnapshot $window $expectedTitle $expectedEstimate $expectedSample $expectedProvenance
+                        $scanCount++
+                        if ($seen.title -and $seen.estimate -and $seen.sample -and $seen.provenance) {
+                            $passed = $true
+                            break
+                        }
+                        [ResearchWeaveUiaWheel]::mouse_event([uint32]0x800, 0, 0, -120, [UIntPtr]::Zero)
+                        $wheelSteps++
+                        Start-Sleep -Milliseconds 110
+                    }
+                }
+            } catch {
+                # Stale UIA geometry or a missing interactive desktop may
+                # block this fallback; the final assertion remains authoritative.
+            } finally {
+                # Wheel restoration and focus restoration are best effort.
+                try {
+                    for ($restore = 0; $restore -lt $wheelSteps; $restore++) {
+                        [ResearchWeaveUiaWheel]::mouse_event([uint32]0x800, 0, 0, 120, [UIntPtr]::Zero)
+                    }
+                    [System.Windows.Forms.Cursor]::Position = $originalCursor
+                } catch { }
+            }
+        }
     } finally {
         # UIA may replace the viewport and button while the result is read.
         # Restoration cannot override a successful assertion or mask a failure.
@@ -257,7 +303,10 @@ function Assert-StatisticsResult(
     }
     if (-not $passed) {
         # Do not print any actual UIA names, values or dataset identifiers.
-        Write-Output "DIAGNOSTIC Statistics result: title=$($seen.title) estimate=$($seen.estimate) sample=$($seen.sample) provenance=$($seen.provenance) inspected_viewports=$scanCount"
+        # Write-Output can be lost when the calling package harness throws
+        # before assigning captured pipeline output. Emit booleans to the host
+        # so CI can distinguish a missing result from scrolling failure.
+        Write-Host "DIAGNOSTIC Statistics result: title=$($seen.title) estimate=$($seen.estimate) sample=$($seen.sample) provenance=$($seen.provenance) scroll_pattern=$($null -ne $restorePattern) wheel_steps=$wheelSteps inspected_viewports=$scanCount"
         throw $failure
     }
 }

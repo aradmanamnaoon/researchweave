@@ -1,0 +1,15 @@
+{
+  "checks": {
+    "title": true,
+    "estimate": true,
+    "sample": true,
+    "provenance": true
+  },
+  "attempts": 1,
+  "names": [
+    "Latest statistics result title: OLS linear model · HC3 robust covariance",
+    "Latest statistics estimate: R² = 0.4000 · residual df = 2.0000",
+    "Latest statistics sample and details: n=4 complete cases · coefficients, robust SEs, intervals and p-values retained below",
+    "Latest statistics provenance: Immutable dataset revision bc104dff3947… · native deterministic analysis"
+  ]
+}
