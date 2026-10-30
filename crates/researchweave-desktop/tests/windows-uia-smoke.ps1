@@ -112,6 +112,155 @@ function Read-DatasetPageJson([System.Windows.Automation.AutomationElement]$pare
         }
     }
 }
+function Read-StatisticsResultSnapshot(
+    [System.Windows.Automation.AutomationElement]$scope,
+    [string]$expectedTitle,
+    [string]$expectedEstimate,
+    [string]$expectedSample,
+    [string]$expectedProvenance
+) {
+    # Evaluate all four fields in one current accessibility-tree traversal.
+    # A stale AccessKit node must only invalidate this snapshot, not the test.
+    $seen = @{ title = $false; estimate = $false; sample = $false; provenance = $false }
+    try {
+        $nodes = $scope.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )
+    } catch {
+        return $seen
+    }
+    foreach ($node in $nodes) {
+        try {
+            $name = $node.Current.Name
+        } catch {
+            continue
+        }
+        if ($name -like $expectedTitle) { $seen.title = $true }
+        if ($name -like $expectedEstimate) { $seen.estimate = $true }
+        if ($name -like $expectedSample) { $seen.sample = $true }
+        if ($name -like $expectedProvenance) { $seen.provenance = $true }
+    }
+    return $seen
+}
+function Assert-StatisticsResult(
+    [System.Windows.Automation.AutomationElement]$window,
+    [string]$runButton,
+    [string]$expectedTitle,
+    [string]$expectedEstimate,
+    [string]$expectedSample,
+    [string]$datasetRevision,
+    [string]$failure
+) {
+    if ($datasetRevision -notmatch '^[0-9a-f]{64}$') {
+        throw 'Statistics fixture revision is invalid'
+    }
+    $expectedProvenance = 'Latest statistics provenance: Immutable dataset revision ' +
+        $datasetRevision.Substring(0, 12) + '*native deterministic analysis'
+    $anchor = Named $window ([System.Windows.Automation.ControlType]::Button) $runButton
+    $scrollElement = $null
+    $scrollPattern = $null
+    $originalVertical = $null
+    # Use the actual scrollable ancestor of the active method button, not
+    # another ScrollView elsewhere in the window (e.g. analysis details).
+    $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+    $node = $anchor
+    for ($depth = 0; $depth -lt 24; $depth++) {
+        try {
+            $node = $walker.GetParent($node)
+            if ($null -eq $node -or $node -eq $window) { break }
+            $candidatePattern = $null
+            if ($node.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$candidatePattern)) {
+                $candidate = [System.Windows.Automation.ScrollPattern]$candidatePattern
+                if ($candidate.Current.VerticallyScrollable) {
+                    $scrollElement = $node
+                    $scrollPattern = $candidate
+                    $originalVertical = [double]$candidate.Current.VerticalScrollPercent
+                    break
+                }
+            }
+        } catch {
+            # AccessKit can replace a node during a viewport update.
+            break
+        }
+    }
+    $scope = if ($null -ne $scrollElement) { $scrollElement } else { $window }
+    # Keep the original pattern for best-effort restoration even if a later
+    # SetScrollPercent fails and the assertion switches to keyboard navigation.
+    $restorePattern = $scrollPattern
+    $seen = @{ title = $false; estimate = $false; sample = $false; provenance = $false }
+    $passed = $false
+    $scanCount = 0
+    try {
+        # Poll once before scrolling; otherwise inspect bounded real scroll
+        # offsets, including the bottom where long result cards materialize.
+        for ($step = 0; $step -le 5; $step++) {
+            if ($step -gt 0 -and $null -ne $scrollPattern) {
+                $target = [Math]::Min(100.0, $originalVertical + 20.0 * $step)
+                try {
+                    $scrollPattern.SetScrollPercent(
+                        [System.Windows.Automation.ScrollPattern]::NoScroll, $target
+                    )
+                } catch {
+                    $scrollPattern = $null
+                    $scope = $window
+                    break
+                }
+                Start-Sleep -Milliseconds 120
+            } elseif ($step -gt 0) {
+                break
+            }
+            $seen = Read-StatisticsResultSnapshot $scope $expectedTitle $expectedEstimate $expectedSample $expectedProvenance
+            $scanCount++
+            if ($seen.title -and $seen.estimate -and $seen.sample -and $seen.provenance) {
+                $passed = $true
+                break
+            }
+        }
+        if (-not $passed) {
+            # Fall back only when the native ScrollPattern did not expose the
+            # result. Focus the current method button before each key sequence.
+            try {
+                $anchor = Named $window ([System.Windows.Automation.ControlType]::Button) $runButton
+                EnsureLiveFocus $anchor
+                for ($step = 0; $step -le 8; $step++) {
+                    $seen = Read-StatisticsResultSnapshot $window $expectedTitle $expectedEstimate $expectedSample $expectedProvenance
+                    $scanCount++
+                    if ($seen.title -and $seen.estimate -and $seen.sample -and $seen.provenance) {
+                        $passed = $true
+                        break
+                    }
+                    if ($step -lt 8) {
+                        [System.Windows.Forms.SendKeys]::SendWait('{PGDN}')
+                        Start-Sleep -Milliseconds 120
+                    }
+                }
+            } catch {
+                # A stale focus target is a missing result, never a raw UIA
+                # exception containing an accessible name or research text.
+            }
+        }
+    } finally {
+        # UIA may replace the viewport and button while the result is read.
+        # Restoration cannot override a successful assertion or mask a failure.
+        if ($null -ne $restorePattern -and $null -ne $originalVertical) {
+            try {
+                $restorePattern.SetScrollPercent(
+                    [System.Windows.Automation.ScrollPattern]::NoScroll, $originalVertical
+                )
+            } catch { }
+        }
+        try {
+            $anchor = Named $window ([System.Windows.Automation.ControlType]::Button) $runButton
+            EnsureLiveFocus $anchor
+        } catch { }
+    }
+    if (-not $passed) {
+        # Do not print any actual UIA names, values or dataset identifiers.
+        Write-Output "DIAGNOSTIC Statistics result: title=$($seen.title) estimate=$($seen.estimate) sample=$($seen.sample) provenance=$($seen.provenance) inspected_viewports=$scanCount"
+        throw $failure
+    }
+}
 function Invoke-AccessibleButton([System.Windows.Automation.AutomationElement]$parent, [string]$name) {
     $button = Named $parent ([System.Windows.Automation.ControlType]::Button) $name
     $scroll = $null
@@ -1087,15 +1236,7 @@ try {
         ([System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($pair[1])
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Run Pearson correlation').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 220
-    $correlationNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($correlationNames | Where-Object { $_ -eq 'Latest statistics result title: Pearson correlation' }) -or
-        -not ($correlationNames | Where-Object { $_ -like 'Latest statistics sample and details: n=4 complete pairs*' })) {
-        throw 'Pearson correlation did not execute against all complete immutable rows'
-    }
+    Assert-StatisticsResult $window 'Run Pearson correlation' 'Latest statistics result title: Pearson correlation' 'Latest statistics estimate: r = 0.6325*' 'Latest statistics sample and details: n=4 complete pairs*' $datasetRevision 'Pearson correlation did not execute against all complete immutable rows'
 
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Show Welch t test form').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     foreach ($pair in @(
@@ -1108,15 +1249,7 @@ try {
         ([System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($pair[1])
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Run Welch t test').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 220
-    $testNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($testNames | Where-Object { $_ -eq 'Latest statistics result title: Welch two-group t test' }) -or
-        -not ($testNames | Where-Object { $_ -like 'Latest statistics sample and details: n=4 included*' })) {
-        throw 'Welch t test did not execute with the two explicit persisted groups'
-    }
+    Assert-StatisticsResult $window 'Run Welch t test' 'Latest statistics result title: Welch two-group t test' 'Latest statistics estimate: Mean difference -2.0000*' 'Latest statistics sample and details: n=4 included*' $datasetRevision 'Welch t test did not execute with the two explicit persisted groups'
 
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Show linear model form').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     foreach ($pair in @(
@@ -1127,17 +1260,7 @@ try {
         ([System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($pair[1])
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Run linear model with HC3 covariance').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 220
-    $modelNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    $modelTitle = @($modelNames | Where-Object { $_ -like 'Latest statistics result title: OLS linear model*HC3 robust covariance' })
-    $modelSample = @($modelNames | Where-Object { $_ -like 'Latest statistics sample and details: n=4 complete cases*' })
-    if ($modelTitle.Count -eq 0 -or $modelSample.Count -eq 0) {
-        Write-Output "DIAGNOSTIC OLS: expected title/sample unavailable; controls=$($modelNames.Count)"
-        throw 'HC3 linear model did not execute through the native Statistics workspace'
-    }
+    Assert-StatisticsResult $window 'Run linear model with HC3 covariance' 'Latest statistics result title: OLS linear model*HC3 robust covariance' 'Latest statistics estimate: R² = 0.4000*' 'Latest statistics sample and details: n=4 complete cases*' $datasetRevision 'HC3 linear model did not execute through the native Statistics workspace'
     Write-Output 'PASS: immutable Statistics workspace runs descriptives, frequency, Pearson correlation, Welch t test, and HC3 OLS'
     Capture-WindowScreenshot $window $StatisticsScreenshot
 

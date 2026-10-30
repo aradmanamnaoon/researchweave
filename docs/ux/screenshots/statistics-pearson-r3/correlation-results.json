@@ -1,0 +1,13 @@
+{
+  "title": true,
+  "estimate": true,
+  "sample": true,
+  "provenance": true,
+  "attempts": 1,
+  "names": [
+    "Latest statistics result title: Pearson correlation",
+    "Latest statistics estimate: r = 0.6325 · p = 0.3675",
+    "Latest statistics sample and details: n=4 complete pairs · 95% confidence interval for r [-0.8380, 0.9911] · association is not causation; review independence and sampling",
+    "Latest statistics provenance: Immutable dataset revision bc104dff3947… · native deterministic analysis"
+  ]
+}
