@@ -1458,8 +1458,9 @@ export component MainWindow inherits Window {
                                             root.pdf-passage-status = "Finding next PDF page. Verify a passage after rendering.";
                                             root.pdf-status = "Finding next matching PDF page…";
                                             root.pdf-highlight-visible = false;
-                                            root.pdf-page-extracted-text = "";
-                                            root.pdf-page-extraction-status = "Finding and extracting text from the next matching PDF page…";
+                                            // Keep the current page's copyable text until a
+                                            // matching page has actually been rendered. A
+                                            // search with no matches must not erase it.
                                             root.find-next-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number);
                                         }
                                     }
@@ -2380,7 +2381,17 @@ export component MainWindow inherits Window {
                                     Button { text: "History"; accessible-label: "Load notebook history"; clicked => { root.load-notebook-history(); } }
                                     Button { text: "Export Markdown"; accessible-label: "Export notebook Markdown"; clicked => { root.export-notebook(); } }
                                 }
-                                Text { text: root.notebook-results; accessible-label: "Notebook result"; wrap: word-wrap; color: Theme.muted-ink; }
+                                // Export, history and save previews may contain long,
+                                // private text. Expose a stable, copyable UIA value
+                                // instead of putting the result into an accessible name.
+                                TextEdit {
+                                    text: root.notebook-results;
+                                    read-only: true;
+                                    min-height: 120px;
+                                    preferred-height: 170px;
+                                    max-height: 260px;
+                                    accessible-label: "Notebook Markdown export result";
+                                }
                             }
                         }
                     }

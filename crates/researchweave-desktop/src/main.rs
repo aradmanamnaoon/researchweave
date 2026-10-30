@@ -706,6 +706,32 @@ fn contextual_note_object_id(note_id: &str) -> String {
     }
 }
 
+/// Bind contextual AI to the Notes editor the user can see. A selected quick
+/// note can remain selected when switching to the separate research notebook.
+fn contextual_notes_payload(
+    show_research_notebook: bool,
+    quick_note_id: &str,
+    quick_note_title: &str,
+    quick_note_body: &str,
+    notebook_draft: &str,
+) -> Result<(String, String, String), String> {
+    if show_research_notebook {
+        Ok((
+            "research-notebook".into(),
+            "Research notebook".into(),
+            notebook_draft.into(),
+        ))
+    } else if quick_note_id.is_empty() {
+        Err("Select or create a Quick Note before previewing its AI context.".into())
+    } else {
+        Ok((
+            contextual_note_object_id(quick_note_id),
+            format!("Quick note: {quick_note_title}"),
+            quick_note_body.into(),
+        ))
+    }
+}
+
 /// Obtain the visible source without opening project storage. Keeping this
 /// one representation shared by request previews and completion fingerprints
 /// avoids SQLite integrity scans on the Slint event loop after an AI request.
@@ -784,20 +810,16 @@ fn contextual_screen_payload(
                 content,
             ))
         }
-        21 => Some((
-            ContextKind::Notes,
-            contextual_note_object_id(ui.get_quick_note_id().as_str()),
-            if ui.get_quick_note_id().is_empty() {
-                "Research notebook".into()
-            } else {
-                format!("Quick note: {}", ui.get_quick_note_title())
-            },
-            if ui.get_quick_note_id().is_empty() {
-                ui.get_notebook_draft().to_string()
-            } else {
-                ui.get_quick_note_body().to_string()
-            },
-        )),
+        21 => {
+            let (object, title, content) = contextual_notes_payload(
+                ui.get_show_research_notebook(),
+                ui.get_quick_note_id().as_str(),
+                ui.get_quick_note_title().as_str(),
+                ui.get_quick_note_body().as_str(),
+                ui.get_notebook_draft().as_str(),
+            )?;
+            Some((ContextKind::Notes, object, title, content))
+        }
         12 | 13 => Some((
             ContextKind::Dataset,
             "dataset".into(),
@@ -10101,6 +10123,53 @@ mod tests {
             contextual_note_object_id("note-a"),
             contextual_note_object_id("note-b"),
             "identical note text must not erase source identity",
+        );
+    }
+
+    #[test]
+    fn contextual_notes_use_only_the_visible_editor() {
+        let research = contextual_notes_payload(
+            true,
+            "selected-quick",
+            "Quick private title",
+            "HIDDEN_QUICK_PRIVATE_TEXT",
+            "VISIBLE_RESEARCH_NOTEBOOK",
+        )
+        .unwrap();
+        assert_eq!(
+            research,
+            (
+                "research-notebook".to_owned(),
+                "Research notebook".to_owned(),
+                "VISIBLE_RESEARCH_NOTEBOOK".to_owned(),
+            )
+        );
+
+        let quick = contextual_notes_payload(
+            false,
+            "selected-quick",
+            "Visible quick title",
+            "VISIBLE_QUICK_PRIVATE_TEXT",
+            "HIDDEN_RESEARCH_NOTEBOOK",
+        )
+        .unwrap();
+        assert_eq!(
+            quick,
+            (
+                "quick-note:selected-quick".to_owned(),
+                "Quick note: Visible quick title".to_owned(),
+                "VISIBLE_QUICK_PRIVATE_TEXT".to_owned(),
+            )
+        );
+        assert!(
+            contextual_notes_payload(false, "", "", "", "HIDDEN_RESEARCH_NOTEBOOK").is_err(),
+            "An empty Quick Notes selection must never expose a hidden research notebook",
+        );
+        assert_eq!(
+            contextual_notes_payload(true, "", "", "", "VISIBLE_RESEARCH_NOTEBOOK")
+                .unwrap()
+                .2,
+            "VISIBLE_RESEARCH_NOTEBOOK",
         );
     }
 

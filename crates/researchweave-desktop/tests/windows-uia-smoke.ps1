@@ -94,6 +94,44 @@ function RevisionedNotebookEditor([System.Windows.Automation.AutomationElement]$
     Start-Sleep -Milliseconds 180
     return (Named $window ([System.Windows.Automation.ControlType]::Edit) $target)
 }
+function Assert-NotebookMarkdownExport(
+    [System.Windows.Automation.AutomationElement]$window,
+    [string]$expectedBody
+) {
+    # UIA Name is a fixed public label. Actual private Markdown is available
+    # only through the read-only editor's ValuePattern; never log its contents.
+    $name = 'Notebook Markdown export result'
+    $exportButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export notebook Markdown'
+    $exportButton.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    $resultFound = $false
+    $validExport = $false
+    do {
+        foreach ($editor in (Children $window ([System.Windows.Automation.ControlType]::Edit))) {
+            if ($editor.Current.Name -ne $name) { continue }
+            $resultFound = $true
+            $raw = ([System.Windows.Automation.ValuePattern]$editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+            try {
+                $payload = ConvertFrom-Json -InputObject $raw -ErrorAction Stop
+            }
+            catch {
+                Start-Sleep -Milliseconds 100
+                continue
+            }
+            if ($payload.text -is [string] -and
+                $payload.text.Contains($expectedBody) -and
+                $payload.text.Contains('# Research notebook') -and
+                $payload.text.Contains('*Saved revision ')) {
+                $validExport = $true
+                break
+            }
+        }
+        if ($validExport) { return }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Persisted notebook export mismatch (read_only_export_control_found=$resultFound, valid_markdown=$validExport)"
+}
 function Read-DatasetPageJson([System.Windows.Automation.AutomationElement]$parent) {
     # Data View exposes the exact read-only page JSON through an accessible
     # TextEdit so users and UIA clients can inspect/copy unabridged cell values.
@@ -1009,10 +1047,20 @@ try {
     WaitForNameLike $window '*PDF search status: Rendered page 2 of 2*matches: 1*' 10000
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Previous PDF page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF page 1 of 2*' 20000
+    WaitForNameLike $window '*PDF search status: Rendered page 1 of 2*' 10000
+    $pdfTextLabel = 'Read-only actual extracted PDF page text; selectable and copyable, not yet a verified evidence anchor'
+    $pdfTextBefore = ([System.Windows.Automation.ValuePattern](Named $window ([System.Windows.Automation.ControlType]::Edit) $pdfTextLabel).GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ([string]::IsNullOrWhiteSpace($pdfTextBefore) -or $pdfTextBefore -notlike '*First page unrelated text*') {
+        throw 'PDF extracted page text was not available before no-match search'
+    }
     ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('not-present-in-any-pdf-page')
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Find next PDF matching page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF search status: No matching page in PDF; current page is unchanged*matches: 0*' 20000
     WaitForNameLike $window '*PDF page 1 of 2*' 10000
+    $pdfTextAfter = ([System.Windows.Automation.ValuePattern](Named $window ([System.Windows.Automation.ControlType]::Edit) $pdfTextLabel).GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($pdfTextAfter -cne $pdfTextBefore) {
+        throw 'No-match PDF search erased or changed current-page extracted text'
+    }
     ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('PDFium')
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Next PDF page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF page 2 of 2*' 20000
@@ -1776,14 +1824,7 @@ try {
         throw 'Notebook edit did not complete the debounced project autosave path'
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export notebook Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 220
-    $notebookExportNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($notebookExportNames | Where-Object { $_ -like "*$autosaveNotebook*" })) {
-        throw 'Debounced notebook autosave was not persisted in notebook export'
-    }
+    Assert-NotebookMarkdownExport $window $autosaveNotebook
     Write-Output 'PASS: notebook edit is journaled then debounced into the revision/CAS/audit save path'
 
     # Prove each writing surface independently survives an actual abrupt exit.
@@ -1941,14 +1982,7 @@ try {
         throw 'Recovered notebook journal did not clear its dirty flag after revision persistence'
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export notebook Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 220
-    $recoveredNotebookExportNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($recoveredNotebookExportNames | Where-Object { $_ -like "*$recoveredNotebook*" })) {
-        throw 'Recovered notebook draft was not persisted after restart'
-    }
+    Assert-NotebookMarkdownExport $window $recoveredNotebook
     $cleanDraft = $draftFiles | ForEach-Object { Read-JsonRetry $_.FullName } | Where-Object {
         $_.notebook -eq $recoveredNotebook -and $_.body -eq $recoveredManuscript
     } | Select-Object -First 1
