@@ -1060,8 +1060,9 @@ try {
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
     ) | ForEach-Object { $_.Current.Name })
-    if (-not ($statisticsNames | Where-Object { $_ -like 'Statistics result primary Mean 3.0000*' })) {
-        $statisticsNames | Where-Object { $_ -like '*Statistics*' -or $_ -like '*Mean*' -or $_ -like '*Descript*' } | Select-Object -First 20 | ForEach-Object { Write-Output ("DIAGNOSTIC Statistics: " + $_) }
+    if (-not ($statisticsNames | Where-Object { $_ -like 'Latest statistics estimate: Mean 3.0000*' })) {
+        # Do not print UIA names: they can contain sensitive user-supplied text.
+        Write-Output "DIAGNOSTIC Statistics: expected estimate unavailable; controls=$($statisticsNames.Count)"
         throw 'Descriptive statistics did not expose the expected mean from the immutable dataset'
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Show frequency table form').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -1073,7 +1074,7 @@ try {
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
     ) | ForEach-Object { $_.Current.Name })
-    if (-not ($frequencyNames | Where-Object { $_ -like 'Statistics result primary*A: 2*B: 2*' })) {
+    if (-not ($frequencyNames | Where-Object { $_ -like 'Latest statistics estimate: A: 2*B: 2*' })) {
         throw 'Frequency table did not expose the expected persisted group counts'
     }
 
@@ -1091,8 +1092,8 @@ try {
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
     ) | ForEach-Object { $_.Current.Name })
-    if (-not ($correlationNames | Where-Object { $_ -eq 'Statistics result title Pearson correlation' }) -or
-        -not ($correlationNames | Where-Object { $_ -like 'Statistics result secondary n=4 complete pairs*' })) {
+    if (-not ($correlationNames | Where-Object { $_ -eq 'Latest statistics result title: Pearson correlation' }) -or
+        -not ($correlationNames | Where-Object { $_ -like 'Latest statistics sample and details: n=4 complete pairs*' })) {
         throw 'Pearson correlation did not execute against all complete immutable rows'
     }
 
@@ -1112,8 +1113,8 @@ try {
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
     ) | ForEach-Object { $_.Current.Name })
-    if (-not ($testNames | Where-Object { $_ -eq 'Statistics result title Welch two-group t test' }) -or
-        -not ($testNames | Where-Object { $_ -like 'Statistics result secondary n=4 included*' })) {
+    if (-not ($testNames | Where-Object { $_ -eq 'Latest statistics result title: Welch two-group t test' }) -or
+        -not ($testNames | Where-Object { $_ -like 'Latest statistics sample and details: n=4 included*' })) {
         throw 'Welch t test did not execute with the two explicit persisted groups'
     }
 
@@ -1131,10 +1132,10 @@ try {
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
     ) | ForEach-Object { $_.Current.Name })
-    $modelTitle = @($modelNames | Where-Object { $_ -like 'Statistics result title OLS linear model*HC3 robust covariance' })
-    $modelSample = @($modelNames | Where-Object { $_ -like 'Statistics result secondary n=4 complete cases*' })
+    $modelTitle = @($modelNames | Where-Object { $_ -like 'Latest statistics result title: OLS linear model*HC3 robust covariance' })
+    $modelSample = @($modelNames | Where-Object { $_ -like 'Latest statistics sample and details: n=4 complete cases*' })
     if ($modelTitle.Count -eq 0 -or $modelSample.Count -eq 0) {
-        $modelNames | Where-Object { $_ -like '*Statistics result*' -or $_ -like '*HC3*' -or $_ -like '*linear model*' } | Select-Object -First 20 | ForEach-Object { Write-Output ("DIAGNOSTIC OLS: " + $_) }
+        Write-Output "DIAGNOSTIC OLS: expected title/sample unavailable; controls=$($modelNames.Count)"
         throw 'HC3 linear model did not execute through the native Statistics workspace'
     }
     Write-Output 'PASS: immutable Statistics workspace runs descriptives, frequency, Pearson correlation, Welch t test, and HC3 OLS'
