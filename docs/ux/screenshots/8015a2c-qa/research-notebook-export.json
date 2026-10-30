@@ -1,0 +1,7 @@
+{
+  "result": "PASS",
+  "source": "native readonly notebook Markdown editor",
+  "saved_revision": 1,
+  "markdown_sha256": "97d42ff8d97026c30b4abeb645b88c5e4a8e1835784e17630ea18e47dda9a65c",
+  "database_body_matches_visible_editor": true
+}
