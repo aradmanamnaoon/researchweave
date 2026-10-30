@@ -1467,8 +1467,11 @@ export component MainWindow inherits Window {
                                 HorizontalLayout {
                                     spacing: 8px;
                                     Button {
-                                        text: "Previous";
+                                        text: "Prev";
                                         horizontal-stretch: 0;
+                                        min-width: 0px;
+                                        preferred-width: 78px * Theme.ui-scale / 100;
+                                        max-width: 90px * Theme.ui-scale / 100;
                                         accessible-label: "Previous PDF page";
                                         enabled: root.pdf-page-number > 1;
                                         accessible-enabled: root.pdf-page-number > 1;
@@ -1483,14 +1486,12 @@ export component MainWindow inherits Window {
                                             root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number - 1);
                                         }
                                     }
-                                    Text {
-                                        text: root.pdf-page-count > 0 ? "Page " + root.pdf-page-number + " of " + root.pdf-page-count : "No page loaded";
-                                        accessible-label: root.pdf-page-count > 0 ? "PDF page " + root.pdf-page-number + " of " + root.pdf-page-count : "No PDF page loaded";
-                                        color: Theme.ink;
-                                    }
                                     Button {
                                         text: "Next";
                                         horizontal-stretch: 0;
+                                        min-width: 0px;
+                                        preferred-width: 78px * Theme.ui-scale / 100;
+                                        max-width: 90px * Theme.ui-scale / 100;
                                         accessible-label: "Next PDF page";
                                         enabled: root.pdf-page-count > 0 && root.pdf-page-number < root.pdf-page-count;
                                         accessible-enabled: root.pdf-page-count > 0 && root.pdf-page-number < root.pdf-page-count;
@@ -1504,6 +1505,12 @@ export component MainWindow inherits Window {
                                             root.pdf-page-extraction-status = "Extracting text from the requested PDF page…";
                                             root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number + 1);
                                         }
+                                    }
+                                    Text {
+                                        text: root.pdf-page-count > 0 ? "Page " + root.pdf-page-number + " of " + root.pdf-page-count : "No page loaded";
+                                        accessible-label: root.pdf-page-count > 0 ? "PDF page " + root.pdf-page-number + " of " + root.pdf-page-count : "No PDF page loaded";
+                                        horizontal-stretch: 0;
+                                        color: Theme.ink;
                                     }
                                 }
                                 Text {

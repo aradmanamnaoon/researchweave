@@ -57,6 +57,7 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
     # provider response. CI failures must never dump arbitrary UIA names.
     $staticTargets = @(
         'Command palette', 'Project path', 'Project title',
+        'Revisioned research notebook text',
         'Create default project', 'Create project', 'Open project',
         'Manuscript section body', 'Manuscript citations', 'Manuscript ID',
         'Backup archive path', 'Backup encryption password',
@@ -79,6 +80,19 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
     $frames = @(Get-PSCallStack)
     $callerLine = if ($frames.Count -gt 1) { [int]$frames[1].ScriptLineNumber } else { 0 }
     throw "UIA element missing: $type '$safeTarget' (script_caller_line=$callerLine). Tree controls=$($availableTypes.Count): $($counts -join ', ')"
+}
+function RevisionedNotebookEditor([System.Windows.Automation.AutomationElement]$window) {
+    # Notebook opens in Quick Notes by default; research notebook is an
+    # explicit user-facing subview. Verify the current view before toggling,
+    # or a reopened project may inadvertently switch *away* from the editor.
+    $target = 'Revisioned research notebook text'
+    foreach ($edit in (Children $window ([System.Windows.Automation.ControlType]::Edit))) {
+        if ($edit.Current.Name -eq $target) { return $edit }
+    }
+    $toggle = Named $window ([System.Windows.Automation.ControlType]::Button) 'Switch between quick notes and revisioned research notebook'
+    $toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 180
+    return (Named $window ([System.Windows.Automation.ControlType]::Edit) $target)
 }
 function Read-DatasetPageJson([System.Windows.Automation.AutomationElement]$parent) {
     # Data View exposes the exact read-only page JSON through an accessible
@@ -1751,7 +1765,7 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
     $autosaveNotebook = "Debounced notebook autosave $persianWord"
-    $notebookBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project notebook text'
+    $notebookBody = RevisionedNotebookEditor $window
     ([System.Windows.Automation.ValuePattern]$notebookBody.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($autosaveNotebook)
     Start-Sleep -Milliseconds 1200
     $notebookAutosaveNames = @($window.FindAll(
@@ -1869,15 +1883,15 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 120
-    $notebookBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project notebook text'
+    $notebookBody = RevisionedNotebookEditor $window
     $notebookBody.SetFocus()
     $focused = $null
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         Start-Sleep -Milliseconds 25
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        if ($focused -and $focused.Current.Name -eq 'Project notebook text') { break }
+        if ($focused -and $focused.Current.Name -eq 'Revisioned research notebook text') { break }
     }
-    if (-not $focused -or $focused.Current.Name -ne 'Project notebook text') {
+    if (-not $focused -or $focused.Current.Name -ne 'Revisioned research notebook text') {
         throw 'Notebook editor did not receive focus before abrupt-exit edit'
     }
     [System.Windows.Forms.SendKeys]::SendWait('^a')
@@ -1908,7 +1922,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 120
-    $restoredNotebook = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project notebook text'
+    $restoredNotebook = RevisionedNotebookEditor $window
     $restoredNotebookValue = ([System.Windows.Automation.ValuePattern]$restoredNotebook.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
     if ($restoredNotebookValue -ne $recoveredNotebook) {
         throw 'Abrupt-exit notebook draft was not restored into the fresh process'

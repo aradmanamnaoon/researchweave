@@ -311,6 +311,26 @@ if MODE in {"page1", "page2"}:
     win_w, win_h = int(geometry["WIDTH"]), int(geometry["HEIGHT"])
     assert 760 <= win_w <= 930 and 500 <= win_h <= 660
     viewport = (win_x, win_y, win_x + win_w, win_y + win_h)
+    # Page 1 must expose the *enabled* Next action inside the visible native
+    # window at 200% scale. Merely navigating with a separate script click
+    # would not detect a clipped button in the user's actual viewport.
+    if page == 1:
+        next_page = by_name("Next PDF page")
+        assert next_page is not None, "PDF Next page action absent from accessibility tree"
+        next_bounds = next_page.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+        next_state = next_page.getState()
+        next_cx = next_bounds.x + next_bounds.width // 2
+        next_cy = next_bounds.y + next_bounds.height // 2
+        next_inside = (viewport[0] + 5 <= next_cx <= viewport[2] - 5
+                       and viewport[1] + 5 <= next_cy <= viewport[3] - 5)
+        assert (next_state.contains(pyatspi.STATE_SHOWING)
+                and next_state.contains(pyatspi.STATE_ENABLED)
+                and next_inside), (
+                    "Enabled Next PDF page control clipped at 200% scale",
+                    [next_bounds.x, next_bounds.y, next_bounds.width, next_bounds.height],
+                    viewport, next_inside,
+                )
+        print("NATIVE_PDF_NEXT_BUTTON_VISIBLE_200_PASS", flush=True)
     diagnostics = []
     for scroll in range(4):
         editor = by_name(EDITOR)
