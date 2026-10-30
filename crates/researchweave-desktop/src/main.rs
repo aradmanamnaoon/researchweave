@@ -3594,6 +3594,18 @@ fn pretty_result_data(result: &serde_json::Value) -> String {
         .unwrap_or_else(|_| "Operation completed, but its result could not be formatted".into())
 }
 
+fn notebook_export_markdown(result: &serde_json::Value) -> Result<&str, String> {
+    let markdown = result
+        .get("data")
+        .and_then(|data| data.get("text"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or("Notebook export returned no Markdown text")?;
+    if !markdown.starts_with("# Research notebook\n") {
+        return Err("Notebook export returned invalid Markdown".into());
+    }
+    Ok(markdown)
+}
+
 fn compact_stat_number(value: Option<&serde_json::Value>) -> String {
     value
         .and_then(serde_json::Value::as_f64)
@@ -8307,12 +8319,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         )
                     });
                 match result {
-                    Ok(result) => {
-                        ui.set_notebook_results(pretty_result_data(&result).into());
-                        ui.set_status(
-                            "Notebook Markdown generated from persisted revisions".into(),
-                        );
-                    }
+                    Ok(result) => match notebook_export_markdown(&result) {
+                        Ok(markdown) => {
+                            ui.set_notebook_results(markdown.into());
+                            ui.set_status(
+                                "Notebook Markdown generated from persisted revisions".into(),
+                            );
+                        }
+                        Err(error) => {
+                            ui.set_notebook_results(error.clone().into());
+                            ui.set_status(error.into());
+                        }
+                    },
                     Err(error) => {
                         ui.set_notebook_results(error.clone().into());
                         ui.set_status(error.into());
@@ -10171,6 +10189,16 @@ mod tests {
                 .2,
             "VISIBLE_RESEARCH_NOTEBOOK",
         );
+    }
+
+    #[test]
+    fn notebook_export_displays_markdown_directly_and_rejects_wrong_shape() {
+        let markdown = "# Research notebook\n\n*Saved revision 1; edited today.*\n\nA note";
+        let result = serde_json::json!({"data": {"text": markdown}});
+        assert_eq!(notebook_export_markdown(&result).unwrap(), markdown);
+        assert!(notebook_export_markdown(&serde_json::json!({"data":{"text":42}})).is_err());
+        assert!(notebook_export_markdown(&serde_json::json!({"data":{"text":"{}"}})).is_err());
+        assert!(notebook_export_markdown(&serde_json::json!({})).is_err());
     }
 
     fn pdf_selection_snapshot(text: &str) -> PdfPageSnapshot {

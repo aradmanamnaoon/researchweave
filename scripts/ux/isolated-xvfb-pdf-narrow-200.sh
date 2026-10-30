@@ -431,6 +431,31 @@ if MODE in {"page1", "page2"}:
         "readonly_noneditable": True, "clipboard_stale_sentinel_replaced": True,
         "typed_mutation_rejected": True
     })
+elif MODE == "no-hit":
+    observed = await_state(
+        lambda ns: (
+            "PDF page 2 of 2" in ns
+            and any(n.startswith(
+                "PDF search status: No matching page in PDF; current page is unchanged"
+            ) for n in ns)
+        ),
+        "Find next with an absent query did not finish on the same PDF page",
+    )
+    editor = by_name(EDITOR)
+    assert editor is not None, "PDF text editor disappeared after no-hit search"
+    assert not editor.getState().contains(pyatspi.STATE_EDITABLE)
+    actual = editor.queryText().getText(0, -1)
+    assert actual.strip() == PAGE_TEXT[2], (
+        "No-hit search erased or altered the current PDF page extraction",
+        repr(actual[:150])
+    )
+    save_record({
+        "result": "PASS", "page": 2, "query_has_no_matches": True,
+        "page_unchanged": True, "extracted_text_unchanged": True,
+        "extracted_sha256": hashlib.sha256(actual.encode("utf-8")).hexdigest(),
+        "status": next(n for n in observed if n.startswith("PDF search status: "))
+    })
+    print("NATIVE_PDF_NO_MATCH_TEXT_PRESERVED_PASS", flush=True)
 elif MODE == "path-change":
     observed = await_state(
         lambda ns: (
@@ -473,12 +498,18 @@ python3 "$private/pdf_probe.py" page2 "$evidence" \
   >"$evidence/page2.stdout.log" 2>"$evidence/page2.stderr.log"
 import -window root "$evidence/05-narrow-200-pdf-page2-find-next-text.png"
 scroll_reader_top
+paste_into 'PDF search query' 'not-present-in-any-pdf-page'
+click_find_next_visible
+python3 "$private/pdf_probe.py" no-hit "$evidence" \
+  >"$evidence/no-hit.stdout.log" 2>"$evidence/no-hit.stderr.log"
+import -window root "$evidence/05b-narrow-200-pdf-no-hit-text-retained.png"
+scroll_reader_top
 paste_into 'PDF file path' "$private/no-such-pdf.pdf"
 python3 "$private/pdf_probe.py" path-change "$evidence" \
   >"$evidence/path-change.stdout.log" 2>"$evidence/path-change.stderr.log"
 import -window root "$evidence/06-narrow-200-pdf-path-change-clears-text.png"
 kill -0 "$app_pid"
-for index in 00 01 02 03 04 05 06; do
+for index in 00 01 02 03 04 05 05b 06; do
   test -s "$(find "$evidence" -maxdepth 1 -name "$index-*.png" -print -quit)"
 done
 sha256sum "$binary" "$fixture" \
@@ -488,5 +519,5 @@ sha256sum "$binary" "$fixture" \
   "$script" \
   >"$evidence/artifact-sha256-after.txt"
 cmp "$evidence/artifact-sha256-before.txt" "$evidence/artifact-sha256-after.txt"
-echo "PRIVATE_NATIVE_PDF_NARROW_200_PASS binary=$(sha256sum "$binary" | cut -d' ' -f1) fixture=$(sha256sum "$fixture" | cut -d' ' -f1) text_scale=200 page1=PASS page2=PASS path_change=PASS" \
+echo "PRIVATE_NATIVE_PDF_NARROW_200_PASS binary=$(sha256sum "$binary" | cut -d' ' -f1) fixture=$(sha256sum "$fixture" | cut -d' ' -f1) text_scale=200 page1=PASS page2=PASS no_hit=PASS path_change=PASS" \
   | tee "$evidence/summary.log"

@@ -112,17 +112,10 @@ function Assert-NotebookMarkdownExport(
             if ($editor.Current.Name -ne $name) { continue }
             $resultFound = $true
             $raw = ([System.Windows.Automation.ValuePattern]$editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
-            try {
-                $payload = ConvertFrom-Json -InputObject $raw -ErrorAction Stop
-            }
-            catch {
-                Start-Sleep -Milliseconds 100
-                continue
-            }
-            if ($payload.text -is [string] -and
-                $payload.text.Contains($expectedBody) -and
-                $payload.text.Contains('# Research notebook') -and
-                $payload.text.Contains('*Saved revision ')) {
+            if ($raw -is [string] -and
+                $raw.Contains($expectedBody) -and
+                $raw.StartsWith(('# Research notebook' + [char]10)) -and
+                $raw.Contains('*Saved revision ')) {
                 $validExport = $true
                 break
             }
