@@ -261,6 +261,10 @@ export component MainWindow inherits Window {
     in-out property <string> pdf-status: "Choose a local PDF file";
     in-out property <string> pdf-page-extracted-text: "";
     in-out property <string> pdf-page-extraction-status: "No PDF page text loaded.";
+    // Manual copy/paste is intentional: Slint does not expose TextEdit's
+    // selection range to the host. The host checks this against the render.
+    in-out property <string> pdf-selected-passage: "";
+    in-out property <string> pdf-passage-status: "Copy selected extracted text and paste it below. No AI request has been prepared.";
     in-out property <string> pdf-local-path: "";
     in-out property <string> data-local-path: "";
     in-out property <bool> local-file-dialog-busy: false;
@@ -419,6 +423,7 @@ export component MainWindow inherits Window {
 
     callback load-pdf(string, string, int);
     callback find-next-pdf(string, string, int);
+    callback ask-about-pdf-passage();
     callback choose-local-file(string);
     callback create-project(string, string);
     callback create-default-project(string);
@@ -1359,6 +1364,8 @@ export component MainWindow inherits Window {
                                         accessible-description: "Absolute path to the PDF file to display";
                                         edited(value) => {
                                             root.pdf-job += 1;
+                                            root.context-ai-ready = false;
+                                            root.pdf-passage-status = "PDF path changed. Open the file and verify a passage again.";
                                             root.pdf-highlight-visible = false;
                                             root.pdf-page-extracted-text = "";
                                             root.pdf-page-extraction-status = "PDF path changed. Open the file to inspect its current page text.";
@@ -1400,6 +1407,8 @@ export component MainWindow inherits Window {
                                         accessible-label: "Open PDF";
                                         clicked => {
                                             root.pdf-job += 1;
+                                            root.context-ai-ready = false;
+                                            root.pdf-passage-status = "PDF render requested. Copy and verify a passage from the new page.";
                                             root.pdf-status = "Rendering PDF…";
                                             root.pdf-page-number = 1;
                                             root.pdf-page-count = 0;
@@ -1425,6 +1434,8 @@ export component MainWindow inherits Window {
                                         accessible-label: "Search PDF";
                                         clicked => {
                                             root.pdf-job += 1;
+                                            root.context-ai-ready = false;
+                                            root.pdf-passage-status = "PDF search requested. Reverify a passage when text loads.";
                                             root.pdf-status = "Searching PDF…";
                                             root.pdf-highlight-visible = false;
                                             root.pdf-page-extracted-text = "";
@@ -1443,6 +1454,8 @@ export component MainWindow inherits Window {
                                         accessible-enabled: root.pdf-page-count > 0 && pdf-query.text != "";
                                         clicked => {
                                             root.pdf-job += 1;
+                                            root.context-ai-ready = false;
+                                            root.pdf-passage-status = "Finding next PDF page. Verify a passage after rendering.";
                                             root.pdf-status = "Finding next matching PDF page…";
                                             root.pdf-highlight-visible = false;
                                             root.pdf-page-extracted-text = "";
@@ -1461,6 +1474,8 @@ export component MainWindow inherits Window {
                                         accessible-enabled: root.pdf-page-number > 1;
                                         clicked => {
                                             root.pdf-job += 1;
+                                            root.context-ai-ready = false;
+                                            root.pdf-passage-status = "PDF page changed. Copy and verify a passage on the new page.";
                                             root.pdf-status = "Rendering previous PDF page…";
                                             root.pdf-highlight-visible = false;
                                             root.pdf-page-extracted-text = "";
@@ -1481,6 +1496,8 @@ export component MainWindow inherits Window {
                                         accessible-enabled: root.pdf-page-count > 0 && root.pdf-page-number < root.pdf-page-count;
                                         clicked => {
                                             root.pdf-job += 1;
+                                            root.context-ai-ready = false;
+                                            root.pdf-passage-status = "PDF page changed. Copy and verify a passage on the new page.";
                                             root.pdf-status = "Rendering next PDF page…";
                                             root.pdf-highlight-visible = false;
                                             root.pdf-page-extracted-text = "";
@@ -1496,8 +1513,8 @@ export component MainWindow inherits Window {
                                 }
                                 // At compact widths show the extracted text
                                 // immediately after the page controls; the
-                                // canvas follows in the scrollable Reader
-                                // column so long previews cannot bury text.
+                                // passage action and canvas follow so the
+                                // reader does not bury copyable text at 200%.
                                 if !root.show-inspector: Rectangle {
                                     background: Theme.surface;
                                     border-radius: Theme.panel-radius;
@@ -1530,6 +1547,47 @@ export component MainWindow inherits Window {
                                             horizontal-stretch: 1;
                                             vertical-stretch: 1;
                                         }
+                                    }
+                                }
+                                VerticalLayout {
+                                    spacing: 5px;
+                                    Text {
+                                        text: "Ask about a PDF passage";
+                                        color: Theme.ink;
+                                        font-weight: 600;
+                                        font-size: 13px * Theme.ui-scale / 100;
+                                    }
+                                    Text {
+                                        text: "Select text in the read-only extracted text area, copy it, then paste the exact passage here. Only one unique occurrence on the displayed page can be verified.";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    TextEdit {
+                                        text: root.pdf-selected-passage;
+                                        edited(value) => {
+                                            root.pdf-selected-passage = value;
+                                            root.context-ai-ready = false;
+                                            root.pdf-passage-status = "Passage changed. Verify it again before running a local model.";
+                                        }
+                                        placeholder-text: "Paste an exact selected PDF passage (up to 4,096 bytes)";
+                                        accessible-label: "Selected PDF passage";
+                                        accessible-description: "Paste text copied from the displayed extracted PDF page. This field does not read your clipboard automatically.";
+                                        min-height: 64px;
+                                        preferred-height: 94px;
+                                        max-height: 128px;
+                                    }
+                                    Button {
+                                        text: "Ask about this PDF passage";
+                                        accessible-label: "Verify selected PDF passage and prepare local AI preview";
+                                        enabled: root.pdf-page-count > 0 && root.pdf-page-extracted-text != "" && !root.context-ai-busy;
+                                        accessible-enabled: root.pdf-page-count > 0 && root.pdf-page-extracted-text != "" && !root.context-ai-busy;
+                                        clicked => { root.ask-about-pdf-passage(); }
+                                    }
+                                    Text {
+                                        text: root.pdf-passage-status;
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                        accessible-label: "PDF passage verification status: " + root.pdf-passage-status;
                                     }
                                 }
                                 Rectangle {
@@ -1584,7 +1642,7 @@ export component MainWindow inherits Window {
                                     Text { text: "Reader context"; color: Theme.ink; font-size: 15px * Theme.ui-scale / 100; font-weight: 600; }
                                     Text { text: "Current native scope"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     Text { text: "Native rendering, per-page search and bounded Find next page (wraps once)."; color: Theme.ink; font-size: 11px * Theme.ui-scale / 100; wrap: word-wrap; }
-                                    Text { text: "Selection and annotations remain pending."; color: Theme.warning; font-size: 11px * Theme.ui-scale / 100; }
+                                    Text { text: "Copy a unique passage from the extracted text and paste it into Ask about a PDF passage. Annotations remain pending."; color: Theme.muted-ink; font-size: 11px * Theme.ui-scale / 100; wrap: word-wrap; }
                                     Text { text: "Extracted current-page text"; color: Theme.ink; font-size: 12px * Theme.ui-scale / 100; font-weight: 600; }
                                     Text {
                                         text: root.pdf-page-extraction-status;
@@ -4185,12 +4243,16 @@ export component MainWindow inherits Window {
                             }
                             LineEdit {
                                 text: root.context-ai-task;
+                                min-width: 0px;
+                                max-width: 275px;
                                 placeholder-text: "What would you like AI to help with?";
                                 accessible-label: "Contextual AI request";
                                 edited(value) => { root.context-ai-task = value; root.context-ai-ready = false; }
                             }
                             LineEdit {
                                 text: root.context-ai-profile;
+                                min-width: 0px;
+                                max-width: 275px;
                                 placeholder-text: "Local model profile (optional)";
                                 accessible-label: "Local AI provider profile ID";
                                 edited(value) => { root.context-ai-profile = value; root.context-ai-ready = false; }
@@ -4199,6 +4261,8 @@ export component MainWindow inherits Window {
                                 spacing: Theme.space2;
                                 Button {
                                     text: "Preview context";
+                                    min-width: 0px;
+                                    max-width: 275px;
                                     accessible-label: "Preview the exact AI request without sending data";
                                     enabled: !root.context-ai-busy;
                                     accessible-enabled: !root.context-ai-busy;
@@ -4206,6 +4270,8 @@ export component MainWindow inherits Window {
                                 }
                                 Button {
                                     text: "Run locally";
+                                    min-width: 0px;
+                                    max-width: 275px;
                                     accessible-label: "Send the approved context to the selected local model";
                                     enabled: root.context-ai-ready && !root.context-ai-busy;
                                     accessible-enabled: root.context-ai-ready && !root.context-ai-busy;
@@ -4225,6 +4291,9 @@ export component MainWindow inherits Window {
                             TextEdit {
                                 text: root.context-ai-preview-summary;
                                 read-only: true;
+                                min-width: 0px;
+                                max-width: 275px;
+                                wrap: word-wrap;
                                 min-height: 135px;
                                 preferred-height: 190px;
                                 accessible-label: "Previewed contextual AI request; scroll to inspect the exact source content and privacy notice";
@@ -4239,6 +4308,9 @@ export component MainWindow inherits Window {
                             TextEdit {
                                 text: root.context-ai-output;
                                 read-only: true;
+                                min-width: 0px;
+                                max-width: 275px;
+                                wrap: word-wrap;
                                 min-height: 200px;
                                 preferred-height: 320px;
                                 accessible-label: "Reviewable AI response; no user documents are changed automatically";

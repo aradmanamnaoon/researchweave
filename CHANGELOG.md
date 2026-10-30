@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+- Added a local-only PDF Reader passage-to-AI preview: users explicitly select/copy displayed extracted text and paste it into an accessible field; the host rejects nonunique, oversized, absent or stale page/path/render excerpts and previews exact displayed-text byte offsets and SHA-256 without automatically contacting a provider. Native private GUI positive/mismatch/path-invalidation acceptance passed; archival PDF annotation anchors remain separate work.
+- Constrained the contextual AI drawer's input/preview widths and shortened its PDF heading; the full provenance remains available in the reviewable text preview.
+
+- Repaired Windows installed-GUI acceptance selectors for all five Statistics methods after the accessible output names changed; retained strict numerical and sample coverage assertions. Requires exact-commit hosted Windows installed-pass confirmation.
+
 - Corrected the installed Windows Data View native-format QA assertion: `dataset.inspect` returns immutable revision, original source hash and rows, while the dataset ID is read from the selected UI control. The native installer must still pass hosted installed Windows smoke on the new commit.
 
 - Reject a delayed contextual local-model result when the active workspace or exact source/task changed after its explicit preview; the UI preserves the new work context and permits another request. Added deterministic cancel/project/page lifecycle coverage.

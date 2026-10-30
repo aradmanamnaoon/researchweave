@@ -1,0 +1,5 @@
+dfcd3204d4bcade67d92175567cee70b40c217d2b5fd025638072cbe74020d97  /home/saba/researchweave-gui-audits/final-pdf-passage-bin-r3/researchweave-desktop
+c0f54e821f5ffcc06eb10ae4a165881251cd5cd5bb397d3fc101a33fe672fa52  /home/saba/researchweave-gui-audits/final-pdf-passage-src-r3/docs/verification/rust-rewrite/pdfium-two-page-ui-fixture.pdf
+37953f0d4d813545d294e6f0862237c4b938087019c6b68729eae6081b69cc36  /home/saba/researchweave-gui-audits/final-pdf-passage-src-r3/crates/researchweave-desktop/src/main.rs
+26f4a197fd386130ba2c1e82f794c9383878d4dad390bc07907f659b2d49de99  /home/saba/researchweave-gui-audits/final-pdf-passage-src-r3/crates/researchweave-desktop/ui/main.slint
+00734ab8c7d0cd61f99940d39ac8f98b8f70f923c34a19187b65a831834cb1ac  /home/saba/researchweave-gui-audits/final-pdf-passage-src-r3/scripts/ux/isolated-xvfb-pdf-passage-ai.sh

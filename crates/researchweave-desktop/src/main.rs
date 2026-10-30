@@ -450,6 +450,83 @@ struct PendingContextAi {
     preview: PromptPreview,
 }
 
+/// Created only when a PDF render actually completes on the UI event loop.
+/// A path edit, new render job, or page transition invalidates this snapshot
+/// without reading the PDF again during preview or model completion.
+#[derive(Clone, Debug)]
+struct PdfPageSnapshot {
+    path: String,
+    page: i32,
+    page_count: i32,
+    render_job: i32,
+    visible_text: String,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PdfPassageAnchor {
+    byte_start: usize,
+    byte_end: usize,
+    source_sha256: String,
+}
+
+const MAX_PDF_PASSAGE_BYTES: usize = 4_096;
+
+/// The pasted passage must occur exactly once in the text that the host
+/// actually rendered. Indices are UTF-8 bytes in that bounded display text,
+/// not coordinates in the PDF or verified archival citation anchors.
+fn verified_pdf_passage(
+    snapshot: Option<&PdfPageSnapshot>,
+    current_path: &str,
+    current_page: i32,
+    current_page_count: i32,
+    current_job: i32,
+    visible_text: &str,
+    pasted: &str,
+) -> Result<PdfPassageAnchor, String> {
+    let source =
+        snapshot.ok_or("Open and finish rendering a PDF page before asking about text.")?;
+    if current_path.is_empty()
+        || source.path != current_path
+        || source.page != current_page
+        || source.page_count != current_page_count
+        || source.render_job != current_job
+        || current_page < 1
+        || current_page_count < current_page
+        || visible_text.is_empty()
+        || source.visible_text != visible_text
+    {
+        return Err("The PDF file, page or displayed text changed. Open the current page and copy the passage again.".into());
+    }
+    if pasted.trim().is_empty() {
+        return Err("Select and copy a passage from the extracted text, then paste it into Selected PDF passage.".into());
+    }
+    if pasted.len() > MAX_PDF_PASSAGE_BYTES {
+        return Err(format!(
+            "Selected PDF passage exceeds the {MAX_PDF_PASSAGE_BYTES}-byte limit."
+        ));
+    }
+    let start = visible_text.find(pasted).ok_or(
+        "Pasted text is not an exact excerpt of this rendered page. Copy it from the extracted text without modifying it.",
+    )?;
+    // Search starting at the next Unicode scalar, rather than the end of the
+    // match, so overlapping repeated passages are also rejected.
+    let next_char = visible_text[start..]
+        .chars()
+        .next()
+        .expect("a nonempty match has a first character")
+        .len_utf8();
+    if visible_text[start + next_char..].contains(pasted) {
+        return Err("This passage appears more than once on the page. Paste a longer unique selection to disambiguate it.".into());
+    }
+    let end = start + pasted.len();
+    debug_assert!(visible_text.is_char_boundary(start) && visible_text.is_char_boundary(end));
+    Ok(PdfPassageAnchor {
+        byte_start: start,
+        byte_end: end,
+        source_sha256: hex::encode(Sha256::digest(visible_text.as_bytes())),
+    })
+}
+
 /// The identity of one explicitly requested local-model run. Project paths
 /// alone are insufficient: a project can be reopened, or an earlier canceled
 /// request can finish after a newer request in that same project.
@@ -571,8 +648,47 @@ fn contextual_note_object_id(note_id: &str) -> String {
 /// avoids SQLite integrity scans on the Slint event loop after an AI request.
 fn contextual_screen_payload(
     ui: &MainWindow,
+    pdf_snapshot: Option<&PdfPageSnapshot>,
 ) -> Result<Option<(ContextKind, String, String, String)>, String> {
     let payload = match ui.get_page() {
+        7 => {
+            let passage = ui.get_pdf_selected_passage();
+            let source = verified_pdf_passage(
+                pdf_snapshot,
+                ui.get_pdf_local_path().as_str(),
+                ui.get_pdf_page_number(),
+                ui.get_pdf_page_count(),
+                ui.get_pdf_job(),
+                ui.get_pdf_page_extracted_text().as_str(),
+                passage.as_str(),
+            )?;
+            let rendered = pdf_snapshot.expect("verified PDF page has a snapshot");
+            // Render-job identity prevents a preview approved for one PDF
+            // opening from being reused after a later render of identical
+            // page text. The hash does not disclose the absolute path.
+            let source_id = hex::encode(Sha256::digest(
+                serde_json::to_vec(&(
+                    &rendered.path,
+                    rendered.page,
+                    rendered.render_job,
+                    &source.source_sha256,
+                ))
+                .map_err(|error| error.to_string())?,
+            ));
+            Some((
+                ContextKind::Evidence,
+                format!("pdf:{}", &source_id[..32]),
+                format!(
+                    "PDF page {} · render {} · displayed-text bytes {}..{} · SHA-256 {}",
+                    rendered.page,
+                    rendered.render_job,
+                    source.byte_start,
+                    source.byte_end,
+                    source.source_sha256
+                ),
+                passage.to_string(),
+            ))
+        }
         19 => {
             let body = ui.get_manuscript_draft_body();
             let selected = ui.get_writing_ai_use_found_text();
@@ -670,11 +786,14 @@ fn contextual_screen_payload(
 /// Privacy-preserving, constant-size comparison for an in-flight local model
 /// response. This contains the screen, exact task, source identity and visible
 /// text, and performs no filesystem/database I/O on the UI completion path.
-fn contextual_visible_ui_digest(ui: &MainWindow) -> Result<String, String> {
+fn contextual_visible_ui_digest(
+    ui: &MainWindow,
+    pdf_snapshot: Option<&PdfPageSnapshot>,
+) -> Result<String, String> {
     let payload = (
         ui.get_page(),
         ui.get_context_ai_task().to_string(),
-        contextual_screen_payload(ui)?,
+        contextual_screen_payload(ui, pdf_snapshot)?,
     );
     let serialized = serde_json::to_vec(&payload).map_err(|error| error.to_string())?;
     Ok(hex::encode(Sha256::digest(serialized)))
@@ -683,22 +802,24 @@ fn contextual_visible_ui_digest(ui: &MainWindow) -> Result<String, String> {
 fn contextual_request_from_ui(
     ui: &MainWindow,
     project: &Path,
+    pdf_snapshot: Option<&PdfPageSnapshot>,
 ) -> Result<ContextualRequest, String> {
     let info = ProjectStore::open(project)
         .map_err(|error| error.to_string())?
         .info()
         .map_err(|error| error.to_string())?;
-    let (kind, object, title, content) = contextual_screen_payload(ui)?.unwrap_or_else(|| {
-        (
-            ContextKind::Project,
-            "project".into(),
-            format!("Project: {}", info.title),
-            format!(
-                "Research question: {}\nDesign: {}\nPrivacy: {}",
-                info.question, info.design, info.privacy
-            ),
-        )
-    });
+    let (kind, object, title, content) = contextual_screen_payload(ui, pdf_snapshot)?
+        .unwrap_or_else(|| {
+            (
+                ContextKind::Project,
+                "project".into(),
+                format!("Project: {}", info.title),
+                format!(
+                    "Research question: {}\nDesign: {}\nPrivacy: {}",
+                    info.question, info.design, info.privacy
+                ),
+            )
+        });
     if content.trim().is_empty() {
         return Err("This screen has no content for AI to inspect. Add a note, manuscript, dataset, or result first.".into());
     }
@@ -4217,8 +4338,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let app = MainWindow::new()?;
+    let pdf_page_snapshot: Arc<Mutex<Option<PdfPageSnapshot>>> = Arc::new(Mutex::new(None));
     app.on_choose_local_file({
         let weak = app.as_weak();
+        let pdf_page_snapshot = pdf_page_snapshot.clone();
         move |kind| {
             let Some(ui) = weak.upgrade() else {
                 return;
@@ -4239,6 +4362,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // chooser; it never imports a file or authorizes network egress.
             ui.set_local_file_dialog_busy(true);
             let weak_task = weak.clone();
+            let snapshot_for_task = pdf_page_snapshot.clone();
             let kind = kind.to_string();
             let task = async move {
                 let selected = rfd::AsyncFileDialog::new()
@@ -4249,6 +4373,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(selected) = selected {
                         match chosen_local_file_path(selected.path()) {
                             Ok(path) if kind == "pdf" => {
+                                snapshot_for_task.lock().unwrap().take();
                                 // File-picker selection updates the property
                                 // programmatically, so Slint's `edited` event
                                 // does not run. Invalidate any in-flight old
@@ -4266,6 +4391,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     "Selected a different file. Open it to inspect verified page text.".into(),
                                 );
                                 ui.set_pdf_local_path(path.into());
+                                ui.set_pdf_passage_status("PDF file changed. Copy a passage from the newly opened page.".into());
+                                ui.set_context_ai_ready(false);
                                 ui.set_status("PDF selected from native file dialog".into());
                             }
                             Ok(path) if kind == "data" => {
@@ -4338,28 +4465,61 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Rc::new(RefCell::new(None));
     let pending_context_ai: Rc<RefCell<Option<PendingContextAi>>> = Rc::new(RefCell::new(None));
     let active_context_ai_run = Arc::new(Mutex::new(ContextAiRunLifecycle::default()));
+    app.on_ask_about_pdf_passage({
+        let weak = app.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_context_ai_task("Explain this exact PDF passage in clear research language without inventing sources.".into());
+                ui.set_context_ai_open(true);
+                ui.set_context_ai_ready(false);
+                ui.invoke_preview_context_ai();
+            }
+        }
+    });
     app.on_preview_context_ai({
         let weak = app.as_weak();
         let active_project = active_project.clone();
         let pending = pending_context_ai.clone();
+        let pdf_page_snapshot = pdf_page_snapshot.clone();
         move || {
             let Some(ui) = weak.upgrade() else { return };
             pending.borrow_mut().take();
             ui.set_context_ai_ready(false);
             let preview_result = (|| {
                 let project = active_project.borrow().clone().ok_or("Open a research project first")?;
-                let request = contextual_request_from_ui(&ui, &project)?;
+                let request = contextual_request_from_ui(&ui, &project, pdf_page_snapshot.lock().unwrap().as_ref())?;
                 let visible_preview = contextual::build_preview(
                     &request, LOCAL_ONLY_AI_POLICY, None,
                 ).map_err(|error| format!("Cannot prepare context: {error}"))?;
-                let source = format!("{:?} · {}", request.context.kind, request.context.title);
+                // The full PDF hash and byte range remain in the read-only
+                // preview. Keep the compact panel heading short enough to
+                // remain readable beside the Reader at narrow widths.
+                let source = if ui.get_page() == 7 {
+                    format!("PDF passage · page {}", ui.get_pdf_page_number())
+                } else {
+                    format!("{:?} · {}", request.context.kind, request.context.title)
+                };
                 ui.set_context_ai_source(source.into());
+                let pdf_source = if ui.get_page() == 7 {
+                    let snapshot = pdf_page_snapshot.lock().unwrap();
+                    let rendered = snapshot.as_ref().ok_or("PDF page was not rendered")?;
+                    format!(
+                        "\nPDF file path: {}\nPage: {} of {}\nShown extracted-text SHA-256: {}\nThe byte range above refers only to the displayed extracted text, not PDF file bytes or a saved citation.\n",
+                        rendered.path,
+                        rendered.page,
+                        rendered.page_count,
+                        hex::encode(Sha256::digest(rendered.visible_text.as_bytes())),
+                    )
+                } else {
+                    String::new()
+                };
                 let local_model = selected_local_ai_profile(
                     &host_data_root()?, ui.get_context_ai_profile().as_str(),
                 );
                 let preview_text = format!(
-                    "Local preview only. Nothing has been sent.\nSource: {}\nTask: {}\nContext: {} bytes.\n\nExact user message:\n{}",
+                    "Local preview only. Nothing has been sent.\nSource: {}{}\nTask: {}\nContext: {} bytes.\n\nExact user message:\n{}",
                     request.context.title,
+                    pdf_source,
                     request.user_request,
                     request.context.content.len(),
                     visible_preview.messages[1].content,
@@ -4378,11 +4538,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         });
                         ui.set_context_ai_preview_summary(preview_text.into());
                         ui.set_context_ai_ready(true);
+                        if ui.get_page() == 7 {
+                            ui.set_pdf_passage_status("Unique PDF passage verified; inspect the full preview and use Run locally only if you approve.".into());
+                        }
                     }
                     Err(error) => {
                         ui.set_context_ai_preview_summary(
                             format!("{preview_text}\n\nLocal inference unavailable: {error}").into(),
                         );
+                        if ui.get_page() == 7 {
+                            ui.set_pdf_passage_status("Passage verified; no configured local model is available. The preview is inspection-only.".into());
+                        }
                     }
                 }
                 Ok::<_, String>(())
@@ -4392,6 +4558,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     format!("No request prepared: {error}").into(),
                 );
                 ui.set_context_ai_ready(false);
+                if ui.get_page() == 7 {
+                    ui.set_pdf_passage_status(format!("Passage rejected: {error}").into());
+                }
             }
         }
     });
@@ -4401,6 +4570,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let project_generation = project_generation.clone();
         let pending = pending_context_ai.clone();
         let active_run = active_context_ai_run.clone();
+        let pdf_page_snapshot = pdf_page_snapshot.clone();
         move || {
             let Some(ui) = weak.upgrade() else { return };
             if ui.get_context_ai_busy() {
@@ -4415,7 +4585,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .as_ref()
                 .is_some_and(|current| current == &approved.project)
                 && ui.get_page() == approved.page
-                && contextual_request_from_ui(&ui, &approved.project)
+                && contextual_request_from_ui(&ui, &approved.project, pdf_page_snapshot.lock().unwrap().as_ref())
                     .is_ok_and(|current| current == approved.request);
             if !valid {
                 ui.set_context_ai_ready(false);
@@ -4426,7 +4596,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 );
                 return;
             }
-            let requested_ui_digest = match contextual_visible_ui_digest(&ui) {
+            let requested_ui_digest = match contextual_visible_ui_digest(&ui, pdf_page_snapshot.lock().unwrap().as_ref()) {
                 Ok(digest) => digest,
                 Err(error) => {
                     ui.set_context_ai_ready(false);
@@ -4467,6 +4637,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let requested_page = approved.page;
             let weak_task = weak.clone();
             let active_run_task = active_run.clone();
+            let pdf_snapshot_task = pdf_page_snapshot.clone();
             std::thread::spawn(move || {
                 let result = NativeHttpTransport::new(Duration::from_secs(30))
                     .and_then(|transport| {
@@ -4500,7 +4671,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             );
                             return;
                         }
-                        if !contextual_visible_ui_digest(&ui)
+                        if !contextual_visible_ui_digest(&ui, pdf_snapshot_task.lock().unwrap().as_ref())
                             .is_ok_and(|visible_digest| visible_digest == requested_ui_digest)
                         {
                             ui.set_context_ai_output(
@@ -9262,7 +9433,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let weak = app.as_weak();
         let activity = activity.clone();
         let activity_path = activity_path.clone();
+        let pdf_page_snapshot = pdf_page_snapshot.clone();
         move |path, query, page_number| {
+            pdf_page_snapshot.lock().unwrap().take();
             let kind = if query.is_empty() {
                 "PDF render"
             } else {
@@ -9273,6 +9446,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let weak = weak.clone();
             let activity = activity.clone();
             let activity_path = activity_path.clone();
+            let pdf_page_snapshot = pdf_page_snapshot.clone();
             std::thread::spawn(move || {
                 let result = usize::try_from(page_number)
                     .ok()
@@ -9347,6 +9521,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     .take(MAX_VISIBLE_PDF_PAGE_CHARS)
                                     .collect::<String>();
                                 let text_sha = hex::encode(Sha256::digest(rendered.extracted_text.as_bytes()));
+                                pdf_page_snapshot.lock().unwrap().replace(PdfPageSnapshot {
+                                    path: path.to_string(),
+                                    page: i32::try_from(rendered.page_index.saturating_add(1)).unwrap_or(i32::MAX),
+                                    page_count: i32::try_from(rendered.page_count).unwrap_or(i32::MAX),
+                                    render_job: job_id,
+                                    visible_text: copyable_text.clone(),
+                                });
                                 ui.set_pdf_page_extracted_text(copyable_text.into());
                                 ui.set_pdf_page_extraction_status(
                                     format!(
@@ -9831,6 +10012,108 @@ mod tests {
             contextual_note_object_id("note-b"),
             "identical note text must not erase source identity",
         );
+    }
+
+    fn pdf_selection_snapshot(text: &str) -> PdfPageSnapshot {
+        PdfPageSnapshot {
+            path: "/private/study/brain paper.pdf".into(),
+            page: 2,
+            page_count: 4,
+            render_job: 19,
+            visible_text: text.into(),
+        }
+    }
+
+    fn pdf_selection(
+        snapshot: Option<&PdfPageSnapshot>,
+        visible: &str,
+        selected: &str,
+    ) -> Result<PdfPassageAnchor, String> {
+        verified_pdf_passage(
+            snapshot,
+            "/private/study/brain paper.pdf",
+            2,
+            4,
+            19,
+            visible,
+            selected,
+        )
+    }
+
+    #[test]
+    fn pdf_selection_verifies_exact_unicode_bytes_and_source_digest() {
+        let visible = "Alpha 🧠\nسلام cortex Δ.\nOmega";
+        let snapshot = pdf_selection_snapshot(visible);
+        let anchor = pdf_selection(Some(&snapshot), visible, "سلام cortex Δ.").unwrap();
+        assert_eq!(anchor.byte_start, "Alpha 🧠\n".len());
+        assert_eq!(anchor.byte_end, "Alpha 🧠\nسلام cortex Δ.".len());
+        assert_eq!(
+            &visible[anchor.byte_start..anchor.byte_end],
+            "سلام cortex Δ."
+        );
+        assert_eq!(
+            anchor.source_sha256,
+            hex::encode(Sha256::digest(visible.as_bytes()))
+        );
+    }
+
+    #[test]
+    fn pdf_selection_rejects_empty_overlong_missing_and_repeated_text() {
+        let visible = "repeated repeated text";
+        let snapshot = pdf_selection_snapshot(visible);
+        for passage in ["", "  \n", "not present", "repeated", "repeated "] {
+            assert!(
+                pdf_selection(Some(&snapshot), visible, passage).is_err(),
+                "{passage:?}"
+            );
+        }
+        assert!(pdf_selection(
+            Some(&snapshot),
+            visible,
+            &"a".repeat(MAX_PDF_PASSAGE_BYTES + 1)
+        )
+        .unwrap_err()
+        .contains("limit"));
+        // Overlapping occurrences are ambiguous even though str::match_indices
+        // would report only one non-overlapping match.
+        let overlapping = pdf_selection_snapshot("ababa");
+        assert!(pdf_selection(Some(&overlapping), "ababa", "aba")
+            .unwrap_err()
+            .contains("more than once"));
+    }
+
+    #[test]
+    fn pdf_selection_fails_closed_after_pdf_path_page_job_or_text_changes() {
+        let visible = "A uniquely identified research passage";
+        let snapshot = pdf_selection_snapshot(visible);
+        let params = (
+            "/private/study/brain paper.pdf",
+            2,
+            4,
+            19,
+            visible,
+            "uniquely identified",
+        );
+        assert!(pdf_selection(None, visible, params.5).is_err());
+        assert!(pdf_selection(Some(&snapshot), "Another text", params.5).is_err());
+        for (path, page, count, job) in [
+            ("/private/study/other.pdf", 2, 4, 19),
+            (params.0, 3, 4, 19),
+            (params.0, 2, 3, 19),
+            (params.0, 2, 4, 20),
+        ] {
+            assert!(verified_pdf_passage(
+                Some(&snapshot),
+                path,
+                page,
+                count,
+                job,
+                visible,
+                params.5
+            )
+            .is_err());
+        }
+        assert!(pdf_selection(Some(&snapshot), visible, params.5).is_ok());
     }
 
     #[test]

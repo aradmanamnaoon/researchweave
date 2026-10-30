@@ -37,6 +37,14 @@ Use this skill when the goal is to **pass exact selected text with source and pe
 
 ## Baseline application record (static inspection only)
 
+## 30 October 2026 native implementation and scoped GUI evidence
+
+**Latest superseding scope (r6):** PDF Reader initial passage UI caused a strict 200%-scale narrow-window extracted-text visibility **FAIL**. The form was moved below the compact extracted-text control; exact-source Linux executable SHA-256 `a96e2a8db0760e02833049e6f4c38cee73a284bc7f7bc7958b41c597ffedae21` then **PASS** both the passage preview positive/mismatch/path-change private native GUI and the independent 900×620/200% original page1/page2/copy/Find Next/path-clear workflow. [Portable r6 evidence](../../screenshots/pdf-passage-r6/). This supersedes the earlier r5 snapshot only for the stated Linux scenarios; it does not certify built Windows/macOS packages or genuine persisted PDF citation/annotation anchors.
+
+The Reader now offers **Selected PDF passage** with explicit instructions to select/copy from its read-only extracted text and paste exact text. Slint 1.18 does not expose the native TextEdit selection range to Rust; this is **not automatic highlighting capture**. `verified_pdf_passage` in `main.rs` matches only one exact bounded UTF-8 occurrence in the displayed page, and binds a host-held render job, page number, path and text digest. The preview identifies path, page, displayed-text byte range and SHA-256, labels the excerpt unverified, and cannot send data until an explicit local-model Run. Persisted annotations and archival citations are not implied.
+
+The independent `scripts/ux/isolated-xvfb-pdf-passage-ai.sh` private Linux GUI workflow **PASS** real Ctrl+A/C from the read-only text widget, explicit paste/button, preview scope, rejection of nonmatching text, and path-change invalidation. Exact-source frozen executable SHA-256 `dfcd3204d4bcade67d92175567cee70b40c217d2b5fd025638072cbe74020d97`; source/screenshot receipts at [pdf-passage-r5](../../screenshots/pdf-passage-r5/). **Disposition: scoped Linux native GUI PASS for the stated acceptance gate; untested on installed Windows/macOS and assistive-technology speech.** This is not a signoff for the remaining 99 skills.
+
 - **Snapshot:** origin/main 976656d, 2026-10-29; UI may evolve after this snapshot.
 - **Evidence:** [main.slint:1040-1079](https://github.com/aradmanamnaoon/researchweave/blob/976656d9ea5ce753f9b170383bf5cb65eb9f263d/crates/researchweave-desktop/ui/main.slint#L1040-L1079).
 - **Observation:** Rendered PDF is an Image with search highlight but no selectable passage.
