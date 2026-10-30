@@ -2,7 +2,25 @@
 
 ## Unreleased
 
-## 0.2.0 - Unreleased
+- Added a local-only PDF Reader passage-to-AI preview: users explicitly select/copy displayed extracted text and paste it into an accessible field; the host rejects nonunique, oversized, absent or stale page/path/render excerpts and previews exact displayed-text byte offsets and SHA-256 without automatically contacting a provider. Native private GUI positive/mismatch/path-invalidation acceptance passed; archival PDF annotation anchors remain separate work.
+- Constrained the contextual AI drawer's input/preview widths and shortened its PDF heading; the full provenance remains available in the reviewable text preview.
+
+- Repaired Windows installed-GUI acceptance selectors for all five Statistics methods after the accessible output names changed; retained strict numerical and sample coverage assertions. Requires exact-commit hosted Windows installed-pass confirmation.
+
+- Corrected the installed Windows Data View native-format QA assertion: `dataset.inspect` returns immutable revision, original source hash and rows, while the dataset ID is read from the selected UI control. The native installer must still pass hosted installed Windows smoke on the new commit.
+
+- Reject a delayed contextual local-model result when the active workspace or exact source/task changed after its explicit preview; the UI preserves the new work context and permits another request. Added deterministic cancel/project/page lifecycle coverage.
+
+- Continued the Rust/Slint UX redesign on draft PR #16: accessible Data View paging/full-value inspection, scoped Quick Notes, manuscript/navigation improvements, source-backed Evidence previews, PDF page text access, and offline encrypted archive recovery. The branch remains under native GUI and scientific acceptance testing; these changes are not part of the published v0.2.0 release.
+- Reworked the Windows installed UI Automation Data View probe to read the import identity from its visible fields and locate the expanded, read-only page inspector through keyboard navigation. Native Windows acceptance of this change is pending.
+- Prevented Quick Notes navigation, archiving, restoring and view switches from replacing a visible draft when its SQLite optimistic save fails. The guard preserves staged recovery data and now has successful-save and concurrent-writer regression tests.
+- Bound each contextual local-AI completion to an exact request UUID, active project and project generation, discarding stale canceled responses after a new request or project switch. Two deterministic race regressions pass. Local-only AI permissions are unchanged.
+- Added a 200%-scale, 900×620 native PDF Reader regression harness after identifying offscreen extracted text in the pre-fix Linux build; layout correction and final native acceptance remain under verification.
+- Added explicit Quick Notes conflict recovery: inspect exact retained UTF-8 draft and source revision, navigate recovery candidates, and recover as a separate new note through an idempotent SQLite transaction that preserves the newer original and refuses stale changes. Clear prior-project recovery data if loading a different project fails.
+- Reorganized PDF Reader search controls for narrow, high-scale windows; reduced canvas growth and placed selectable read-only extracted text ahead of the canvas. The strict private 200% GUI suite currently fails on a clipped Find Next control and remains a release gate until fully verified.
+- Verified the corrected Reader search button hit-point at genuine 200% scale in a 900×620 native Linux GUI, with complete two-page extraction, clipboard selection/copy, read-only behavior and stale-path invalidation passing. Retained the older failing screenshots and exact-source receipts for regression tracking.
+
+## 0.2.0 - 2026-10-28
 
 - Replaced the shipped Python/PyQt6 desktop runtime with a native Rust workspace and Slint desktop application while preserving the Python release in Git history/recovery artifacts.
 - Added native project, evidence, library, analysis, AI and encrypted local archive crates behind a shared typed command/approval boundary.

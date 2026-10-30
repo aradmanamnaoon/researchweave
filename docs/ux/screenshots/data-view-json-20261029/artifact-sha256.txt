@@ -1,0 +1,4 @@
+1ba31ff1f79f244dc4b4244e678c0e2abde136647d3f2a1bb24f3a7924889599  linux-release/researchweave-desktop
+486568be07e3f91aff03a66dd38381514bf185e033a3210f09c691e3fe38fcfe  repo/crates/researchweave-desktop/ui/main.slint
+3b922808eba8a77a66b948a7b928322e6279e8b63995450faf539a2759c72275  repo/crates/researchweave-desktop/src/main.rs
+400353b58856f712a025211b3ed0a466e48cf5e2d06ca9bcf617095d397a65d1  repo/scripts/ux/isolated-xvfb-dataset-grid.sh

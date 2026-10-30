@@ -31,3 +31,10 @@ hex = "0.4"
 # debug info keeps development stacks useful without changing release builds.
 [profile.dev]
 debug = 1
+
+# AccessKit AT-SPI 0.19.1 marks disabled buttons as enabled because it only
+# checks is_disabled() when is_read_only_supported(). Until an upstream fix
+# is available in our locked Slint dependency graph, use the narrowly patched
+# upstream adapter so Linux screen readers receive accurate button states.
+[patch.crates-io]
+accesskit_atspi_common = { path = "vendor/accesskit_atspi_common" }

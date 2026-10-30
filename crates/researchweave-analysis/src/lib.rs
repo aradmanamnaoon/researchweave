@@ -1331,7 +1331,9 @@ impl DatasetStore {
 }
 
 pub fn page(dataset: &Dataset, offset: usize, limit: usize) -> Result<Value, AnalysisError> {
-    if limit == 0 || limit > 1_000 {
+    // An invalid offset must fail as a domain error, not panic while slicing
+    // immutable records. UI paging and CLI callers share this boundary.
+    if limit == 0 || limit > 1_000 || offset > dataset.records.len() {
         return Err(AnalysisError::InvalidInput("page bounds".into()));
     }
     let end = offset.saturating_add(limit).min(dataset.records.len());
@@ -4428,6 +4430,14 @@ mod tests {
         let (_dir, dataset) = sample();
         let p = page(&dataset, 1, 2).unwrap();
         assert_eq!(p["rows"][0]["score"], "4");
+        assert!(matches!(
+            page(&dataset, dataset.records.len() + 1, 25),
+            Err(AnalysisError::InvalidInput(_))
+        ));
+        assert_eq!(
+            page(&dataset, dataset.records.len(), 25).unwrap()["rows"],
+            json!([])
+        );
         let f = frequency(&dataset, "group").unwrap();
         assert_eq!(f["n_valid"], 6);
         assert_eq!(f["levels"][0]["count"], 3);

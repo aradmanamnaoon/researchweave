@@ -1,12 +1,19 @@
+// The desktop executable is a native GUI application. Windows must not create
+// a separate console window when started from Explorer or an installed shortcut.
+// Explicit smoke commands still use redirected stdout in the packaging harness.
+#![cfg_attr(windows, windows_subsystem = "windows")]
+
 use base64::{engine::general_purpose::STANDARD as BASE64_STANDARD, Engine as _};
 use researchweave_ai::{
     agent_actions::{AgentActionRecord, AgentActionStore},
+    chat as ai_chat,
+    contextual::{self, ContextKind, ContextualContext, ContextualRequest, PromptPreview},
     conversations::ConversationStore,
     grounding::GroundingStore,
     operations::{self as ai_operations, AiOperationHandler, NoSecrets},
     profile_store::ProfileStore,
     prompts::PromptStore,
-    EgressPolicy, NativeHttpTransport,
+    EgressPolicy, NativeHttpTransport, ProviderProfile,
 };
 use researchweave_analysis::AnalysisService;
 use researchweave_core::{
@@ -16,21 +23,28 @@ use researchweave_core::{
 use researchweave_evidence::EvidenceHandler;
 use researchweave_library::LibraryHandler;
 use researchweave_project::{
+    quick_notes::{self, ConflictingQuickNoteDraft, NoteFlag, QuickNote},
     verify_archive, verify_encrypted_archive, ProjectHandler, ProjectInfo, ProjectStore,
 };
 use sha2::{Digest, Sha256};
-use slint::{Image, Rgba8Pixel, SharedPixelBuffer};
+use slint::{
+    Image, ModelRc, Rgba8Pixel, SharedPixelBuffer, StandardListViewItem, TableColumn, VecModel,
+};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     io::Read,
     path::{Path, PathBuf},
     rc::Rc,
-    sync::Arc,
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
     time::{Duration, SystemTime, UNIX_EPOCH},
 };
 use uuid::Uuid;
 #[cfg(test)]
 mod display_contrast;
+mod document_navigation;
 mod durable_activity;
 mod pdf_engine;
 mod physical_export;
@@ -61,7 +75,7 @@ fn flush_writing_drafts(
             .info()
             .map_err(|error| error.to_string())?
             .id;
-        writing_autosave::save(&writing_autosave::path(root, &id), drafts)?;
+        writing_autosave::save(&writing_autosave::scoped_path(root, project, &id)?, drafts)?;
     }
     if drafts.manuscript_dirty
         && !drafts.manuscript_id.trim().is_empty()
@@ -87,7 +101,7 @@ fn flush_writing_drafts(
             .info()
             .map_err(|error| error.to_string())?
             .id;
-        writing_autosave::save(&writing_autosave::path(root, &id), drafts)?;
+        writing_autosave::save(&writing_autosave::scoped_path(root, project, &id)?, drafts)?;
     }
     Ok(revision)
 }
@@ -97,18 +111,35 @@ fn restore_writing_drafts(
     project: &Path,
     drafts: &RefCell<writing_autosave::Drafts>,
 ) -> Result<(), String> {
+    ui.set_writing_recovery_blocked(true);
+    // Always discard the previous project's in-memory text before recovery.
+    // Failed/corrupt journals must never carry prior-project text forward.
+    *drafts.borrow_mut() = writing_autosave::Drafts::default();
+    ui.set_notebook_draft("".into());
+    ui.set_manuscript_draft_id("".into());
+    ui.set_manuscript_draft_section("".into());
+    ui.set_manuscript_draft_citations("".into());
+    ui.set_manuscript_draft_body("".into());
+    ui.set_manuscript_word_count(0);
+    ui.set_manuscript_character_count(0);
     let root = host_data_root()?;
     let id = ProjectStore::open(project)
         .map_err(|error| error.to_string())?
         .info()
         .map_err(|error| error.to_string())?
         .id;
-    let recovered = writing_autosave::load(&writing_autosave::path(&root, &id))?;
+    let recovered = writing_autosave::load_for_project(&root, project, &id)?;
     ui.set_notebook_draft(recovered.notebook.clone().into());
     ui.set_manuscript_draft_id(recovered.manuscript_id.clone().into());
     ui.set_manuscript_draft_section(recovered.section.clone().into());
     ui.set_manuscript_draft_citations(recovered.citations.clone().into());
     ui.set_manuscript_draft_body(recovered.body.clone().into());
+    ui.set_manuscript_word_count(
+        i32::try_from(recovered.body.split_whitespace().count()).unwrap_or(i32::MAX),
+    );
+    ui.set_manuscript_character_count(
+        i32::try_from(recovered.body.chars().count()).unwrap_or(i32::MAX),
+    );
     if recovered.notebook_dirty {
         ui.set_notebook_results("Recovered notebook edits awaiting project autosave".into());
     }
@@ -116,6 +147,7 @@ fn restore_writing_drafts(
         ui.set_writing_results("Recovered manuscript edits awaiting project autosave".into());
     }
     *drafts.borrow_mut() = recovered;
+    ui.set_writing_recovery_blocked(false);
     Ok(())
 }
 
@@ -169,6 +201,38 @@ fn recovered_writing_requires_flush(drafts: &writing_autosave::Drafts) -> bool {
             && !drafts.section.trim().is_empty())
 }
 
+/// An archive contains the project database, not the host-local writing journal.
+/// The UI must synchronously commit all pending edits before it snapshots that
+/// database. Refuse the export on ambiguous, stale, or unreadable recovery data.
+fn flush_writing_before_archive(
+    project: &Path,
+    drafts: &mut writing_autosave::Drafts,
+    root: &Path,
+) -> Result<i64, String> {
+    let info = ProjectStore::open(project)
+        .map_err(|error| error.to_string())?
+        .info()
+        .map_err(|error| error.to_string())?;
+    let persisted = writing_autosave::load_for_project(root, project, &info.id)?;
+    if persisted != *drafts {
+        return Err("Writing journal differs from the active editor; archive canceled to preserve unsaved edits. Reopen the project and resolve writing recovery.".into());
+    }
+    if drafts.manuscript_dirty
+        && (drafts.manuscript_id.trim().is_empty() || drafts.section.trim().is_empty())
+    {
+        return Err("Manuscript has unsaved edits but no manuscript ID or section; fill both fields before exporting an archive.".into());
+    }
+    let revision = if drafts.notebook_dirty || drafts.manuscript_dirty {
+        flush_writing_drafts(project, drafts, root)?
+    } else {
+        info.revision
+    };
+    if drafts.notebook_dirty || drafts.manuscript_dirty {
+        return Err("Writing edits remain pending; archive was not exported".into());
+    }
+    Ok(revision)
+}
+
 fn reconcile_manual_writing_save(
     pending: &PendingEvidenceAction,
     drafts: &mut writing_autosave::Drafts,
@@ -219,7 +283,11 @@ fn reconcile_manual_writing_save(
         updated.manuscript_dirty = false;
     }
     writing_autosave::save(
-        &writing_autosave::path(root, &pending.project_id.to_string()),
+        &writing_autosave::scoped_path(
+            root,
+            &pending.project_path,
+            &pending.project_id.to_string(),
+        )?,
         &updated,
     )?;
     *drafts = updated;
@@ -232,6 +300,895 @@ fn show_activity(ui: &MainWindow, state: &durable_activity::Activity) {
 }
 
 slint::include_modules!();
+
+fn update_manuscript_outline(ui: &MainWindow, body: &str) {
+    let headings = document_navigation::outline(body, 100)
+        .into_iter()
+        .map(|heading| ManuscriptHeading {
+            title: heading.title.into(),
+            level: i32::try_from(heading.level).unwrap_or(i32::MAX),
+            offset: i32::try_from(heading.offset).unwrap_or(i32::MAX),
+        })
+        .collect::<Vec<_>>();
+    ui.set_manuscript_headings(ModelRc::new(VecModel::from(headings)));
+}
+
+fn dataset_cell_preview(value: &serde_json::Value) -> String {
+    const LIMIT: usize = 300;
+    const SUFFIX: &str = "… [shortened; full value in inspection details]";
+    let text = match value {
+        serde_json::Value::Null => "Missing (null)".to_owned(),
+        serde_json::Value::String(value) => value.clone(),
+        serde_json::Value::Number(_) | serde_json::Value::Bool(_) => value.to_string(),
+        _ => "[Structured value; inspect full JSON below]".to_owned(),
+    };
+    if text.chars().count() <= LIMIT {
+        return text;
+    }
+    let prefix_length = LIMIT - SUFFIX.chars().count();
+    format!(
+        "{}{}",
+        text.chars().take(prefix_length).collect::<String>(),
+        SUFFIX
+    )
+}
+
+fn set_verified_dataset_grid(
+    ui: &MainWindow,
+    response: &serde_json::Value,
+    requested_revision: &str,
+    page_index: i32,
+    page_size: i32,
+) -> Result<(), String> {
+    let data = response
+        .get("data")
+        .filter(|value| value.is_object())
+        .ok_or("Dataset read returned no verified data object")?;
+    if page_index < 0 || !(1..=100).contains(&page_size) {
+        return Err("Dataset page size/index is outside the safe range".into());
+    }
+    let expected_offset = (page_index as u64)
+        .checked_mul(page_size as u64)
+        .ok_or("Dataset page offset overflow")?;
+    let offset = data["offset"].as_u64().ok_or("Dataset offset missing")?;
+    let total = data["total"].as_u64().ok_or("Dataset row count missing")?;
+    let revision = data["revision"]
+        .as_str()
+        .ok_or("Dataset revision missing")?;
+    if offset != expected_offset
+        || total < offset
+        || revision != requested_revision
+        || data["limit"].as_u64() != Some(page_size as u64)
+    {
+        return Err("Dataset page response does not match selected immutable revision".into());
+    }
+    let records = data["rows"]
+        .as_array()
+        .ok_or("Verified dataset rows missing")?;
+    if records.len() > page_size as usize {
+        return Err("Dataset returned more rows than requested".into());
+    }
+    let headers = records
+        .first()
+        .and_then(serde_json::Value::as_object)
+        .map(|object| object.keys().cloned().collect::<Vec<_>>())
+        .unwrap_or_default();
+    if headers.len() > 200 {
+        return Err("Dataset preview exceeds the 200-column UI limit".into());
+    }
+    let mut row_number_column = TableColumn::default();
+    row_number_column.title = "Row #".into();
+    row_number_column.min_width = 70.0;
+    row_number_column.width = 80.0;
+    row_number_column.horizontal_stretch = 0.0;
+    let columns = std::iter::once(row_number_column)
+        .chain(headers.iter().map(|name| {
+            let mut column = TableColumn::default();
+            column.title = name.clone().into();
+            column.min_width = 85.0;
+            column.width = 140.0;
+            column.horizontal_stretch = 1.0;
+            column
+        }))
+        .collect::<Vec<_>>();
+    let mut rows: Vec<ModelRc<StandardListViewItem>> = Vec::with_capacity(records.len());
+    for (row_index, record) in records.iter().enumerate() {
+        let values = record
+            .as_object()
+            .ok_or("Dataset record is not an object")?;
+        if values.len() != headers.len() || headers.iter().any(|name| !values.contains_key(name)) {
+            return Err("Dataset row schema differs from the selected column headers".into());
+        }
+        let mut row_number = StandardListViewItem::default();
+        row_number.text = (offset + row_index as u64 + 1).to_string().into();
+        let cells = std::iter::once(row_number)
+            .chain(headers.iter().map(|name| {
+                let mut cell = StandardListViewItem::default();
+                cell.text = dataset_cell_preview(&values[name]).into();
+                cell
+            }))
+            .collect::<Vec<_>>();
+        rows.push(ModelRc::new(VecModel::from(cells)));
+    }
+    ui.set_dataset_grid_columns(ModelRc::new(VecModel::from(columns)));
+    ui.set_dataset_grid_rows(ModelRc::new(VecModel::from(rows)));
+    ui.set_dataset_grid_page(page_index);
+    ui.set_dataset_grid_page_size(page_size);
+    ui.set_dataset_grid_total_rows(i32::try_from(total).unwrap_or(i32::MAX));
+    ui.set_dataset_grid_ready(!records.is_empty());
+    ui.set_dataset_grid_status(
+        format!(
+            "Verified revision {} · Rows {}–{} of {} · Read-only, original row order · Shortened cells have full values in Inspection details",
+            &revision[..revision.len().min(12)],
+            offset.saturating_add(1),
+            offset.saturating_add(records.len() as u64),
+            total
+        )
+        .into(),
+    );
+    Ok(())
+}
+
+fn clear_dataset_grid(ui: &MainWindow, status: &str) {
+    ui.set_dataset_grid_columns(ModelRc::new(VecModel::from(Vec::<TableColumn>::new())));
+    ui.set_dataset_grid_rows(ModelRc::new(VecModel::from(Vec::<
+        ModelRc<StandardListViewItem>,
+    >::new())));
+    ui.set_dataset_grid_page(0);
+    ui.set_dataset_grid_total_rows(-1);
+    ui.set_dataset_grid_ready(false);
+    ui.set_dataset_grid_busy(false);
+    ui.set_dataset_grid_status(status.into());
+}
+
+#[derive(Clone)]
+struct PendingContextAi {
+    page: i32,
+    project: PathBuf,
+    request: ContextualRequest,
+    profile: ProviderProfile,
+    preview: PromptPreview,
+    pdf_source: Option<(PathBuf, String)>,
+}
+
+/// Created only when a PDF render actually completes on the UI event loop.
+/// A path edit, new render job, or page transition invalidates this snapshot
+/// without reading the PDF again during preview or model completion.
+#[derive(Clone, Debug)]
+struct PdfPageSnapshot {
+    path: String,
+    page: i32,
+    page_count: i32,
+    render_job: i32,
+    visible_text: String,
+    /// The source file's actual bytes, verified unchanged across rendering.
+    /// This is distinct from the hash of displayed extracted Unicode text.
+    file_sha256: Option<String>,
+}
+
+#[derive(Debug, PartialEq, Eq)]
+struct PdfPassageAnchor {
+    byte_start: usize,
+    byte_end: usize,
+    source_sha256: String,
+}
+
+const MAX_PDF_PASSAGE_BYTES: usize = 4_096;
+const MAX_GROUNDED_PDF_FILE_BYTES: u64 = 256 * 1024 * 1024;
+
+/// File digest computation is only used on background worker threads. Do not
+/// hash potentially large documents from the Slint event loop.
+fn pdf_file_sha256(path: &Path) -> Result<String, String> {
+    use std::io::Read as _;
+    let mut file = std::fs::File::open(path)
+        .map_err(|_| "Cannot open the displayed PDF for source verification".to_string())?;
+    let mut digest = Sha256::new();
+    let mut total = 0_u64;
+    let mut chunk = [0_u8; 64 * 1024];
+    loop {
+        let count = file
+            .read(&mut chunk)
+            .map_err(|_| "Cannot read the displayed PDF for source verification".to_string())?;
+        if count == 0 {
+            break;
+        }
+        total += count as u64;
+        if total > MAX_GROUNDED_PDF_FILE_BYTES {
+            return Err("PDF is too large for verified local-AI source grounding".into());
+        }
+        digest.update(&chunk[..count]);
+    }
+    Ok(hex::encode(digest.finalize()))
+}
+
+fn verify_pdf_file_sha256(path: &Path, expected: &str) -> Result<(), String> {
+    let actual = pdf_file_sha256(path)?;
+    if actual != expected {
+        return Err("The source PDF changed on disk after rendering. Reopen its page and preview the passage again; nothing was sent.".into());
+    }
+    Ok(())
+}
+
+/// The dispatch closure is deliberately unreachable when the file bytes no
+/// longer match the page shown during approval. The check runs off the UI
+/// event loop. Cancellation after an HTTP send begins remains best-effort.
+fn with_verified_pdf_ai_source<T>(
+    pdf_source: Option<&(PathBuf, String)>,
+    cancelled: impl Fn() -> bool,
+    dispatch: impl FnOnce() -> Result<T, String>,
+) -> Result<T, String> {
+    if let Some((path, digest)) = pdf_source {
+        verify_pdf_file_sha256(path, digest)?;
+    }
+    if cancelled() {
+        return Err("Local AI request canceled before dispatch".into());
+    }
+    let result = dispatch()?;
+    // A local model can take seconds to respond; fail closed if the source
+    // file changes while inference is in flight rather than displaying text
+    // as though it described the current on-disk document.
+    if let Some((path, digest)) = pdf_source {
+        verify_pdf_file_sha256(path, digest)?;
+    }
+    Ok(result)
+}
+
+/// The pasted passage must occur exactly once in the text that the host
+/// actually rendered. Indices are UTF-8 bytes in that bounded display text,
+/// not coordinates in the PDF or verified archival citation anchors.
+fn verified_pdf_passage(
+    snapshot: Option<&PdfPageSnapshot>,
+    current_path: &str,
+    current_page: i32,
+    current_page_count: i32,
+    current_job: i32,
+    visible_text: &str,
+    pasted: &str,
+) -> Result<PdfPassageAnchor, String> {
+    let source =
+        snapshot.ok_or("Open and finish rendering a PDF page before asking about text.")?;
+    if current_path.is_empty()
+        || source.path != current_path
+        || source.page != current_page
+        || source.page_count != current_page_count
+        || source.render_job != current_job
+        || current_page < 1
+        || current_page_count < current_page
+        || visible_text.is_empty()
+        || source.visible_text != visible_text
+        || source.file_sha256.is_none()
+    {
+        return Err("The PDF file, page or displayed text changed. Open the current page and copy the passage again.".into());
+    }
+    if pasted.trim().is_empty() {
+        return Err("Select and copy a passage from the extracted text, then paste it into Selected PDF passage.".into());
+    }
+    if pasted.len() > MAX_PDF_PASSAGE_BYTES {
+        return Err(format!(
+            "Selected PDF passage exceeds the {MAX_PDF_PASSAGE_BYTES}-byte limit."
+        ));
+    }
+    let start = visible_text.find(pasted).ok_or(
+        "Pasted text is not an exact excerpt of this rendered page. Copy it from the extracted text without modifying it.",
+    )?;
+    // Search starting at the next Unicode scalar, rather than the end of the
+    // match, so overlapping repeated passages are also rejected.
+    let next_char = visible_text[start..]
+        .chars()
+        .next()
+        .expect("a nonempty match has a first character")
+        .len_utf8();
+    if visible_text[start + next_char..].contains(pasted) {
+        return Err("This passage appears more than once on the page. Paste a longer unique selection to disambiguate it.".into());
+    }
+    let end = start + pasted.len();
+    debug_assert!(visible_text.is_char_boundary(start) && visible_text.is_char_boundary(end));
+    Ok(PdfPassageAnchor {
+        byte_start: start,
+        byte_end: end,
+        source_sha256: hex::encode(Sha256::digest(visible_text.as_bytes())),
+    })
+}
+
+/// The identity of one explicitly requested local-model run. Project paths
+/// alone are insufficient: a project can be reopened, or an earlier canceled
+/// request can finish after a newer request in that same project.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct ContextAiRunIdentity {
+    id: Uuid,
+    project: PathBuf,
+    project_generation: u64,
+}
+
+struct ContextAiInFlight {
+    identity: ContextAiRunIdentity,
+    stop: Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+struct ContextAiRunLifecycle {
+    project: Option<PathBuf>,
+    project_generation: u64,
+    current: Option<ContextAiInFlight>,
+}
+
+fn context_ai_completion_is_current(
+    state: &ContextAiRunLifecycle,
+    completed: &ContextAiRunIdentity,
+) -> bool {
+    state.current.as_ref().is_some_and(|run| {
+        !run.stop.load(Ordering::SeqCst)
+            && run.identity == *completed
+            && state.project.as_deref() == Some(completed.project.as_path())
+            && state.project_generation == completed.project_generation
+    })
+}
+
+/// Invalidate before clearing the UI. A canceled worker can still finish, but
+/// its delayed event-loop completion can no longer affect any later request.
+fn invalidate_context_ai_run(state: &mut ContextAiRunLifecycle) -> bool {
+    if let Some(run) = state.current.take() {
+        run.stop.store(true, Ordering::SeqCst);
+        true
+    } else {
+        false
+    }
+}
+
+fn change_context_ai_project(
+    state: &mut ContextAiRunLifecycle,
+    project: Option<PathBuf>,
+    project_generation: u64,
+) {
+    invalidate_context_ai_run(state);
+    state.project = project;
+    state.project_generation = project_generation;
+}
+
+fn begin_context_ai_run(
+    state: &mut ContextAiRunLifecycle,
+    identity: ContextAiRunIdentity,
+    stop: Arc<AtomicBool>,
+) -> bool {
+    if state.project.as_deref() != Some(identity.project.as_path())
+        || state.project_generation != identity.project_generation
+        || state.current.is_some()
+    {
+        return false;
+    }
+    state.current = Some(ContextAiInFlight { identity, stop });
+    true
+}
+
+fn finish_context_ai_run(
+    state: &mut ContextAiRunLifecycle,
+    completed: &ContextAiRunIdentity,
+) -> bool {
+    if !context_ai_completion_is_current(state, completed) {
+        return false;
+    }
+    state.current.take();
+    true
+}
+
+#[derive(Debug, PartialEq, Eq)]
+enum ContextAiCompletionDisposition {
+    IgnoredStale,
+    DiscardedAfterPageChange,
+    DisplayOnSourcePage,
+}
+
+fn complete_context_ai_for_page(
+    state: &mut ContextAiRunLifecycle,
+    completed: &ContextAiRunIdentity,
+    requested_page: i32,
+    visible_page: i32,
+) -> ContextAiCompletionDisposition {
+    if !finish_context_ai_run(state, completed) {
+        ContextAiCompletionDisposition::IgnoredStale
+    } else if requested_page != visible_page {
+        ContextAiCompletionDisposition::DiscardedAfterPageChange
+    } else {
+        ContextAiCompletionDisposition::DisplayOnSourcePage
+    }
+}
+
+const LOCAL_ONLY_AI_POLICY: EgressPolicy = EgressPolicy {
+    offline: true,
+    external_allowed: false,
+};
+
+fn contextual_note_object_id(note_id: &str) -> String {
+    if note_id.is_empty() {
+        "research-notebook".into()
+    } else {
+        format!("quick-note:{note_id}")
+    }
+}
+
+/// Bind contextual AI to the Notes editor the user can see. A selected quick
+/// note can remain selected when switching to the separate research notebook.
+fn contextual_notes_payload(
+    show_research_notebook: bool,
+    quick_note_id: &str,
+    quick_note_title: &str,
+    quick_note_body: &str,
+    notebook_draft: &str,
+) -> Result<(String, String, String), String> {
+    if show_research_notebook {
+        Ok((
+            "research-notebook".into(),
+            "Research notebook".into(),
+            notebook_draft.into(),
+        ))
+    } else if quick_note_id.is_empty() {
+        Err("Select or create a Quick Note before previewing its AI context.".into())
+    } else {
+        Ok((
+            contextual_note_object_id(quick_note_id),
+            format!("Quick note: {quick_note_title}"),
+            quick_note_body.into(),
+        ))
+    }
+}
+
+/// Obtain the visible source without opening project storage. Keeping this
+/// one representation shared by request previews and completion fingerprints
+/// avoids SQLite integrity scans on the Slint event loop after an AI request.
+fn contextual_screen_payload(
+    ui: &MainWindow,
+    pdf_snapshot: Option<&PdfPageSnapshot>,
+) -> Result<Option<(ContextKind, String, String, String)>, String> {
+    let payload = match ui.get_page() {
+        7 => {
+            let passage = ui.get_pdf_selected_passage();
+            let source = verified_pdf_passage(
+                pdf_snapshot,
+                ui.get_pdf_local_path().as_str(),
+                ui.get_pdf_page_number(),
+                ui.get_pdf_page_count(),
+                ui.get_pdf_job(),
+                ui.get_pdf_page_extracted_text().as_str(),
+                passage.as_str(),
+            )?;
+            let rendered = pdf_snapshot.expect("verified PDF page has a snapshot");
+            // Render-job identity prevents a preview approved for one PDF
+            // opening from being reused after a later render of identical
+            // page text. The hash does not disclose the absolute path.
+            let source_id = hex::encode(Sha256::digest(
+                serde_json::to_vec(&(
+                    &rendered.path,
+                    rendered.page,
+                    rendered.render_job,
+                    &source.source_sha256,
+                    &rendered.file_sha256,
+                ))
+                .map_err(|error| error.to_string())?,
+            ));
+            Some((
+                ContextKind::Evidence,
+                format!("pdf:{}", &source_id[..32]),
+                format!(
+                    "PDF page {} · render {} · displayed-text bytes {}..{} · SHA-256 {}",
+                    rendered.page,
+                    rendered.render_job,
+                    source.byte_start,
+                    source.byte_end,
+                    source.source_sha256
+                ),
+                passage.to_string(),
+            ))
+        }
+        19 => {
+            let body = ui.get_manuscript_draft_body();
+            let selected = ui.get_writing_ai_use_found_text();
+            let content = if selected {
+                document_navigation::found_text(
+                    body.as_str(),
+                    ui.get_writing_find_offset(),
+                    ui.get_writing_find_end(),
+                    ui.get_writing_find_match(),
+                )
+                .ok_or("Found-text selection is stale or invalid; find the text again before previewing AI context.")?
+                .to_string()
+            } else {
+                body.to_string()
+            };
+            Some((
+                ContextKind::Manuscript,
+                "manuscript".into(),
+                format!(
+                    "Manuscript: {} · {}{}",
+                    ui.get_manuscript_draft_id(),
+                    ui.get_manuscript_draft_section(),
+                    if selected {
+                        " · exact found text only"
+                    } else {
+                        ""
+                    }
+                ),
+                content,
+            ))
+        }
+        21 => {
+            let (object, title, content) = contextual_notes_payload(
+                ui.get_show_research_notebook(),
+                ui.get_quick_note_id().as_str(),
+                ui.get_quick_note_title().as_str(),
+                ui.get_quick_note_body().as_str(),
+                ui.get_notebook_draft().as_str(),
+            )?;
+            Some((ContextKind::Notes, object, title, content))
+        }
+        12 | 13 => Some((
+            ContextKind::Dataset,
+            "dataset".into(),
+            "Current dataset metadata".into(),
+            format!(
+                "Dataset: {}\nVariable metadata: {}",
+                ui.get_analysis_results(),
+                ui.get_variable_results()
+            ),
+        )),
+        14 | 15 => Some((
+            ContextKind::Statistics,
+            "analysis".into(),
+            ui.get_statistics_result_title().to_string(),
+            format!(
+                "Statistical result: {}\nDiagnostics: {}\nProvenance: {}",
+                ui.get_statistics_result_primary(),
+                ui.get_statistics_result_secondary(),
+                ui.get_statistics_result_provenance()
+            ),
+        )),
+        3 => Some((
+            ContextKind::Search,
+            "search".into(),
+            "Research search".into(),
+            ui.get_library_results().to_string(),
+        )),
+        5..=11 | 20 => Some((
+            ContextKind::Evidence,
+            "evidence".into(),
+            "Current sources and evidence".into(),
+            format!(
+                "Sources: {}\nReferences: {}\nReview: {}",
+                ui.get_library_results(),
+                ui.get_reference_results(),
+                ui.get_review_results()
+            ),
+        )),
+        22 | 27 => Some((
+            ContextKind::Reports,
+            "report".into(),
+            "Prepared manuscript/report".into(),
+            ui.get_writing_results().to_string(),
+        )),
+        _ => None,
+    };
+    Ok(payload)
+}
+
+/// Privacy-preserving, constant-size comparison for an in-flight local model
+/// response. This contains the screen, exact task, source identity and visible
+/// text, and performs no filesystem/database I/O on the UI completion path.
+fn contextual_visible_ui_digest(
+    ui: &MainWindow,
+    pdf_snapshot: Option<&PdfPageSnapshot>,
+) -> Result<String, String> {
+    let payload = (
+        ui.get_page(),
+        ui.get_context_ai_task().to_string(),
+        contextual_screen_payload(ui, pdf_snapshot)?,
+    );
+    let serialized = serde_json::to_vec(&payload).map_err(|error| error.to_string())?;
+    Ok(hex::encode(Sha256::digest(serialized)))
+}
+
+fn contextual_request_from_ui(
+    ui: &MainWindow,
+    project: &Path,
+    pdf_snapshot: Option<&PdfPageSnapshot>,
+) -> Result<ContextualRequest, String> {
+    let info = ProjectStore::open(project)
+        .map_err(|error| error.to_string())?
+        .info()
+        .map_err(|error| error.to_string())?;
+    let (kind, object, title, content) = contextual_screen_payload(ui, pdf_snapshot)?
+        .unwrap_or_else(|| {
+            (
+                ContextKind::Project,
+                "project".into(),
+                format!("Project: {}", info.title),
+                format!(
+                    "Research question: {}\nDesign: {}\nPrivacy: {}",
+                    info.question, info.design, info.privacy
+                ),
+            )
+        });
+    if content.trim().is_empty() {
+        return Err("This screen has no content for AI to inspect. Add a note, manuscript, dataset, or result first.".into());
+    }
+    Ok(ContextualRequest {
+        user_request: ui.get_context_ai_task().to_string(),
+        context: ContextualContext {
+            kind,
+            project_id: info.id,
+            object_id: object,
+            title,
+            content,
+            source_excerpts: Vec::new(),
+        },
+    })
+}
+
+fn selected_local_ai_profile(data_root: &Path, selected: &str) -> Result<ProviderProfile, String> {
+    let store = ProfileStore::open(&data_root.join("ai-profiles.json"))
+        .map_err(|error| error.to_string())?;
+    let profile = store
+        .list()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .find(|profile| {
+            profile.local && (selected.trim().is_empty() || profile.id == selected.trim())
+        })
+        .ok_or("No matching local AI model. Configure a loopback provider profile in Manage → Providers.")?;
+    let profile = ProviderProfile {
+        id: profile.id,
+        kind: profile.kind,
+        model: profile.model,
+        endpoint: profile.endpoint,
+        local: true,
+        credential_reference: None,
+        capabilities: profile.capabilities,
+    };
+    LOCAL_ONLY_AI_POLICY
+        .authorize(&profile)
+        .map_err(|error| error.to_string())?;
+    Ok(profile)
+}
+
+fn populate_quick_notes(
+    ui: &MainWindow,
+    project: &Path,
+    search: &str,
+    view: i32,
+) -> Result<(), String> {
+    let notes = quick_notes::list_with_deleted(project, search, view == 1, view == 2)
+        .map_err(|error| error.to_string())?;
+    let count = notes.len();
+    let cards: Vec<QuickNoteCard> = notes
+        .into_iter()
+        .map(|note| QuickNoteCard {
+            id: note.id.into(),
+            title: note.title.into(),
+            preview: note.body.chars().take(135).collect::<String>().into(),
+            labels: note.labels.into(),
+            pinned: note.pinned,
+            archived: note.archived,
+            revision: note.revision as i32,
+        })
+        .collect();
+    ui.set_quick_notes(slint::ModelRc::new(slint::VecModel::from(cards)));
+    ui.set_quick_note_status(format!("{count} note(s) · Saved locally").into());
+    Ok(())
+}
+
+/// Host-owned, project-scoped recovery choices. The UI receives only
+/// read-only display fields; it never supplies a recovery token or draft body
+/// to a mutating action.
+#[derive(Default)]
+struct QuickNoteRecoverySelection {
+    project: Option<PathBuf>,
+    drafts: Vec<ConflictingQuickNoteDraft>,
+    selected: usize,
+}
+
+impl QuickNoteRecoverySelection {
+    fn refresh(&mut self, project: &Path) -> Result<(), String> {
+        // Never retain another project's private draft in host/UI memory when
+        // opening a project whose journal cannot be read. Failure also clears
+        // potentially stale snapshots for the same project.
+        if self.project.as_deref() != Some(project) {
+            self.reset();
+        }
+        let drafts = match quick_notes::list_conflicting_drafts(project) {
+            Ok(drafts) => drafts,
+            Err(error) => {
+                self.reset();
+                return Err(error.to_string());
+            }
+        };
+        let previous_token = self
+            .current(project)
+            .map(|draft| draft.recovery_token.clone());
+        let selected = previous_token
+            .and_then(|token| {
+                drafts
+                    .iter()
+                    .position(|draft| draft.recovery_token == token)
+            })
+            .unwrap_or_else(|| self.selected.min(drafts.len().saturating_sub(1)));
+        self.project = Some(project.to_path_buf());
+        self.drafts = drafts;
+        self.selected = selected;
+        Ok(())
+    }
+
+    fn reset(&mut self) {
+        self.project = None;
+        self.drafts.clear();
+        self.selected = 0;
+    }
+
+    fn current(&self, project: &Path) -> Option<&ConflictingQuickNoteDraft> {
+        (self.project.as_deref() == Some(project))
+            .then(|| self.drafts.get(self.selected))
+            .flatten()
+    }
+
+    fn shift(&mut self, project: &Path, direction: i32) -> bool {
+        if self.project.as_deref() != Some(project) || self.drafts.is_empty() {
+            return false;
+        }
+        let last = self.drafts.len() - 1;
+        self.selected = if direction < 0 {
+            self.selected.saturating_sub(1)
+        } else if direction > 0 {
+            (self.selected + 1).min(last)
+        } else {
+            self.selected
+        };
+        true
+    }
+}
+
+fn display_quick_note_recovery(ui: &MainWindow, choices: &QuickNoteRecoverySelection) {
+    ui.set_quick_note_recovery_count(choices.drafts.len().try_into().unwrap_or(i32::MAX));
+    let Some(draft) = choices.drafts.get(choices.selected) else {
+        ui.set_quick_note_recovery_index(0);
+        ui.set_quick_note_recovery_title("".into());
+        ui.set_quick_note_recovery_body("".into());
+        ui.set_quick_note_recovery_labels("".into());
+        ui.set_quick_note_recovery_source("".into());
+        ui.set_quick_note_recovery_status("".into());
+        return;
+    };
+    ui.set_quick_note_recovery_index(
+        choices
+            .selected
+            .saturating_add(1)
+            .try_into()
+            .unwrap_or(i32::MAX),
+    );
+    ui.set_quick_note_recovery_title(draft.title.clone().into());
+    ui.set_quick_note_recovery_body(draft.body.clone().into());
+    ui.set_quick_note_recovery_labels(draft.labels.clone().into());
+    ui.set_quick_note_recovery_source(
+        format!(
+            "Original note {} · draft revision {} · newer saved revision {}",
+            draft.source_note_id, draft.expected_revision, draft.current_revision
+        )
+        .into(),
+    );
+    ui.set_quick_note_recovery_status(
+        "This is the exact staged draft. Recovery creates a different note; it never replaces the newer saved original."
+            .into(),
+    );
+}
+
+fn recovered_draft_matches_visible_editor(
+    draft: &ConflictingQuickNoteDraft,
+    selected_note_id: &str,
+    title: &str,
+    body: &str,
+    labels: &str,
+) -> bool {
+    selected_note_id == draft.source_note_id
+        && title == draft.title
+        && body == draft.body
+        && labels == draft.labels
+}
+
+fn select_quick_note(ui: &MainWindow, note: &QuickNote) {
+    ui.set_quick_note_id(note.id.clone().into());
+    ui.set_quick_note_revision(note.revision as i32);
+    ui.set_quick_note_title(note.title.clone().into());
+    ui.set_quick_note_body(note.body.clone().into());
+    ui.set_quick_note_labels(note.labels.clone().into());
+    ui.set_quick_note_status("Ready to edit · Auto-save is on".into());
+}
+
+fn reset_quick_notes_for_project(ui: &MainWindow, project: &Path) {
+    ui.set_dataset_selected_id("".into());
+    ui.set_dataset_selected_revision("".into());
+    clear_dataset_grid(ui, "Open or import a dataset revision to inspect it");
+    ui.set_quick_note_id("".into());
+    ui.set_quick_note_title("".into());
+    ui.set_quick_note_body("".into());
+    ui.set_quick_note_labels("".into());
+    ui.set_quick_note_revision(0);
+    ui.set_quick_note_search("".into());
+    ui.set_quick_note_view(0);
+    ui.set_quick_note_grid(true);
+    let recovered = quick_notes::recover_drafts(project);
+    if let Err(error) = populate_quick_notes(ui, project, "", 0) {
+        ui.set_quick_note_status(format!("Cannot load project notes: {error}").into());
+    } else {
+        match recovered {
+            Ok(count) if count > 0 => ui.set_quick_note_status(
+                format!("Recovered {count} interrupted note draft(s)").into(),
+            ),
+            Err(error) => ui.set_quick_note_status(
+                format!("Note draft recovery needs attention: {error}").into(),
+            ),
+            _ => {}
+        }
+    }
+    // Called only after the host has bound the new active project. A failed
+    // automatic recovery must remain inspectable rather than disappearing.
+    ui.invoke_refresh_quick_note_recovery();
+}
+
+fn save_selected_quick_note(ui: &MainWindow, project: &Path) -> Result<(), String> {
+    let id = ui.get_quick_note_id().to_string();
+    if id.is_empty() {
+        return Ok(());
+    }
+    let updated = quick_notes::save(
+        project,
+        Some(&id),
+        Some(ui.get_quick_note_revision() as i64),
+        ui.get_quick_note_title().as_str(),
+        ui.get_quick_note_body().as_str(),
+        ui.get_quick_note_labels().as_str(),
+    )
+    .map_err(|error| {
+        ui.invoke_refresh_quick_note_recovery();
+        error.to_string()
+    })?;
+    // A revision may have committed even if clearing the draft journal fails.
+    // Keep the editor's optimistic revision in sync before reporting that error.
+    ui.set_quick_note_revision(updated.revision as i32);
+    quick_notes::flush_draft(project, &id).map_err(|error| {
+        ui.invoke_refresh_quick_note_recovery();
+        error.to_string()
+    })?;
+    ui.set_quick_note_status("Saved locally · Revision history retained".into());
+    populate_quick_notes(
+        ui,
+        project,
+        ui.get_quick_note_search().as_str(),
+        ui.get_quick_note_view(),
+    )
+}
+
+/// A note transition may replace the editor, change the active filter, or
+/// mutate a note. None of those effects may occur if the current edit fails to
+/// save. Keeping the gate separate allows real optimistic-revision conflicts
+/// to be checked without constructing a native GUI in tests.
+fn after_quick_note_save<T>(
+    save: impl FnOnce() -> Result<(), String>,
+    transition: impl FnOnce() -> T,
+) -> Result<T, String> {
+    save()?;
+    Ok(transition())
+}
+
+/// Save the active quick note before changing projects. A pending timer could
+/// otherwise run after project switch and persist the previous project's text
+/// under the new project's active note identifier.
+fn finish_quick_note_before_project_switch(
+    ui: &MainWindow,
+    project: Option<&Path>,
+    timer: &slint::Timer,
+) -> Result<(), String> {
+    timer.stop();
+    if let Some(project) = project {
+        save_selected_quick_note(ui, project)?;
+    }
+    Ok(())
+}
 
 const PAGES: [&str; 40] = [
     "Welcome",
@@ -2129,6 +3086,134 @@ fn library_read_at(
     Ok(result)
 }
 
+fn source_entries_from_result(
+    response: &serde_json::Value,
+    field: &str,
+) -> Result<Vec<SourceListEntry>, String> {
+    let rows = response
+        .pointer(&format!("/data/{field}"))
+        .and_then(serde_json::Value::as_array)
+        .ok_or("Library returned an invalid source list")?;
+    rows.iter()
+        .map(|row| {
+            let id = row
+                .get("source_id")
+                .and_then(serde_json::Value::as_str)
+                .filter(|value| !value.is_empty())
+                .ok_or("Source list contains an invalid ID")?;
+            let title = row
+                .get("title")
+                .and_then(serde_json::Value::as_str)
+                .ok_or("Source list contains an invalid title")?;
+            Ok(SourceListEntry {
+                source_id: id.into(),
+                title: title.into(),
+                snippet: row
+                    .get("snippet")
+                    .and_then(serde_json::Value::as_str)
+                    .unwrap_or_default()
+                    .into(),
+            })
+        })
+        .collect()
+}
+
+fn clear_reader_document(ui: &MainWindow) {
+    ui.set_reader_source_title("".into());
+    ui.set_reader_text("".into());
+    ui.set_reader_offset(0);
+    ui.set_reader_returned(0);
+    ui.set_reader_more(false);
+}
+
+fn reset_source_views(ui: &MainWindow, project_id: &str) {
+    ui.set_source_project_id(project_id.into());
+    ui.set_source_search_request(ui.get_source_search_request().wrapping_add(1));
+    ui.set_reader_request(ui.get_reader_request().wrapping_add(1));
+    ui.set_source_search_busy(false);
+    ui.set_reader_busy(false);
+    ui.set_source_search_results(ModelRc::new(VecModel::from(Vec::<SourceListEntry>::new())));
+    ui.set_reader_source_list(ModelRc::new(VecModel::from(Vec::<SourceListEntry>::new())));
+    ui.set_reader_source_id("".into());
+    clear_reader_document(ui);
+    ui.set_reader_list_offset(0);
+    ui.set_reader_list_more(false);
+    ui.set_source_search_status("Search this project's locally stored text.".into());
+    ui.set_reader_status("Choose a source from this project to read.".into());
+    ui.set_reader_list_status("Refresh to list the project's sources.".into());
+}
+
+struct SourceReaderPage {
+    title: String,
+    text: String,
+    offset: i32,
+    returned: i32,
+    total: i32,
+    more: bool,
+}
+
+fn source_reader_page_at(
+    project: &Path,
+    source_id: &str,
+    offset: i32,
+    data_root: &Path,
+) -> Result<SourceReaderPage, String> {
+    if source_id.trim().is_empty() || source_id.len() > 128 || source_id.contains('\0') {
+        return Err("Select a valid source ID".into());
+    }
+    if !(0..=10_000_000).contains(&offset) {
+        return Err("Reader offset is outside the supported range".into());
+    }
+    let arguments = serde_json::json!({"source_id":source_id});
+    let metadata = library_read_at(project, "library.source_get", arguments, data_root)?;
+    let page = library_read_at(
+        project,
+        "source.full_text",
+        serde_json::json!({"source_id":source_id,"offset":offset,"limit":8000}),
+        data_root,
+    )?;
+    let meta = &metadata["data"];
+    let body = &page["data"];
+    let title = meta["title"].as_str().ok_or("Invalid source metadata")?;
+    let text = body["text"]
+        .as_str()
+        .ok_or("Invalid source text response")?;
+    let returned = body["returned_characters"]
+        .as_u64()
+        .and_then(|number| i32::try_from(number).ok())
+        .ok_or("Invalid source page length")?;
+    let total = body["total_characters"]
+        .as_u64()
+        .and_then(|number| i32::try_from(number).ok())
+        .ok_or("Invalid source text length")?;
+    let actual_offset = body["offset"]
+        .as_u64()
+        .and_then(|number| i32::try_from(number).ok())
+        .ok_or("Invalid source page offset")?;
+    let more = body["truncated"]
+        .as_bool()
+        .ok_or("Invalid source pagination status")?;
+    if actual_offset != offset
+        || returned != text.chars().count() as i32
+        || returned > 8000
+        || offset.saturating_add(returned) > total
+        || more != (offset.saturating_add(returned) < total)
+        || meta["source_id"].as_str() != Some(source_id)
+        || body["source_id"].as_str() != Some(source_id)
+        || meta["characters"].as_u64() != Some(total as u64)
+    {
+        return Err("Source metadata and page content are inconsistent".into());
+    }
+    Ok(SourceReaderPage {
+        title: title.into(),
+        text: text.into(),
+        offset,
+        returned,
+        total,
+        more,
+    })
+}
+
 fn evidence_router(
     project_id: Uuid,
     project_path: &Path,
@@ -2351,9 +3436,174 @@ fn evidence_read_at(
     Ok(result)
 }
 
+/// Evidence notes are explicitly attached to an existing project source. A
+/// note is a human interpretation, not a verified quotation or anchor.
+fn evidence_note_arguments(
+    source_id: &str,
+    title: &str,
+    body: &str,
+) -> Result<serde_json::Value, String> {
+    let source_id = source_id.trim();
+    let title = title.trim();
+    let body = body.trim();
+    if source_id.is_empty() || source_id.len() > 128 || source_id.chars().any(char::is_control) {
+        return Err("Enter a valid existing source ID (at most 128 UTF-8 bytes)".into());
+    }
+    if title.is_empty() || title.chars().count() > 300 {
+        return Err("Evidence note title must contain 1–300 characters".into());
+    }
+    if body.is_empty() || body.chars().count() > 250_000 {
+        return Err("Evidence note body must contain 1–250,000 characters".into());
+    }
+    Ok(serde_json::json!({
+        "source_id": source_id,
+        "title": title,
+        "body": body,
+    }))
+}
+
+fn require_matching_evidence_note_preview(
+    pending: &PendingEvidenceAction,
+    source_id: &str,
+    title: &str,
+    body: &str,
+) -> Result<(), String> {
+    if pending.surface != "evidence" || pending.operation != "evidence.note" {
+        return Err("The active approval is for another research workflow. Preview this evidence note again.".into());
+    }
+    let current = evidence_note_arguments(source_id, title, body)?;
+    for field in ["source_id", "title", "body"] {
+        if pending.arguments[field] != current[field] {
+            return Err("Evidence note fields changed after preview. Preview the current text again before recording.".into());
+        }
+    }
+    Ok(())
+}
+
+fn require_ai_preview_surface(pending: &PendingAiAction, expected: &str) -> Result<(), String> {
+    if pending.surface != expected {
+        return Err(
+            "The active preview belongs to another workspace. Preview this action again before recording.".into(),
+        );
+    }
+    Ok(())
+}
+
+fn clear_evidence_draft_on_project_switch(ui: &MainWindow) {
+    ui.set_evidence_draft_source_id("".into());
+    ui.set_evidence_draft_title("".into());
+    ui.set_evidence_draft_body("".into());
+    ui.set_evidence_last_note_id("".into());
+}
+
+/// Drop previous-project result text and UI-only selections before exposing
+/// another project's workspaces. This does not modify stored project data.
+fn clear_project_scoped_view_state(ui: &MainWindow) {
+    // PDF rendering/search runs on a worker thread. Invalidate its token
+    // before clearing the screen so an old project's late completion cannot
+    // paint its page or search status into the newly opened project.
+    ui.set_pdf_job(ui.get_pdf_job().wrapping_add(1));
+    clear_evidence_draft_on_project_switch(ui);
+    ui.set_notebook_draft("".into());
+    ui.set_manuscript_draft_id("".into());
+    ui.set_manuscript_draft_section("".into());
+    ui.set_manuscript_draft_citations("".into());
+    ui.set_manuscript_reference_options(ModelRc::new(VecModel::from(Vec::<
+        ManuscriptReferenceChoice,
+    >::new())));
+    ui.set_manuscript_reference_status(
+        "Search registered project references to insert their exact IDs.".into(),
+    );
+    ui.set_manuscript_draft_body("".into());
+    ui.set_manuscript_word_count(0);
+    ui.set_manuscript_character_count(0);
+    ui.set_writing_find_match(false);
+    ui.set_writing_ai_use_found_text(false);
+    ui.set_manuscript_headings(ModelRc::new(
+        VecModel::from(Vec::<ManuscriptHeading>::new()),
+    ));
+    ui.set_research_summary("Refresh the current project's research metadata.".into());
+    ui.set_project_metadata_results("Inspect the current project before editing metadata.".into());
+    ui.set_question_results("Preview a question in the current project.".into());
+    ui.set_protocol_results("Preview a protocol in the current project.".into());
+    ui.set_protocol_export_id("".into());
+    ui.set_protocol_export_receipt("".into());
+    ui.set_library_results("Refresh sources in this project.".into());
+    ui.set_reference_results("Refresh references in this project.".into());
+    ui.set_review_results("Load this project's review records.".into());
+    ui.set_extraction_results("Load this project's extraction records.".into());
+    ui.set_analysis_results("Import or inspect a dataset in the current project.".into());
+    ui.set_variable_results("Inspect variables in the current project.".into());
+    ui.set_statistics_result_title("No analysis run for this project yet".into());
+    ui.set_statistics_result_primary("Choose a dataset revision and method.".into());
+    ui.set_statistics_result_secondary("".into());
+    ui.set_statistics_result_provenance("".into());
+    ui.set_analysis_report_results("Load reports from this project.".into());
+    ui.set_mixed_methods_results("Load this project's mixed-methods records.".into());
+    ui.set_qualitative_results("Inspect this project's qualitative records.".into());
+    ui.set_agent_results("Open this project's assistant history or preview an action.".into());
+    ui.set_agent_action_results("No action selected for this project.".into());
+    ui.set_project_activity_results("Load current project activity.".into());
+    ui.set_diagnostics_results("Run diagnostics for the current project.".into());
+    ui.set_context_ai_open(false);
+    ui.set_context_ai_ready(false);
+    ui.set_context_ai_busy(false);
+    ui.set_context_ai_output("".into());
+    ui.set_context_ai_preview_summary(
+        "Select a current-project context before previewing AI.".into(),
+    );
+    ui.set_writing_results("Load or preview a current-project manuscript section.".into());
+    ui.set_notebook_results("Load or edit this project's notebook.".into());
+    ui.set_pdf_local_path("".into());
+    ui.set_pdf_page_extracted_text("".into());
+    ui.set_pdf_page_extraction_status("No PDF page text loaded.".into());
+    ui.set_pdf_page_count(0);
+    ui.set_pdf_page_number(1);
+    ui.set_pdf_matches(0);
+    ui.set_pdf_highlight_visible(false);
+    ui.set_pdf_image(slint::Image::default());
+    ui.set_pdf_status("Choose a PDF for the current project.".into());
+}
+
+fn evidence_note_history_at(
+    project: &Path,
+    note_id: &str,
+    data_root: &Path,
+) -> Result<serde_json::Value, String> {
+    let note_id = note_id.trim();
+    let parsed = Uuid::parse_str(note_id)
+        .map_err(|_| "Enter the actual UUID returned when an evidence note was recorded")?;
+    let result = evidence_read_at(
+        project,
+        "evidence.note_history",
+        serde_json::json!({"note_id": parsed.to_string()}),
+        data_root,
+    )?;
+    let data = &result["data"];
+    if data["note_id"].as_str() != Some(parsed.to_string().as_str())
+        || data["source_id"].as_str().is_none_or(str::is_empty)
+        || data["revisions"].as_array().is_none_or(Vec::is_empty)
+    {
+        return Err("Evidence note history is incomplete or does not match this ID".into());
+    }
+    Ok(result)
+}
+
 fn pretty_result_data(result: &serde_json::Value) -> String {
     serde_json::to_string_pretty(&result["data"])
         .unwrap_or_else(|_| "Operation completed, but its result could not be formatted".into())
+}
+
+fn notebook_export_markdown(result: &serde_json::Value) -> Result<&str, String> {
+    let markdown = result
+        .get("data")
+        .and_then(|data| data.get("text"))
+        .and_then(serde_json::Value::as_str)
+        .ok_or("Notebook export returned no Markdown text")?;
+    if !markdown.starts_with("# Research notebook\n") {
+        return Err("Notebook export returned invalid Markdown".into());
+    }
+    Ok(markdown)
 }
 
 fn compact_stat_number(value: Option<&serde_json::Value>) -> String {
@@ -2374,6 +3624,18 @@ fn compact_stat_integer(value: Option<&serde_json::Value>) -> String {
         .and_then(serde_json::Value::as_u64)
         .map(|number| number.to_string())
         .unwrap_or_else(|| "n/a".into())
+}
+
+fn compact_stat_interval(value: Option<&serde_json::Value>) -> Option<String> {
+    let bounds = value?.as_array()?;
+    let [lower, upper] = bounds.as_slice() else {
+        return None;
+    };
+    let (lower, upper) = (lower.as_f64()?, upper.as_f64()?);
+    if !lower.is_finite() || !upper.is_finite() || lower > upper {
+        return None;
+    }
+    Some(format!("[{lower:.4}, {upper:.4}]"))
 }
 
 fn statistics_result_summary(
@@ -2448,34 +3710,52 @@ fn statistics_result_summary(
                 provenance,
             )
         }
-        "statistics.correlate" => (
-            "Pearson correlation".into(),
-            format!(
-                "r = {} · p = {}",
-                compact_stat_number(data.get("estimate")),
-                compact_stat_number(data.get("p_value"))
-            ),
-            format!(
-                "n={} complete pairs · pairwise missingness · review independence/sampling assumptions",
-                compact_stat_integer(data.get("n_used"))
-            ),
-            provenance,
-        ),
-        "statistics.test" => (
-            "Welch two-group t test".into(),
-            format!(
-                "Mean difference {} · t = {} · p = {}",
-                compact_stat_number(data.get("estimate")),
-                compact_stat_number(data.get("statistic")),
-                compact_stat_number(data.get("p_value"))
-            ),
-            format!(
-                "n={} included · df={} · effect size and 95% CI retained in verified payload",
-                compact_stat_integer(data.get("n_used")),
-                compact_stat_number(data.get("degrees_freedom"))
-            ),
-            provenance,
-        ),
+        "statistics.correlate" => {
+            let confidence = compact_stat_interval(
+                data.pointer("/details/fisher_z_confidence_interval_95"),
+            )
+            .map(|bounds| format!("95% confidence interval for r {bounds}"))
+            .unwrap_or_else(|| "95% confidence interval unavailable for this sample".into());
+            (
+                "Pearson correlation".into(),
+                format!(
+                    "r = {} · p = {}",
+                    compact_stat_number(data.get("estimate")),
+                    compact_stat_number(data.get("p_value"))
+                ),
+                format!(
+                    "n={} complete pairs · {confidence} · association is not causation; review independence and sampling",
+                    compact_stat_integer(data.get("n_used"))
+                ),
+                provenance,
+            )
+        }
+        "statistics.test" => {
+            let confidence = compact_stat_interval(data.get("confidence_interval"))
+                .map(|bounds| format!("95% confidence interval {bounds}"))
+                .unwrap_or_else(|| "confidence interval unavailable".into());
+            let effect = data
+                .pointer("/effect/cohen_d")
+                .and_then(serde_json::Value::as_f64)
+                .filter(|value| value.is_finite())
+                .map(|value| format!(" · Cohen's d = {value:.4}"))
+                .unwrap_or_default();
+            (
+                "Welch two-group t test".into(),
+                format!(
+                    "Mean difference {} · {confidence} · p = {}",
+                    compact_stat_number(data.get("estimate")),
+                    compact_stat_number(data.get("p_value"))
+                ),
+                format!(
+                    "n={} included · df={}{} · statistical nonsignificance does not establish equivalence; review design assumptions",
+                    compact_stat_integer(data.get("n_used")),
+                    compact_stat_number(data.get("degrees_freedom")),
+                    effect
+                ),
+                provenance,
+            )
+        }
         "statistics.model" => (
             "OLS linear model · HC3 robust covariance".into(),
             format!(
@@ -2500,6 +3780,55 @@ fn statistics_result_summary(
 
 fn parse_json_input(input: &str, label: &str) -> Result<serde_json::Value, String> {
     serde_json::from_str(input.trim()).map_err(|_| format!("{label} must be valid JSON"))
+}
+
+fn insert_unique_registered_citation(existing: &str, reference_id: &str) -> Result<String, String> {
+    let parsed = Uuid::parse_str(reference_id.trim())
+        .map_err(|_| "The selected reference does not have a valid ID".to_string())?;
+    let id = parsed.to_string();
+    let mut citations: Vec<&str> = existing
+        .split(',')
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .collect();
+    if citations
+        .iter()
+        .any(|value| Uuid::parse_str(value).is_ok_and(|candidate| candidate == parsed))
+    {
+        return Ok(existing.to_owned());
+    }
+    citations.push(&id);
+    Ok(citations.join(", "))
+}
+
+fn registered_manuscript_reference_choices_at(
+    project: &Path,
+    query: &str,
+    data_root: &Path,
+) -> Result<(Vec<ManuscriptReferenceChoice>, usize), String> {
+    // Push literal title/ID filtering into SQLite, rather than executing up
+    // to 50 round trips on the Slint event loop for every picker search.
+    const MAX_RESULTS: usize = 50;
+    let result = library_read_at(
+        project,
+        "library.references",
+        serde_json::json!({"limit": MAX_RESULTS, "query": query.trim()}),
+        data_root,
+    )?;
+    let references = result
+        .pointer("/data/references")
+        .and_then(serde_json::Value::as_array)
+        .ok_or_else(|| "Reference list is unavailable".to_string())?;
+    let choices = references
+        .iter()
+        .filter_map(|reference| {
+            Some(ManuscriptReferenceChoice {
+                reference_id: reference.get("reference_id")?.as_str()?.into(),
+                title: reference.get("title")?.as_str()?.into(),
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok((choices, references.len()))
 }
 
 fn reference_arguments(
@@ -3107,8 +4436,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let app = MainWindow::new()?;
+    let pdf_page_snapshot: Arc<Mutex<Option<PdfPageSnapshot>>> = Arc::new(Mutex::new(None));
     app.on_choose_local_file({
         let weak = app.as_weak();
+        let pdf_page_snapshot = pdf_page_snapshot.clone();
         move |kind| {
             let Some(ui) = weak.upgrade() else {
                 return;
@@ -3129,6 +4460,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             // chooser; it never imports a file or authorizes network egress.
             ui.set_local_file_dialog_busy(true);
             let weak_task = weak.clone();
+            let snapshot_for_task = pdf_page_snapshot.clone();
             let kind = kind.to_string();
             let task = async move {
                 let selected = rfd::AsyncFileDialog::new()
@@ -3139,7 +4471,26 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(selected) = selected {
                         match chosen_local_file_path(selected.path()) {
                             Ok(path) if kind == "pdf" => {
+                                snapshot_for_task.lock().unwrap().take();
+                                // File-picker selection updates the property
+                                // programmatically, so Slint's `edited` event
+                                // does not run. Invalidate any in-flight old
+                                // file render and clear stale page evidence.
+                                ui.set_pdf_job(ui.get_pdf_job().wrapping_add(1));
+                                ui.set_pdf_image(Image::default());
+                                ui.set_pdf_page_count(0);
+                                ui.set_pdf_page_number(1);
+                                ui.set_pdf_matches(0);
+                                ui.set_pdf_highlight_visible(false);
+                                ui.set_pdf_render_width(0.0);
+                                ui.set_pdf_render_height(0.0);
+                                ui.set_pdf_page_extracted_text("".into());
+                                ui.set_pdf_page_extraction_status(
+                                    "Selected a different file. Open it to inspect verified page text.".into(),
+                                );
                                 ui.set_pdf_local_path(path.into());
+                                ui.set_pdf_passage_status("PDF file changed. Copy a passage from the newly opened page.".into());
+                                ui.set_context_ai_ready(false);
                                 ui.set_status("PDF selected from native file dialog".into());
                             }
                             Ok(path) if kind == "data" => {
@@ -3207,16 +4558,816 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let active_project: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    let project_generation = Rc::new(Cell::new(0_u64));
+    let quick_note_draft_session: Rc<RefCell<Option<quick_notes::DraftSession>>> =
+        Rc::new(RefCell::new(None));
+    let pending_context_ai: Rc<RefCell<Option<PendingContextAi>>> = Rc::new(RefCell::new(None));
+    let active_context_ai_run = Arc::new(Mutex::new(ContextAiRunLifecycle::default()));
+    app.on_ask_about_pdf_passage({
+        let weak = app.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_context_ai_task("Explain this exact PDF passage in clear research language without inventing sources.".into());
+                ui.set_context_ai_open(true);
+                ui.set_context_ai_ready(false);
+                ui.invoke_preview_context_ai();
+            }
+        }
+    });
+    app.on_preview_context_ai({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending = pending_context_ai.clone();
+        let pdf_page_snapshot = pdf_page_snapshot.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            pending.borrow_mut().take();
+            ui.set_context_ai_ready(false);
+            let preview_result = (|| {
+                let project = active_project.borrow().clone().ok_or("Open a research project first")?;
+                let request = contextual_request_from_ui(&ui, &project, pdf_page_snapshot.lock().unwrap().as_ref())?;
+                let visible_preview = contextual::build_preview(
+                    &request, LOCAL_ONLY_AI_POLICY, None,
+                ).map_err(|error| format!("Cannot prepare context: {error}"))?;
+                // The full PDF hash and byte range remain in the read-only
+                // preview. Keep the compact panel heading short enough to
+                // remain readable beside the Reader at narrow widths.
+                let source = if ui.get_page() == 7 {
+                    format!("PDF passage · page {}", ui.get_pdf_page_number())
+                } else {
+                    format!("{:?} · {}", request.context.kind, request.context.title)
+                };
+                ui.set_context_ai_source(source.into());
+                let pdf_source = if ui.get_page() == 7 {
+                    let snapshot = pdf_page_snapshot.lock().unwrap();
+                    let rendered = snapshot.as_ref().ok_or("PDF page was not rendered")?;
+                    format!(
+                        "\nPDF file path: {}\nPage: {} of {}\nPDF file SHA-256 at rendering: {}\nShown extracted-text SHA-256: {}\nThe byte range above refers to displayed extracted text, not PDF file bytes or a saved citation. The PDF file is reverified before any local-model request.\n",
+                        rendered.path,
+                        rendered.page,
+                        rendered.page_count,
+                        rendered.file_sha256.as_deref().ok_or("PDF file identity is unverified; render the page again")?,
+                        hex::encode(Sha256::digest(rendered.visible_text.as_bytes())),
+                    )
+                } else {
+                    String::new()
+                };
+                let local_model = selected_local_ai_profile(
+                    &host_data_root()?, ui.get_context_ai_profile().as_str(),
+                );
+                let preview_text = format!(
+                    "Local preview only. Nothing has been sent.\nSource: {}{}\nTask: {}\nContext: {} bytes.\n\nExact user message:\n{}",
+                    request.context.title,
+                    pdf_source,
+                    request.user_request,
+                    request.context.content.len(),
+                    visible_preview.messages[1].content,
+                );
+                match local_model {
+                    Ok(profile) => {
+                        let permitted_preview = contextual::build_preview(
+                            &request, LOCAL_ONLY_AI_POLICY, Some(&profile),
+                        ).map_err(|error| error.to_string())?;
+                        *pending.borrow_mut() = Some(PendingContextAi {
+                            page: ui.get_page(),
+                            project,
+                            request,
+                            profile,
+                            preview: permitted_preview,
+                            pdf_source: if ui.get_page() == 7 {
+                                let snapshot = pdf_page_snapshot.lock().unwrap();
+                                let source = snapshot.as_ref().ok_or("PDF page is unavailable")?;
+                                Some((
+                                    PathBuf::from(&source.path),
+                                    source.file_sha256.clone().ok_or("PDF file identity is unverified")?,
+                                ))
+                            } else {
+                                None
+                            },
+                        });
+                        ui.set_context_ai_preview_summary(preview_text.into());
+                        ui.set_context_ai_ready(true);
+                        if ui.get_page() == 7 {
+                            ui.set_pdf_passage_status("Unique PDF passage verified; inspect the full preview and use Run locally only if you approve.".into());
+                        }
+                    }
+                    Err(error) => {
+                        ui.set_context_ai_preview_summary(
+                            format!("{preview_text}\n\nLocal inference unavailable: {error}").into(),
+                        );
+                        if ui.get_page() == 7 {
+                            ui.set_pdf_passage_status("Passage verified; no configured local model is available. The preview is inspection-only.".into());
+                        }
+                    }
+                }
+                Ok::<_, String>(())
+            })();
+            if let Err(error) = preview_result {
+                ui.set_context_ai_preview_summary(
+                    format!("No request prepared: {error}").into(),
+                );
+                ui.set_context_ai_ready(false);
+                if ui.get_page() == 7 {
+                    ui.set_pdf_passage_status(format!("Passage rejected: {error}").into());
+                }
+            }
+        }
+    });
+    app.on_run_context_ai({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let project_generation = project_generation.clone();
+        let pending = pending_context_ai.clone();
+        let active_run = active_context_ai_run.clone();
+        let pdf_page_snapshot = pdf_page_snapshot.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            if ui.get_context_ai_busy() {
+                return;
+            }
+            let Some(approved) = pending.borrow().clone() else {
+                ui.set_context_ai_output("Preview a valid local-model request first.".into());
+                return;
+            };
+            let valid = active_project
+                .borrow()
+                .as_ref()
+                .is_some_and(|current| current == &approved.project)
+                && ui.get_page() == approved.page
+                && contextual_request_from_ui(&ui, &approved.project, pdf_page_snapshot.lock().unwrap().as_ref())
+                    .is_ok_and(|current| current == approved.request);
+            if !valid {
+                ui.set_context_ai_ready(false);
+                pending.borrow_mut().take();
+                ui.set_context_ai_output(
+                    "Your project, page or writing changed after preview. Review context again."
+                        .into(),
+                );
+                return;
+            }
+            let requested_ui_digest = match contextual_visible_ui_digest(&ui, pdf_page_snapshot.lock().unwrap().as_ref()) {
+                Ok(digest) => digest,
+                Err(error) => {
+                    ui.set_context_ai_ready(false);
+                    pending.borrow_mut().take();
+                    ui.set_context_ai_output(
+                        format!("The visible local AI context cannot be verified: {error}").into(),
+                    );
+                    return;
+                }
+            };
+            // One explicit user action authorizes one local inference. Remote
+            // profiles cannot pass the offline egress policy.
+            let identity = ContextAiRunIdentity {
+                id: Uuid::new_v4(),
+                project: approved.project.clone(),
+                project_generation: project_generation.get(),
+            };
+            let stop = Arc::new(AtomicBool::new(false));
+            {
+                let mut state = active_run.lock().unwrap();
+                if !begin_context_ai_run(&mut state, identity.clone(), stop.clone()) {
+                    ui.set_context_ai_ready(false);
+                    pending.borrow_mut().take();
+                    ui.set_context_ai_output(
+                        "The active local AI request or project changed. Preview again.".into(),
+                    );
+                    return;
+                }
+            }
+            pending.borrow_mut().take();
+            ui.set_context_ai_busy(true);
+            ui.set_context_ai_ready(false);
+            ui.set_context_ai_output("Contacting the approved local model…".into());
+            // A model response belongs to the screen whose exact context was
+            // approved. A later navigation within this same project must not
+            // display the old screen's result as though it described the new
+            // workspace.
+            let requested_page = approved.page;
+            let weak_task = weak.clone();
+            let active_run_task = active_run.clone();
+            let pdf_snapshot_task = pdf_page_snapshot.clone();
+            std::thread::spawn(move || {
+                let result = with_verified_pdf_ai_source(
+                    approved.pdf_source.as_ref(),
+                    || stop.load(Ordering::SeqCst),
+                    || {
+                    let transport = NativeHttpTransport::new(Duration::from_secs(30))
+                        .map_err(|error| error.to_string())?;
+                    ai_chat(
+                        &transport,
+                        &approved.profile,
+                        LOCAL_ONLY_AI_POLICY,
+                        &approved.preview.messages_json(),
+                        &|| stop.load(Ordering::SeqCst),
+                    )
+                    .map_err(|error| error.to_string())
+                    },
+                );
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak_task.upgrade() {
+                        // Never let an older request clear the busy state or
+                        // render into another request's or project's panel.
+                        let disposition = complete_context_ai_for_page(
+                            &mut active_run_task.lock().unwrap(),
+                            &identity,
+                            requested_page,
+                            ui.get_page(),
+                        );
+                        if disposition == ContextAiCompletionDisposition::IgnoredStale {
+                            return;
+                        }
+                        ui.set_context_ai_busy(false);
+                        if disposition == ContextAiCompletionDisposition::DiscardedAfterPageChange {
+                            ui.set_context_ai_output(
+                                "The local AI result was discarded because you switched workspaces. Preview the current screen again."
+                                    .into(),
+                            );
+                            return;
+                        }
+                        if !contextual_visible_ui_digest(&ui, pdf_snapshot_task.lock().unwrap().as_ref())
+                            .is_ok_and(|visible_digest| visible_digest == requested_ui_digest)
+                        {
+                            ui.set_context_ai_output(
+                                "The local AI result was discarded because the source text or task changed during inference. Review the current context and preview again."
+                                    .into(),
+                            );
+                            return;
+                        }
+                        match result {
+                            Ok(response) => ui.set_context_ai_output(
+                                format!(
+                                    "Model-generated draft · Verify against actual sources.\n\n{}",
+                                    response.text
+                                )
+                                .into(),
+                            ),
+                            Err(error) => ui.set_context_ai_output(
+                                format!(
+                                    "Local model unavailable: {error}. Your project is unchanged."
+                                )
+                                .into(),
+                            ),
+                        }
+                    }
+                });
+            });
+        }
+    });
+    app.on_cancel_context_ai({
+        let weak = app.as_weak();
+        let active_run = active_context_ai_run.clone();
+        let pending = pending_context_ai.clone();
+        move || {
+            if invalidate_context_ai_run(&mut active_run.lock().unwrap()) {
+                pending.borrow_mut().take();
+                if let Some(ui) = weak.upgrade() {
+                    ui.set_context_ai_busy(false);
+                    ui.set_context_ai_ready(false);
+                    ui.set_context_ai_output(
+                        "Local AI request canceled. Research content is unchanged. Preview again to retry."
+                            .into(),
+                    );
+                }
+            } else if let Some(ui) = weak.upgrade() {
+                ui.set_context_ai_output(
+                    "No local AI request is running.".into(),
+                );
+            }
+        }
+    });
+    // Quick notes deliberately have a separate debounce timer from the
+    // revisioned notebook/manuscript editor. Switching editors cannot cancel
+    // a pending save in an unrelated writing surface.
+    let quick_note_timer = Rc::new(slint::Timer::default());
+    let quick_note_recovery = Rc::new(RefCell::new(QuickNoteRecoverySelection::default()));
+    app.on_refresh_quick_note_recovery({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let recovery = quick_note_recovery.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                recovery.borrow_mut().reset();
+                display_quick_note_recovery(&ui, &recovery.borrow());
+                return;
+            };
+            let result = recovery.borrow_mut().refresh(&project);
+            display_quick_note_recovery(&ui, &recovery.borrow());
+            match result {
+                Ok(()) if !recovery.borrow().drafts.is_empty() => {
+                    ui.set_quick_note_recovery_status(
+                        "Inspect the exact draft text, then choose Recover as new note copy. Nothing is replaced automatically."
+                            .into(),
+                    );
+                }
+                Ok(()) => {}
+                Err(error) => ui.set_quick_note_status(
+                    format!("Cannot inspect retained note drafts; they have not been removed: {error}")
+                        .into(),
+                ),
+            }
+        }
+    });
+    app.on_navigate_quick_note_recovery({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let recovery = quick_note_recovery.clone();
+        move |action| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                return;
+            };
+            let direction = match action.as_str() {
+                "previous" => -1,
+                "next" => 1,
+                _ => {
+                    ui.set_quick_note_recovery_status(
+                        "Unknown recovery choice. No note was changed.".into(),
+                    );
+                    return;
+                }
+            };
+            if recovery.borrow_mut().shift(&project, direction) {
+                display_quick_note_recovery(&ui, &recovery.borrow());
+            }
+        }
+    });
+    app.on_recover_quick_note_as_copy({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let recovery = quick_note_recovery.clone();
+        let timer = quick_note_timer.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_quick_note_status("Open a project to recover a note draft.".into());
+                return;
+            };
+            // Never accept UI text, draft ID or hash from the callback:
+            // only the exact snapshot inspected and held by this host.
+            let inspected = recovery.borrow().current(&project).cloned();
+            let Some(inspected) = inspected else {
+                ui.set_quick_note_status(
+                    "No inspected conflicting draft is ready. Refresh recovery drafts first."
+                        .into(),
+                );
+                return;
+            };
+            let can_switch_editor = recovered_draft_matches_visible_editor(
+                &inspected,
+                ui.get_quick_note_id().as_str(),
+                ui.get_quick_note_title().as_str(),
+                ui.get_quick_note_body().as_str(),
+                ui.get_quick_note_labels().as_str(),
+            );
+            match quick_notes::recover_conflicting_draft_as_copy(&project, &inspected) {
+                Ok(copy) => {
+                    if can_switch_editor {
+                        // Rebind only when no newer unsaved editor content
+                        // would be replaced. Otherwise leave all fields
+                        // untouched and let the writer resolve them manually.
+                        timer.stop();
+                        select_quick_note(&ui, &copy);
+                        ui.set_quick_note_grid(false);
+                        ui.set_quick_note_search("".into());
+                        ui.set_quick_note_view(0);
+                    }
+                    let refresh = recovery.borrow_mut().refresh(&project);
+                    display_quick_note_recovery(&ui, &recovery.borrow());
+                    let listing = populate_quick_notes(
+                        &ui, &project, ui.get_quick_note_search().as_str(),
+                        ui.get_quick_note_view(),
+                    );
+                    let mut message = format!(
+                        "Recovered a separate note copy: {}. The newer original was not changed.",
+                        copy.title,
+                    );
+                    if !can_switch_editor {
+                        message.push_str(
+                            " Your current editor text was kept; open the recovered copy from Notes when ready.",
+                        );
+                    }
+                    if let Err(error) = refresh {
+                        message.push_str(&format!(
+                            " The copy is safe, but recovery-list refresh failed: {error}."
+                        ));
+                    }
+                    if let Err(error) = listing {
+                        message.push_str(&format!(" Note-list refresh failed: {error}."));
+                    }
+                    ui.set_quick_note_status(message.clone().into());
+                    ui.set_quick_note_recovery_status(message.into());
+                }
+                Err(error) => {
+                    let refresh = recovery.borrow_mut().refresh(&project);
+                    display_quick_note_recovery(&ui, &recovery.borrow());
+                    let message = match refresh {
+                        Ok(()) => format!(
+                            "No copy created: {error}. The draft and newer saved original are unchanged. Inspect the refreshed draft before retrying."
+                        ),
+                        Err(refresh_error) => format!(
+                            "No copy created: {error}. Draft inspection failed: {refresh_error}. Existing work was not removed."
+                        ),
+                    };
+                    ui.set_quick_note_status(message.clone().into());
+                    ui.set_quick_note_recovery_status(message.into());
+                }
+            }
+        }
+    });
+    app.on_refresh_quick_notes({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |search, view| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_quick_notes(slint::ModelRc::new(slint::VecModel::from(Vec::<
+                    QuickNoteCard,
+                >::new(
+                ))));
+                ui.set_quick_note_status("Open a project to see its notes".into());
+                return;
+            };
+            if let Err(error) = populate_quick_notes(&ui, &project, search.as_str(), view) {
+                ui.set_quick_note_status(format!("Unable to load notes: {error}").into());
+            }
+        }
+    });
+    app.on_navigate_quick_notes({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let timer = quick_note_timer.clone();
+        move |destination| {
+            let Some(ui) = weak.upgrade() else { return };
+            let view = match destination.as_str() {
+                "active" => Some(0),
+                "archived" => Some(1),
+                "trash" => Some(2),
+                "toggle-grid" | "toggle-notebook" => None,
+                _ => {
+                    ui.set_quick_note_status("Unknown note destination".into());
+                    return;
+                }
+            };
+            let project = active_project.borrow().clone();
+            let result = after_quick_note_save(
+                || finish_quick_note_before_project_switch(&ui, project.as_deref(), &timer),
+                || {
+                    if let Some(view) = view {
+                        if let Some(project) = project.as_deref() {
+                            populate_quick_notes(
+                                &ui,
+                                project,
+                                ui.get_quick_note_search().as_str(),
+                                view,
+                            )?;
+                        }
+                        ui.set_quick_note_view(view);
+                    } else if destination == "toggle-grid" {
+                        ui.set_quick_note_grid(!ui.get_quick_note_grid());
+                    } else {
+                        ui.set_show_research_notebook(!ui.get_show_research_notebook());
+                    }
+                    Ok::<(), String>(())
+                },
+            );
+            match result {
+                Err(error) => ui.set_quick_note_status(
+                    format!("Cannot switch notes; current edit was preserved: {error}").into(),
+                ),
+                Ok(Err(error)) => ui.set_quick_note_status(
+                    format!("Cannot load note destination; current edit was preserved: {error}")
+                        .into(),
+                ),
+                Ok(Ok(())) => {}
+            }
+        }
+    });
+    app.on_create_quick_note({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let timer = quick_note_timer.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_quick_note_status("Open a project before creating a note".into());
+                return;
+            };
+            if let Err(error) = after_quick_note_save(
+                || finish_quick_note_before_project_switch(&ui, Some(&project), &timer),
+                || (),
+            ) {
+                ui.set_quick_note_status(
+                    format!("Cannot create a note; current edit was preserved: {error}").into(),
+                );
+                return;
+            }
+            match quick_notes::save(&project, None, None, "", "", "") {
+                Ok(note) => {
+                    select_quick_note(&ui, &note);
+                    ui.set_quick_note_grid(false);
+                    if let Err(error) = populate_quick_notes(&ui, &project, "", 0) {
+                        ui.set_quick_note_status(error.into());
+                    }
+                    ui.set_quick_note_search("".into());
+                    ui.set_quick_note_view(0);
+                    ui.set_quick_note_status("New note ready · Type to autosave".into());
+                }
+                Err(error) => {
+                    ui.set_quick_note_status(format!("Cannot create note: {error}").into())
+                }
+            }
+        }
+    });
+    app.on_select_quick_note({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let timer = quick_note_timer.clone();
+        move |id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                return;
+            };
+            if let Err(error) = after_quick_note_save(
+                || finish_quick_note_before_project_switch(&ui, Some(&project), &timer),
+                || (),
+            ) {
+                ui.set_quick_note_status(
+                    format!("Cannot open another note; current edit was preserved: {error}").into(),
+                );
+                return;
+            }
+            match quick_notes::get(&project, id.as_str()) {
+                Ok(note) if !note.deleted => {
+                    ui.set_quick_note_grid(false);
+                    select_quick_note(&ui, &note)
+                }
+                Ok(_) => {
+                    ui.set_quick_note_status("This note is in Trash. Restore it to edit.".into())
+                }
+                Err(error) => ui.set_quick_note_status(format!("Cannot open note: {error}").into()),
+            }
+        }
+    });
+    app.on_save_quick_note({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let timer = quick_note_timer.clone();
+        move || {
+            timer.stop();
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                return;
+            };
+            if let Err(error) = save_selected_quick_note(&ui, &project) {
+                ui.set_quick_note_status(
+                    format!("Save failed; draft is still in editor: {error}").into(),
+                );
+            }
+        }
+    });
+    app.on_quick_note_draft_edited({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let draft_session = quick_note_draft_session.clone();
+        let timer = quick_note_timer.clone();
+        move |_, _, _| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                return;
+            };
+            // A durable one-row journal survives a sudden close; only one
+            // full revision is committed after the user pauses typing.
+            let note_id = ui.get_quick_note_id();
+            if note_id.is_empty() {
+                return;
+            }
+            let stage_result = match draft_session.borrow().as_ref() {
+                Some(session) if session.is_for(&project) => session.stage(
+                    note_id.as_str(),
+                    i64::from(ui.get_quick_note_revision()),
+                    ui.get_quick_note_title().as_str(),
+                    ui.get_quick_note_body().as_str(),
+                    ui.get_quick_note_labels().as_str(),
+                ),
+                _ => quick_notes::stage_draft(
+                    &project,
+                    note_id.as_str(),
+                    i64::from(ui.get_quick_note_revision()),
+                    ui.get_quick_note_title().as_str(),
+                    ui.get_quick_note_body().as_str(),
+                    ui.get_quick_note_labels().as_str(),
+                ),
+            };
+            match stage_result {
+                Ok(()) => ui.set_quick_note_status(
+                    "Draft safely stored · Creating a revision shortly".into(),
+                ),
+                Err(error) => {
+                    ui.set_quick_note_status(
+                        format!("Save failed. Keep this note open and retry: {error}").into(),
+                    );
+                    ui.invoke_refresh_quick_note_recovery();
+                    return;
+                }
+            }
+            let weak_task = weak.clone();
+            timer.start(
+                slint::TimerMode::SingleShot,
+                Duration::from_millis(650),
+                move || {
+                    if let Some(ui) = weak_task.upgrade() {
+                        match quick_notes::flush_draft(&project, note_id.as_str()) {
+                            Ok(saved) => {
+                                if ui.get_quick_note_id() == note_id {
+                                    ui.set_quick_note_revision(saved.revision as i32);
+                                }
+                            }
+                            Err(error) => {
+                                ui.set_quick_note_status(
+                                    format!(
+                                        "Draft retained for recovery; revision failed: {error}"
+                                    )
+                                    .into(),
+                                );
+                                ui.invoke_refresh_quick_note_recovery();
+                                return;
+                            }
+                        }
+                        if let Err(error) = populate_quick_notes(
+                            &ui,
+                            &project,
+                            ui.get_quick_note_search().as_str(),
+                            ui.get_quick_note_view(),
+                        ) {
+                            ui.set_quick_note_status(
+                                format!("Note saved; preview refresh failed: {error}").into(),
+                            );
+                        }
+                    }
+                },
+            );
+        }
+    });
+    app.on_quick_note_action({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let timer = quick_note_timer.clone();
+        move |action, id, revision| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                return;
+            };
+            let flag = match action.as_str() {
+                "pin" => NoteFlag::Pinned,
+                "archive" | "unarchive" => NoteFlag::Archived,
+                "delete" | "restore" => NoteFlag::Deleted,
+                _ => {
+                    ui.set_quick_note_status("Unknown note action".into());
+                    return;
+                }
+            };
+            if let Err(error) = after_quick_note_save(
+                || finish_quick_note_before_project_switch(&ui, Some(&project), &timer),
+                || (),
+            ) {
+                ui.set_quick_note_status(
+                    format!("Cannot change note; current edit was preserved: {error}").into(),
+                );
+                return;
+            }
+            let selected = ui.get_quick_note_id().as_str() == id.as_str();
+            let expected = if selected {
+                i64::from(ui.get_quick_note_revision())
+            } else {
+                i64::from(revision)
+            };
+            let result = quick_notes::get(&project, id.as_str())
+                .map_err(|error| error.to_string())
+                .and_then(|existing| {
+                    if existing.revision != expected {
+                        return Err("This note has changed. Refresh before retrying.".into());
+                    }
+                    let value = match action.as_str() {
+                        "pin" => !existing.pinned,
+                        "archive" | "delete" => true,
+                        _ => false,
+                    };
+                    quick_notes::set_flag(&project, id.as_str(), existing.revision, flag, value)
+                        .map_err(|error| error.to_string())
+                });
+            match result {
+                Ok(updated) => {
+                    if selected && action.as_str() == "pin" {
+                        // A quick pin toggle should not eject the writer from
+                        // their active note or lose the optimistic revision.
+                        select_quick_note(&ui, &updated);
+                    } else if selected {
+                        ui.set_quick_note_id("".into());
+                        ui.set_quick_note_title("".into());
+                        ui.set_quick_note_body("".into());
+                        ui.set_quick_note_labels("".into());
+                        ui.set_quick_note_revision(0);
+                    }
+                    if let Err(error) = populate_quick_notes(
+                        &ui,
+                        &project,
+                        ui.get_quick_note_search().as_str(),
+                        ui.get_quick_note_view(),
+                    ) {
+                        ui.set_quick_note_status(error.into());
+                    }
+                }
+                Err(error) => ui.set_quick_note_status(format!("Note unchanged: {error}").into()),
+            }
+        }
+    });
     let pending_project_metadata: Rc<RefCell<Option<PendingProjectMetadata>>> =
         Rc::new(RefCell::new(None));
     let writing_drafts = Rc::new(RefCell::new(writing_autosave::Drafts::default()));
     let writing_timer = Rc::new(slint::Timer::default());
+    app.on_adopt_legacy_writing_draft({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            if !ui.get_writing_recovery_blocked() {
+                ui.set_status("Current project writing recovery is already available".into());
+                return;
+            }
+            let result = (|| {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or_else(|| "Open a project before adopting a writing draft".to_string())?;
+                let root = host_data_root()?;
+                let id = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?
+                    .id;
+                writing_autosave::adopt_legacy_for_project(&root, &project, &id)?;
+                restore_writing_drafts(&ui, &project, &drafts)?;
+                resume_recovered_writing(&timer, &project, drafts.clone(), weak.clone());
+                Ok::<(), String>(())
+            })();
+            match result {
+                Ok(()) => ui.set_status(
+                    "Older writing draft adopted into this exact project. Original recovery file retained."
+                        .into(),
+                ),
+                Err(error) => ui.set_status(format!("Writing draft not adopted: {error}").into()),
+            }
+        }
+    });
+    app.on_start_fresh_writing_draft({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let drafts = writing_drafts.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            if !ui.get_writing_recovery_blocked() {
+                return;
+            }
+            let result = (|| {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or_else(|| "Open a project before starting a writing draft".to_string())?;
+                let root = host_data_root()?;
+                let id = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?
+                    .id;
+                writing_autosave::start_fresh_for_project(&root, &project, &id)?;
+                restore_writing_drafts(&ui, &project, &drafts)?;
+                Ok::<(), String>(())
+            })();
+            match result {
+                Ok(()) => ui.set_status(
+                    "Fresh writing journal created for this project; older recovery files remain untouched."
+                        .into(),
+                ),
+                Err(error) => ui.set_status(format!("Cannot start fresh writing: {error}").into()),
+            }
+        }
+    });
     app.on_notebook_draft_edited({
         let weak = app.as_weak();
         let active_project = active_project.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |body| {
+            if weak
+                .upgrade()
+                .is_some_and(|ui| ui.get_writing_recovery_blocked())
+            {
+                return;
+            }
             let Some(project) = active_project.borrow().clone() else {
                 return;
             };
@@ -3230,7 +5381,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let mut draft = drafts.borrow_mut();
                 draft.notebook = body.to_string();
                 draft.notebook_dirty = true;
-                writing_autosave::save(&writing_autosave::path(&root, &id), &draft)
+                writing_autosave::save(
+                    &writing_autosave::scoped_path(&root, &project, &id)?,
+                    &draft,
+                )
             })();
             if let Err(error) = result {
                 if let Some(ui) = weak.upgrade() {
@@ -3274,6 +5428,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |id, section, citations, body| {
+            if weak.upgrade().is_some_and(|ui| ui.get_writing_recovery_blocked()) {
+                return;
+            }
+            if let Some(ui) = weak.upgrade() {
+                ui.set_manuscript_word_count(
+                    i32::try_from(body.split_whitespace().count()).unwrap_or(i32::MAX),
+                );
+                ui.set_manuscript_character_count(
+                    i32::try_from(body.chars().count()).unwrap_or(i32::MAX),
+                );
+                ui.set_writing_find_next_from(0);
+                ui.set_writing_find_match(false);
+                ui.set_writing_ai_use_found_text(false);
+                if ui.get_writing_show_outline() {
+                    update_manuscript_outline(&ui, body.as_str());
+                }
+            }
             let Some(project) = active_project.borrow().clone() else {
                 return;
             };
@@ -3290,7 +5461,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 draft.citations = citations.to_string();
                 draft.body = body.to_string();
                 draft.manuscript_dirty = true;
-                writing_autosave::save(&writing_autosave::path(&root, &project_id), &draft)
+                writing_autosave::save(&writing_autosave::scoped_path(&root, &project, &project_id)?, &draft)
             })();
             if let Err(error) = result {
                 if let Some(ui) = weak.upgrade() {
@@ -3328,6 +5499,82 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
     });
+    app.on_refresh_manuscript_outline({
+        let weak = app.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                update_manuscript_outline(&ui, ui.get_manuscript_draft_body().as_str());
+            }
+        }
+    });
+    app.on_find_next_manuscript({
+        let weak = app.as_weak();
+        move |needle| {
+            let Some(ui) = weak.upgrade() else { return };
+            let body = ui.get_manuscript_draft_body();
+            if let Some(found) = document_navigation::find_next(
+                body.as_str(),
+                needle.as_str(),
+                ui.get_writing_find_next_from().max(0) as usize,
+            ) {
+                let Ok(start) = i32::try_from(found.start) else {
+                    ui.set_writing_find_status(
+                        "Search match lies outside the editor's supported range".into(),
+                    );
+                    ui.set_writing_find_match(false);
+                    return;
+                };
+                let Ok(end) = i32::try_from(found.end) else {
+                    ui.set_writing_find_status(
+                        "Search match lies outside the editor's supported range".into(),
+                    );
+                    ui.set_writing_find_match(false);
+                    return;
+                };
+                ui.set_writing_find_offset(start);
+                ui.set_writing_find_end(end);
+                ui.set_writing_find_next_from(end);
+                ui.set_writing_find_match(true);
+                ui.set_writing_find_status(
+                    format!(
+                        "Found at byte {start}{}",
+                        if found.wrapped {
+                            " · Wrapped to start"
+                        } else {
+                            ""
+                        }
+                    )
+                    .into(),
+                );
+            } else {
+                ui.set_writing_find_match(false);
+                ui.set_writing_find_status(
+                    "No matching text in the current manuscript draft".into(),
+                );
+            }
+        }
+    });
+    app.on_select_manuscript_range({
+        let weak = app.as_weak();
+        move |start, end| {
+            let Some(ui) = weak.upgrade() else { return };
+            let body = ui.get_manuscript_draft_body();
+            let valid = start >= 0
+                && end >= start
+                && (end as usize) <= body.len()
+                && body.is_char_boundary(start as usize)
+                && body.is_char_boundary(end as usize);
+            if valid {
+                ui.set_writing_find_status("Moved to selected manuscript heading".into());
+            } else {
+                ui.set_writing_find_status(
+                    "Cannot navigate to stale manuscript position; refresh outline".into(),
+                );
+            }
+            ui.set_writing_find_match(false);
+            ui.set_writing_ai_use_found_text(false);
+        }
+    });
     let pending_evidence: Rc<RefCell<Option<PendingEvidenceAction>>> = Rc::new(RefCell::new(None));
     let pending_physical_export: Rc<RefCell<Option<physical_export::PreparedPhysicalExport>>> =
         Rc::new(RefCell::new(None));
@@ -3338,6 +5585,79 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pending_ai: Rc<RefCell<Option<PendingAiAction>>> = Rc::new(RefCell::new(None));
     let selected_agent_action: Rc<RefCell<Option<SelectedAgentAction>>> =
         Rc::new(RefCell::new(None));
+    app.on_preview_evidence_note({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        move |source_id, title, body| {
+            let Some(ui) = weak.upgrade() else { return };
+            // Any new preview attempt invalidates the previous approval.
+            pending_evidence.borrow_mut().take();
+            let result = evidence_note_arguments(
+                source_id.as_str(),
+                title.as_str(),
+                body.as_str(),
+            )
+            .and_then(|arguments| {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or_else(|| "Open a project before creating evidence notes".to_owned())?;
+                let root = host_data_root()?;
+                evidence_preview_at(&project, "evidence.note", "evidence", arguments, &root)
+            });
+            match result {
+                Ok((pending, preview)) => {
+                    *pending_evidence.borrow_mut() = Some(pending);
+                    ui.set_evidence_results(
+                        format!(
+                            "Preview only: human-authored note linked to the selected, existing source. No text anchor or verified quotation was created. Recording requires explicit approval and the same project revision.\n{}",
+                            pretty_result_data(&preview)
+                        )
+                        .into(),
+                    );
+                    ui.set_status("Evidence note preview ready; nothing recorded yet".into());
+                }
+                Err(error) => {
+                    ui.set_evidence_results(format!("Cannot preview evidence note: {error}").into());
+                    ui.set_status(error.into());
+                }
+            }
+        }
+    });
+    app.on_load_evidence_note_history({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |note_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = active_project
+                .borrow()
+                .clone()
+                .ok_or_else(|| "Open a project before loading evidence note history".to_owned())
+                .and_then(|project| {
+                    let root = host_data_root()?;
+                    evidence_note_history_at(&project, note_id.as_str(), &root)
+                });
+            match result {
+                Ok(history) => {
+                    ui.set_evidence_results(
+                        format!(
+                            "Recorded evidence note history, read from the current project:\n{}",
+                            pretty_result_data(&history)
+                        )
+                        .into(),
+                    );
+                    ui.set_status("Evidence note history loaded by exact ID".into());
+                }
+                Err(error) => {
+                    ui.set_evidence_results(
+                        format!("Unable to load evidence note history: {error}").into(),
+                    );
+                    ui.set_status(error.into());
+                }
+            }
+        }
+    });
     app.on_preview_question({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -3489,6 +5809,55 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_apply_evidence_note_preview({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<(serde_json::Value, i64), String> {
+                if ui.get_page() != 8 {
+                    return Err("Open Evidence to approve a note".into());
+                }
+                let pending = pending_evidence
+                    .borrow()
+                    .clone()
+                    .ok_or("Preview this evidence note before recording")?;
+                require_matching_evidence_note_preview(
+                    &pending,
+                    ui.get_evidence_draft_source_id().as_str(),
+                    ui.get_evidence_draft_title().as_str(),
+                    ui.get_evidence_draft_body().as_str(),
+                )?;
+                let path = active_project.borrow().clone().ok_or("Open a project first")?;
+                let root = host_data_root()?;
+                evidence_execute_pending(&pending, &path, &root)
+            })();
+            match result {
+                Ok((executed, revision)) => {
+                    pending_evidence.borrow_mut().take();
+                    if let Some(note_id) = executed.pointer("/data/note_id").and_then(serde_json::Value::as_str) {
+                        ui.set_evidence_last_note_id(note_id.into());
+                    }
+                    ui.set_evidence_results(
+                        format!(
+                            "Human-authored evidence note recorded in the current project. The note ID above can be used to inspect immutable revision history; this is not a verified quote or text anchor.\n{}",
+                            pretty_result_data(&executed)
+                        ).into(),
+                    );
+                    ui.set_project_revision(revision as i32);
+                    ui.set_status("Evidence note recorded through exact preview and approval".into());
+                }
+                Err(error) => {
+                    // A failed or stale approval cannot be reused. Other
+                    // operation previews must be prepared on their own route.
+                    pending_evidence.borrow_mut().take();
+                    ui.set_evidence_results(error.clone().into());
+                    ui.set_status(error.into());
+                }
+            }
+        }
+    });
     app.on_apply_evidence_preview({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -3499,6 +5868,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ui) = weak.upgrade() {
                 let pending = pending_evidence.borrow().clone();
                 let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                    (Some(_), Some(pending)) if pending.surface == "evidence" => {
+                        Err("Evidence notes require the Evidence-specific preview and approval button".into())
+                    }
                     (Some(path), Some(pending)) => host_data_root()
                         .and_then(|root| evidence_execute_pending(pending, path, &root)),
                     (None, _) => Err("Open a project first".into()),
@@ -3553,6 +5925,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ui.set_notebook_results(message.into());
                         } else if surface == "qualitative" {
                             ui.set_qualitative_results(message.into());
+                        } else if surface == "evidence" {
+                            ui.set_evidence_results(
+                                format!(
+                                    "{message}\nUse the returned note_id to load its real revision history. This is a human note, not a verified quotation or anchor."
+                                )
+                                .into(),
+                            );
                         } else {
                             ui.set_review_results(message.into());
                         }
@@ -3584,6 +5963,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 ui.set_notebook_results(error.into());
                             } else if pending.surface == "qualitative" {
                                 ui.set_qualitative_results(error.into());
+                            } else if pending.surface == "evidence" {
+                                ui.set_evidence_results(error.into());
                             } else {
                                 ui.set_review_results(error.into());
                             }
@@ -4261,6 +6642,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 match result {
                     Ok(executed) => {
+                        if let (Some(dataset_id), Some(revision)) = (
+                            executed["data"]["dataset_id"].as_str(),
+                            executed["data"]["revision"].as_str(),
+                        ) {
+                            ui.set_dataset_selected_id(dataset_id.into());
+                            ui.set_dataset_selected_revision(revision.into());
+                            clear_dataset_grid(
+                                &ui,
+                                "Dataset imported. Choose Inspect dataset to see verified rows.",
+                            );
+                        }
                         ui.set_analysis_results(
                             format!(
                                 "Immutable dataset revision imported through approved local-write command:\n{}",
@@ -4306,13 +6698,76 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Ok(result) => {
                         ui.set_analysis_results(pretty_result_data(&result).into());
                         ui.set_status("Immutable dataset revision loaded".into());
+                        ui.invoke_request_dataset_page(dataset_id, revision, 0, 25);
                     }
                     Err(error) => {
+                        clear_dataset_grid(
+                            &ui,
+                            &format!("Cannot inspect selected revision: {error}"),
+                        );
                         ui.set_analysis_results(error.clone().into());
                         ui.set_status(error.into());
                     }
                 }
             }
+        }
+    });
+    app.on_request_dataset_page({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |dataset_id, revision, page_index, page_size| {
+            let Some(ui) = weak.upgrade() else { return };
+            if page_index < 0 || !(1..=100).contains(&page_size) {
+                clear_dataset_grid(
+                    &ui,
+                    "Invalid page. Select a nonnegative page and 1–100 rows.",
+                );
+                return;
+            }
+            let Some(offset) = (page_index as u64).checked_mul(page_size as u64) else {
+                clear_dataset_grid(&ui, "Dataset page is too large");
+                return;
+            };
+            let dataset_id = dataset_id.to_string();
+            let revision = revision.to_string();
+            ui.set_dataset_grid_busy(true);
+            ui.set_dataset_grid_status("Reading selected immutable dataset revision…".into());
+            let result = active_project
+                .borrow()
+                .as_ref()
+                .ok_or_else(|| "Open a project first".to_owned())
+                .and_then(|project| {
+                    let root = host_data_root()?;
+                    analysis_read_at(
+                        project,
+                        "dataset.inspect",
+                        serde_json::json!({
+                            "dataset_id": dataset_id.trim(),
+                            "revision": revision.trim(),
+                            "offset": offset,
+                            "limit": page_size,
+                        }),
+                        &root,
+                    )
+                });
+            match result.and_then(|result| {
+                set_verified_dataset_grid(&ui, &result, revision.trim(), page_index, page_size)?;
+                // The table is intentionally a bounded preview. Preserve the
+                // entire verified current page for inspection and copying,
+                // including long cells and non-string dataset values.
+                ui.set_analysis_results(pretty_result_data(&result).into());
+                Ok(())
+            }) {
+                Ok(()) => {}
+                Err(error) => {
+                    clear_dataset_grid(
+                        &ui,
+                        &format!("Unable to display this exact dataset revision: {error}"),
+                    );
+                    ui.set_analysis_results(format!("No verified dataset page: {error}").into());
+                }
+            }
+            ui.set_dataset_grid_busy(false);
         }
     });
     app.on_run_descriptives({
@@ -5083,53 +7538,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
-    app.on_apply_ai_preview({
+    // A provider button must never approve an assistant proposal and vice
+    // versa. Their shared pending store is always matched to the invoking
+    // surface before the canonical revision/approval-checked executor runs.
+    let make_scoped_ai_apply = {
         let weak = app.as_weak();
         let active_project = active_project.clone();
         let pending_ai = pending_ai.clone();
-        move || {
-            if let Some(ui) = weak.upgrade() {
-                let pending = pending_ai.borrow().clone();
-                let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
-                    (Some(path), Some(pending)) => {
-                        host_data_root().and_then(|root| ai_execute_pending(pending, path, &root))
-                    }
-                    (None, _) => Err("Open a project first".into()),
-                    (_, None) => Err("Preview an assistant action before recording it".into()),
-                };
+        move |expected_surface: &'static str| {
+            let weak = weak.clone();
+            let active_project = active_project.clone();
+            let pending_ai = pending_ai.clone();
+            move || {
+                let Some(ui) = weak.upgrade() else { return };
+                let result = (|| -> Result<serde_json::Value, String> {
+                    let pending = pending_ai
+                        .borrow()
+                        .clone()
+                        .ok_or("Preview an action in this workspace before recording")?;
+                    require_ai_preview_surface(&pending, expected_surface)?;
+                    let path = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a project first")?;
+                    let root = host_data_root()?;
+                    ai_execute_pending(&pending, &path, &root)
+                })();
+                // Every click consumes the pending approval, including failed
+                // surface matches, preventing replay after navigation.
+                pending_ai.borrow_mut().take();
                 match result {
                     Ok(executed) => {
-                        let surface = pending
-                            .as_ref()
-                            .map(|item| item.surface.as_str())
-                            .unwrap_or_default();
-                        let message = format!(
-                            "Recorded through approved local assistant command:\n{}",
-                            pretty_result_data(&executed)
-                        );
-                        if surface == "agent" {
-                            ui.set_agent_results(message.into());
-                        } else if surface == "provider" {
-                            // Never display the preview arguments or endpoint in status.
+                        if expected_surface == "provider" {
                             ui.set_provider_results("Approved provider metadata change recorded locally; connectivity not checked. Refresh the profile list to verify state.".into());
+                        } else {
+                            ui.set_agent_results(
+                                format!(
+                                    "Recorded through approved local assistant command:\n{}",
+                                    pretty_result_data(&executed)
+                                )
+                                .into(),
+                            );
                         }
-                        ui.set_status("Previewed assistant operation recorded and audited".into());
-                        pending_ai.borrow_mut().take();
+                        ui.set_status("Scoped preview action recorded and audited".into());
+                    }
+                    Err(error) if expected_surface == "provider" => {
+                        ui.set_provider_results("Provider profile approval was not recorded. Preview this exact provider change in Providers again.".into());
+                        ui.set_status(format!("Provider approval blocked: {error}").into());
                     }
                     Err(error) => {
-                        let provider = pending.as_ref().is_some_and(|item| item.surface == "provider");
-                        if provider {
-                            ui.set_provider_results("Provider change failed; no connectivity or credential check performed.".into());
-                            ui.set_status("Provider change failed".into());
-                        } else {
-                            ui.set_agent_results(error.clone().into());
-                            ui.set_status(error.into());
-                        }
+                        ui.set_agent_results(error.clone().into());
+                        ui.set_status(error.into());
                     }
                 }
             }
         }
-    });
+    };
+    app.on_apply_agent_preview(make_scoped_ai_apply("agent"));
+    app.on_apply_provider_preview(make_scoped_ai_apply("provider"));
     app.on_load_assistant_history({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -5853,12 +8319,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         )
                     });
                 match result {
-                    Ok(result) => {
-                        ui.set_notebook_results(pretty_result_data(&result).into());
-                        ui.set_status(
-                            "Notebook Markdown generated from persisted revisions".into(),
-                        );
-                    }
+                    Ok(result) => match notebook_export_markdown(&result) {
+                        Ok(markdown) => {
+                            ui.set_notebook_results(markdown.into());
+                            ui.set_status(
+                                "Notebook Markdown generated from persisted revisions".into(),
+                            );
+                        }
+                        Err(error) => {
+                            ui.set_notebook_results(error.clone().into());
+                            ui.set_status(error.into());
+                        }
+                    },
                     Err(error) => {
                         ui.set_notebook_results(error.clone().into());
                         ui.set_status(error.into());
@@ -6237,6 +8709,88 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_search_manuscript_references({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |query| {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_manuscript_reference_options(ModelRc::new(VecModel::from(
+                Vec::<ManuscriptReferenceChoice>::new(),
+            )));
+            let result = active_project
+                .borrow()
+                .as_ref()
+                .ok_or_else(|| "Open a project before selecting citations".to_string())
+                .and_then(|path| {
+                    let root = host_data_root()?;
+                    registered_manuscript_reference_choices_at(path, query.as_str(), &root)
+                });
+            match result {
+                Ok((choices, _matched)) => {
+                    let total = choices.len();
+                    ui.set_manuscript_reference_options(ModelRc::new(VecModel::from(choices)));
+                    ui.set_manuscript_reference_status(
+                        format!("{total} matching registered references displayed (up to 50 per search). Refine your search to narrow the list; select one to insert its canonical ID.").into(),
+                    );
+                }
+                Err(error) => ui.set_manuscript_reference_status(error.into()),
+            }
+        }
+    });
+    app.on_insert_manuscript_reference({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |reference_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            if ui.get_writing_recovery_blocked() {
+                ui.set_manuscript_reference_status(
+                    "Resolve the current project's writing recovery before inserting citations"
+                        .into(),
+                );
+                return;
+            }
+            let result = active_project
+                .borrow()
+                .as_ref()
+                .ok_or_else(|| "Open a project before inserting citations".to_string())
+                .and_then(|path| {
+                    let root = host_data_root()?;
+                    library_read_at(
+                        path,
+                        "reference.resolve",
+                        serde_json::json!({"reference_id":reference_id.as_str()}),
+                        &root,
+                    )
+                })
+                .and_then(|resolution| {
+                    let canonical_id = resolution
+                        .pointer("/data/canonical_id")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or_else(|| {
+                            "Reference resolution did not identify a canonical ID".to_string()
+                        })?;
+                    insert_unique_registered_citation(
+                        ui.get_manuscript_draft_citations().as_str(),
+                        canonical_id,
+                    )
+                });
+            match result {
+                Ok(next) => {
+                    ui.set_manuscript_draft_citations(next.clone().into());
+                    ui.invoke_manuscript_draft_edited(
+                        ui.get_manuscript_draft_id(),
+                        ui.get_manuscript_draft_section(),
+                        next.into(),
+                        ui.get_manuscript_draft_body(),
+                    );
+                    ui.set_manuscript_reference_status(
+                        "Registered project reference inserted into the manuscript draft".into(),
+                    );
+                }
+                Err(error) => ui.set_manuscript_reference_status(error.into()),
+            }
+        }
+    });
     app.on_preview_writing_section({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -6540,49 +9094,396 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_search_project_sources({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |query| {
+            let Some(ui) = weak.upgrade() else { return };
+            let query = query.as_str().trim().to_owned();
+            ui.set_source_search_results(ModelRc::new(VecModel::from(
+                Vec::<SourceListEntry>::new(),
+            )));
+            if query.is_empty() || query.len() > 200 {
+                ui.set_source_search_status("Enter a search query of 1–200 UTF-8 bytes.".into());
+                return;
+            }
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_source_search_status("Open a project before searching sources.".into());
+                return;
+            };
+            let project_id = ui.get_source_project_id().to_string();
+            if project_id.is_empty() {
+                ui.set_source_search_status("Project source state unavailable. Reopen the project.".into());
+                return;
+            }
+            let request = ui.get_source_search_request().wrapping_add(1);
+            ui.set_source_search_request(request);
+            ui.set_source_search_busy(true);
+            ui.set_source_search_status("Searching project sources locally…".into());
+            let weak_task = weak.clone();
+            std::thread::spawn(move || {
+                let result = host_data_root()
+                    .and_then(|root| {
+                        library_read_at(
+                            &project,
+                            "search.query",
+                            serde_json::json!({"query":query,"limit":100}),
+                            &root,
+                        )
+                    })
+                    .and_then(|response| source_entries_from_result(&response, "records"));
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak_task.upgrade() else { return };
+                    if ui.get_source_search_request() != request
+                        || ui.get_source_project_id().as_str() != project_id
+                    {
+                        return;
+                    }
+                    ui.set_source_search_busy(false);
+                    match result {
+                        Ok(entries) => {
+                            let count = entries.len();
+                            ui.set_source_search_results(ModelRc::new(VecModel::from(entries)));
+                            ui.set_source_search_status(
+                                format!("{count} result(s). Up to 100 shown; at most 10,000 locally stored sources scanned. Open a result to read its verified text.").into(),
+                            );
+                        }
+                        Err(error) => {
+                            ui.set_source_search_status(
+                                format!("Local source search failed: {error}").into(),
+                            );
+                        }
+                    }
+                });
+            });
+        }
+    });
+    app.on_load_reader_source_list({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |offset| {
+            let Some(ui) = weak.upgrade() else { return };
+            if !(0..=10_000_000).contains(&offset) {
+                ui.set_reader_list_status(
+                    "Source list offset is outside the supported range.".into(),
+                );
+                return;
+            }
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_reader_source_list(ModelRc::new(VecModel::from(
+                    Vec::<SourceListEntry>::new(),
+                )));
+                ui.set_reader_list_status("Open a project to browse sources.".into());
+                return;
+            };
+            let project_id = ui.get_source_project_id().to_string();
+            if project_id.is_empty() {
+                ui.set_reader_list_status(
+                    "Project source state unavailable. Reopen the project.".into(),
+                );
+                return;
+            }
+            let request = ui.get_reader_request().wrapping_add(1);
+            ui.set_reader_request(request);
+            ui.set_reader_busy(true);
+            ui.set_reader_list_status("Loading local source index…".into());
+            let weak_task = weak.clone();
+            std::thread::spawn(move || {
+                let result = host_data_root()
+                    .and_then(|root| {
+                        library_read_at(
+                            &project,
+                            "library.list",
+                            serde_json::json!({"limit":51,"offset":offset}),
+                            &root,
+                        )
+                    })
+                    .and_then(|response| source_entries_from_result(&response, "sources"));
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak_task.upgrade() else {
+                        return;
+                    };
+                    if ui.get_reader_request() != request
+                        || ui.get_source_project_id().as_str() != project_id
+                    {
+                        return;
+                    }
+                    ui.set_reader_busy(false);
+                    match result {
+                        Ok(mut entries) => {
+                            let more = entries.len() > 50;
+                            entries.truncate(50);
+                            let count = entries.len();
+                            ui.set_reader_source_list(ModelRc::new(VecModel::from(entries)));
+                            ui.set_reader_list_offset(offset);
+                            ui.set_reader_list_more(more);
+                            ui.set_reader_list_status(
+                                format!("Showing {count} source(s), starting at {}.", offset + 1)
+                                    .into(),
+                            );
+                        }
+                        Err(error) => ui.set_reader_list_status(
+                            format!("Unable to list sources: {error}").into(),
+                        ),
+                    }
+                });
+            });
+        }
+    });
+    app.on_open_reader_source({
+        let weak = app.as_weak();
+        move |source_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let source_id = source_id.as_str().trim();
+            if source_id.is_empty() || source_id.len() > 128 || source_id.contains('\0') {
+                // Invalidate any in-flight read before clearing its document.
+                // Keep the entered ID in the edit field so it can be corrected.
+                ui.set_reader_request(ui.get_reader_request().wrapping_add(1));
+                ui.set_reader_busy(false);
+                clear_reader_document(&ui);
+                ui.set_reader_status("Choose a valid source ID before reading.".into());
+                return;
+            }
+            ui.set_page(6);
+            ui.set_reader_source_id(source_id.into());
+            clear_reader_document(&ui);
+            ui.invoke_load_reader_page(source_id.into(), 0);
+        }
+    });
+    app.on_load_reader_page({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |source_id, offset| {
+            let Some(ui) = weak.upgrade() else { return };
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_reader_status("Open a project before reading a source.".into());
+                return;
+            };
+            let project_id = ui.get_source_project_id().to_string();
+            if project_id.is_empty() {
+                ui.set_reader_status(
+                    "Project source state unavailable. Reopen the project.".into(),
+                );
+                return;
+            }
+            let source_id = source_id.as_str().trim().to_owned();
+            if source_id.is_empty() || source_id.len() > 128 || !(0..=10_000_000).contains(&offset)
+            {
+                ui.set_reader_status("Invalid source ID or source text offset.".into());
+                return;
+            }
+            let request = ui.get_reader_request().wrapping_add(1);
+            ui.set_reader_request(request);
+            ui.set_reader_busy(true);
+            ui.set_reader_text("".into());
+            ui.set_reader_status("Reading and checking locally stored source text…".into());
+            let weak_task = weak.clone();
+            std::thread::spawn(move || {
+                let result = host_data_root()
+                    .and_then(|root| source_reader_page_at(&project, &source_id, offset, &root));
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak_task.upgrade() else {
+                        return;
+                    };
+                    if ui.get_reader_request() != request
+                        || ui.get_source_project_id().as_str() != project_id
+                        || ui.get_reader_source_id().as_str() != source_id
+                    {
+                        return;
+                    }
+                    ui.set_reader_busy(false);
+                    match result {
+                        Ok(page) => {
+                            ui.set_reader_source_title(page.title.into());
+                            ui.set_reader_text(page.text.into());
+                            ui.set_reader_offset(page.offset);
+                            ui.set_reader_returned(page.returned);
+                            ui.set_reader_more(page.more);
+                            ui.set_reader_status(
+                                format!(
+                                    "Verified text: characters {}–{} of {}. {}",
+                                    page.offset.saturating_add(1),
+                                    page.offset.saturating_add(page.returned),
+                                    page.total,
+                                    if page.more {
+                                        "More text available."
+                                    } else {
+                                        "End of source."
+                                    }
+                                )
+                                .into(),
+                            );
+                        }
+                        Err(error) => {
+                            ui.set_reader_more(false);
+                            ui.set_reader_status(format!("Unable to read source: {error}").into());
+                        }
+                    }
+                });
+            });
+        }
+    });
+    app.on_backup_finished({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |succeeded, source_path, message| {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_backup_busy(false);
+            if active_project.borrow().as_deref() != Some(Path::new(source_path.as_str())) {
+                ui.set_backup_results(
+                    "Backup finished for the previously open project. Reopen that project to inspect its archive status.".into(),
+                );
+                return;
+            }
+            ui.set_backup_results(message.clone());
+            ui.set_status(if succeeded {
+                "Backup operation completed".into()
+            } else {
+                message
+            });
+        }
+    });
     app.on_backup_action({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let writing_drafts = writing_drafts.clone();
+        let quick_timer = quick_note_timer.clone();
         move |action, archive, password| {
-            if let Some(ui) = weak.upgrade() {
-                let result = active_project
-                    .borrow()
-                    .as_ref()
-                    .ok_or_else(|| "Open a project first".to_string())
-                    .and_then(|path| backup_operation(path, &action, &archive, &password));
-                match result {
-                    Ok(message) => {
-                        ui.set_backup_results(message.into());
-                        ui.set_status("Backup operation completed".into());
-                    }
+            let Some(ui) = weak.upgrade() else { return };
+            if ui.get_backup_busy() || ui.get_recovery_busy() {
+                return;
+            }
+            let Some(project) = active_project.borrow().clone() else {
+                ui.set_backup_results("Open a project first".into());
+                return;
+            };
+            if action == "export" || action == "export-encrypted" {
+                // Quick Notes have their own debounced journal, separate from
+                // notebook/manuscript. Include the active note in this snapshot.
+                if let Err(error) =
+                    finish_quick_note_before_project_switch(&ui, Some(&project), &quick_timer)
+                {
+                    ui.set_backup_results(
+                        format!("Archive not created: active note could not be saved: {error}")
+                            .into(),
+                    );
+                    return;
+                }
+                if ui.get_writing_recovery_blocked() {
+                    ui.set_backup_results(
+                        "Archive not created: resolve the writing recovery journal before exporting".into(),
+                    );
+                    return;
+                }
+                let preflight = host_data_root().and_then(|root| {
+                    flush_writing_before_archive(&project, &mut writing_drafts.borrow_mut(), &root)
+                });
+                match preflight {
+                    Ok(revision) => ui.set_project_revision(revision as i32),
                     Err(error) => {
-                        ui.set_backup_results(error.clone().into());
-                        ui.set_status(error.into());
+                        ui.set_backup_results(format!("Archive not created: {error}").into());
+                        return;
                     }
                 }
+            }
+            ui.set_backup_busy(true);
+            ui.set_backup_results("Working with the selected local archive…".into());
+            let weak_task = weak.clone();
+            std::thread::spawn(move || {
+                let result = backup_operation(&project, &action, &archive, &password);
+                let (succeeded, message) = match result {
+                    Ok(message) => (true, message),
+                    Err(error) => (false, error),
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak_task.upgrade() {
+                        ui.invoke_backup_finished(
+                            succeeded,
+                            project.to_string_lossy().into_owned().into(),
+                            message.into(),
+                        );
+                    }
+                });
+            });
+        }
+    });
+    let restoring_from = Rc::new(RefCell::new(None::<(u64, Option<PathBuf>)>));
+    app.on_restore_finished({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let project_generation = project_generation.clone();
+        let restoring_from = restoring_from.clone();
+        move |succeeded, destination, message| {
+            let Some(ui) = weak.upgrade() else { return };
+            ui.set_recovery_busy(false);
+            let requested_from = restoring_from.borrow_mut().take();
+            if !succeeded {
+                ui.set_recovery_results(message.clone());
+                ui.set_status(message);
+                return;
+            }
+            // The user may open another project while a large archive is being
+            // authenticated and restored. Never unexpectedly replace it.
+            if requested_from
+                != Some((project_generation.get(), active_project.borrow().clone()))
+            {
+                ui.set_recovery_results(
+                    format!("Archive restored to {destination}. Your current project has not changed; open the restored directory when ready.").into(),
+                );
+                return;
+            }
+            let restored_path = PathBuf::from(destination.as_str());
+            ui.invoke_open_project(destination.clone());
+            if active_project.borrow().as_deref() == Some(restored_path.as_path()) {
+                ui.set_recovery_results(message.clone());
+                ui.set_status(message);
+            } else {
+                ui.set_recovery_results(
+                    format!("Archive restored to {destination}, but could not be opened automatically. Open the restored directory to continue.").into(),
+                );
             }
         }
     });
     app.on_restore_backup({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let project_generation = project_generation.clone();
+        let restoring_from = restoring_from.clone();
+        let quick_timer = quick_note_timer.clone();
         move |encrypted, archive, destination, password| {
-            if let Some(ui) = weak.upgrade() {
-                match restore_backup(encrypted, &archive, &destination, &password) {
-                    Ok((info, path, message)) => {
-                        *active_project.borrow_mut() = Some(path);
-                        ui.set_project_title(info.title.into());
-                        ui.set_project_revision(info.revision as i32);
-                        ui.set_recovery_results(message.clone().into());
-                        ui.set_status(message.into());
-                        ui.set_page(1);
-                    }
-                    Err(error) => {
-                        ui.set_recovery_results(error.clone().into());
-                        ui.set_status(error.into());
-                    }
-                }
+            let Some(ui) = weak.upgrade() else { return };
+            if ui.get_recovery_busy() || ui.get_backup_busy() {
+                return;
             }
+            if let Err(error) = finish_quick_note_before_project_switch(
+                &ui,
+                active_project.borrow().as_deref(),
+                &quick_timer,
+            ) {
+                ui.set_status(
+                    format!("Restore canceled: current note could not be saved: {error}").into(),
+                );
+                return;
+            }
+            *restoring_from.borrow_mut() =
+                Some((project_generation.get(), active_project.borrow().clone()));
+            ui.set_recovery_busy(true);
+            ui.set_recovery_results("Authenticating and restoring a local archive…".into());
+            let weak_task = weak.clone();
+            std::thread::spawn(move || {
+                let result = restore_backup(encrypted, &archive, &destination, &password);
+                let (succeeded, restored_path, message) = match result {
+                    Ok((_info, path, message)) => {
+                        (true, path.to_string_lossy().into_owned(), message)
+                    }
+                    Err(error) => (false, String::new(), error),
+                };
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak_task.upgrade() {
+                        ui.invoke_restore_finished(succeeded, restored_path.into(), message.into());
+                    }
+                });
+            });
         }
     });
     let preferences_path = host_data_root()?.join("display-preferences.json");
@@ -6652,7 +9553,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let weak = app.as_weak();
         let activity = activity.clone();
         let activity_path = activity_path.clone();
+        let pdf_page_snapshot = pdf_page_snapshot.clone();
         move |path, query, page_number| {
+            pdf_page_snapshot.lock().unwrap().take();
             let kind = if query.is_empty() {
                 "PDF render"
             } else {
@@ -6663,7 +9566,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let weak = weak.clone();
             let activity = activity.clone();
             let activity_path = activity_path.clone();
+            let pdf_page_snapshot = pdf_page_snapshot.clone();
             std::thread::spawn(move || {
+                // Capture the actual PDF bytes on both sides of rendering.
+                // If another process writes the same path during this job,
+                // keep the Reader usable but fail closed for AI grounding.
+                let source_before = pdf_file_sha256(Path::new(path.as_str())).ok();
                 let result = usize::try_from(page_number)
                     .ok()
                     .filter(|number| *number > 0)
@@ -6675,6 +9583,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             number - 1,
                         )
                     });
+                let verified_source_sha = source_before.and_then(|before| {
+                    pdf_file_sha256(Path::new(path.as_str()))
+                        .ok()
+                        .filter(|after| after == &before)
+                });
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak.upgrade() {
                         let succeeded = result.is_ok();
@@ -6728,6 +9641,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     rendered.height,
                                 );
                                 ui.set_pdf_image(Image::from_rgba8(buffer));
+                                const MAX_VISIBLE_PDF_PAGE_CHARS: usize = 16_000;
+                                let count_chars = rendered.extracted_text.chars().count();
+                                let clipped = count_chars > MAX_VISIBLE_PDF_PAGE_CHARS;
+                                let copyable_text = rendered
+                                    .extracted_text
+                                    .chars()
+                                    .take(MAX_VISIBLE_PDF_PAGE_CHARS)
+                                    .collect::<String>();
+                                let text_sha = hex::encode(Sha256::digest(rendered.extracted_text.as_bytes()));
+                                pdf_page_snapshot.lock().unwrap().replace(PdfPageSnapshot {
+                                    path: path.to_string(),
+                                    page: i32::try_from(rendered.page_index.saturating_add(1)).unwrap_or(i32::MAX),
+                                    page_count: i32::try_from(rendered.page_count).unwrap_or(i32::MAX),
+                                    render_job: job_id,
+                                    visible_text: copyable_text.clone(),
+                                    file_sha256: verified_source_sha,
+                                });
+                                ui.set_pdf_page_extracted_text(copyable_text.into());
+                                ui.set_pdf_page_extraction_status(
+                                    format!(
+                                        "Page {} of {} · {} extracted Unicode characters{} · extracted-text SHA-256 {}. This text is for inspection only; no page-specific evidence anchor has been recorded.",
+                                        rendered.page_index + 1,
+                                        rendered.page_count,
+                                        count_chars,
+                                        if clipped { " (first 16,000 shown; truncated)" } else { "" },
+                                        &text_sha[..16],
+                                    )
+                                    .into(),
+                                );
                                 ui.set_pdf_matches(count);
                                 ui.set_pdf_status(
                                     format!(
@@ -6742,6 +9684,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                             }
                             Err(e) => {
+                                ui.set_pdf_page_extracted_text("".into());
+                                ui.set_pdf_page_extraction_status("PDF page text unavailable; retry opening the file.".into());
                                 ui.set_pdf_status(format!("PDF error: {}", e).into());
                                 ui.set_pdf_page_number(1);
                                 ui.set_pdf_page_count(0);
@@ -6813,23 +9757,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let project_generation = project_generation.clone();
+        let pending_evidence = pending_evidence.clone();
+        let pending_ai = pending_ai.clone();
+        let pending_context_ai = pending_context_ai.clone();
+        let active_context_ai_run = active_context_ai_run.clone();
+        let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
+        let quick_timer = quick_note_timer.clone();
         move |path, title| {
+            if let Some(ui) = weak.upgrade() {
+                if let Err(error) = finish_quick_note_before_project_switch(
+                    &ui,
+                    active_project.borrow().as_deref(),
+                    &quick_timer,
+                ) {
+                    ui.set_status(
+                        format!("Project switch canceled because the current note could not be saved: {error}").into(),
+                    );
+                    return;
+                }
+            }
             let result = load_project(&path, &title, true);
             if let Some(ui) = weak.upgrade() {
                 match result {
                     Ok(info) => {
+                        project_generation.set(project_generation.get().wrapping_add(1));
                         timer.stop();
+                        pending_evidence.borrow_mut().take();
+                        pending_ai.borrow_mut().take();
+                        pending_context_ai.borrow_mut().take();
+                        change_context_ai_project(
+                            &mut active_context_ai_run.lock().unwrap(),
+                            Some(PathBuf::from(path.as_str())),
+                            project_generation.get(),
+                        );
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
-                        if let Err(error) =
+                        clear_project_scoped_view_state(&ui);
+                        reset_quick_notes_for_project(&ui, Path::new(path.as_str()));
+                        *draft_session.borrow_mut() =
+                            quick_notes::DraftSession::open(Path::new(path.as_str())).ok();
+                        let draft_warning = if let Err(error) =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
                         {
-                            ui.set_status(error.into());
+                            ui.set_writing_results(format!("Writing recovery blocked: {error}").into());
+                            ui.set_notebook_results(format!("Writing recovery blocked: {error}").into());
+                            Some(error)
                         } else {
                             resume_recovered_writing(
                                 &timer,
@@ -6837,10 +9815,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 drafts.clone(),
                                 weak.clone(),
                             );
-                        }
+                            None
+                        };
+                        reset_source_views(&ui, &info.id);
+                        ui.set_evidence_results("Project changed. Evidence previews from another project are invalid. Enter an existing source ID to begin.".into());
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project created".into());
+                        ui.set_status(draft_warning.map_or_else(|| "Project created".to_owned(), |error| format!("Project created; writing recovery needs attention: {error}" )).into());
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -6851,22 +9832,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_default_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let project_generation = project_generation.clone();
+        let pending_evidence = pending_evidence.clone();
+        let pending_ai = pending_ai.clone();
+        let pending_context_ai = pending_context_ai.clone();
+        let active_context_ai_run = active_context_ai_run.clone();
+        let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
+        let quick_timer = quick_note_timer.clone();
         move |title| {
+            if let Some(ui) = weak.upgrade() {
+                if let Err(error) = finish_quick_note_before_project_switch(
+                    &ui,
+                    active_project.borrow().as_deref(),
+                    &quick_timer,
+                ) {
+                    ui.set_status(
+                        format!("Project switch canceled because the current note could not be saved: {error}").into(),
+                    );
+                    return;
+                }
+            }
             let result = create_managed_project(&title);
             if let Some(ui) = weak.upgrade() {
                 match result {
                     Ok(info) => {
+                        project_generation.set(project_generation.get().wrapping_add(1));
                         timer.stop();
+                        pending_evidence.borrow_mut().take();
+                        pending_ai.borrow_mut().take();
+                        pending_context_ai.borrow_mut().take();
+                        // The managed-project locator below may fail. Bind
+                        // the AI lifecycle to the actual opened path, not the
+                        // new project's UUID or a guessed storage location.
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = find_managed_project(&info.id).ok();
+                        change_context_ai_project(
+                            &mut active_context_ai_run.lock().unwrap(),
+                            active_project.borrow().clone(),
+                            project_generation.get(),
+                        );
+                        clear_project_scoped_view_state(&ui);
+                        let mut draft_warning = None;
                         if let Some(project) = active_project.borrow().as_ref() {
+                            reset_quick_notes_for_project(&ui, project);
+                            *draft_session.borrow_mut() =
+                                quick_notes::DraftSession::open(project).ok();
                             if let Err(error) = restore_writing_drafts(&ui, project, &drafts) {
-                                ui.set_status(error.into());
+                                ui.set_writing_results(format!("Writing recovery blocked: {error}").into());
+                                ui.set_notebook_results(format!("Writing recovery blocked: {error}").into());
+                                draft_warning = Some(error);
                             } else {
                                 resume_recovered_writing(
                                     &timer,
@@ -6876,9 +9895,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                             }
                         }
+                        reset_source_views(&ui, &info.id);
+                        ui.set_evidence_results("Project changed. Evidence previews from another project are invalid. Enter an existing source ID to begin.".into());
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project created in managed local storage".into());
+                        ui.set_status(draft_warning.map_or_else(|| "Project created in managed local storage".to_owned(), |error| format!("Managed project created; writing recovery needs attention: {error}")).into());
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -6889,23 +9910,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_open_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let project_generation = project_generation.clone();
+        let pending_evidence = pending_evidence.clone();
+        let pending_ai = pending_ai.clone();
+        let pending_context_ai = pending_context_ai.clone();
+        let active_context_ai_run = active_context_ai_run.clone();
+        let draft_session = quick_note_draft_session.clone();
         let pending_physical_export = pending_physical_export.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
+        let quick_timer = quick_note_timer.clone();
         move |path| {
+            if let Some(ui) = weak.upgrade() {
+                if let Err(error) = finish_quick_note_before_project_switch(
+                    &ui,
+                    active_project.borrow().as_deref(),
+                    &quick_timer,
+                ) {
+                    ui.set_status(
+                        format!("Project switch canceled because the current note could not be saved: {error}").into(),
+                    );
+                    return;
+                }
+            }
             let result = load_project(&path, "", false);
             if let Some(ui) = weak.upgrade() {
                 match result {
                     Ok(info) => {
+                        project_generation.set(project_generation.get().wrapping_add(1));
                         timer.stop();
+                        pending_evidence.borrow_mut().take();
+                        pending_ai.borrow_mut().take();
+                        pending_context_ai.borrow_mut().take();
+                        change_context_ai_project(
+                            &mut active_context_ai_run.lock().unwrap(),
+                            Some(PathBuf::from(path.as_str())),
+                            project_generation.get(),
+                        );
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_id("".into());
                         ui.set_protocol_export_receipt("".into());
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
-                        if let Err(error) =
+                        clear_project_scoped_view_state(&ui);
+                        reset_quick_notes_for_project(&ui, Path::new(path.as_str()));
+                        *draft_session.borrow_mut() =
+                            quick_notes::DraftSession::open(Path::new(path.as_str())).ok();
+                        let draft_warning = if let Err(error) =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
                         {
-                            ui.set_status(error.into());
+                            ui.set_writing_results(format!("Writing recovery blocked: {error}").into());
+                            ui.set_notebook_results(format!("Writing recovery blocked: {error}").into());
+                            Some(error)
                         } else {
                             resume_recovered_writing(
                                 &timer,
@@ -6913,10 +9968,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 drafts.clone(),
                                 weak.clone(),
                             );
-                        }
+                            None
+                        };
+                        reset_source_views(&ui, &info.id);
+                        ui.set_evidence_results("Project changed. Evidence previews from another project are invalid. Enter an existing source ID to begin.".into());
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project opened".into());
+                        ui.set_status(draft_warning.map_or_else(|| "Project opened".to_owned(), |error| format!("Project opened; writing recovery needs attention: {error}")).into());
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -6972,6 +10030,679 @@ mod tests {
     use super::*;
 
     #[test]
+    fn quick_note_recovery_selection_keeps_exact_draft_and_never_crosses_projects() {
+        let root = std::env::temp_dir().join(format!("rw-note-recovery-ui-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Host recovery selection",
+            true,
+            &root.join("audit.sqlite"),
+        )
+        .unwrap();
+        for index in 0..2 {
+            let note = quick_notes::save(
+                &project,
+                None,
+                None,
+                &format!("Original {index}"),
+                "before",
+                "",
+            )
+            .unwrap();
+            quick_notes::stage_draft(
+                &project,
+                &note.id,
+                note.revision,
+                &format!("Title \u{067E}\u{0698}\u{0648}\u{0647}\u{0634} {index}"),
+                &format!("Exact journal body 🧠 漢字 {index}"),
+                "lab, qualitative",
+            )
+            .unwrap();
+            quick_notes::save(
+                &project,
+                Some(&note.id),
+                Some(note.revision),
+                "External writer",
+                "newer saved",
+                "",
+            )
+            .unwrap();
+        }
+        let mut choices = QuickNoteRecoverySelection::default();
+        choices.refresh(&project).unwrap();
+        assert_eq!(choices.drafts.len(), 2);
+        // An unreadable second project must never show the first project's
+        // retained private draft, even if loading the new project fails.
+        assert!(choices.refresh(&root.join("missing-project")).is_err());
+        assert!(choices.drafts.is_empty());
+        assert!(choices.project.is_none());
+        choices.refresh(&project).unwrap();
+        assert_eq!(choices.drafts.len(), 2);
+        let first = choices.current(&project).unwrap().clone();
+        assert!(first.body.contains("漢字"));
+        assert!(!choices.shift(&root.join("other-project"), 1));
+        assert!(choices.current(&root.join("other-project")).is_none());
+        assert!(choices.shift(&project, 1));
+        let second = choices.current(&project).unwrap().clone();
+        assert_ne!(first.recovery_token, second.recovery_token);
+        choices.refresh(&project).unwrap();
+        assert_eq!(choices.current(&project), Some(&second));
+        assert!(choices.shift(&project, 1));
+        assert_eq!(
+            choices.current(&project),
+            Some(&second),
+            "last choice clamps"
+        );
+        assert!(choices.shift(&project, -1));
+        assert_eq!(choices.current(&project), Some(&first));
+        assert!(recovered_draft_matches_visible_editor(
+            &first,
+            &first.source_note_id,
+            &first.title,
+            &first.body,
+            &first.labels
+        ));
+        assert!(!recovered_draft_matches_visible_editor(
+            &first,
+            &first.source_note_id,
+            &first.title,
+            "newer unsaved text must not be discarded",
+            &first.labels
+        ));
+        // A recovery button must use the host-held inspected choice, not
+        // whatever text is currently displayed in the editable note.
+        let newer_original = quick_notes::get(&project, &first.source_note_id).unwrap();
+        let recovered = quick_notes::recover_conflicting_draft_as_copy(
+            &project,
+            choices.current(&project).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(recovered.body, first.body);
+        assert_eq!(
+            quick_notes::get(&project, &first.source_note_id).unwrap(),
+            newer_original
+        );
+        choices.refresh(&project).unwrap();
+        assert_eq!(choices.drafts.len(), 1);
+        assert_eq!(choices.current(&project), Some(&second));
+        choices.reset();
+        assert!(choices.current(&project).is_none());
+        assert!(choices.drafts.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn contextual_note_identity_distinguishes_equal_text_in_different_notes() {
+        assert_eq!(contextual_note_object_id(""), "research-notebook");
+        assert_eq!(contextual_note_object_id("note-a"), "quick-note:note-a");
+        assert_ne!(
+            contextual_note_object_id("note-a"),
+            contextual_note_object_id("note-b"),
+            "identical note text must not erase source identity",
+        );
+    }
+
+    #[test]
+    fn contextual_notes_use_only_the_visible_editor() {
+        let research = contextual_notes_payload(
+            true,
+            "selected-quick",
+            "Quick private title",
+            "HIDDEN_QUICK_PRIVATE_TEXT",
+            "VISIBLE_RESEARCH_NOTEBOOK",
+        )
+        .unwrap();
+        assert_eq!(
+            research,
+            (
+                "research-notebook".to_owned(),
+                "Research notebook".to_owned(),
+                "VISIBLE_RESEARCH_NOTEBOOK".to_owned(),
+            )
+        );
+
+        let quick = contextual_notes_payload(
+            false,
+            "selected-quick",
+            "Visible quick title",
+            "VISIBLE_QUICK_PRIVATE_TEXT",
+            "HIDDEN_RESEARCH_NOTEBOOK",
+        )
+        .unwrap();
+        assert_eq!(
+            quick,
+            (
+                "quick-note:selected-quick".to_owned(),
+                "Quick note: Visible quick title".to_owned(),
+                "VISIBLE_QUICK_PRIVATE_TEXT".to_owned(),
+            )
+        );
+        assert!(
+            contextual_notes_payload(false, "", "", "", "HIDDEN_RESEARCH_NOTEBOOK").is_err(),
+            "An empty Quick Notes selection must never expose a hidden research notebook",
+        );
+        assert_eq!(
+            contextual_notes_payload(true, "", "", "", "VISIBLE_RESEARCH_NOTEBOOK")
+                .unwrap()
+                .2,
+            "VISIBLE_RESEARCH_NOTEBOOK",
+        );
+    }
+
+    #[test]
+    fn notebook_export_displays_markdown_directly_and_rejects_wrong_shape() {
+        let markdown = "# Research notebook\n\n*Saved revision 1; edited today.*\n\nA note";
+        let result = serde_json::json!({"data": {"text": markdown}});
+        assert_eq!(notebook_export_markdown(&result).unwrap(), markdown);
+        assert!(notebook_export_markdown(&serde_json::json!({"data":{"text":42}})).is_err());
+        assert!(notebook_export_markdown(&serde_json::json!({"data":{"text":"{}"}})).is_err());
+        assert!(notebook_export_markdown(&serde_json::json!({})).is_err());
+    }
+
+    fn pdf_selection_snapshot(text: &str) -> PdfPageSnapshot {
+        PdfPageSnapshot {
+            path: "/private/study/brain paper.pdf".into(),
+            page: 2,
+            page_count: 4,
+            render_job: 19,
+            visible_text: text.into(),
+            file_sha256: Some("synthetic-pdf-file-digest".into()),
+        }
+    }
+
+    #[test]
+    fn replaced_pdf_at_identical_path_never_reaches_ai_dispatch() {
+        use std::cell::Cell;
+
+        let directory = std::env::temp_dir().join(format!("rw-pdf-source-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&directory).unwrap();
+        let file = directory.join("research-paper.pdf");
+        std::fs::write(&file, b"%PDF-1.7\nsynthetic source A\n").unwrap();
+        let original = pdf_file_sha256(&file).unwrap();
+        let invoked = Cell::new(0);
+        let verified = (file.clone(), original.clone());
+        let ok = with_verified_pdf_ai_source(
+            Some(&verified),
+            || false,
+            || {
+                invoked.set(invoked.get() + 1);
+                Ok(())
+            },
+        );
+        assert!(ok.is_ok());
+        assert_eq!(invoked.get(), 1);
+
+        // Same pathname, new bytes: preserve the displayed-text snapshot but
+        // reject its now-stale request before constructing any HTTP transport.
+        std::fs::write(&file, b"%PDF-1.7\nsynthetic source B\n").unwrap();
+        let rejected = with_verified_pdf_ai_source(
+            Some(&verified),
+            || false,
+            || {
+                invoked.set(invoked.get() + 1);
+                Ok(())
+            },
+        );
+        assert!(rejected.unwrap_err().contains("changed on disk"));
+        assert_eq!(invoked.get(), 1, "no model dispatch after file replacement");
+        assert_ne!(pdf_file_sha256(&file).unwrap(), original);
+
+        let replacement_digest = pdf_file_sha256(&file).unwrap();
+        let in_flight_source = (file.clone(), replacement_digest);
+        let in_flight = with_verified_pdf_ai_source(
+            Some(&in_flight_source),
+            || false,
+            || {
+                std::fs::write(&file, b"%PDF-1.7\nmodified during inference\n").unwrap();
+                Ok("synthetic model output")
+            },
+        );
+        assert!(in_flight.unwrap_err().contains("changed on disk"));
+
+        let missing = directory.join("deleted.pdf");
+        let missing_request = (missing, original);
+        assert!(with_verified_pdf_ai_source(
+            Some(&missing_request),
+            || false,
+            || {
+                invoked.set(invoked.get() + 1);
+                Ok(())
+            }
+        )
+        .is_err());
+        assert_eq!(invoked.get(), 1);
+        std::fs::remove_dir_all(directory).unwrap();
+    }
+
+    #[test]
+    fn canceled_pdf_dispatch_does_not_invoke_transport() {
+        let transport_called = std::cell::Cell::new(false);
+        let result = with_verified_pdf_ai_source(
+            None,
+            || true,
+            || {
+                transport_called.set(true);
+                Ok(())
+            },
+        );
+        assert!(result.unwrap_err().contains("canceled"));
+        assert!(!transport_called.get());
+    }
+
+    fn pdf_selection(
+        snapshot: Option<&PdfPageSnapshot>,
+        visible: &str,
+        selected: &str,
+    ) -> Result<PdfPassageAnchor, String> {
+        verified_pdf_passage(
+            snapshot,
+            "/private/study/brain paper.pdf",
+            2,
+            4,
+            19,
+            visible,
+            selected,
+        )
+    }
+
+    #[test]
+    fn pdf_selection_verifies_exact_unicode_bytes_and_source_digest() {
+        let visible = "Alpha 🧠\nسلام cortex Δ.\nOmega";
+        let snapshot = pdf_selection_snapshot(visible);
+        let anchor = pdf_selection(Some(&snapshot), visible, "سلام cortex Δ.").unwrap();
+        assert_eq!(anchor.byte_start, "Alpha 🧠\n".len());
+        assert_eq!(anchor.byte_end, "Alpha 🧠\nسلام cortex Δ.".len());
+        assert_eq!(
+            &visible[anchor.byte_start..anchor.byte_end],
+            "سلام cortex Δ."
+        );
+        assert_eq!(
+            anchor.source_sha256,
+            hex::encode(Sha256::digest(visible.as_bytes()))
+        );
+    }
+
+    #[test]
+    fn pdf_selection_rejects_empty_overlong_missing_and_repeated_text() {
+        let visible = "repeated repeated text";
+        let snapshot = pdf_selection_snapshot(visible);
+        for passage in ["", "  \n", "not present", "repeated", "repeated "] {
+            assert!(
+                pdf_selection(Some(&snapshot), visible, passage).is_err(),
+                "{passage:?}"
+            );
+        }
+        assert!(pdf_selection(
+            Some(&snapshot),
+            visible,
+            &"a".repeat(MAX_PDF_PASSAGE_BYTES + 1)
+        )
+        .unwrap_err()
+        .contains("limit"));
+        // Overlapping occurrences are ambiguous even though str::match_indices
+        // would report only one non-overlapping match.
+        let overlapping = pdf_selection_snapshot("ababa");
+        assert!(pdf_selection(Some(&overlapping), "ababa", "aba")
+            .unwrap_err()
+            .contains("more than once"));
+    }
+
+    #[test]
+    fn pdf_selection_fails_closed_after_pdf_path_page_job_or_text_changes() {
+        let visible = "A uniquely identified research passage";
+        let snapshot = pdf_selection_snapshot(visible);
+        let params = (
+            "/private/study/brain paper.pdf",
+            2,
+            4,
+            19,
+            visible,
+            "uniquely identified",
+        );
+        assert!(pdf_selection(None, visible, params.5).is_err());
+        assert!(pdf_selection(Some(&snapshot), "Another text", params.5).is_err());
+        for (path, page, count, job) in [
+            ("/private/study/other.pdf", 2, 4, 19),
+            (params.0, 3, 4, 19),
+            (params.0, 2, 3, 19),
+            (params.0, 2, 4, 20),
+        ] {
+            assert!(verified_pdf_passage(
+                Some(&snapshot),
+                path,
+                page,
+                count,
+                job,
+                visible,
+                params.5
+            )
+            .is_err());
+        }
+        assert!(pdf_selection(Some(&snapshot), visible, params.5).is_ok());
+    }
+
+    #[test]
+    fn contextual_ai_drops_completed_previous_page_and_allows_new_page_run() {
+        let project = PathBuf::from("local-synthetic-project");
+        let mut state = ContextAiRunLifecycle::default();
+        change_context_ai_project(&mut state, Some(project.clone()), 9);
+        let old = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project: project.clone(),
+            project_generation: 9,
+        };
+        assert!(begin_context_ai_run(
+            &mut state,
+            old.clone(),
+            Arc::new(AtomicBool::new(false)),
+        ));
+        assert_eq!(
+            complete_context_ai_for_page(&mut state, &old, 19, 21),
+            ContextAiCompletionDisposition::DiscardedAfterPageChange,
+        );
+        assert!(
+            state.current.is_none(),
+            "page switch must release busy state"
+        );
+
+        let current = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project,
+            project_generation: 9,
+        };
+        assert!(begin_context_ai_run(
+            &mut state,
+            current.clone(),
+            Arc::new(AtomicBool::new(false)),
+        ));
+        assert_eq!(
+            complete_context_ai_for_page(&mut state, &old, 19, 21),
+            ContextAiCompletionDisposition::IgnoredStale,
+        );
+        assert!(
+            state.current.is_some(),
+            "stale completion must not dismiss a new run"
+        );
+        assert_eq!(
+            complete_context_ai_for_page(&mut state, &current, 21, 21),
+            ContextAiCompletionDisposition::DisplayOnSourcePage,
+        );
+    }
+
+    #[test]
+    fn contextual_ai_cancel_then_retry_blocks_old_completion_from_clearing_new_busy_state() {
+        let project = PathBuf::from("private-local-project");
+        let mut state = ContextAiRunLifecycle::default();
+        change_context_ai_project(&mut state, Some(project.clone()), 7);
+        let first = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project: project.clone(),
+            project_generation: 7,
+        };
+        let old_stop = Arc::new(AtomicBool::new(false));
+        assert!(begin_context_ai_run(
+            &mut state,
+            first.clone(),
+            old_stop.clone()
+        ));
+        assert!(context_ai_completion_is_current(&state, &first));
+
+        assert!(invalidate_context_ai_run(&mut state));
+        assert!(old_stop.load(Ordering::SeqCst));
+        let second = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project,
+            project_generation: 7,
+        };
+        assert!(begin_context_ai_run(
+            &mut state,
+            second.clone(),
+            Arc::new(AtomicBool::new(false))
+        ));
+
+        // Same event-loop guard as production. The first worker is permitted
+        // to finish later but cannot overwrite the second request's panel.
+        let busy = Cell::new(true);
+        let output = RefCell::new("New local request in progress".to_owned());
+        if finish_context_ai_run(&mut state, &first) {
+            busy.set(false);
+            output.replace("Stale model output".to_owned());
+        }
+        assert!(busy.get());
+        assert_eq!(*output.borrow(), "New local request in progress");
+        assert!(context_ai_completion_is_current(&state, &second));
+        assert!(finish_context_ai_run(&mut state, &second));
+        assert!(!finish_context_ai_run(&mut state, &second));
+    }
+
+    #[test]
+    fn contextual_ai_project_switch_and_same_path_reopen_invalidate_late_worker() {
+        let project_a = PathBuf::from("project-a");
+        let project_b = PathBuf::from("project-b");
+        let mut state = ContextAiRunLifecycle::default();
+        change_context_ai_project(&mut state, Some(project_a.clone()), 2);
+        let old = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project: project_a.clone(),
+            project_generation: 2,
+        };
+        let old_stop = Arc::new(AtomicBool::new(false));
+        assert!(begin_context_ai_run(
+            &mut state,
+            old.clone(),
+            old_stop.clone()
+        ));
+        change_context_ai_project(&mut state, Some(project_b.clone()), 3);
+        assert!(old_stop.load(Ordering::SeqCst));
+        assert!(!finish_context_ai_run(&mut state, &old));
+        assert!(!begin_context_ai_run(
+            &mut state,
+            old.clone(),
+            Arc::new(AtomicBool::new(false))
+        ));
+
+        let other_project = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project: project_b.clone(),
+            project_generation: 3,
+        };
+        let other_stop = Arc::new(AtomicBool::new(false));
+        assert!(begin_context_ai_run(
+            &mut state,
+            other_project.clone(),
+            other_stop.clone()
+        ));
+        // Reopening the identical directory must still invalidate the old
+        // completion: project identity is path AND generation.
+        change_context_ai_project(&mut state, Some(project_b.clone()), 4);
+        assert!(other_stop.load(Ordering::SeqCst));
+        assert!(!finish_context_ai_run(&mut state, &other_project));
+
+        let reloaded = ContextAiRunIdentity {
+            id: Uuid::new_v4(),
+            project: project_b,
+            project_generation: 4,
+        };
+        assert!(begin_context_ai_run(
+            &mut state,
+            reloaded.clone(),
+            Arc::new(AtomicBool::new(false))
+        ));
+        assert!(!finish_context_ai_run(&mut state, &old));
+        assert!(finish_context_ai_run(&mut state, &reloaded));
+    }
+
+    #[test]
+    fn quick_note_navigation_stays_put_when_current_editor_save_conflicts() {
+        let root = std::env::temp_dir().join(format!("rw-note-navigation-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Quick note transition conflict",
+            true,
+            &root.join("audit.sqlite"),
+        )
+        .unwrap();
+        let original = quick_notes::save(&project, None, None, "My note", "Original", "").unwrap();
+        quick_notes::stage_draft(
+            &project,
+            &original.id,
+            original.revision,
+            "My note",
+            "Uncommitted Persian draft پژوهش",
+            "",
+        )
+        .unwrap();
+        let other_writer = quick_notes::save(
+            &project,
+            Some(&original.id),
+            Some(original.revision),
+            "My note",
+            "Concurrent writer",
+            "",
+        )
+        .unwrap();
+
+        let selected_id = RefCell::new(original.id.clone());
+        let visible_draft = RefCell::new("Uncommitted Persian draft پژوهش".to_owned());
+        let transition = after_quick_note_save(
+            || {
+                quick_notes::save(
+                    &project,
+                    Some(&original.id),
+                    Some(original.revision),
+                    "My note",
+                    visible_draft.borrow().as_str(),
+                    "",
+                )
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+            },
+            || {
+                selected_id.replace("next-note".into());
+                visible_draft.replace("Next note body".into());
+            },
+        );
+        assert!(transition.is_err());
+        assert_eq!(*selected_id.borrow(), original.id);
+        assert_eq!(*visible_draft.borrow(), "Uncommitted Persian draft پژوهش");
+        assert_eq!(
+            quick_notes::get(&project, &original.id).unwrap().revision,
+            other_writer.revision
+        );
+        assert_eq!(
+            quick_notes::get(&project, &original.id).unwrap().body,
+            "Concurrent writer"
+        );
+        // The already-staged local draft remains recoverable, not discarded
+        // or silently forced over a newer project revision.
+        assert!(quick_notes::recover_drafts(&project).is_err());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn quick_note_navigation_runs_after_successful_persist() {
+        let root = std::env::temp_dir().join(format!("rw-note-transition-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Quick note successful navigation",
+            true,
+            &root.join("audit.sqlite"),
+        )
+        .unwrap();
+        let note = quick_notes::save(&project, None, None, "Note", "Before", "").unwrap();
+        let switched = Cell::new(false);
+        after_quick_note_save(
+            || {
+                quick_notes::save(
+                    &project,
+                    Some(&note.id),
+                    Some(note.revision),
+                    "Note",
+                    "Saved before switch",
+                    "",
+                )
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+            },
+            || {
+                assert_eq!(
+                    quick_notes::get(&project, &note.id).unwrap().body,
+                    "Saved before switch"
+                );
+                switched.set(true);
+            },
+        )
+        .unwrap();
+        assert!(switched.get());
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn citation_picker_inserts_canonical_reference_once_without_discarding_existing_ids() {
+        let id = "A410D409-112D-461F-9872-EA62680C2B83";
+        let canonical = "a410d409-112d-461f-9872-ea62680c2b83";
+        let result = insert_unique_registered_citation("legacy-ref", id).unwrap();
+        assert_eq!(result, format!("legacy-ref, {canonical}"));
+        assert_eq!(
+            insert_unique_registered_citation(&result, canonical).unwrap(),
+            result
+        );
+        assert_eq!(
+            insert_unique_registered_citation(id, canonical).unwrap(),
+            id
+        );
+        assert!(insert_unique_registered_citation("legacy-ref", "../project-b").is_err());
+    }
+
+    #[test]
+    fn manuscript_reference_picker_searches_beyond_first_200_project_references() {
+        let root = std::env::temp_dir().join(format!("rw-citation-picker-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Reference picker pagination",
+            true,
+            &root.join("project-audit.sqlite"),
+        )
+        .unwrap();
+        let mut store = ProjectStore::open(&project).unwrap();
+        let tx = store.transaction().unwrap();
+        let mut final_id = String::new();
+        for index in 0..201_u128 {
+            let id = Uuid::from_u128(index + 1).to_string();
+            let title = if index == 200 {
+                final_id = id.clone();
+                "Unique Persian citation target پژوهش".to_string()
+            } else {
+                format!("Unrelated reference {index}")
+            };
+            let created = format!("2026-10-29T00:{:02}:{:02}Z", index / 60, index % 60);
+            tx.execute(
+                "INSERT INTO reference(id,title,authors_json,year,doi,kind,format,raw,metadata_json,status,imported_at) VALUES (?1,?2,'[]',NULL,NULL,'article','bibtex','@article{synthetic}','{}','unverified',?3)",
+                [&id, &title, &created],
+            )
+            .unwrap();
+        }
+        tx.commit().unwrap();
+        let (choices, matched) =
+            registered_manuscript_reference_choices_at(&project, "Persian citation", &root)
+                .unwrap();
+        assert_eq!(matched, 1);
+        assert_eq!(choices.len(), 1);
+        assert_eq!(choices[0].reference_id.as_str(), final_id);
+        assert!(choices[0].title.as_str().contains("پژوهش"));
+        drop(store);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
     fn native_file_dialogs_are_explicitly_scoped_to_supported_read_imports() {
         let (pdf, pdf_ext) = native_chooser_filter("pdf").unwrap();
         assert_eq!(pdf, "PDF documents");
@@ -7013,6 +10744,65 @@ mod tests {
         assert!(secondary.contains("n=42 complete cases"));
         assert!(provenance.contains("abcdef123456…"));
         assert!(!primary.contains("dataset_revision"));
+    }
+
+    #[test]
+    fn statistics_result_summary_shows_real_intervals_effect_and_cautions() {
+        let correlation = serde_json::json!({
+            "data": {
+                "dataset_revision": "1234567890abcdef", "n_used": 8,
+                "estimate": 0.08, "p_value": 0.72,
+                "details": {"fisher_z_confidence_interval_95": [-0.65, 0.72]}
+            }
+        });
+        let (_, primary, secondary, _) =
+            statistics_result_summary("statistics.correlate", &correlation);
+        assert!(primary.contains("r = 0.0800 · p = 0.7200"));
+        assert!(secondary.contains("95% confidence interval for r [-0.6500, 0.7200]"));
+        assert!(secondary.contains("association is not causation"));
+
+        let welch = serde_json::json!({
+            "data": {
+                "dataset_revision": "1234567890abcdef", "n_used": 26,
+                "estimate": 0.15, "p_value": 0.8, "degrees_freedom": 12.25,
+                "confidence_interval": [-1.2, 1.5],
+                "effect": {"cohen_d": 0.12}
+            }
+        });
+        let (_, primary, secondary, _) = statistics_result_summary("statistics.test", &welch);
+        assert!(primary.contains("Mean difference 0.1500"));
+        assert!(primary.contains("95% confidence interval [-1.2000, 1.5000]"));
+        assert!(secondary.contains("Cohen's d = 0.1200"));
+        assert!(secondary.contains("nonsignificance does not establish equivalence"));
+
+        let malformed = serde_json::json!({
+            "data": {"confidence_interval": [2.0, -2.0], "effect": {"cohen_d": "missing"}}
+        });
+        let (_, primary, secondary, _) = statistics_result_summary("statistics.test", &malformed);
+        assert!(primary.contains("confidence interval unavailable"));
+        assert!(!secondary.contains("Cohen's d"));
+        assert!(compact_stat_interval(Some(&serde_json::json!([0.0, 1.0, 2.0]))).is_none());
+    }
+
+    #[test]
+    fn dataset_cell_preview_exposes_truncation_without_losing_full_page_json() {
+        let long_text = "آزمایش🧠Alpha".repeat(85);
+        let long_value = serde_json::Value::String(long_text.clone());
+        let cell = dataset_cell_preview(&long_value);
+        assert!(cell.chars().count() <= 300);
+        assert!(cell.starts_with("آزمایش🧠Alpha"));
+        assert!(cell.ends_with("… [shortened; full value in inspection details]"));
+        assert_ne!(cell, long_text);
+        assert_eq!(
+            dataset_cell_preview(&serde_json::Value::Null),
+            "Missing (null)"
+        );
+        assert_eq!(dataset_cell_preview(&serde_json::json!(true)), "true");
+        assert_eq!(dataset_cell_preview(&serde_json::json!(42)), "42");
+        let short_text = serde_json::Value::String("سلام🧠".into());
+        assert_eq!(dataset_cell_preview(&short_text), "سلام🧠");
+        let page = serde_json::json!({"data": {"rows": [{"notes": long_value}]}});
+        assert!(pretty_result_data(&page).contains(&long_text));
     }
 
     #[test]
@@ -7107,6 +10897,7 @@ mod tests {
             arguments: serde_json::json!({"notebook":"Notebook current"}),
             expected_revision: 1,
         };
+        std::fs::create_dir_all(root.join("project")).unwrap();
         assert!(reconcile_manual_writing_save(&notebook, &mut drafts, &root).unwrap());
         assert!(!drafts.notebook_dirty);
         assert!(drafts.manuscript_dirty);
@@ -7138,9 +10929,11 @@ mod tests {
         };
         assert!(reconcile_manual_writing_save(&current_manuscript, &mut drafts, &root).unwrap());
         assert!(!drafts.manuscript_dirty);
-        let reopened =
-            writing_autosave::load(&writing_autosave::path(&root, &project_id.to_string()))
-                .unwrap();
+        let reopened = writing_autosave::load(
+            &writing_autosave::scoped_path(&root, &root.join("project"), &project_id.to_string())
+                .unwrap(),
+        )
+        .unwrap();
         assert!(!reopened.notebook_dirty && !reopened.manuscript_dirty);
         assert_eq!(reopened.body, "Newest body");
         std::fs::remove_dir_all(root).unwrap();
@@ -7160,7 +10953,7 @@ mod tests {
         .unwrap();
         let root = host.join("host");
         let id = ProjectStore::open(&project).unwrap().info().unwrap().id;
-        let draft_path = writing_autosave::path(&root, &id);
+        let draft_path = writing_autosave::scoped_path(&root, &project, &id).unwrap();
         let mut drafts = writing_autosave::Drafts {
             notebook: "ملاحظات notebook".into(),
             manuscript_id: "draft-1".into(),
@@ -7223,6 +11016,215 @@ mod tests {
         assert!(library_operation_at(&target, "add", "", "", &host).is_err());
         let reopened = ProjectStore::open(&target).unwrap().info().unwrap();
         assert_eq!(reopened.revision, revision);
+        std::fs::remove_dir_all(host).unwrap();
+    }
+
+    #[test]
+    fn evidence_note_rejects_empty_oversized_and_unbound_inputs() {
+        assert!(evidence_note_arguments("", "Title", "Body").is_err());
+        assert!(evidence_note_arguments("source", " ", "Body").is_err());
+        assert!(evidence_note_arguments("source", "Title", " ").is_err());
+        assert!(evidence_note_arguments("source\nother", "Title", "Body").is_err());
+        assert!(evidence_note_arguments("source", &"T".repeat(301), "Body").is_err());
+        assert!(evidence_note_arguments("source", "Title", &"B".repeat(250_001)).is_err());
+        let valid = evidence_note_arguments(" source-1 ", " عنوان ", " پژوهش ").unwrap();
+        assert_eq!(valid["source_id"], "source-1");
+        assert_eq!(valid["title"], "عنوان");
+        assert_eq!(valid["body"], "پژوهش");
+    }
+
+    #[test]
+    fn evidence_approval_rejects_cross_surface_and_changed_visible_draft() {
+        let id = Uuid::new_v4();
+        let mut pending = PendingEvidenceAction {
+            project_id: id,
+            project_path: PathBuf::from("synthetic-only"),
+            operation: "evidence.note".into(),
+            surface: "evidence".into(),
+            arguments: evidence_note_arguments("source-1", "Title", "Persian متن").unwrap(),
+            expected_revision: 2,
+        };
+        assert!(require_matching_evidence_note_preview(
+            &pending,
+            "source-1",
+            "Title",
+            "Persian متن"
+        )
+        .is_ok());
+        for (source, title, body) in [
+            ("source-2", "Title", "Persian متن"),
+            ("source-1", "Changed", "Persian متن"),
+            ("source-1", "Title", "Changed"),
+        ] {
+            assert!(require_matching_evidence_note_preview(&pending, source, title, body).is_err());
+        }
+        pending.surface = "question".into();
+        assert!(require_matching_evidence_note_preview(
+            &pending,
+            "source-1",
+            "Title",
+            "Persian متن"
+        )
+        .is_err());
+        pending.surface = "evidence".into();
+        pending.operation = "writing.section_save".into();
+        assert!(require_matching_evidence_note_preview(
+            &pending,
+            "source-1",
+            "Title",
+            "Persian متن"
+        )
+        .is_err());
+    }
+
+    #[test]
+    fn provider_and_assistant_approval_surfaces_cannot_be_interchanged() {
+        let mut pending = PendingAiAction {
+            project_id: Uuid::new_v4(),
+            project_path: PathBuf::from("synthetic-only"),
+            operation: "provider.configure".into(),
+            surface: "provider".into(),
+            arguments: serde_json::json!({}),
+            project_revision: 1,
+        };
+        assert!(require_ai_preview_surface(&pending, "provider").is_ok());
+        assert!(require_ai_preview_surface(&pending, "agent").is_err());
+        pending.surface = "agent".into();
+        assert!(require_ai_preview_surface(&pending, "agent").is_ok());
+        assert!(require_ai_preview_surface(&pending, "provider").is_err());
+    }
+
+    #[test]
+    fn evidence_note_preview_history_and_project_isolation_use_real_source() {
+        let host = std::env::temp_dir().join(format!("rw-evidence-note-ui-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&host).unwrap();
+        let project = host.join("alpha");
+        let other_project = host.join("beta");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Alpha",
+            true,
+            &host.join("create-alpha.sqlite"),
+        )
+        .unwrap();
+        load_project_with_audit(
+            other_project.to_str().unwrap(),
+            "Beta",
+            true,
+            &host.join("create-beta.sqlite"),
+        )
+        .unwrap();
+        let data_root = host.join("host-data");
+        library_operation_at(
+            &project,
+            "add",
+            "Local source",
+            "ثبت دادهٔ پژوهش",
+            &data_root,
+        )
+        .unwrap();
+        let sources = library_read_at(
+            &project,
+            "library.list",
+            serde_json::json!({"limit":10}),
+            &data_root,
+        )
+        .unwrap();
+        let source_id = sources["data"]["sources"][0]["source_id"]
+            .as_str()
+            .unwrap()
+            .to_owned();
+        let revision_before = ProjectStore::open(&project)
+            .unwrap()
+            .info()
+            .unwrap()
+            .revision;
+        let arguments =
+            evidence_note_arguments(&source_id, "یادداشت نخست", "تفسیر انسانی").unwrap();
+        let (pending, preview) =
+            evidence_preview_at(&project, "evidence.note", "evidence", arguments, &data_root)
+                .unwrap();
+        assert_eq!(pending.surface, "evidence");
+        assert_eq!(preview["data"]["preview"], true);
+        assert_eq!(preview["data"]["simulated_result"]["source_id"], source_id);
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            revision_before,
+            "preview must not write the original project"
+        );
+        assert!(
+            evidence_execute_pending(&pending, &other_project, &data_root).is_err(),
+            "approval from another active project must fail"
+        );
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            revision_before
+        );
+        let (executed, revision) =
+            evidence_execute_pending(&pending, &project, &data_root).unwrap();
+        assert_eq!(revision, revision_before + 1);
+        assert_eq!(executed["data"]["source_id"], source_id);
+        assert_eq!(executed["data"]["evidence_class"], "human_note_unverified");
+        let note_id = executed["data"]["note_id"].as_str().unwrap();
+        Uuid::parse_str(note_id).unwrap();
+        let history = evidence_note_history_at(&project, note_id, &data_root).unwrap();
+        assert_eq!(history["data"]["note_id"], note_id);
+        assert_eq!(history["data"]["source_id"], source_id);
+        assert_eq!(history["data"]["revisions"][0]["title"], "یادداشت نخست");
+        assert_eq!(history["data"]["revisions"][0]["body"], "تفسیر انسانی");
+        assert_eq!(history["data"]["revisions"][0]["revision"], 1);
+        assert!(evidence_note_history_at(&other_project, note_id, &data_root).is_err());
+        assert!(evidence_note_history_at(&project, "invented-anchor", &data_root).is_err());
+        assert!(
+            evidence_note_history_at(&project, &Uuid::new_v4().to_string(), &data_root).is_err()
+        );
+        assert!(
+            evidence_execute_pending(&pending, &project, &data_root).is_err(),
+            "the approved preview must be revision-bound and cannot be replayed"
+        );
+        std::fs::remove_dir_all(host).unwrap();
+    }
+
+    #[test]
+    fn evidence_note_preview_rejects_nonexistent_source_without_mutating_project() {
+        let host = std::env::temp_dir().join(format!("rw-evidence-foreign-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&host).unwrap();
+        let project = host.join("project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "No sources",
+            true,
+            &host.join("created.sqlite"),
+        )
+        .unwrap();
+        let info_before = ProjectStore::open(&project).unwrap().info().unwrap();
+        let arguments = evidence_note_arguments(
+            &Uuid::new_v4().to_string(),
+            "Unverified note",
+            "This text must never be committed without its real source",
+        )
+        .unwrap();
+        let result = evidence_preview_at(
+            &project,
+            "evidence.note",
+            "evidence",
+            arguments,
+            &host.join("host-data"),
+        );
+        assert!(
+            result.is_err(),
+            "missing source ID should fail in the preview"
+        );
+        let info_after = ProjectStore::open(&project).unwrap().info().unwrap();
+        assert_eq!(info_after.revision, info_before.revision);
         std::fs::remove_dir_all(host).unwrap();
     }
 
@@ -8346,6 +12348,115 @@ mod tests {
         assert_eq!(events[0].operation, "project.create");
         assert_eq!(events[0].effect, "local-write");
         std::fs::remove_dir_all(harness).unwrap();
+    }
+
+    #[test]
+    fn archive_preflight_flushes_immediate_edits_and_restores_exact_encrypted_writing() {
+        let host = std::env::temp_dir().join(format!("rw-backup-writing-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&host).unwrap();
+        let project = host.join("original");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Writing backup preflight",
+            true,
+            &host.join("create-audit.sqlite"),
+        )
+        .unwrap();
+        let project_id = ProjectStore::open(&project).unwrap().info().unwrap().id;
+        let journal = writing_autosave::scoped_path(&host, &project, &project_id).unwrap();
+        let mut drafts = writing_autosave::Drafts {
+            notebook: "Final notebook after last keystroke".into(),
+            manuscript_id: "paper-backup".into(),
+            section: "Results".into(),
+            body: "Immediate edit: پژوهش before 800ms autosave".into(),
+            citations: String::new(),
+            notebook_dirty: true,
+            manuscript_dirty: true,
+        };
+        writing_autosave::save(&journal, &drafts).unwrap();
+        // Export is requested immediately, without allowing the autosave timer to fire.
+        assert_eq!(
+            flush_writing_before_archive(&project, &mut drafts, &host).unwrap(),
+            2
+        );
+        assert!(!drafts.notebook_dirty && !drafts.manuscript_dirty);
+        let archive = host.join("immediate.rwproj.enc");
+        backup_operation_at(
+            &project,
+            "export-encrypted",
+            archive.to_str().unwrap(),
+            "offline-only-test-password",
+            &host,
+        )
+        .unwrap();
+        let recovered = host.join("restored");
+        restore_backup_at(
+            true,
+            archive.to_str().unwrap(),
+            recovered.to_str().unwrap(),
+            "offline-only-test-password",
+            &host,
+        )
+        .unwrap();
+        let notebook = evidence_read_at(
+            &recovered,
+            "evidence.notebook_export",
+            serde_json::json!({}),
+            &host,
+        )
+        .unwrap();
+        assert!(notebook
+            .to_string()
+            .contains("Final notebook after last keystroke"));
+        let manuscript = evidence_read_at(
+            &recovered,
+            "writing.inspect",
+            serde_json::json!({"manuscript_id":"paper-backup"}),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(
+            manuscript["data"]["sections"][0]["body"],
+            "Immediate edit: پژوهش before 800ms autosave"
+        );
+        // The restored project shares its UUID, but not its host journal path.
+        assert_ne!(
+            writing_autosave::scoped_path(&host, &project, &project_id).unwrap(),
+            writing_autosave::scoped_path(&host, &recovered, &project_id).unwrap()
+        );
+        std::fs::remove_dir_all(host).unwrap();
+    }
+
+    #[test]
+    fn archive_preflight_rejects_incomplete_or_corrupt_writing_journals() {
+        let host = std::env::temp_dir().join(format!("rw-backup-block-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&host).unwrap();
+        let project = host.join("original");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Writing backup safety",
+            true,
+            &host.join("create-audit.sqlite"),
+        )
+        .unwrap();
+        let project_id = ProjectStore::open(&project).unwrap().info().unwrap().id;
+        let journal = writing_autosave::scoped_path(&host, &project, &project_id).unwrap();
+        let mut drafts = writing_autosave::Drafts {
+            body: "Must not disappear".into(),
+            manuscript_dirty: true,
+            ..Default::default()
+        };
+        writing_autosave::save(&journal, &drafts).unwrap();
+        assert!(flush_writing_before_archive(&project, &mut drafts, &host)
+            .unwrap_err()
+            .contains("no manuscript ID or section"));
+        assert!(drafts.manuscript_dirty);
+        std::fs::write(&journal, b"{broken journal").unwrap();
+        assert!(flush_writing_before_archive(&project, &mut drafts, &host)
+            .unwrap_err()
+            .contains("corrupt"));
+        assert_eq!(std::fs::read(&journal).unwrap(), b"{broken journal");
+        std::fs::remove_dir_all(host).unwrap();
     }
 
     #[test]

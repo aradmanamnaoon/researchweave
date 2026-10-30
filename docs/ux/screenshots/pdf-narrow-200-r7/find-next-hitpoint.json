@@ -1,0 +1,22 @@
+{
+  "name": "Find next PDF matching page",
+  "bounds": [
+    331,
+    366,
+    190,
+    43
+  ],
+  "hit_point": [
+    426,
+    387
+  ],
+  "window": [
+    12,
+    50,
+    900,
+    620
+  ],
+  "enabled": true,
+  "showing": true,
+  "hit_point_inside_window": true
+}

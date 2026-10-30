@@ -15,7 +15,7 @@ These criteria are additive to the Rust rewrite/master release specification. Pa
 - [ ] Default New Project does not require typing an absolute path.
 - [ ] Custom path remains available.
 - [ ] Open/import/migrate/recovery paths are clearly distinct.
-- [ ] Local-first/privacy state is explained before optional network sync.
+- [ ] Offline project storage, encrypted backup/recovery and privacy are explained; any optional AI provider data egress requires separate explicit consent.
 - [ ] Create/open survives close/relaunch and preserves expected metadata.
 - [ ] Failure states provide a recovery action or concrete next step.
 
@@ -49,7 +49,7 @@ These criteria are additive to the Rust rewrite/master release specification. Pa
 
 ## F. Responsiveness and long-running work
 
-- [ ] Project/sync/PDF/analysis jobs do not freeze the event loop beyond measured UI threshold.
+- [ ] Project/backup/restore/PDF/analysis jobs do not freeze the event loop beyond a measured UI threshold.
 - [ ] Long-running jobs expose running/succeeded/failed/cancelled state.
 - [ ] Cancellation is offered only where backend semantics support safe cancellation.
 - [ ] Completed jobs link to resulting artifact/context.

@@ -1,0 +1,368 @@
+{
+  "kind": "native-linux-private-xvfb-search-reader",
+  "result": "PASS",
+  "source_state": "snapshot only; binary-to-source provenance requires independent build log",
+  "binary_sha256": "9fa1269b23fc28516bf1564288bf00a7ee2a836641d5d6da1601d9dd2bee67b5",
+  "slint_sha256": "4437d03c2ef6a5a6b972244ee0ff8361f45c70373edd9d6ee67d932e39352a91",
+  "main_rs_sha256": "e03ea640f8cb2bee64cc87604da2bca58a9084001cacd06a960817063f24360b",
+  "script_sha256": "3ead762eca0eaa0f7c9a0ed1ac6dc6e0af02894c66ae63265595b198ed770370",
+  "synthetic_source_count": 53,
+  "exact_reader_text_sha256": "b2a13ebcb449fbc0e661539ddfbce09489401c741b4ab16942b574ebf42703c6",
+  "long_reader_text_sha256": "bd88d8f197fd3ce64895ba1d78a9fd020314285aede5f05f60df05dae5598241",
+  "long_reader_unicode_scalars": 16916,
+  "long_reader_utf8_bytes": 29252,
+  "accessibility_state_checks": [
+    {
+      "control": "Read previous source text page",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read next source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read previous source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read next source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read previous source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read next source text page",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read previous source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read next source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read previous source text page",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Read next source text page",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Previous 50 sources",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Next 50 sources",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Previous 50 sources",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Next 50 sources",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Previous 50 sources",
+      "role": "button",
+      "expected_enabled": false,
+      "actual_enabled": false,
+      "actual_sensitive": false,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "11",
+        "25",
+        "30"
+      ]
+    },
+    {
+      "control": "Next 50 sources",
+      "role": "button",
+      "expected_enabled": true,
+      "actual_enabled": true,
+      "actual_sensitive": true,
+      "actual_showing": true,
+      "actual_visible": true,
+      "atspi_states": [
+        "8",
+        "11",
+        "24",
+        "25",
+        "30"
+      ]
+    }
+  ],
+  "accessibility_state_mismatches": [],
+  "disabled_boundary_clicks": [
+    {
+      "control": "Read previous source text page",
+      "status_unchanged": true,
+      "content_unchanged": true
+    },
+    {
+      "control": "Read next source text page",
+      "status_unchanged": true,
+      "content_unchanged": true
+    },
+    {
+      "control": "Previous 50 sources",
+      "status_unchanged": true,
+      "content_unchanged": true
+    },
+    {
+      "control": "Next 50 sources",
+      "status_unchanged": true,
+      "content_unchanged": true
+    }
+  ],
+  "tested": [
+    "actual project creation and source library add",
+    "empty and zero-result search statuses",
+    "Unicode source search yields one correct source",
+    "click search result opens Reader with exact Unicode text",
+    "Reader missing/empty IDs fail visibly without stale text",
+    "Reader source list reopens correct text and returns to Search",
+    "multilingual Reader content is exact across three 8,000-character pages",
+    "Reader Next/Previous actions, boundaries and return pages are exact",
+    "real GUI-created 53-source list paginates 50+3 with Previous reversal",
+    "Reader and source-list enabled/disabled states match AT-SPI STATE_ENABLED"
+  ],
+  "not_tested": [
+    "PDF/OCR search",
+    "human screen-reader navigation",
+    "10,000 source performance",
+    "Windows and macOS native packages"
+  ],
+  "captures": [
+    {
+      "step": "01-native-search-route",
+      "image": "01-native-search-route.png",
+      "sha256": "f8ce747cae2d343184ce8a253e490662f819e75259bf97f109750f6601239cc1"
+    },
+    {
+      "step": "02-unicode-search-result",
+      "image": "02-unicode-search-result.png",
+      "sha256": "782db20a75dbc154d8af2d0726b358d2b09aa2543b0886948e32938468d9b5e1"
+    },
+    {
+      "step": "03-reader-exact-unicode-text",
+      "image": "03-reader-exact-unicode-text.png",
+      "sha256": "8d6fc750549ae95edc6e29293694c7e43696055b9e64c9cbbc6074517f52f9e0"
+    },
+    {
+      "step": "04-reader-invalid-id",
+      "image": "04-reader-invalid-id.png",
+      "sha256": "e2d66655faa4141637ee1148ad8871d87cdcb5cc1b0b169728a57083ba933ba2"
+    },
+    {
+      "step": "05-reader-list-reopen",
+      "image": "05-reader-list-reopen.png",
+      "sha256": "1714ac3bcf830635a099eb19216fc187f84f71246479b636611d83e7d87c15b4"
+    },
+    {
+      "step": "06-reader-back-to-search",
+      "image": "06-reader-back-to-search.png",
+      "sha256": "0fb0a009646d90eecb522ad0a3f899b54855541baa8616fdec114d998b97f4db"
+    },
+    {
+      "step": "07-reader-long-page-1",
+      "image": "07-reader-long-page-1.png",
+      "sha256": "41e65e49d39d7a1f528baeef93e86347af1d82167f7ce12e0745c4621c700665"
+    },
+    {
+      "step": "08-reader-long-page-2",
+      "image": "08-reader-long-page-2.png",
+      "sha256": "d29f3762a604d3bcdc12c43a018a28a70ebe1907683ba92d408c3eb9dcfc750a"
+    },
+    {
+      "step": "09-reader-long-page-3-end",
+      "image": "09-reader-long-page-3-end.png",
+      "sha256": "41fe7ac9818b87b41a4fc86feb10c0cbdcd07a0649b1befc2d311e7a2e19d155"
+    },
+    {
+      "step": "10-reader-long-page-return",
+      "image": "10-reader-long-page-return.png",
+      "sha256": "41e65e49d39d7a1f528baeef93e86347af1d82167f7ce12e0745c4621c700665"
+    },
+    {
+      "step": "11-reader-source-list-1-to-50",
+      "image": "11-reader-source-list-1-to-50.png",
+      "sha256": "6da246cb01610f1e70bf13f5ecec65a5c9cd6bf039566298c741ffec6d32f0fb"
+    },
+    {
+      "step": "12-reader-source-list-51-to-53",
+      "image": "12-reader-source-list-51-to-53.png",
+      "sha256": "e2fc846775a3566f34a8864e70aa493d62f202cfa234bc4534f9db1944dc3b83"
+    },
+    {
+      "step": "13-reader-source-list-back-to-1",
+      "image": "13-reader-source-list-back-to-1.png",
+      "sha256": "39edf8b6eeecacd651f78b2ffc8b171162fd8fccff133c889dff5ac4411ee9d1"
+    }
+  ]
+}

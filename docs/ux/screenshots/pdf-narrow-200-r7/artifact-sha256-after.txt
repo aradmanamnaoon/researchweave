@@ -1,0 +1,6 @@
+31d4e6e22b62f96d09c38c13ef58b635cf86b2177edb388e8e685be35f5d68b0  /home/saba/researchweave-gui-audits/worker2-pdf-narrow-r7-built/researchweave-desktop
+c0f54e821f5ffcc06eb10ae4a165881251cd5cd5bb397d3fc101a33fe672fa52  /home/saba/researchweave-gui-audits/worker2-pdf-narrow-src/docs/verification/rust-rewrite/pdfium-two-page-ui-fixture.pdf
+91668a5203ad9c735312c016f6237bc0c751bb9ffe776b4525b2c6860398b333  /home/saba/researchweave-gui-audits/worker2-pdf-narrow-src/crates/researchweave-desktop/ui/main.slint
+c9e078e167406c4f596f3a7a7b5f218904c545341658c475d03bc3284a3b9084  /home/saba/researchweave-gui-audits/worker2-pdf-narrow-src/crates/researchweave-desktop/src/main.rs
+79ad2e5b94548593474c96cab8468eedfaacd3a2b996677561d132055d77d8eb  /home/saba/researchweave-gui-audits/worker2-pdf-narrow-src/crates/researchweave-desktop/src/pdf_engine.rs
+3ab755442488a624bd29ae74642dfedf8e3b69877e5130f4ac798513f75cdd0a  /home/saba/researchweave-gui-audits/worker2-pdf-narrow-src/scripts/ux/isolated-xvfb-pdf-narrow-200.sh

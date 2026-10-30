@@ -19,6 +19,7 @@ use thiserror::Error;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 mod handler;
+pub mod quick_notes;
 pub use handler::ProjectHandler;
 
 pub const SCHEMA_VERSION: u32 = 5;
@@ -510,24 +511,7 @@ impl ProjectStore {
     }
 
     pub fn info(&self) -> Result<ProjectInfo, ProjectError> {
-        self.conn
-            .query_row(
-                "SELECT id,title,question,design,locale,privacy,revision,created_at FROM project",
-                [],
-                |row| {
-                    Ok(ProjectInfo {
-                        id: row.get(0)?,
-                        title: row.get(1)?,
-                        question: row.get(2)?,
-                        design: row.get(3)?,
-                        locale: row.get(4)?,
-                        privacy: row.get(5)?,
-                        revision: row.get(6)?,
-                        created_at: row.get(7)?,
-                    })
-                },
-            )
-            .map_err(ProjectError::from)
+        project_info_from_connection(&self.conn)
     }
 
     pub fn put_object(&self, bytes: &[u8]) -> Result<String, ProjectError> {
@@ -570,6 +554,26 @@ impl ProjectStore {
         out.close().map_err(|(_, e)| e)?;
         Ok(())
     }
+}
+
+fn project_info_from_connection(conn: &Connection) -> Result<ProjectInfo, ProjectError> {
+    conn.query_row(
+        "SELECT id,title,question,design,locale,privacy,revision,created_at FROM project",
+        [],
+        |row| {
+            Ok(ProjectInfo {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                question: row.get(2)?,
+                design: row.get(3)?,
+                locale: row.get(4)?,
+                privacy: row.get(5)?,
+                revision: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        },
+    )
+    .map_err(ProjectError::from)
 }
 
 fn open_connection(path: &Path) -> Result<Connection, ProjectError> {
@@ -920,6 +924,14 @@ pub fn archive_project(
     store: &ProjectStore,
     destination: &Path,
 ) -> Result<ArchiveVerification, ProjectError> {
+    archive_project_after_snapshot(store, destination, || {})
+}
+
+fn archive_project_after_snapshot(
+    store: &ProjectStore,
+    destination: &Path,
+    after_snapshot: impl FnOnce(),
+) -> Result<ArchiveVerification, ProjectError> {
     if destination.extension().and_then(|x| x.to_str()) != Some("rwproj")
         || !destination.parent().is_some_and(Path::is_dir)
     {
@@ -930,11 +942,16 @@ pub fn archive_project(
     }
     let db = NamedTempFile::new_in(store.root())?;
     store.backup_database(db.path())?;
+    // A hook makes concurrent mutations deterministic in the archive regression
+    // test. Production callers use the no-op closure.
+    after_snapshot();
+    // All archive metadata must come from the *same* immutable SQLite backup.
+    // Reading the live store here could mix a previous database snapshot with
+    // a new project revision while the desktop continues accepting edits.
+    let snapshot = Connection::open_with_flags(db.path(), OpenFlags::SQLITE_OPEN_READ_ONLY)?;
     let mut files: Vec<(String, PathBuf)> =
         vec![("data/project.sqlite".into(), db.path().to_path_buf())];
-    let mut stmt = store
-        .conn
-        .prepare("SELECT digest FROM objects ORDER BY digest")?;
+    let mut stmt = snapshot.prepare("SELECT digest FROM objects ORDER BY digest")?;
     let digests = stmt
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
@@ -981,7 +998,7 @@ pub fn archive_project(
         sha256: sha256(&schema_bytes),
         size: schema_bytes.len() as u64,
     });
-    let info = store.info()?;
+    let info = project_info_from_connection(&snapshot)?;
     let manifest = ArchiveManifest {
         format: "researchweave-rwproj".into(),
         version: ARCHIVE_VERSION.into(),
@@ -1426,6 +1443,48 @@ mod tests {
         assert_eq!(restored.manifest_sha256, verified.manifest_sha256);
         let reopened = ProjectStore::open(&destination).unwrap();
         assert_eq!(reopened.info().unwrap().title, "Neuroscience α فارسی");
+    }
+
+    #[test]
+    fn archive_remains_restorable_when_project_changes_after_sqlite_snapshot() {
+        let base = tempfile::tempdir().unwrap();
+        let source = base.path().join("concurrent-source");
+        let store = ProjectStore::create(&source, &info()).unwrap();
+        let original_digest = store.put_object(b"first revision").unwrap();
+        let archive = base.path().join("consistent.rwproj");
+
+        // The source project changes precisely after the database backup and
+        // before the archive inventory/manifest are assembled.
+        let saved = archive_project_after_snapshot(&store, &archive, || {
+            store.put_object(b"subsequent revision").unwrap();
+            store
+                .connection()
+                .execute(
+                    "UPDATE project SET revision = revision + 1, title = 'newer title'",
+                    [],
+                )
+                .unwrap();
+        })
+        .unwrap();
+        assert_eq!(store.info().unwrap().revision, 1);
+        assert_eq!(saved.project_revision, 0);
+        assert_eq!(saved, verify_archive(&archive).unwrap());
+
+        let destination = base.path().join("consistent-restore");
+        restore_archive(&archive, &destination).unwrap();
+        let restored = ProjectStore::open(&destination).unwrap();
+        assert_eq!(restored.info().unwrap().revision, 0);
+        assert_ne!(restored.info().unwrap().title, "newer title");
+        let count: i64 = restored
+            .connection()
+            .query_row("SELECT COUNT(*) FROM objects", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(count, 1);
+        assert!(destination
+            .join("objects")
+            .join(&original_digest[..2])
+            .join(&original_digest)
+            .is_file());
     }
 
     #[test]

@@ -5,6 +5,7 @@ use serde_json::Value;
 use thiserror::Error;
 
 pub mod agent_actions;
+pub mod contextual;
 pub mod conversations;
 pub mod grounding;
 pub mod operations;
@@ -466,6 +467,12 @@ pub fn chat_with_secrets<T: Transport>(
             )
         }
     };
+    // Credential lookup and request construction can outlive a cancellation.
+    // Recheck immediately before dispatch; an already-started HTTP request
+    // cannot be recalled by this cooperative cancellation callback.
+    if cancelled() {
+        return Err(AiError::Cancelled);
+    }
     let (status, raw) = transport.post_json_headers(&endpoint, &body, &headers)?;
     classify_status(status)?;
     if cancelled() {
@@ -782,6 +789,52 @@ mod tests {
             ),
             Err(AiError::Cancelled)
         );
+    }
+    #[test]
+    fn cancellation_during_credential_resolution_prevents_http_dispatch() {
+        use std::cell::Cell;
+
+        struct CountingTransport(Cell<usize>);
+        impl Transport for CountingTransport {
+            fn post_json(&self, _: &str, _: &Value) -> Result<(u16, Value), AiError> {
+                self.0.set(self.0.get() + 1);
+                Ok((200, serde_json::json!({})))
+            }
+
+            fn post_json_headers(
+                &self,
+                _: &str,
+                _: &Value,
+                _: &[(&str, &str)],
+            ) -> Result<(u16, Value), AiError> {
+                self.0.set(self.0.get() + 1);
+                Ok((200, serde_json::json!({})))
+            }
+        }
+
+        let transport = CountingTransport(Cell::new(0));
+        let cancelled = Cell::new(false);
+        let cancellation_checks = Cell::new(0);
+        let mut local = profile();
+        local.credential_reference = Some("synthetic-secret-reference".into());
+        let result = chat_with_secrets(
+            &transport,
+            &local,
+            policy(),
+            &serde_json::json!([{"role":"user","content":"synthetic private passage"}]),
+            &|| {
+                cancellation_checks.set(cancellation_checks.get() + 1);
+                cancelled.get()
+            },
+            &|reference| {
+                assert_eq!(reference, "synthetic-secret-reference");
+                cancelled.set(true);
+                Some("synthetic-token".into())
+            },
+        );
+        assert_eq!(result, Err(AiError::Cancelled));
+        assert!(cancellation_checks.get() >= 2);
+        assert_eq!(transport.0.get(), 0, "cancellation must suppress POST");
     }
     #[test]
     fn proposal_is_data_only() {

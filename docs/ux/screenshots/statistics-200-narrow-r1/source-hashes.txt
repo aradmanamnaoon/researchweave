@@ -1,0 +1,4 @@
+58201b8455f07838b2a87cbbf4d96d2a85c1c7eea5191e99830d98d9d078c626  /home/saba/researchweave-linux/target/release/researchweave-desktop
+37953f0d4d813545d294e6f0862237c4b938087019c6b68729eae6081b69cc36  /home/saba/researchweave-gui-audits/stats-layout-before-after-r1/source/crates/researchweave-desktop/src/main.rs
+5b258d8e5ea4545426c302df40a200b5085ae43e6a3437477f801ca17217ef08  /home/saba/researchweave-gui-audits/stats-layout-before-after-r1/source/crates/researchweave-desktop/ui/main.slint
+063fb1b7d698faf32ce738a3ed3edbef4477e2b8345d85d2b7947731b7f00fbb  scripts/ux/isolated-xvfb-statistics-narrow-200.sh

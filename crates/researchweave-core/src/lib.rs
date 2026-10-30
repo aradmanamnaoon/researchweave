@@ -117,6 +117,32 @@ impl Command {
             serde_json::to_vec(&payload).map_err(|_| AuthorizationError::InvalidRequest)?;
         Ok(Sha256::digest(canonical).into())
     }
+
+    /// Persist only a fingerprint of non-secret command metadata in the audit.
+    ///
+    /// The approval digest above MUST still bind all arguments, including
+    /// passwords, but persisting that unkeyed digest creates a fast offline
+    /// password-guessing oracle. Never hash argument *values* into an audit
+    /// record: credentials and private research content can appear under new,
+    /// nested or provider-specific field names that an allowlist would miss.
+    /// The request ID distinguishes commands; this digest is not a checksum
+    /// of the arguments and must not be used for approval validation.
+    fn audit_metadata_digest(&self) -> Result<[u8; 32], AuthorizationError> {
+        self.validate()?;
+        let metadata = json!({
+            "domain": "researchweave.audit.metadata.v2",
+            "protocol_version": self.protocol_version,
+            "request_id": self.request_id.to_string(),
+            "operation": self.operation,
+            "project_id": self.project_id.to_string(),
+            "expected_revision": self.expected_revision,
+            "actor": self.actor,
+            "preview": self.preview,
+        });
+        let canonical =
+            serde_json::to_vec(&metadata).map_err(|_| AuthorizationError::InvalidRequest)?;
+        Ok(Sha256::digest(canonical).into())
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -349,6 +375,9 @@ pub struct AuditRecord {
     pub effect: String,
     pub preview: bool,
     pub status: String,
+    /// Since v2, a SHA-256 fingerprint of non-secret command metadata ONLY.
+    /// Historical rows retain their original full-argument approval hashes;
+    /// they cannot be safely rewritten without their original commands.
     pub input_sha256: String,
     pub output_sha256: String,
     pub error_code: Option<String>,
@@ -426,9 +455,12 @@ impl AuditStore {
             .map_err(|_| AuditError::StateUnavailable)?
             .as_secs_f64()
             .to_string();
+        // Do not persist approval_digest(): a weak archive password can be
+        // guessed against its full-command SHA-256 much faster than scrypt.
+        // Retain the existing column/schema for compatibility with old rows.
         let input_sha256 = hex::encode(
             command
-                .approval_digest()
+                .audit_metadata_digest()
                 .map_err(|_| AuditError::Serialization)?,
         );
         let output_sha256 = canonical_sha256(result)?;
@@ -914,5 +946,89 @@ mod tests {
             .contains("never-store-me"));
         drop(reopened);
         let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn audit_fingerprint_never_hashes_archive_passwords_or_provider_credentials() {
+        // Production human passwords can be low-entropy. A persisted digest
+        // must not be a fast password verifier, even for nested future fields.
+        let scenarios = [
+            (
+                "project.archive_encrypted",
+                json!({"destination":"/backup/one.rwproj.enc","password":"weak-password"}),
+                json!({"destination":"/backup/one.rwproj.enc","password":"another-password"}),
+            ),
+            (
+                "project.archive_encrypted_verify",
+                json!({"archive":"/backup/one.rwproj.enc","password":"weak-password"}),
+                json!({"archive":"/backup/one.rwproj.enc","password":"another-password"}),
+            ),
+            (
+                "project.restore_encrypted",
+                json!({"archive":"/backup/one.rwproj.enc","password":"weak-password"}),
+                json!({"archive":"/backup/one.rwproj.enc","password":"another-password"}),
+            ),
+            (
+                "providers.credential_save",
+                json!({"settings":{"provider":{"apiToken":"low-entropy-token"}}}),
+                json!({"settings":{"provider":{"apiToken":"replacement-token"}}}),
+            ),
+        ];
+
+        for (operation, original_arguments, replacement_arguments) in scenarios {
+            let command = Command::new(Uuid::new_v4(), operation, original_arguments);
+            let mut changed = command.clone();
+            changed.arguments = replacement_arguments;
+
+            let approval_hash = command.approval_digest().unwrap();
+            assert_ne!(approval_hash, changed.approval_digest().unwrap());
+            assert_eq!(
+                command.audit_metadata_digest().unwrap(),
+                changed.audit_metadata_digest().unwrap(),
+                "audit fingerprint must not depend on password or secret arguments"
+            );
+
+            let audit = AuditStore::memory().unwrap();
+            let result = json!({"status":"failed","error":{"code":"AUTH_FAILED"}});
+            audit.append(&command, Effect::LocalWrite, &result).unwrap();
+            let records = audit.events().unwrap();
+            assert_eq!(records.len(), 1);
+            assert_eq!(
+                records[0].input_sha256,
+                hex::encode(command.audit_metadata_digest().unwrap())
+            );
+            assert_ne!(records[0].input_sha256, hex::encode(approval_hash));
+            assert_eq!(records[0].input_sha256.len(), 64);
+
+            // Request-specific metadata still distinguishes independent audit
+            // entries; it does not purport to certify private argument values.
+            let independent = Command::new(command.project_id, operation, changed.arguments);
+            assert_ne!(
+                command.audit_metadata_digest().unwrap(),
+                independent.audit_metadata_digest().unwrap()
+            );
+        }
+    }
+
+    #[test]
+    fn encrypted_archive_approval_still_binds_exact_password_and_is_one_use() {
+        let authority = Authority::new();
+        let command = Command::new(
+            Uuid::new_v4(),
+            "project.restore_encrypted",
+            json!({"archive":"/backup/one.rwproj.enc","password":"first-password"}),
+        );
+        let approval = authority.issue(&command, 30, 100.0).unwrap();
+        let mut different_password = command.clone();
+        different_password.arguments["password"] = json!("second-password");
+        assert_eq!(
+            authority.consume(&different_password, Some(&approval), 101.0),
+            Err(AuthorizationError::ScopeMismatch)
+        );
+        assert_eq!(authority.consume(&command, Some(&approval), 101.0), Ok(()));
+        assert_eq!(
+            authority.consume(&command, Some(&approval), 101.0),
+            Err(AuthorizationError::Replay)
+        );
     }
 }

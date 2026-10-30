@@ -1,0 +1,6 @@
+b60cd7547abd4d7096e4f59de42bb61824ddf1b9e89feb32364b8f0f4f04d896  /home/saba/researchweave-gui-audits/final-pdf-passage-gui-r4/selected-passage.txt
+e9e1577c6cb496b3cb686c7f842ba024ae5cd5f4b044e20bfddc528c48f11cf1  /home/saba/researchweave-gui-audits/final-pdf-passage-gui-r4/preview.txt
+2f6e15dc6ef28dc462db3a592931d70209ca9c639d9da01ae82dcd76f5f29d35  /home/saba/researchweave-gui-audits/final-pdf-passage-gui-r4/02-passage-local-preview.png
+98ba4f667d3293616b131ef1610de3b6ffe64130247c5e08e78120037c4753eb  /home/saba/researchweave-gui-audits/final-pdf-passage-gui-r4/negative-preview.txt
+15ff2bd50f42d85f54deb7246d13e2ae1285ae1fde4adb6484b55bca4f1324c7  /home/saba/researchweave-gui-audits/final-pdf-passage-gui-r4/03-invalid-passage-rejected.png
+8c5df1e9731db58e0d7b88b5e4143a4a75e35283796044c9c941e517a7020c56  /home/saba/researchweave-gui-audits/final-pdf-passage-gui-r4/04-path-change-invalidated.png

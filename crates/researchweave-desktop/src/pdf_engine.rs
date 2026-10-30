@@ -98,21 +98,27 @@ pub fn render_search(pdf_path: &Path, query: &str) -> Result<PdfRender, String> 
     render_search_at(pdf_path, query, 0)
 }
 
-const MAX_FIND_NEXT_PDF_BYTES: u64 = 128 * 1024 * 1024;
+// Apply the same bounded input budget to normal page render and find-next.
+// Rendering previously loaded an arbitrary-size file into memory before the
+// PDF parser could reject it, while find-next already used a bounded reader.
+const MAX_PDF_BYTES: u64 = 128 * 1024 * 1024;
 
-fn read_bounded_find_next_pdf(pdf_path: &Path) -> Result<Vec<u8>, String> {
+fn read_bounded_pdf(pdf_path: &Path) -> Result<Vec<u8>, String> {
     // Use one open handle for metadata and content. A path could otherwise be
     // swapped or the file could grow between metadata(path) and read(path).
     let file = std::fs::File::open(pdf_path).map_err(|e| e.to_string())?;
-    if file.metadata().map_err(|e| e.to_string())?.len() > MAX_FIND_NEXT_PDF_BYTES {
-        return Err("PDF exceeds the bounded find-next file budget".into());
+    if !file.metadata().map_err(|e| e.to_string())?.is_file() {
+        return Err("PDF input must be a regular file".into());
+    }
+    if file.metadata().map_err(|e| e.to_string())?.len() > MAX_PDF_BYTES {
+        return Err("PDF exceeds the bounded file budget".into());
     }
     let mut contents = Vec::new();
-    file.take(MAX_FIND_NEXT_PDF_BYTES + 1)
+    file.take(MAX_PDF_BYTES + 1)
         .read_to_end(&mut contents)
         .map_err(|e| e.to_string())?;
-    if contents.len() as u64 > MAX_FIND_NEXT_PDF_BYTES {
-        return Err("PDF exceeds the bounded find-next file budget".into());
+    if contents.len() as u64 > MAX_PDF_BYTES {
+        return Err("PDF exceeds the bounded file budget".into());
     }
     Ok(contents)
 }
@@ -130,7 +136,7 @@ pub fn find_next_matching_page(
     }
     const MAX_SCAN_PAGES: usize = 512;
     const MAX_TOTAL_TEXT_BYTES: usize = 16 * 1024 * 1024;
-    let contents = read_bounded_find_next_pdf(pdf_path)?;
+    let contents = read_bounded_pdf(pdf_path)?;
     let runtime = runtime_library()?;
     let pdfium = Pdfium::load_from_path(runtime).map_err(|e| e.to_string())?;
     let doc = pdfium
@@ -169,13 +175,16 @@ pub fn render_search_at(
 ) -> Result<PdfRender, String> {
     let runtime = runtime_library()?;
     let pdfium = Pdfium::load_from_path(runtime).map_err(|e| e.to_string())?;
-    let contents = std::fs::read(pdf_path).map_err(|e| e.to_string())?;
+    let contents = read_bounded_pdf(pdf_path)?;
     let doc = pdfium
         .load_document(contents, None)
         .map_err(|e| e.to_string())?;
     let page_count = doc.page_count();
     if page_count == 0 {
         return Err("PDF contains no pages".into());
+    }
+    if page_count > 512 {
+        return Err("PDF page count exceeds the supported 512-page limit".into());
     }
     if page_index >= page_count {
         return Err(format!(
@@ -193,6 +202,9 @@ pub fn render_search_at(
         )
         .map_err(|e| e.to_string())?;
     let text = page.text().map_err(|e| e.to_string())?;
+    if text.text().len() > 4 * 1024 * 1024 {
+        return Err("PDF page extracted text exceeds the bounded text budget".into());
+    }
     let mut hits = Vec::new();
     let mut match_count = 0_usize;
     let mut previous_byte_end = 0_usize;
@@ -436,16 +448,16 @@ mod tests {
         let input =
             std::env::temp_dir().join(format!("rw-bounded-find-{}.pdf", uuid::Uuid::new_v4()));
         std::fs::write(&input, b"PDF").unwrap();
-        assert_eq!(read_bounded_find_next_pdf(&input).unwrap(), b"PDF");
+        assert_eq!(read_bounded_pdf(&input).unwrap(), b"PDF");
         std::fs::OpenOptions::new()
             .write(true)
             .open(&input)
             .unwrap()
-            .set_len(MAX_FIND_NEXT_PDF_BYTES + 1)
+            .set_len(MAX_PDF_BYTES + 1)
             .unwrap();
-        assert!(read_bounded_find_next_pdf(&input)
+        assert!(read_bounded_pdf(&input)
             .unwrap_err()
-            .contains("bounded find-next file budget"));
+            .contains("bounded file budget"));
         std::fs::remove_file(input).unwrap();
     }
 }

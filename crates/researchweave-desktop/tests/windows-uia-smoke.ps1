@@ -5,10 +5,29 @@ param(
     [string]$PreserveProjectDirectory = ""
 )
 $ErrorActionPreference = 'Stop'
+# Windows PowerShell 5.1 treats a script without a UTF-8 BOM as local ANSI.
+# Reject new non-ASCII source bytes before a result assertion silently
+# compares garbled text, while allowing a properly BOM-marked script.
+$scriptSource = [IO.File]::ReadAllBytes($PSCommandPath)
+$hasUtf8Bom = $scriptSource.Length -ge 3 -and $scriptSource[0] -eq 0xEF -and
+    $scriptSource[1] -eq 0xBB -and $scriptSource[2] -eq 0xBF
+if (-not $hasUtf8Bom) {
+    foreach ($sourceByte in $scriptSource) {
+        if ($sourceByte -gt 127) { throw 'BOM-less Windows UIA smoke script must use ASCII-safe source literals' }
+    }
+}
 Add-Type -AssemblyName UIAutomationClient
 Add-Type -AssemblyName UIAutomationTypes
 Add-Type -AssemblyName System.Drawing
 Add-Type -AssemblyName System.Windows.Forms
+Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ResearchWeaveUiaWheel {
+    [DllImport("user32.dll", SetLastError = true)]
+    public static extern void mouse_event(uint flags, uint dx, uint dy, int wheelDelta, UIntPtr extraInfo);
+}
+'@
 function UnicodeString([int[]]$CodePoints) {
     return -join ($CodePoints | ForEach-Object { [char]$_ })
 }
@@ -34,11 +53,330 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
         foreach ($item in (Children $parent $type)) { if ($item.Current.Name -eq $name) { return $item } }
         Start-Sleep -Milliseconds 100
     }
-    $available = @($parent.FindAll(
+    # An accessible Name may contain an entire private manuscript, note or
+    # provider response. CI failures must never dump arbitrary UIA names.
+    $staticTargets = @(
+        'Command palette', 'Project path', 'Project title',
+        'Revisioned research notebook text',
+        'Create default project', 'Create project', 'Open project',
+        'Manuscript section body', 'Manuscript citations', 'Manuscript ID',
+        'Backup archive path', 'Backup encryption password',
+        'Recovery archive path', 'Recovery destination path',
+        'Recovery encryption password', 'Reader source ID',
+        'Show manuscript editing and export tools',
+        'Hide manuscript editing and export tools'
+    )
+    $safeTarget = if ($staticTargets -contains $name) { $name } else { '[redacted dynamic target]' }
+    $availableTypes = @($parent.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName + ' :: ' + $_.Current.Name })
-    throw "UIA element missing: $type '$name'. Available: $($available -join ' | ')"
+    ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName })
+    $counts = @($availableTypes | Group-Object | Sort-Object Name | ForEach-Object {
+        $_.Name + '=' + $_.Count
+    })
+    # A name can contain confidential user text. Report only this script's
+    # stable caller line number, never the caller command or its arguments;
+    # CI can then locate a failing action without exposing private content.
+    $frames = @(Get-PSCallStack)
+    $callerLine = if ($frames.Count -gt 1) { [int]$frames[1].ScriptLineNumber } else { 0 }
+    throw "UIA element missing: $type '$safeTarget' (script_caller_line=$callerLine). Tree controls=$($availableTypes.Count): $($counts -join ', ')"
+}
+function RevisionedNotebookEditor([System.Windows.Automation.AutomationElement]$window) {
+    # Notebook opens in Quick Notes by default; research notebook is an
+    # explicit user-facing subview. Verify the current view before toggling,
+    # or a reopened project may inadvertently switch *away* from the editor.
+    $target = 'Revisioned research notebook text'
+    foreach ($edit in (Children $window ([System.Windows.Automation.ControlType]::Edit))) {
+        if ($edit.Current.Name -eq $target) { return $edit }
+    }
+    $toggle = Named $window ([System.Windows.Automation.ControlType]::Button) 'Switch between quick notes and revisioned research notebook'
+    $toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 180
+    return (Named $window ([System.Windows.Automation.ControlType]::Edit) $target)
+}
+function Assert-NotebookMarkdownExport(
+    [System.Windows.Automation.AutomationElement]$window,
+    [string]$expectedBody
+) {
+    # UIA Name is a fixed public label. Actual private Markdown is available
+    # only through the read-only editor's ValuePattern; never log its contents.
+    $name = 'Notebook Markdown export result'
+    $exportButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export notebook Markdown'
+    $exportButton.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
+    $deadline = [DateTime]::UtcNow.AddSeconds(10)
+    $resultFound = $false
+    $validExport = $false
+    do {
+        foreach ($editor in (Children $window ([System.Windows.Automation.ControlType]::Edit))) {
+            if ($editor.Current.Name -ne $name) { continue }
+            $resultFound = $true
+            $raw = ([System.Windows.Automation.ValuePattern]$editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+            if ($raw -is [string] -and
+                $raw.Contains($expectedBody) -and
+                $raw.StartsWith(('# Research notebook' + [char]10)) -and
+                $raw.Contains('*Saved revision ')) {
+                $validExport = $true
+                break
+            }
+        }
+        if ($validExport) { return }
+        Start-Sleep -Milliseconds 100
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "Persisted notebook export mismatch (read_only_export_control_found=$resultFound, valid_markdown=$validExport)"
+}
+function Read-DatasetPageJson([System.Windows.Automation.AutomationElement]$parent) {
+    # Data View exposes the exact read-only page JSON through an accessible
+    # TextEdit so users and UIA clients can inspect/copy unabridged cell values.
+    # Slint only materializes the visible viewport in UIA. Keyboard Tab moves
+    # through native focusable controls and scrolls the TextEdit into view; a
+    # PageDown-only probe can leave the wrong nested widget handling scrolling.
+    $name = 'Verified current dataset page JSON; select and copy complete values including shortened table cells'
+    $anchor = Named $parent ([System.Windows.Automation.ControlType]::Button) 'Inspect dataset revision and request preview'
+    EnsureLiveFocus $anchor
+    $scrolled = 0
+    $tabbed = 0
+    try {
+        $details = $null
+        for ($step = 0; $step -le 12; $step++) {
+            foreach ($edit in (Children $parent ([System.Windows.Automation.ControlType]::Edit))) {
+                if ($edit.Current.Name -eq $name) {
+                    $details = $edit
+                    break
+                }
+            }
+            if ($details) { break }
+            if ($step -lt 12) {
+                [System.Windows.Forms.SendKeys]::SendWait('{TAB}')
+                $tabbed++
+                Start-Sleep -Milliseconds 120
+            }
+        }
+        if (-not $details) { EnsureLiveFocus $anchor }
+        for ($step = 0; $step -le 10; $step++) {
+            if ($details) { break }
+            foreach ($edit in (Children $parent ([System.Windows.Automation.ControlType]::Edit))) {
+                if ($edit.Current.Name -eq $name) {
+                    $details = $edit
+                    break
+                }
+            }
+            if ($details) { break }
+            [System.Windows.Forms.SendKeys]::SendWait('{PGDN}')
+            $scrolled++
+            Start-Sleep -Milliseconds 120
+        }
+        if (-not $details) {
+            throw "Verified dataset page JSON editor did not appear after $tabbed keyboard tabs and $scrolled viewport scrolls"
+        }
+        return ([System.Windows.Automation.ValuePattern]$details.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    }
+    finally {
+        # Subsequent import checks start from the Inspect dataset control.
+        EnsureLiveFocus $anchor
+        if ($scrolled -gt 0) {
+            for ($step = 0; $step -lt $scrolled; $step++) {
+                [System.Windows.Forms.SendKeys]::SendWait('{PGUP}')
+                Start-Sleep -Milliseconds 100
+            }
+        }
+    }
+}
+function Read-StatisticsResultSnapshot(
+    [System.Windows.Automation.AutomationElement]$scope,
+    [string]$expectedTitle,
+    [string]$expectedEstimate,
+    [string]$expectedSample,
+    [string]$expectedProvenance
+) {
+    # Evaluate all four fields in one current accessibility-tree traversal.
+    # A stale AccessKit node must only invalidate this snapshot, not the test.
+    $seen = @{ title = $false; estimate = $false; sample = $false; provenance = $false }
+    try {
+        $nodes = $scope.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )
+    } catch {
+        return $seen
+    }
+    foreach ($node in $nodes) {
+        try {
+            $name = $node.Current.Name
+        } catch {
+            continue
+        }
+        # The fixed native status bar carries a single accessible live summary
+        # when the tall result card is outside the visible Slint ScrollView.
+        # Require all four values from this same current result snapshot;
+        # the individual card labels remain independently valid as well.
+        if ($null -eq $name) { continue }
+        $isLiveSummary = $name.StartsWith('Latest statistics live summary: ')
+        if ($name -like $expectedTitle -or ($isLiveSummary -and $name -like ('*' + $expectedTitle + '*'))) { $seen.title = $true }
+        if ($name -like $expectedEstimate -or ($isLiveSummary -and $name -like ('*' + $expectedEstimate + '*'))) { $seen.estimate = $true }
+        if ($name -like $expectedSample -or ($isLiveSummary -and $name -like ('*' + $expectedSample + '*'))) { $seen.sample = $true }
+        if ($name -like $expectedProvenance -or ($isLiveSummary -and $name -like ('*' + $expectedProvenance + '*'))) { $seen.provenance = $true }
+    }
+    return $seen
+}
+function Assert-StatisticsResult(
+    [System.Windows.Automation.AutomationElement]$window,
+    [string]$runButton,
+    [string]$expectedTitle,
+    [string]$expectedEstimate,
+    [string]$expectedSample,
+    [string]$datasetRevision,
+    [string]$failure
+) {
+    if ($datasetRevision -notmatch '^[0-9a-f]{64}$') {
+        throw 'Statistics fixture revision is invalid'
+    }
+    $expectedProvenance = 'Latest statistics provenance: Immutable dataset revision ' +
+        $datasetRevision.Substring(0, 12) + '*native deterministic analysis'
+    $anchor = Named $window ([System.Windows.Automation.ControlType]::Button) $runButton
+    $scrollElement = $null
+    $scrollPattern = $null
+    $originalVertical = $null
+    # Use the actual scrollable ancestor of the active method button, not
+    # another ScrollView elsewhere in the window (e.g. analysis details).
+    $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+    $node = $anchor
+    for ($depth = 0; $depth -lt 24; $depth++) {
+        try {
+            $node = $walker.GetParent($node)
+            if ($null -eq $node -or $node -eq $window) { break }
+            $candidatePattern = $null
+            if ($node.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$candidatePattern)) {
+                $candidate = [System.Windows.Automation.ScrollPattern]$candidatePattern
+                if ($candidate.Current.VerticallyScrollable) {
+                    $scrollElement = $node
+                    $scrollPattern = $candidate
+                    $originalVertical = [double]$candidate.Current.VerticalScrollPercent
+                    break
+                }
+            }
+        } catch {
+            # AccessKit can replace a node during a viewport update.
+            break
+        }
+    }
+    $scope = if ($null -ne $scrollElement) { $scrollElement } else { $window }
+    # Keep the original pattern for best-effort restoration even if a later
+    # SetScrollPercent fails and the assertion switches to keyboard navigation.
+    $restorePattern = $scrollPattern
+    $seen = @{ title = $false; estimate = $false; sample = $false; provenance = $false }
+    $passed = $false
+    $scanCount = 0
+    $wheelSteps = 0
+    try {
+        # Poll once before scrolling; otherwise inspect bounded real scroll
+        # offsets, including the bottom where long result cards materialize.
+        for ($step = 0; $step -le 5; $step++) {
+            if ($step -gt 0 -and $null -ne $scrollPattern) {
+                $target = [Math]::Min(100.0, $originalVertical + 20.0 * $step)
+                try {
+                    $scrollPattern.SetScrollPercent(
+                        [System.Windows.Automation.ScrollPattern]::NoScroll, $target
+                    )
+                } catch {
+                    $scrollPattern = $null
+                    $scope = $window
+                    break
+                }
+                Start-Sleep -Milliseconds 120
+            } elseif ($step -gt 0) {
+                break
+            }
+            $seen = Read-StatisticsResultSnapshot $scope $expectedTitle $expectedEstimate $expectedSample $expectedProvenance
+            $scanCount++
+            if ($seen.title -and $seen.estimate -and $seen.sample -and $seen.provenance) {
+                $passed = $true
+                break
+            }
+        }
+        if (-not $passed) {
+            # Fall back only when the native ScrollPattern did not expose the
+            # result. Focus the current method button before each key sequence.
+            try {
+                $anchor = Named $window ([System.Windows.Automation.ControlType]::Button) $runButton
+                EnsureLiveFocus $anchor
+                for ($step = 0; $step -le 8; $step++) {
+                    $seen = Read-StatisticsResultSnapshot $window $expectedTitle $expectedEstimate $expectedSample $expectedProvenance
+                    $scanCount++
+                    if ($seen.title -and $seen.estimate -and $seen.sample -and $seen.provenance) {
+                        $passed = $true
+                        break
+                    }
+                    if ($step -lt 8) {
+                        [System.Windows.Forms.SendKeys]::SendWait('{PGDN}')
+                        Start-Sleep -Milliseconds 120
+                    }
+                }
+            } catch {
+                # A stale focus target is a missing result, never a raw UIA
+                # exception containing an accessible name or research text.
+            }
+        }
+        if (-not $passed) {
+            # Slint/AccessKit can expose a scrollable viewport to pointer
+            # events even when Windows UIA reports no usable ScrollPattern.
+            # Move to a bounded point inside the Statistics content pane and
+            # use real native wheel messages, observing the card after each.
+            $originalCursor = [System.Windows.Forms.Cursor]::Position
+            try {
+                $bounds = $window.Current.BoundingRectangle
+                if ($bounds.Width -gt 450 -and $bounds.Height -gt 350) {
+                    $cursorX = [int]($bounds.Left + $bounds.Width * 0.72)
+                    $cursorY = [int]($bounds.Top + $bounds.Height * 0.65)
+                    [System.Windows.Forms.Cursor]::Position = [System.Drawing.Point]::new($cursorX, $cursorY)
+                    for ($step = 0; $step -lt 18; $step++) {
+                        $seen = Read-StatisticsResultSnapshot $window $expectedTitle $expectedEstimate $expectedSample $expectedProvenance
+                        $scanCount++
+                        if ($seen.title -and $seen.estimate -and $seen.sample -and $seen.provenance) {
+                            $passed = $true
+                            break
+                        }
+                        [ResearchWeaveUiaWheel]::mouse_event([uint32]0x800, 0, 0, -120, [UIntPtr]::Zero)
+                        $wheelSteps++
+                        Start-Sleep -Milliseconds 110
+                    }
+                }
+            } catch {
+                # Stale UIA geometry or a missing interactive desktop may
+                # block this fallback; the final assertion remains authoritative.
+            } finally {
+                # Wheel restoration and focus restoration are best effort.
+                try {
+                    for ($restore = 0; $restore -lt $wheelSteps; $restore++) {
+                        [ResearchWeaveUiaWheel]::mouse_event([uint32]0x800, 0, 0, 120, [UIntPtr]::Zero)
+                    }
+                    [System.Windows.Forms.Cursor]::Position = $originalCursor
+                } catch { }
+            }
+        }
+    } finally {
+        # UIA may replace the viewport and button while the result is read.
+        # Restoration cannot override a successful assertion or mask a failure.
+        if ($null -ne $restorePattern -and $null -ne $originalVertical) {
+            try {
+                $restorePattern.SetScrollPercent(
+                    [System.Windows.Automation.ScrollPattern]::NoScroll, $originalVertical
+                )
+            } catch { }
+        }
+        try {
+            $anchor = Named $window ([System.Windows.Automation.ControlType]::Button) $runButton
+            EnsureLiveFocus $anchor
+        } catch { }
+    }
+    if (-not $passed) {
+        # Do not print any actual UIA names, values or dataset identifiers.
+        # Write-Output can be lost when the calling package harness throws
+        # before assigning captured pipeline output. Emit booleans to the host
+        # so CI can distinguish a missing result from scrolling failure.
+        Write-Host "DIAGNOSTIC Statistics result: title=$($seen.title) estimate=$($seen.estimate) sample=$($seen.sample) provenance=$($seen.provenance) scroll_pattern=$($null -ne $restorePattern) wheel_steps=$wheelSteps inspected_viewports=$scanCount"
+        throw $failure
+    }
 }
 function Invoke-AccessibleButton([System.Windows.Automation.AutomationElement]$parent, [string]$name) {
     $button = Named $parent ([System.Windows.Automation.ControlType]::Button) $name
@@ -147,7 +485,7 @@ function Select-FileThroughNativeDialog(
         [System.Windows.Automation.ValuePattern]::Pattern
     )).Current.Value
     if ($enteredPath -ne $selectedPath) {
-        throw "Native picker filename entry did not match the fixture: $buttonName (value=$enteredPath)"
+        throw "Native picker filename entry did not match the fixture (control=$buttonName, entered_length=$($enteredPath.Length), expected_length=$($selectedPath.Length))"
     }
     # Let the dialog commit and validate its file name before activating Open;
     # pressing Enter while an auto-completion popup is active can accept only
@@ -225,7 +563,7 @@ function Capture-WindowScreenshot([System.Windows.Automation.AutomationElement]$
     $graphics.Dispose()
     $bmp.Save($Path, [System.Drawing.Imaging.ImageFormat]::Png)
     $bmp.Dispose()
-    Write-Output "Screenshot: $Path"
+    Write-Output 'Screenshot captured in the isolated test artifact directory'
 }
 function Read-JsonRetry([string]$Path, [int]$Attempts = 20) {
     for ($attempt = 0; $attempt -lt $Attempts; $attempt++) {
@@ -270,18 +608,39 @@ function WaitForNameLike(
         }
         Start-Sleep -Milliseconds 50
     } while ([DateTime]::UtcNow -lt $deadline)
-    $diagnosticNames = @($Window.FindAll(
+    $diagnosticTypes = @($Window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name } | Where-Object {
-        $_ -like '*agent*' -or $_ -like '*proposal*' -or $_ -like '*plan*' -or
-        $_ -like '*tools_executed*' -or $_ -like '*arguments=hidden*' -or
-        $_ -like '*Open a project*' -or $_ -like '*invalid*'
+    ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName })
+    $counts = @($diagnosticTypes | Group-Object | Sort-Object Name | ForEach-Object {
+        $_.Name + '=' + $_.Count
     })
-    if ($diagnosticNames.Count -gt 0) {
-        Write-Output ('UIA_WAIT_DIAGNOSTIC: ' + (($diagnosticNames | Select-Object -First 20) -join ' | '))
+    Write-Output ('UIA_WAIT_DIAGNOSTIC controls=' + $diagnosticTypes.Count + ': ' + ($counts -join ', '))
+    # The expected pattern can itself contain a private document title/body.
+    throw 'Expected UIA result did not appear before timeout; details redacted'
+}
+function Enter-ArchivePassword(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$ControlName,
+    [string]$Password
+) {
+    # Use the native edit gesture for a masked password field. Never read its
+    # ValuePattern, print the password, or serialize it into test receipts.
+    $entry = Named $Window ([System.Windows.Automation.ControlType]::Edit) $ControlName
+    EnsureLiveFocus $entry
+    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    [System.Windows.Forms.SendKeys]::SendWait($Password)
+}
+function Ensure-ManuscriptToolsVisible([System.Windows.Automation.AutomationElement]$Window) {
+    # A fresh Slint process collapses Writing tools; subsequent navigations
+    # may retain their state. Expand only when the Show action is present.
+    foreach ($button in (Children $Window ([System.Windows.Automation.ControlType]::Button))) {
+        if ($button.Current.Name -eq 'Show manuscript editing and export tools') {
+            Invoke-AccessibleButton $Window 'Show manuscript editing and export tools'
+            break
+        }
     }
-    throw "UIA result missing: $Pattern"
+    [void](Named $Window ([System.Windows.Automation.ControlType]::Button) 'Hide manuscript editing and export tools')
 }
 function AssertImplementedPageHasNoFallback(
     [System.Windows.Automation.AutomationElement]$Window,
@@ -336,7 +695,7 @@ function EnsureLiveFocus([System.Windows.Automation.AutomationElement]$Anchor) {
             }
         } catch [System.Windows.Automation.ElementNotAvailableException] { }
     }
-    throw "UIA anchor failed to receive keyboard focus: $expectedType '$expectedName'"
+    throw "UIA anchor failed to receive keyboard focus: $expectedType (expected_name_length=$($expectedName.Length))"
 }
 function FocusByTab(
     [System.Windows.Automation.AutomationElement]$Anchor,
@@ -350,7 +709,9 @@ function FocusByTab(
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         if ($focused) {
             try {
-                $visited.Add("$($focused.Current.ControlType.ProgrammaticName):$($focused.Current.Name)")
+                # Do not leak private editor text or file paths from UIA Names
+                # into hosted CI failure logs.
+                $visited.Add($focused.Current.ControlType.ProgrammaticName)
                 if ($focused.Current.ControlType -eq $Type -and $focused.Current.Name -eq $Name) {
                     return $focused
                 }
@@ -364,8 +725,8 @@ function FocusByTab(
         Start-Sleep -Milliseconds 120
     }
     $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-    $focusedName = if ($focused) { $focused.Current.Name } else { '<none>' }
-    throw "UIA element did not receive keyboard focus: $Type '$Name' (focused='$focusedName'; tab_trace='$($visited -join ' -> ')')"
+    $focusedType = if ($focused) { $focused.Current.ControlType.ProgrammaticName } else { '<none>' }
+    throw "UIA element did not receive keyboard focus: $Type (expected_name_length=$($Name.Length), focused_type=$focusedType; tab_types='$($visited -join ' -> ')')"
 }
 function FocusByShiftTab(
     [System.Windows.Automation.AutomationElement]$Anchor,
@@ -458,7 +819,7 @@ try {
         }
     }
     if (-not $focused -or $focused.Current.Name -ne 'Command palette') {
-        throw "Ctrl+K did not focus Command palette (focused='$($focused.Current.Name)')"
+        throw 'Ctrl+K did not focus Command palette'
     }
     ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('About')
     $command.SetFocus()
@@ -668,10 +1029,7 @@ try {
         $pdfPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF file path'
         $observed = ([System.Windows.Automation.ValuePattern]$pdfPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
         $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose local PDF with native file picker').Current.IsEnabled
-        $statuses = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
-            Where-Object { $_ -like 'Status: *' })
-        throw "Native PDF selection did not replace the manual path and restore the UI (value=$observed, ready=$ready, status=$($statuses -join ' | '))"
+        throw "Native PDF selection did not replace the manual path and restore the UI (path_matches_fixture=$($observed -eq $twoPagePdf), observed_length=$($observed.Length), ready=$ready)"
     }
     Write-Output 'PASS: native Windows PDF selection updates the path without importing'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open PDF').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -682,10 +1040,20 @@ try {
     WaitForNameLike $window '*PDF search status: Rendered page 2 of 2*matches: 1*' 10000
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Previous PDF page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF page 1 of 2*' 20000
+    WaitForNameLike $window '*PDF search status: Rendered page 1 of 2*' 10000
+    $pdfTextLabel = 'Read-only actual extracted PDF page text; selectable and copyable, not yet a verified evidence anchor'
+    $pdfTextBefore = ([System.Windows.Automation.ValuePattern](Named $window ([System.Windows.Automation.ControlType]::Edit) $pdfTextLabel).GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ([string]::IsNullOrWhiteSpace($pdfTextBefore) -or $pdfTextBefore -notlike '*First page unrelated text*') {
+        throw 'PDF extracted page text was not available before no-match search'
+    }
     ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('not-present-in-any-pdf-page')
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Find next PDF matching page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF search status: No matching page in PDF; current page is unchanged*matches: 0*' 20000
     WaitForNameLike $window '*PDF page 1 of 2*' 10000
+    $pdfTextAfter = ([System.Windows.Automation.ValuePattern](Named $window ([System.Windows.Automation.ControlType]::Edit) $pdfTextLabel).GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($pdfTextAfter -cne $pdfTextBefore) {
+        throw 'No-match PDF search erased or changed current-page extracted text'
+    }
     ([System.Windows.Automation.ValuePattern]$pdfSearch.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('PDFium')
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Next PDF page').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*PDF page 2 of 2*' 20000
@@ -849,7 +1217,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
-    $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+    $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Local dataset path to preview'
     if (-not (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled) {
         throw 'Scientific import native file picker is not exposed as an enabled accessible button'
     }
@@ -860,7 +1228,7 @@ try {
         # The Slint accessibility provider may replace the LineEdit node when
         # the asynchronous native chooser completes. Never poll the pre-dialog
         # AutomationElement: it can retain the manually entered sentinel.
-        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Local dataset path to preview'
         $value = ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
         $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled
         if ((Test-SelectedFixturePath $value $analysisInput) -and $ready) {
@@ -870,16 +1238,13 @@ try {
         Start-Sleep -Milliseconds 100
     }
     if (-not $dataSelected) {
-        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+        $analysisPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Local dataset path to preview'
         $observed = ([System.Windows.Automation.ValuePattern]$analysisPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
         $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose scientific dataset with native file picker').Current.IsEnabled
-        $statuses = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
-            Where-Object { $_ -like 'Status: *' })
-        throw "Native scientific dataset selection did not update the path and restore the UI (value=$observed, expected=$analysisInput, observed_length=$($observed.Length), expected_length=$($analysisInput.Length), ready=$ready, status=$($statuses -join ' | '))"
+        throw "Native scientific dataset selection did not update the path and restore the UI (path_matches_fixture=$(Test-SelectedFixturePath $observed $analysisInput), observed_length=$($observed.Length), expected_length=$($analysisInput.Length), ready=$ready)"
     }
     Write-Output 'PASS: native Windows dataset selection updates the path before preview/import'
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import without modifying project').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 260
     $analysisPreviewNames = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
@@ -888,31 +1253,23 @@ try {
     if (-not ($analysisPreviewNames | Where-Object { $_ -like '*Analysis import preview ready*' })) {
         throw 'Analysis import preview did not complete through the native workbench'
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Import previewed analysis data').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Record previewed immutable analysis dataset').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 300
-    $analysisNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    $analysisResult = $analysisNames | Where-Object { $_ -like 'Analysis operation result*' } | Select-Object -First 1
-    $datasetMatch = [regex]::Match([string]$analysisResult, '"dataset_id": "([0-9a-f]{24})"')
-    $revisionMatch = [regex]::Match([string]$analysisResult, '"revision": "([0-9a-f]{64})"')
-    if (-not $datasetMatch.Success -or -not $revisionMatch.Success) {
-        throw 'Analysis import did not expose immutable dataset identity and revision'
-    }
-    $datasetId = $datasetMatch.Groups[1].Value
-    $datasetRevision = $revisionMatch.Groups[1].Value
     $datasetIdEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis dataset ID'
     $datasetRevisionEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis dataset revision'
+    # Import populates both fields from the trusted result. Its compact initial
+    # state has no loaded rows, so inspect the full page only after requesting
+    # a specific immutable revision (which expands the real table/inspector).
+    $datasetId = ([System.Windows.Automation.ValuePattern]$datasetIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    $datasetRevision = ([System.Windows.Automation.ValuePattern]$datasetRevisionEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($datasetId -notmatch '^[0-9a-f]{24}$' -or $datasetRevision -notmatch '^[0-9a-f]{64}$') {
+        throw 'Analysis import did not populate a valid immutable dataset identity and revision'
+    }
     ([System.Windows.Automation.ValuePattern]$datasetIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($datasetId)
     ([System.Windows.Automation.ValuePattern]$datasetRevisionEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($datasetRevision)
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect analysis dataset').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect dataset revision and request preview').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
-    $inspectNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($inspectNames | Where-Object { $_ -like '*"score": "1"*' })) {
+    if ((Read-DatasetPageJson $window) -notlike '*"score": "1"*') {
         throw 'Imported immutable dataset rows were not visible through Data View'
     }
 
@@ -921,19 +1278,41 @@ try {
     $nativeFixtures = (Resolve-Path (Join-Path $PSScriptRoot '../../researchweave-analysis/tests/fixtures')).Path
     foreach ($nativeName in @('nullable.parquet','labelled.sav','labelled.zsav','labelled.dta')) {
         $nativeSource = Join-Path $nativeFixtures $nativeName
-        $nativePath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis import path'
+        $nativePath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Local dataset path to preview'
         ([System.Windows.Automation.ValuePattern]$nativePath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($nativeSource)
-        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview analysis import without modifying project').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         WaitForNameLike $window '*Analysis import preview ready*' 5000
-        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Import previewed analysis data').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Record previewed immutable analysis dataset').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
         WaitForNameLike $window '*Analysis dataset imported and audited*' 5000
-        $nativeNames = @($window.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition
-        ) | ForEach-Object { $_.Current.Name })
-        $nativeResult = $nativeNames | Where-Object { $_ -like 'Analysis operation result*' } | Select-Object -First 1
-        if (-not ([regex]::Match([string]$nativeResult, '"dataset_id": "([0-9a-f]{24})"')).Success) {
-            throw "Native data import $nativeName did not persist an immutable dataset identity"
+        # Every native import returns to the compact preview. The page inspector
+        # is only a meaningful row assertion after loading its immutable revision.
+        $nativeIdEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis dataset ID'
+        $nativeRevisionEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis dataset revision'
+        $nativeId = ([System.Windows.Automation.ValuePattern]$nativeIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $nativeRevision = ([System.Windows.Automation.ValuePattern]$nativeRevisionEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        if ($nativeId -notmatch '^[0-9a-f]{24}$' -or $nativeRevision -notmatch '^[0-9a-f]{64}$') {
+            throw "Native data import $nativeName did not populate an immutable dataset identity"
+        }
+        (Named $window ([System.Windows.Automation.ControlType]::Button) 'Inspect dataset revision and request preview').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+        WaitForNameLike $window '*Immutable dataset revision loaded*' 5000
+        $nativeResult = Read-DatasetPageJson $window
+        try {
+            $nativePage = $nativeResult | ConvertFrom-Json -ErrorAction Stop
+        } catch {
+            throw "Native data import $nativeName returned invalid dataset inspection JSON: $($_.Exception.Message)"
+        }
+        # dataset.inspect returns revision, source_hash, rows and metadata,
+        # but intentionally no dataset_id. Bind that identity to the actual
+        # selected UI field instead of inventing an output-contract member.
+        $nativeSelectedIdEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis dataset ID'
+        $nativeSelectedId = ([System.Windows.Automation.ValuePattern]$nativeSelectedIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $nativeSourceHash = (Get-FileHash -LiteralPath $nativeSource -Algorithm SHA256).Hash.ToLowerInvariant()
+        if ($nativeSelectedId -ne $nativeId -or
+            $nativePage.revision -ne $nativeRevision -or
+            $nativePage.source_hash -ne $nativeSourceHash -or
+            [int]$nativePage.total -le 0 -or
+            @($nativePage.rows | Where-Object { $null -ne $_ }).Count -lt 1) {
+            throw "Native data import $nativeName did not reopen the UI-selected immutable revision with its verified fixture hash and rows"
         }
     }
     Write-Output 'PASS: native Parquet/SPSS SAV/ZSAV/Stata DTA imports preview and persist via installed GUI'
@@ -957,8 +1336,9 @@ try {
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
     ) | ForEach-Object { $_.Current.Name })
-    if (-not ($statisticsNames | Where-Object { $_ -like 'Statistics result primary Mean 3.0000*' })) {
-        $statisticsNames | Where-Object { $_ -like '*Statistics*' -or $_ -like '*Mean*' -or $_ -like '*Descript*' } | Select-Object -First 20 | ForEach-Object { Write-Output ("DIAGNOSTIC Statistics: " + $_) }
+    if (-not ($statisticsNames | Where-Object { $_ -like 'Latest statistics estimate: Mean 3.0000*' })) {
+        # Do not print UIA names: they can contain sensitive user-supplied text.
+        Write-Output "DIAGNOSTIC Statistics: expected estimate unavailable; controls=$($statisticsNames.Count)"
         throw 'Descriptive statistics did not expose the expected mean from the immutable dataset'
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Show frequency table form').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -970,7 +1350,7 @@ try {
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
     ) | ForEach-Object { $_.Current.Name })
-    if (-not ($frequencyNames | Where-Object { $_ -like 'Statistics result primary*A: 2*B: 2*' })) {
+    if (-not ($frequencyNames | Where-Object { $_ -like 'Latest statistics estimate: A: 2*B: 2*' })) {
         throw 'Frequency table did not expose the expected persisted group counts'
     }
 
@@ -983,15 +1363,7 @@ try {
         ([System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($pair[1])
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Run Pearson correlation').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 220
-    $correlationNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($correlationNames | Where-Object { $_ -eq 'Statistics result title Pearson correlation' }) -or
-        -not ($correlationNames | Where-Object { $_ -like 'Statistics result secondary n=4 complete pairs*' })) {
-        throw 'Pearson correlation did not execute against all complete immutable rows'
-    }
+    Assert-StatisticsResult $window 'Run Pearson correlation' 'Latest statistics result title: Pearson correlation' 'Latest statistics estimate: r = 0.6325*' 'Latest statistics sample and details: n=4 complete pairs*' $datasetRevision 'Pearson correlation did not execute against all complete immutable rows'
 
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Show Welch t test form').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     foreach ($pair in @(
@@ -1004,15 +1376,7 @@ try {
         ([System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($pair[1])
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Run Welch t test').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 220
-    $testNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($testNames | Where-Object { $_ -eq 'Statistics result title Welch two-group t test' }) -or
-        -not ($testNames | Where-Object { $_ -like 'Statistics result secondary n=4 included*' })) {
-        throw 'Welch t test did not execute with the two explicit persisted groups'
-    }
+    Assert-StatisticsResult $window 'Run Welch t test' 'Latest statistics result title: Welch two-group t test' 'Latest statistics estimate: Mean difference -2.0000*' 'Latest statistics sample and details: n=4 included*' $datasetRevision 'Welch t test did not execute with the two explicit persisted groups'
 
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Show linear model form').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     foreach ($pair in @(
@@ -1023,17 +1387,11 @@ try {
         ([System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($pair[1])
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Run linear model with HC3 covariance').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 220
-    $modelNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    $modelTitle = @($modelNames | Where-Object { $_ -like 'Statistics result title OLS linear model*HC3 robust covariance' })
-    $modelSample = @($modelNames | Where-Object { $_ -like 'Statistics result secondary n=4 complete cases*' })
-    if ($modelTitle.Count -eq 0 -or $modelSample.Count -eq 0) {
-        $modelNames | Where-Object { $_ -like '*Statistics result*' -or $_ -like '*HC3*' -or $_ -like '*linear model*' } | Select-Object -First 20 | ForEach-Object { Write-Output ("DIAGNOSTIC OLS: " + $_) }
-        throw 'HC3 linear model did not execute through the native Statistics workspace'
-    }
+    # powershell.exe 5.1 reads a BOM-less .ps1 as the system ANSI code page.
+    # Construct superscript two from its code point; a literal UTF-8 code
+    # point would otherwise be decoded as mojibake on the Windows runner.
+    $expectedOlsEstimate = 'Latest statistics estimate: R' + [char]0x00B2 + ' = 0.4000*'
+    Assert-StatisticsResult $window 'Run linear model with HC3 covariance' 'Latest statistics result title: OLS linear model*HC3 robust covariance' $expectedOlsEstimate 'Latest statistics sample and details: n=4 complete cases*' $datasetRevision 'HC3 linear model did not execute through the native Statistics workspace'
     Write-Output 'PASS: immutable Statistics workspace runs descriptives, frequency, Pearson correlation, Welch t test, and HC3 OLS'
     Capture-WindowScreenshot $window $StatisticsScreenshot
 
@@ -1200,6 +1558,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
+    Ensure-ManuscriptToolsVisible $window
     foreach ($pair in @(
         @('Manuscript ID','uia-paper'),
         @('Manuscript section','Results'),
@@ -1414,6 +1773,8 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 220
 
+    # The inspector and export actions stay in the expanded Writing tools panel.
+    Ensure-ManuscriptToolsVisible $window
     # Exercise the real edit-driven debounce path. UI Automation SetValue is
     # surfaced by Slint as an edit, which journals synchronously and restarts
     # the shared 800 ms single-shot autosave timer.
@@ -1445,7 +1806,7 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
     $autosaveNotebook = "Debounced notebook autosave $persianWord"
-    $notebookBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project notebook text'
+    $notebookBody = RevisionedNotebookEditor $window
     ([System.Windows.Automation.ValuePattern]$notebookBody.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($autosaveNotebook)
     Start-Sleep -Milliseconds 1200
     $notebookAutosaveNames = @($window.FindAll(
@@ -1456,14 +1817,7 @@ try {
         throw 'Notebook edit did not complete the debounced project autosave path'
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export notebook Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 220
-    $notebookExportNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($notebookExportNames | Where-Object { $_ -like "*$autosaveNotebook*" })) {
-        throw 'Debounced notebook autosave was not persisted in notebook export'
-    }
+    Assert-NotebookMarkdownExport $window $autosaveNotebook
     Write-Output 'PASS: notebook edit is journaled then debounced into the revision/CAS/audit save path'
 
     # Prove each writing surface independently survives an actual abrupt exit.
@@ -1476,6 +1830,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 120
+    Ensure-ManuscriptToolsVisible $window
     $recoveredManuscript = 'Abrupt manuscript recovery'
     $manuscriptBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
     $manuscriptBody.SetFocus()
@@ -1486,7 +1841,7 @@ try {
         if ($focused -and $focused.Current.Name -eq 'Manuscript section body') { break }
     }
     if (-not $focused -or $focused.Current.Name -ne 'Manuscript section body') {
-        throw "Manuscript editor did not receive focus before abrupt-exit edit (focused='$($focused.Current.Name)')"
+        throw 'Manuscript editor did not receive focus before abrupt-exit edit'
     }
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait($recoveredManuscript)
@@ -1523,6 +1878,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 120
+    Ensure-ManuscriptToolsVisible $window
     $restoredManuscript = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
     $restoredManuscriptValue = ([System.Windows.Automation.ValuePattern]$restoredManuscript.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
     if ($restoredManuscriptValue -ne $recoveredManuscript) {
@@ -1561,16 +1917,16 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 120
-    $notebookBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project notebook text'
+    $notebookBody = RevisionedNotebookEditor $window
     $notebookBody.SetFocus()
     $focused = $null
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         Start-Sleep -Milliseconds 25
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
-        if ($focused -and $focused.Current.Name -eq 'Project notebook text') { break }
+        if ($focused -and $focused.Current.Name -eq 'Revisioned research notebook text') { break }
     }
-    if (-not $focused -or $focused.Current.Name -ne 'Project notebook text') {
-        throw "Notebook editor did not receive focus before abrupt-exit edit (focused='$($focused.Current.Name)')"
+    if (-not $focused -or $focused.Current.Name -ne 'Revisioned research notebook text') {
+        throw 'Notebook editor did not receive focus before abrupt-exit edit'
     }
     [System.Windows.Forms.SendKeys]::SendWait('^a')
     [System.Windows.Forms.SendKeys]::SendWait($recoveredNotebook)
@@ -1600,7 +1956,7 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 120
-    $restoredNotebook = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project notebook text'
+    $restoredNotebook = RevisionedNotebookEditor $window
     $restoredNotebookValue = ([System.Windows.Automation.ValuePattern]$restoredNotebook.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
     if ($restoredNotebookValue -ne $recoveredNotebook) {
         throw 'Abrupt-exit notebook draft was not restored into the fresh process'
@@ -1619,14 +1975,7 @@ try {
         throw 'Recovered notebook journal did not clear its dirty flag after revision persistence'
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export notebook Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
-    Start-Sleep -Milliseconds 220
-    $recoveredNotebookExportNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($recoveredNotebookExportNames | Where-Object { $_ -like "*$recoveredNotebook*" })) {
-        throw 'Recovered notebook draft was not persisted after restart'
-    }
+    Assert-NotebookMarkdownExport $window $recoveredNotebook
     $cleanDraft = $draftFiles | ForEach-Object { Read-JsonRetry $_.FullName } | Where-Object {
         $_.notebook -eq $recoveredNotebook -and $_.body -eq $recoveredManuscript
     } | Select-Object -First 1
@@ -1723,9 +2072,12 @@ try {
     ([System.Windows.Automation.ValuePattern]$agentOperation.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('assistant.retrieval.index')
     $agentPrivateSentinel = 'AGENT_PRIVATE_SENTINEL_91D7'
     ([System.Windows.Automation.ValuePattern]$agentArguments.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('{"citation_id":"agent-uia-citation","source_id":"agent-uia-source","revision":"r1","content":"' + $agentPrivateSentinel + '"}')
-    $previewPlanButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview inert agent plan'
-    $stageProposalButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Stage agent tool proposal'
-    $timelineButton = Named $window ([System.Windows.Automation.ControlType]::Button) 'Load agent action timeline'
+    # The proposal buttons follow the three input fields inside a virtualized
+    # Slint ScrollView. Tab from the last visible field to materialize the
+    # native controls before querying them through UIA.
+    $previewPlanButton = FocusByTab $agentArguments ([System.Windows.Automation.ControlType]::Button) 'Preview inert agent plan' 4
+    $stageProposalButton = FocusByTab $previewPlanButton ([System.Windows.Automation.ControlType]::Button) 'Stage agent tool proposal' 4
+    $timelineButton = FocusByTab $stageProposalButton ([System.Windows.Automation.ControlType]::Button) 'Load agent action timeline' 4
     $previewPlanButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     # The result summary lives below the proposal row in the virtualized ScrollView.
     # Traverse through real keyboard focus so both the lower controls and result are
@@ -1820,6 +2172,164 @@ try {
         throw 'Removed Cloud Sync workspace is still reachable through Manage'
     }
     Write-Output 'PASS: local backups and recovery remain accessible without cloud sync navigation'
+
+    # Real offline encrypted archive flow on the isolated installed candidate.
+    # The original project A and restored project B deliberately have the same
+    # archive UUID but different physical directories. All created files stay
+    # beneath this run's disposable host-data root; no cloud service is used.
+    $encryptedArchive = Join-Path $hostData 'uia-local-archive.rwproj.enc'
+    $restoredDirectory = Join-Path $hostData 'uia-local-restored-project'
+    $archivePassword = 'RwArchive' + [guid]::NewGuid().ToString('N')
+    if ((Test-Path -LiteralPath $encryptedArchive) -or (Test-Path -LiteralPath $restoredDirectory)) {
+        throw 'Encrypted archive UIA destination was not fresh'
+    }
+    Invoke-AccessibleButton $window 'Backups workspace screen'
+    $backupPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Backup archive path'
+    ([System.Windows.Automation.ValuePattern]$backupPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($encryptedArchive)
+    Enter-ArchivePassword $window 'Backup encryption password' $archivePassword
+    Invoke-AccessibleButton $window 'Export encrypted project archive'
+    WaitForNameLike $window '*Status: Backup operation completed*' 60000
+    if (-not (Test-Path -LiteralPath $encryptedArchive -PathType Leaf)) {
+        throw 'Encrypted archive export completed without producing a local file'
+    }
+    $encryptedLength = (Get-Item -LiteralPath $encryptedArchive).Length
+    if ($encryptedLength -lt 100) { throw 'Encrypted archive is unexpectedly small' }
+    $encryptedStream = [System.IO.File]::OpenRead($encryptedArchive)
+    try {
+        $magic = New-Object byte[] 8
+        if ($encryptedStream.Read($magic, 0, $magic.Length) -ne 8 -or
+            [System.Text.Encoding]::ASCII.GetString($magic) -ne "RWPENC1`n") {
+            throw 'GUI archive output does not have the encrypted RWPENC1 header'
+        }
+    } finally {
+        $encryptedStream.Dispose()
+    }
+    $archiveDigest = (Get-FileHash -LiteralPath $encryptedArchive -Algorithm SHA256).Hash
+    # Verify the negative case first so that the subsequent success status
+    # cannot be mistaken for the preceding export's still-visible status.
+    Enter-ArchivePassword $window 'Backup encryption password' 'DefinitelyWrongArchivePassword'
+    Invoke-AccessibleButton $window 'Verify encrypted project archive'
+    WaitForNameLike $window '*Status: *authentication failed*' 60000
+    if ((Get-FileHash -LiteralPath $encryptedArchive -Algorithm SHA256).Hash -ne $archiveDigest) {
+        throw 'Wrong-password verification modified the encrypted archive'
+    }
+    Enter-ArchivePassword $window 'Backup encryption password' $archivePassword
+    Invoke-AccessibleButton $window 'Verify encrypted project archive'
+    WaitForNameLike $window '*Status: Backup operation completed*' 60000
+    if ((Get-FileHash -LiteralPath $encryptedArchive -Algorithm SHA256).Hash -ne $archiveDigest) {
+        throw 'Read-only encrypted archive verification modified the file'
+    }
+    Write-Output 'PASS: installed GUI exports and authenticates an encrypted archive, rejects a wrong password and preserves archive bytes'
+
+    # Leave a newer, project-A-only writing draft after the archive snapshot.
+    # B must not acquire this draft even though the restored SQLite project
+    # retains the archive's original UUID.
+    $aOnlyDraft = 'uia_archive_A_' + [guid]::NewGuid().ToString('N')
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Manuscript')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Ensure-ManuscriptToolsVisible $window
+    $manuscriptBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
+    EnsureLiveFocus $manuscriptBody
+    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    [System.Windows.Forms.SendKeys]::SendWait($aOnlyDraft)
+    $aJournal = $null
+    for ($attempt = 0; $attempt -lt 80; $attempt++) {
+        $aJournal = @(Get-ChildItem -LiteralPath (Join-Path $hostData 'writing-drafts') -Filter 'scoped-*.json' -File | Where-Object {
+            (Read-JsonRetry $_.FullName).body -eq $aOnlyDraft
+        } | Select-Object -First 1)
+        if ($aJournal.Count -eq 1) { break }
+        Start-Sleep -Milliseconds 50
+    }
+    if ($aJournal.Count -ne 1) { throw 'Project A manuscript edit did not produce a scoped recovery journal' }
+    $aJournalPath = $aJournal[0].FullName
+
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Recovery')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $recoveryArchive = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Recovery archive path'
+    $recoveryDestination = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Recovery destination path'
+    ([System.Windows.Automation.ValuePattern]$recoveryArchive.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($encryptedArchive)
+    ([System.Windows.Automation.ValuePattern]$recoveryDestination.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($restoredDirectory)
+    Enter-ArchivePassword $window 'Recovery encryption password' 'DefinitelyWrongArchivePassword'
+    Invoke-AccessibleButton $window 'Restore encrypted project archive'
+    WaitForNameLike $window '*Status: *authentication failed*' 60000
+    if (Test-Path -LiteralPath $restoredDirectory) {
+        throw 'Wrong-password restore created a project destination'
+    }
+    if ((Get-FileHash -LiteralPath $encryptedArchive -Algorithm SHA256).Hash -ne $archiveDigest) {
+        throw 'Wrong-password recovery modified its source archive'
+    }
+    Enter-ArchivePassword $window 'Recovery encryption password' $archivePassword
+    Invoke-AccessibleButton $window 'Restore encrypted project archive'
+    WaitForNameLike $window '*Status: Recovered and opened encrypted backup*' 60000
+    if (-not (Test-Path -LiteralPath (Join-Path $restoredDirectory 'data/project.sqlite') -PathType Leaf)) {
+        throw 'Authenticated restore did not create a separate SQLite project'
+    }
+    if (-not (Test-Path -LiteralPath (Join-Path $temporary 'data/project.sqlite') -PathType Leaf)) {
+        throw 'Archive restore damaged the original project directory'
+    }
+    Write-Output 'PASS: wrong password rejects restore without creating a directory; correct password restores an independent local project'
+
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Manuscript')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Ensure-ManuscriptToolsVisible $window
+    $restoredBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
+    $restoredValue = ([System.Windows.Automation.ValuePattern]$restoredBody.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($restoredValue -eq $aOnlyDraft) { throw 'Restored project B inherited project A manuscript draft' }
+    $restoredManuscriptId = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID'
+    ([System.Windows.Automation.ValuePattern]$restoredManuscriptId.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('uia-paper')
+    Invoke-AccessibleButton $window 'Inspect manuscript'
+    WaitForNameLike $window '*Status: Persisted manuscript revisions loaded*' 10000
+    $restoredManuscriptNames = @((Children $window ([System.Windows.Automation.ControlType]::Text)) | ForEach-Object { $_.Current.Name })
+    if (-not ($restoredManuscriptNames | Where-Object { $_ -like "*$recoveredManuscript*" })) {
+        throw 'Restored project B did not retain the manuscript revision saved in the encrypted snapshot'
+    }
+    $bOnlyDraft = 'uia_archive_B_' + [guid]::NewGuid().ToString('N')
+    $restoredBody = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
+    EnsureLiveFocus $restoredBody
+    [System.Windows.Forms.SendKeys]::SendWait('^a')
+    [System.Windows.Forms.SendKeys]::SendWait($bOnlyDraft)
+    $bJournal = $null
+    for ($attempt = 0; $attempt -lt 80; $attempt++) {
+        $bJournal = @(Get-ChildItem -LiteralPath (Join-Path $hostData 'writing-drafts') -Filter 'scoped-*.json' -File | Where-Object {
+            (Read-JsonRetry $_.FullName).body -eq $bOnlyDraft
+        } | Select-Object -First 1)
+        if ($bJournal.Count -eq 1) { break }
+        Start-Sleep -Milliseconds 50
+    }
+    if ($bJournal.Count -ne 1 -or $bJournal[0].FullName -eq $aJournalPath) {
+        throw 'Restored same-UUID project B did not receive an independent writing journal'
+    }
+    if ((Read-JsonRetry $aJournalPath).body -ne $aOnlyDraft) {
+        throw 'Writing in restored project B overwrote project A recovery draft'
+    }
+
+    # Return to A so the remainder of this existing UIA suite still exercises
+    # its original fixture, while checking the draft survives the project swap.
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Welcome')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    $path = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project path'
+    ([System.Windows.Automation.ValuePattern]$path.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($temporary)
+    Invoke-AccessibleButton $window 'Open project'
+    WaitForNameLike $window '*Status: Project opened*' 10000
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Manuscript')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Ensure-ManuscriptToolsVisible $window
+    $aBodyAfterReturn = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
+    if (([System.Windows.Automation.ValuePattern]$aBodyAfterReturn.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value -ne $aOnlyDraft) {
+        throw 'Opening project A after restoring B lost its original scoped manuscript draft'
+    }
+    Write-Output 'PASS: same-UUID original and restored projects keep distinct manuscripts and scoped recovery journals'
+
     $sources = Named $window ([System.Windows.Automation.ControlType]::Button) 'Sources activity'
     ([System.Windows.Automation.InvokePattern]$sources.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern)).Invoke()
     Start-Sleep -Milliseconds 120
@@ -1983,14 +2493,14 @@ try {
             [IO.Path]::GetFullPath((Join-Path $repoRoot $PreserveProjectDirectory))
         }
         if (-not $preservePath.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
-            throw "Preserved UIA fixtures must stay under $allowedRoot"
+            throw 'Preserved UIA fixtures must stay under the approved performance-fixtures directory'
         }
         New-Item -ItemType Directory -Path (Split-Path -Parent $preservePath) -Force | Out-Null
         if (Test-Path -LiteralPath $preservePath) {
             Remove-Item -LiteralPath $preservePath -Recurse -Force
         }
         Copy-Item -LiteralPath $temporary -Destination $preservePath -Recurse
-        Write-Output "Preserved project fixture: $preservePath"
+        Write-Output 'Preserved isolated project fixture for local QA review'
     }
     foreach ($cleanupPath in @($temporary, $hostData)) {
         if (-not (Test-Path -LiteralPath $cleanupPath)) { continue }

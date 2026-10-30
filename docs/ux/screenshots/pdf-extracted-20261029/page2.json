@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "page": 2,
+  "role": "entry",
+  "actual_text": "Second page PDFium landmark",
+  "clipboard_sha256": "3baf0e7e8d50975a3dc2aaa2fa7bc0bc3f9f58496f3a8e9786462ba56049c9b5",
+  "provenance": "PDF extracted text provenance: Page 2 of 2 · 27 extracted Unicode characters · extracted-text SHA-256 3baf0e7e8d50975a. This text is for inspection only; no page-specific evidence anchor has been recorded.",
+  "render_status": "PDF search status: Rendered page 2 of 2 (700 × 433) · 27 extracted characters matches: 1",
+  "width": 218,
+  "height": 330,
+  "readonly_noneditable": true,
+  "clipboard_stale_sentinel_replaced": true,
+  "typed_mutation_rejected": true
+}

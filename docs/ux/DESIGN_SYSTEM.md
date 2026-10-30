@@ -135,6 +135,51 @@ The UI renders authority state; it does not invent weaker effect rules.
 - Tables/plots plus accessible textual alternative.
 - Reopen settings, copy/export, provenance.
 
+### Data View · immutable dataset preview (Slint page ID 12)
+
+**Implementation status:** The Slint screen contains a native `StandardTableView` (not a drawn fake spreadsheet), a separate import/inspect workflow, an explicit empty state, and next/previous page controls. **Live table content and paging are pending the typed Rust host adapter.** The host's existing `inspect-dataset(string, string)` callback still requests `dataset.inspect` with `offset: 0, limit: 100` and displays the returned JSON in `analysis-results`. The new table must not pretend that this text constitutes a populated grid.
+
+Design contract:
+
+- Column headers come directly from the verified dataset's ordered field names. Each row uses the **same column order**; never infer columns from the first display row or insert sample records.
+- The native table preserves the platform's accessibility table role, focus, header labels and keyboard row navigation. On-screen text explains **read-only**, **current page**, **rows shown**, and **project revision**; a missing/failed dataset shows an honest empty or error message, not fake rows.
+- Page size is **25** in this UI contract. Absolute page offset is `page * page_size`; populate only verified rows for the requested page. Keep the existing identifier/revision immutable and suppress stale responses when the user changes the selected dataset while a request is running.
+- `dataset-grid-ready` means headers and rows came from an actual `dataset.inspect` response, even when the requested page has zero records; the UI never mutates it on the basis of local synthetic examples. Disable page navigation while loading. A failed request retains clearly labeled old data or empties it, and announces the failure without lying about the page number.
+- If total count is trustworthy, display it and disable Next exactly at the final page; if the server cannot supply total count, use `-1` and disable Next when fewer than 25 rows were returned. Never claim a total from a single page. Boundary requests cannot wrap or move to a negative offset.
+- The screen renders the legacy raw analysis/inspection response in a bounded scroll panel as a fallback; it is not silently treated as the tabular model.
+- `StandardTableView` exposes sort-capable header affordances, but no actual sort callback is wired yet. The current UI responds explicitly that row order is unchanged. **Do not claim sorting** until the host supplies stable server-side ordering, resets page position, and prevents a misleading sort indicator.
+
+**Host-owned wiring required (not part of this UI-only task):**
+
+```slint
+// Import StandardTableView alongside existing std widgets.
+import { StandardTableView } from "std-widgets.slint";
+// Add to MainWindow alongside existing typed in-out properties:
+in-out property <[TableColumn]> dataset-grid-columns: [];
+in-out property <[[StandardListViewItem]]> dataset-grid-rows: [];
+in-out property <int> dataset-grid-page: 0;
+in-out property <int> dataset-grid-page-size: 25;
+in-out property <int> dataset-grid-total-rows: -1;
+in-out property <bool> dataset-grid-ready: false;
+in-out property <bool> dataset-grid-busy: false;
+in-out property <string> dataset-grid-status: "Inspect a revision to request a verified row preview.";
+callback request-dataset-page(string, string, int, int);
+```
+
+The Rust host should build `Vec<TableColumn>` and a nested Slint model of `StandardListViewItem { text: … }` from the existing dataset inspection operation, **not** derive data by substring-splitting formatted JSON text. It must preserve native column schema order, exact dataset/revision identity and row ordering, include value labels/explicit missingness semantics where supported by verified metadata, and supply a bounded status/error string. Limit long individual cells by a visual elide with a discoverable full-value alternative (future native review required), and never silently expose private columns just because a UI grid requests them. The host must implement `on_request_dataset_page` with validated page and size and update all model/status properties together on a successful response. Until this exists, only the empty native table structure is source-present; **no end-to-end populated-grid pass** can be claimed.
+
+### Statistics · method selection and uncertainty (Slint page ID 14)
+
+**Implementation status:** The existing native callbacks remain `run-descriptives`, `run-frequency`, `run-correlation`, `run-t-test`, and `run-linear-model`. No new statistical algorithm, confidence interval or interpretation is calculated by the UI. The screen is reorganized into (1) dataset/revision identity, (2) method-specific inputs and explanation, and (3) a labeled last-computed result summary, sample/diagnostic text, provenance and separately scrollable verified payload.
+
+- Method tabs must not be confused with recalculation: switching among them changes the **input form**, not the previous result. Label the output “latest computed” explicitly.
+- Show exact numeric outputs and diagnostic claims **only** from the host-owned `statistics-result-*` strings or verified JSON. Never fabricate confidence bounds, standard errors, p-values, sample totals, units or an interpretation unavailable in the result.
+- Method-specific educational text distinguishes descriptive spread and missingness, valid category denominators, pairwise-complete Pearson association, explicitly scoped Welch groups, and HC3 OLS uncertainty. It must not imply randomized assignment, normality, causal identification or independent observations without checking the study design.
+- Place interpretation caveats next to the result: estimates depend on sampling and assumptions, missing values affect denominators, and statistical significance alone does not establish causal or practical importance. If an interval is absent, **do not infer one**.
+- Provide a plainly labeled scrollable full payload alternative for inspection and copying; do not rely on color to distinguish the primary estimate, warnings and dataset revision.
+
+**Outstanding GUI acceptance:** Confirm focus/keyboard table navigation and correct header announcements with NVDA, VoiceOver and Orca; high-contrast and 100/150/200% scale; 25-row pages with 0, 1, 25 and 26 actual rows, errors, Unicode/RTL values, duplicate header names, variable-width numeric fields, private source metadata and rapid dataset switches. Check that Slint scroll and horizontal overflow remain usable when contextual AI is open. A successful Slint compile validates syntax/bindings, **not** native render or assistive-technology behavior.
+
 ### EmptyState
 
 - States why the area is empty.

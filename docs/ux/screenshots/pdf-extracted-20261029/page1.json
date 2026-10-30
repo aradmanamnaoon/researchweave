@@ -1,0 +1,14 @@
+{
+  "result": "PASS",
+  "page": 1,
+  "role": "entry",
+  "actual_text": "First page unrelated text",
+  "clipboard_sha256": "b60cd7547abd4d7096e4f59de42bb61824ddf1b9e89feb32364b8f0f4f04d896",
+  "provenance": "PDF extracted text provenance: Page 1 of 2 · 25 extracted Unicode characters · extracted-text SHA-256 b60cd7547abd4d70. This text is for inspection only; no page-specific evidence anchor has been recorded.",
+  "render_status": "PDF search status: Rendered page 1 of 2 (700 × 433) · 25 extracted characters matches: 0",
+  "width": 218,
+  "height": 330,
+  "readonly_noneditable": true,
+  "clipboard_stale_sentinel_replaced": true,
+  "typed_mutation_rejected": true
+}

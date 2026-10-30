@@ -1,0 +1,9 @@
+{
+  "result": "PASS",
+  "page": 2,
+  "query_has_no_matches": true,
+  "page_unchanged": true,
+  "extracted_text_unchanged": true,
+  "extracted_sha256": "3baf0e7e8d50975a3dc2aaa2fa7bc0bc3f9f58496f3a8e9786462ba56049c9b5",
+  "status": "PDF search status: No matching page in PDF; current page is unchanged matches: 0"
+}

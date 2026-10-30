@@ -1,0 +1,117 @@
+{
+  "result": "FAIL",
+  "checks": [
+    {
+      "control": "Read previous source text page",
+      "expected_enabled": false,
+      "actual_enabled": true
+    },
+    {
+      "control": "Read next source text page",
+      "expected_enabled": true,
+      "actual_enabled": true
+    },
+    {
+      "control": "Read previous source text page",
+      "expected_enabled": true,
+      "actual_enabled": true
+    },
+    {
+      "control": "Read next source text page",
+      "expected_enabled": true,
+      "actual_enabled": true
+    },
+    {
+      "control": "Read previous source text page",
+      "expected_enabled": true,
+      "actual_enabled": true
+    },
+    {
+      "control": "Read next source text page",
+      "expected_enabled": false,
+      "actual_enabled": true
+    },
+    {
+      "control": "Read previous source text page",
+      "expected_enabled": true,
+      "actual_enabled": true
+    },
+    {
+      "control": "Read next source text page",
+      "expected_enabled": true,
+      "actual_enabled": true
+    },
+    {
+      "control": "Read previous source text page",
+      "expected_enabled": false,
+      "actual_enabled": true
+    },
+    {
+      "control": "Read next source text page",
+      "expected_enabled": true,
+      "actual_enabled": true
+    },
+    {
+      "control": "Previous 50 sources",
+      "expected_enabled": false,
+      "actual_enabled": true
+    },
+    {
+      "control": "Next 50 sources",
+      "expected_enabled": true,
+      "actual_enabled": true
+    },
+    {
+      "control": "Previous 50 sources",
+      "expected_enabled": true,
+      "actual_enabled": true
+    },
+    {
+      "control": "Next 50 sources",
+      "expected_enabled": false,
+      "actual_enabled": true
+    },
+    {
+      "control": "Previous 50 sources",
+      "expected_enabled": false,
+      "actual_enabled": true
+    },
+    {
+      "control": "Next 50 sources",
+      "expected_enabled": true,
+      "actual_enabled": true
+    }
+  ],
+  "mismatches": [
+    {
+      "control": "Read previous source text page",
+      "expected_enabled": false,
+      "actual_enabled": true
+    },
+    {
+      "control": "Read next source text page",
+      "expected_enabled": false,
+      "actual_enabled": true
+    },
+    {
+      "control": "Read previous source text page",
+      "expected_enabled": false,
+      "actual_enabled": true
+    },
+    {
+      "control": "Previous 50 sources",
+      "expected_enabled": false,
+      "actual_enabled": true
+    },
+    {
+      "control": "Next 50 sources",
+      "expected_enabled": false,
+      "actual_enabled": true
+    },
+    {
+      "control": "Previous 50 sources",
+      "expected_enabled": false,
+      "actual_enabled": true
+    }
+  ]
+}

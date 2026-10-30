@@ -1,0 +1,6 @@
+43a33c616c35b47604a57e3828a16174c200d2c18537260d2585405f928147c5  linux-release/researchweave-desktop
+c0f54e821f5ffcc06eb10ae4a165881251cd5cd5bb397d3fc101a33fe672fa52  repo/docs/verification/rust-rewrite/pdfium-two-page-ui-fixture.pdf
+68f1e95678160b5138b4255a3b80c6631a04792e424d357c5d5db709c88224c6  repo/crates/researchweave-desktop/ui/main.slint
+178a6b6df7b860a035e63c1a0ab6196a63d506a4cd7da3a590939bdd6d386693  repo/crates/researchweave-desktop/src/main.rs
+79ad2e5b94548593474c96cab8468eedfaacd3a2b996677561d132055d77d8eb  repo/crates/researchweave-desktop/src/pdf_engine.rs
+f6fe1806850de9080274be15b4302b8c5c8e910b3213f8a646e060796d6791d6  repo/scripts/ux/isolated-xvfb-pdf-extracted-text.sh

@@ -4,9 +4,11 @@
 
 <h1 align="center">ResearchWeave</h1>
 
+**Release status — 29 October 2026:** Published [Rust v0.2.0](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.2.0) remains the supported download. The next native UX candidate is under review in [draft PR #16](https://github.com/aradmanamnaoon/researchweave/pull/16). Recent scoped native checks cover [Reader accessibility](docs/ux/screenshots/search-reader-accesskit-pass-r6/results.json), [40 routes](docs/ux/screenshots/native-40-accesskit-r9/results.json), and [a source-backed Evidence workflow](docs/ux/screenshots/utility-evidence-accesskit-r10/results.json); these historical binary-specific passes are not final-release approval. Consult the [12-task execution plan](docs/ux/PR16_EXECUTION_PLAN.md) and [cross-platform acceptance evidence](docs/ux/CROSS_PLATFORM_QA.md) for the remaining installed-Windows, PDF grounding, manuscript, security, 100-skill and 109-scenario gates.
+
 <p align="center">
-  <strong>A native, local-first research operating system built in Rust.</strong><br/>
-  Evidence, literature, quantitative and qualitative analysis, writing, reproducibility, controlled AI, and secure project portability in one research workbench.
+  <strong>Your research, in one local Rust workspace.</strong><br/>
+  Organize sources, analyze data, write with traceable revisions, and keep control of your files and AI actions.
 </p>
 
 <p align="center">
@@ -23,9 +25,10 @@
 </p>
 
 <p align="center">
-  <a href="#downloads-and-release-status">Downloads</a> ·
-  <a href="#what-researchweave-does">Capabilities</a> ·
+  <a href="#downloads-and-release-status">Download</a> ·
+  <a href="#start-with-one-research-workflow">First workflow</a> ·
   <a href="#real-rust-desktop">Screenshots</a> ·
+  <a href="#capability-status-at-a-glance">Feature status</a> ·
   <a href="#quick-start">Quick start</a> ·
   <a href="#architecture">Architecture</a> ·
   <a href="#build-from-source">Build</a> ·
@@ -41,16 +44,22 @@
   <img src="assets/screenshots/rust-welcome-activity-rail.png" width="66%" alt="Real Rust/Slint welcome screen with the six-section activity rail and a local project creation form." />
 </p>
 
-<p align="center"><em>Actual Rust desktop capture. The banner above is a conceptual illustration, not an application screenshot.</em></p>
+<p align="center">
+  <img src="docs/ux/screenshots/data-view-json-20261029/02-visible-inspector-after-copy.png" width="48%" alt="Unreleased native Data View showing the full verified current-page JSON inspector." />
+  <img src="docs/ux/screenshots/pdf-extracted-20261029/02-pdf-page2-find-next-text.png" width="48%" alt="Unreleased native PDF reader showing the searchable second page and selectable extracted text." />
+</p>
+<p align="center"><em>Actual private Linux GUI captures from the unreleased PR #16 candidate. These prove scoped Data View and PDF extraction tests, not finished citation anchoring or a new published release.</em></p>
+
+<p align="center"><em>The welcome screenshot is from a previously captured Rust desktop build. The banner above illustrates the research workflow; it is not an app screenshot or a preview of unfinished UX features.</em></p>
 
 > [!IMPORTANT]
-> **Rust v0.2.0 is local-first and does not require a cloud storage account.** Check the [latest published release](https://github.com/aradmanamnaoon/researchweave/releases/latest) for the current downloadable version and its verification status. The historical [Python v0.1.2 edition](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.1.2) remains available for recovery. Rust release assets are considered published only after native/security checks and public hash verification succeed.
+> **Published release: Rust v0.2.0.** The current UX redesign is under development; the screenshots and downloads below refer to the previously published build, not an unverified new release. ResearchWeave stores projects locally; no cloud storage account is needed. The [archived Python v0.1.2 release](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.1.2) and Python-to-Rust compatibility fixtures remain available for historical recovery.
 
 ## Downloads and release status
 
-**Current download:** [Latest verified GitHub release](https://github.com/aradmanamnaoon/researchweave/releases/latest). Older [Python v0.1.2](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.1.2) remains available separately. Check each release's assets and checksums before installation.
+**Current published Rust build:** [ResearchWeave v0.2.0](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.2.0). The [latest release page](https://github.com/aradmanamnaoon/researchweave/releases/latest) shows the currently designated version; confirm its files and checksums before installation.
 
-**Rust v0.2.0 assets:** The exact URLs below are checked by the release workflow. They become available after that GitHub release is publicly published and verified; a missing link indicates that the release has not been published successfully.
+**Rust v0.2.0 download options** (these URLs deliberately remain on the existing published release until the next release's native tests and public-file verification have succeeded):
 
 | Platform | Native Rust artifact | Verification required | Public Rust download |
 | --- | --- | --- | --- |
@@ -59,11 +68,11 @@
 | macOS Intel | `.app` inside `.dmg` | Mounted-app launch and relaunch on x64 | [v0.2.0 macOS x64](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-macos-x64.dmg) |
 | Linux x86_64 | AppImage + Debian package | Installed-package launch and AT-SPI accessibility | [v0.2.0 AppImage](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-linux-x86_64.AppImage) · [v0.2.0 DEB](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/ResearchWeave-v0.2.0-linux-amd64.deb) |
 
-Checksum manifest: [SHA256SUMS.txt](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/SHA256SUMS.txt). The repository release page is <https://github.com/aradmanamnaoon/researchweave/releases>. The release workflow refuses to call these links verified until anonymous public downloads and hashes succeed.
+Checksum manifest: [v0.2.0 SHA256SUMS.txt](https://github.com/aradmanamnaoon/researchweave/releases/download/v0.2.0/SHA256SUMS.txt). For each downloaded file, compare the published SHA-256 digest to the local artifact. Packages from the new UX branch must receive a **new** exact-commit verification before their links replace these.
 
 ## Quick start
 
-**Installing ResearchWeave?** Use the [latest verified release](https://github.com/aradmanamnaoon/researchweave/releases/latest). To build the Rust desktop from source, install [Rustup](https://rustup.rs/) and the native build tools for your OS. The Rust source is tracked on the default [`main` branch](https://github.com/aradmanamnaoon/researchweave/tree/main); reviewed changes are merged after their native acceptance checks pass:
+**Installing ResearchWeave?** Start with the [published v0.2.0 release](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.2.0). To build the Rust desktop from source, install [Rustup](https://rustup.rs/) and your OS's native build tools. The published Rust source lives on [`main`](https://github.com/aradmanamnaoon/researchweave/tree/main):
 
 ```sh
 git clone https://github.com/aradmanamnaoon/researchweave.git
@@ -73,7 +82,7 @@ rustup toolchain install 1.94.1
 cargo +1.94.1 run --locked -p researchweave-desktop
 ```
 
-The native PDF reader additionally needs the platform PDFium library; see [build instructions](#build-from-source). Project work starts locally without a cloud account or configured AI provider. The application supports creating or opening a research project from **Home**, adding references/PDFs in **Sources**, running analyses in **Analyze**, and working on manuscripts in **Synthesize**.
+The native PDF reader additionally needs the matching platform PDFium library; see [build instructions](#build-from-source). Project work starts locally without a cloud account or configured AI provider. Begin with a managed project in **Home**; from there you can register references, open local PDFs, import data, record analyses and edit manuscript sections. Some links between these workflows still require manually entering IDs or paths.
 
 | Start here | Then try | Where to look |
 | --- | --- | --- |
@@ -81,7 +90,26 @@ The native PDF reader additionally needs the platform PDFium library; see [build
 | **Import and inspect a dataset** | Run a descriptive or regression analysis with provenance | **Analyze → Statistics** |
 | **Write and review a manuscript** | Save revisions and generate a DOCX export | **Synthesize → Manuscript** |
 
-Research projects and encrypted portable archives work entirely offline. Optional remote AI requests require explicit configuration and consent.
+Research projects and encrypted portable archives work entirely offline. The current desktop's provider management is an **offline configuration flow**, not proof that a remote AI chat request is working.
+
+## Start with one research workflow
+
+Pick a single outcome and follow the workspace rather than learning every tool first:
+
+| Step | In the desktop | What you get | Current limitation |
+|:---:|---|---|---|
+| **01** | **Home → Start Center** | A local project with an auditable revision history | Recent-project selection is limited; custom paths are manual |
+| **02** | **Home → Research Question / Protocol** | A versioned question and protocol with preview-before-save | You may need to enter object IDs between screens |
+| **03** | **Sources → Library / Search / Reader / Evidence / PDF Reader** | Local source records and stored-text search; the unreleased branch adds human-authored, source-bound Evidence notes with preview-before-record and actual note history | The unreleased AccessKit candidate passed strict long-text Reader pagination and source-index paging plus one approved, source-bound Evidence note/history task in private Linux GUI; PDF quote anchors, full citation validation, adversarial cases and installed cross-OS tests remain pending |
+| **04** | **Analyze → Data / Statistics** | Imported dataset revisions and reproducible basic statistical results | Advanced analysis methods are richer in Rust libraries than in the desktop UI |
+| **05** | **Synthesize → Manuscript** | Versioned section text and prepared DOCX/HTML/Markdown/PDF export | This is currently a structured text editor, not a Word-style page editor |
+| **06** | **Manage → Backups / Recovery** | An optional encrypted local archive and restore-as-copy | Archive paths are currently entered manually |
+
+<p align="center">
+  <img src="assets/branding/workflow.svg" width="92%" alt="Illustration of the ResearchWeave workflow connecting research stages. This is conceptual artwork, not an application screenshot." />
+</p>
+
+**New to research?** A *revision* is a saved version of a project object or dataset. A *preview* shows the proposed change before it is recorded. A *provenance record* explains which inputs and operations produced a result.
 
 ## What ResearchWeave is
 
@@ -90,9 +118,9 @@ ResearchWeave is designed as a **research workbench rather than a collection of 
 | Principle | What it means in the product |
 | --- | --- |
 | 🏠 **Local-first** | Core project work does not require an account, hosted backend, or AI provider. |
-| 🧬 **One research object graph** | Sources, references, review records, extraction, datasets, codebooks, writing, and provenance are linked instead of copied between apps. |
+| 🧬 **Typed research records** | Sources, references, review records, extraction, datasets, codebooks and writing have project-scoped identities. Some relationships are present in Rust storage but not yet surfaced as direct UI navigation. |
 | 🔬 **Scientific traceability** | Immutable dataset revisions, hashes, assumptions, complete-case accounting, bounded algorithms, and deterministic tests are first-class concerns. |
-| 🤖 **AI with boundaries** | AI proposes and assists; sensitive writes/tool actions remain inspectable and approval-gated. |
+| 🤖 **AI with boundaries** | Local assistant conversations, retrieval proposals and approval-bound tool actions exist. The unreleased UX branch adds optional context previews and explicit local-model requests from research screens; selection grounding and hosted-provider consent UX are still pending. |
 | 🔐 **Privacy by architecture** | Private text and credentials are not dumped into audit logs or AI provider profile metadata. Project data stays local; encrypted project archives are optional. |
 | ⚡ **Native desktop** | The application runtime is Rust. Python is not hidden inside the shipped desktop app; Python helpers are limited to build/verification tooling where used. |
 
@@ -103,9 +131,9 @@ The Rust UI uses six persistent activity roots. Each has its own original icon a
 | Activity | Visual | Research responsibility |
 | --- | :---: | --- |
 | **Home** | <img src="assets/icons/home.svg" width="24" alt="Home icon"/> | Start Center, project home, research question, protocol and project context |
-| **Sources** | <img src="assets/icons/sources.svg" width="24" alt="Sources icon"/> | Library, references, native PDF reading, evidence anchors and review inputs |
-| **Analyze** | <img src="assets/icons/analyze.svg" width="24" alt="Analyze icon"/> | Data import, immutable datasets, statistics, plots, qualitative coding and mixed methods |
-| **Synthesize** | <img src="assets/icons/synthesize.svg" width="24" alt="Synthesize icon"/> | Notebook, manuscript, bibliography, publishing checks and research outputs |
+| **Sources** | <img src="assets/icons/sources.svg" width="24" alt="Sources icon"/> | Library, Search, stored-text Reader, source-bound human Evidence notes, references, native PDF page reading, review and extraction; quote anchoring and citation navigation remain incomplete |
+| **Analyze** | <img src="assets/icons/analyze.svg" width="24" alt="Analyze icon"/> | Data import, immutable datasets, five basic statistics forms, qualitative coding and mixed methods; additional analysis kernels are accessible through Rust |
+| **Synthesize** | <img src="assets/icons/synthesize.svg" width="24" alt="Synthesize icon"/> | Versioned plain-text notebook/manuscript, local exports, bibliography and publishing readiness checks |
 | **Automate** | <img src="assets/icons/automate.svg" width="24" alt="Automate icon"/> | Assistant conversations, retrieval, agent proposals and controlled tool execution |
 | **Manage** | <img src="assets/icons/manage.svg" width="24" alt="Manage icon"/> | AI provider configuration, diagnostics, activity history, local backups, recovery and preferences |
 
@@ -113,7 +141,59 @@ The shell also provides a global `Ctrl+K` command path, persistent status contex
 
 ## Real Rust desktop
 
-These are captures from the **running Rust/Slint application**, not mockups and not screenshots from the legacy Python/PyQt build.
+### Unreleased UX worktree — actual isolated Linux GUI captures
+
+These screenshots were captured by launching the native Rust/Slint executable in a private Linux virtual display and clicking through it with desktop automation. They depict the **working UX branch**, not the published v0.2.0 installers. A real temporary SQLite project was used to test note creation, editing, autosave, pinning, archiving, trash, restoration and retained history. The manuscript screenshot demonstrates a larger writing canvas, not Word-equivalent rich editing.
+
+| Project quick notes | Expanded manuscript writing |
+| --- | --- |
+| ![Actual Rust UX branch note collection and expanded note editor](docs/ux/screenshots/after-xvfb/08-saved-note.png) | ![Actual Rust UX branch manuscript writing canvas](docs/ux/screenshots/after-xvfb/03-manuscript.png) |
+
+![Actual Rust UX branch optional contextual AI panel with a reviewable local-only request preview](docs/ux/screenshots/after-xvfb/14-context-preview.png)
+
+The AI panel previews bounded, user-reviewed context and requires an explicitly configured local model before inference. It does not silently transmit research content or replace manuscripts. The [100-skill source audit](docs/ux/100_SKILLS_APPLICATION_MATRIX.md), [screen inventory](docs/ux/SCREEN_INVENTORY.md) and [long-form persistence measurements](docs/ux/LONG_FORM_EDITOR.md) distinguish tested behavior from unfinished work.
+
+### Newer unreleased source Search / Reader — actual private Linux GUI
+
+![Actual private Linux Xvfb ResearchWeave Reader displaying a verified 207-Unicode-character synthetic source after local search](docs/ux/screenshots/search-reader-xvfb/03-reader-exact-unicode-text.png)
+
+This **actual native Rust/Slint screenshot** is from a later synthetic Search → Reader GUI test on executable SHA-256 `77295db0109768f108495a31d932238431aeb0a86988325a63dd4258318023c7`. The scoped harness passed text equality, empty/no-result search feedback, invalid IDs, source-list reopening and return navigation. The [test receipt](docs/ux/screenshots/search-reader-xvfb/results.json) and [cross-platform QA report](docs/ux/CROSS_PLATFORM_QA.md) record provenance and exclusions. **It does not represent the published v0.2.0 release or prove long pagination, PDF selection, assistive technology, or macOS/Windows operation.**
+
+### Current accessibility-fix candidate — actual private Linux GUI
+
+The **newest** independent Linux/Xvfb route and workflow captures were taken from accessibility-fixed executable `499cfebbe7012d679143f9c9371103ea92619ff50813dcd18fa6aac6aff1df76` (Slint `4437d03c...`, host `e03ea640...`). The [r7 route manifest](docs/ux/screenshots/native-40-accessible-r7/results.json) records **40/40 routes and zero explicit placeholders** with 46 actual captures; the [r8 utility/Evidence manifest](docs/ux/screenshots/utility-evidence-accessible-r8/results.json) records **7/7 utility links and source-bound note approval/record/history PASS**, with 21 captures. All 67 screenshot hashes and sizes were checked against these manifests.
+
+| Current Evidence workspace (r7) | Persisted source-bound Evidence note history (r8) |
+| --- | --- |
+| ![Latest private r7 actual native Linux Evidence work area after accessibility source fix](docs/ux/screenshots/native-40-accessible-r7/route-08.png) | ![Latest private r8 native Linux Evidence note history after scoped approval and persistence](docs/ux/screenshots/utility-evidence-accessible-r8/evidence-05-persisted-note-history.png) |
+
+**Historical pre-vendor accessibility follow-up:** An earlier long Reader r3 test passed a **16,916-character, 53-source** content/pagination task but found six disabled AT-SPI controls incorrectly announcing enabled. The present Slint source specifies `accessible-enabled` for those controls, and strict post-fix Reader r4 still FAILED six of sixteen native AT-SPI checks. These GUI captures do not establish human Orca, Windows/macOS installed operation or complete research workflow acceptance.
+
+### Earlier utility and Evidence screens — historical private Linux audits
+
+The [new r6 full-route result](docs/ux/screenshots/native-40-final-source-r6/results.json) and [actual Evidence route 8](docs/ux/screenshots/native-40-final-source-r6/route-08.png) are retained alongside the pre-safety captures below. This **newer** set contains 40 route, four keyboard and two resize screenshots from binary `707b1c...`; the older images remain for historical comparison.
+
+| Evidence notes (route 8) | Privacy & approvals (route 25) |
+| --- | --- |
+| ![Actual native Linux Evidence route 8 source-bound note controls, from an uncommitted pre-safety-fix snapshot](docs/ux/screenshots/native-40-routes-20261029/route-08.png) | ![Actual native Linux Privacy route 25 linked utility cards, from an uncommitted pre-safety-fix snapshot](docs/ux/screenshots/native-40-routes-20261029/route-25.png) |
+
+| Exports (route 27) | Tutorials (route 33) | About (route 38) |
+| --- | --- | --- |
+| ![Uncommitted Linux Exports utility route 27](docs/ux/screenshots/native-40-routes-20261029/route-27.png) | ![Uncommitted Linux Tutorials utility route 33](docs/ux/screenshots/native-40-routes-20261029/route-33.png) | ![Uncommitted Linux About utility route 38](docs/ux/screenshots/native-40-routes-20261029/route-38.png) |
+
+These are **real native AT-SPI/Xvfb route screenshots** from the *uncommitted* binary `72ebceea6d67d758e223712ab01daa28083d2ebf514249554599463927a290e3`, before the subsequent Evidence/Provider approval and project-restore safety changes. The [40-route receipt](docs/ux/screenshots/native-40-routes-20261029/results.json) reports 40/40 route activations and zero explicit placeholders; it does **not** establish correctness of any link or approval action. Separate, earlier scoped private GUI tests observed seven linked utility cards and creation/history of a real source-bound Evidence note; **the full r3 utility/Evidence harness did not pass** because its revision assertion confused different revision meanings. These images are not current final-source acceptance or published v0.2.0 screenshots.
+
+**Later r5 functional capture (different binary):** the [r5 results manifest](docs/ux/screenshots/utility-evidence-xvfb/results.json) reports PASS for all seven linked utility destinations and the scoped Evidence record flow on executable `707b1c43446cc86f8e25da28954b90b18864613434b7600e1c57296a0180916d`. The **21 actual PNG captures** have matching retained SHA-256 digests. The audit recorded unchanged Slint/host source files during execution, and their SHA-256 values match the inspected worktree; an independent binary build record is still outstanding. The earlier combined r3 harness **failed** and is retained as historical evidence, not relabeled as passing.
+
+| Source → Reader | Preview before recording | Approved, persisted Evidence note |
+| --- | --- | --- |
+| ![Real stored source opened in native Reader during private r5 functional test](docs/ux/screenshots/utility-evidence-xvfb/evidence-02-reader-real-source-id.png) | ![Actual r5 source-bound human Evidence note preview before approval and save](docs/ux/screenshots/utility-evidence-xvfb/evidence-03-human-note-preview-not-saved.png) | ![Actual r5 Evidence note history showing recorded note ID and revision](docs/ux/screenshots/utility-evidence-xvfb/evidence-05-persisted-note-history.png) |
+
+This demonstrates one synthetic source-bound human note, approval, record and history lookup. It does not establish PDF text-selection anchors, claim-level citation provenance, multiple note revisions, accessibility with Orca or native Windows/macOS packages.
+
+### Previously published Rust interface
+
+The images below were captured from **earlier running Rust/Slint builds** and are retained as historical UI examples. They are not mockups or Python/PyQt screenshots, and they do not demonstrate completion or visual QA of the ongoing UX transformation.
 
 | Manuscript + DOCX | Native PDF reader |
 | --- | --- |
@@ -128,6 +208,24 @@ The current design system uses **Deep Ink** (`#172438`), **Research Teal** (`#14
 ## What ResearchWeave does
 
 The current Rust workspace is split into nine focused crates and exposes project-scoped capabilities through the shared command router. The high-level product surface is summarized below; detailed implementation status lives in [`docs/verification/FEATURE_EXPANSION.md`](docs/verification/FEATURE_EXPANSION.md).
+
+## Capability status at a glance
+
+The **Rust domain library**, **desktop screen** and **release evidence** have different levels of completion. This is a source-based inventory of the existing UI; each claim still needs a fresh acceptance run when the UX branch changes.
+
+| Area | Working in the current Rust desktop | Present in Rust or partially wired | Not yet available as the requested UX |
+|---|---|---|---|
+| **Projects and local safety** | Managed create/open, metadata preview/record, archives and recovery | Audit/activity, diagnostics, project migration | Recent-project dashboard, complete guided recovery |
+| **Sources and reviews** | Local source entry, references, PDF page search, review votes, PRISMA text counts, extraction JSON forms; **unreleased UX branch:** local source Search and paged Reader plus a dedicated, source-bound human Evidence note preview/record/history screen | Anchor storage, source relationships, review algorithms, seven linked utility pages | Longer Reader pagination, selected quotation anchoring, broad post-safety approval rejection/restore GUI testing, cross-OS Search/Reader and screening queue |
+| **Data and methods** | Import/inspect datasets, variable metadata, descriptives, frequency, Pearson, Welch t, HC3 OLS; **unreleased UX branch:** read-only `StandardTableView` with 25-row paging controls | Additional statistical methods, plots and reproducible results in Rust crates | Editable spreadsheet features and visual interactive analysis across every method; multi-page and cross-OS grid acceptance pending |
+| **Qualitative and mixed methods** | Codebook/annotation/mapping forms, kappa, verified joint-display action | Project-scoped coder state and quality/provenance checks | Visual transcript coding and rich joint-display table |
+| **Notes and writing** | Project notebook editor; versioned manuscript sections, recovery and DOCX/HTML/PDF/Markdown exports | Unreleased UX branch has quick-note cards/list, pin/archive/trash/restore, labels/search and durable drafts | Word-style rich, paginated editing and complete citations-in-context |
+| **Assistant and automation** | Local conversation/template forms, offline provider profiles, human-reviewed retrieval tool proposals | Unreleased UX branch has optional contextual AI preview and explicit local-model generation | Selection-grounded editing, end-to-end streaming chat and consented hosted-provider UX |
+| **Display and accessibility** | Six navigation roots, Ctrl+K, display themes, density, scale and basic keyboard semantics | Windows UIA scripts and native OS accessibility probes | Complete NVDA/VoiceOver/Orca, real RTL IME and all-state visual QA |
+
+**Reading this table:** “Working” means the current Slint screen has a concrete handler, not that every variation passed a new user study. “Present in Rust” describes implementation or infrastructure without promising a mature, clickable desktop workflow. Historical screenshots and test reports are not proof for unreviewed UX branch changes.
+
+See [the route-by-route screen inventory](docs/ux/SCREEN_INVENTORY.md), [workflow handoff audit](docs/ux/WORKFLOW_INVENTORY.md) and [contextual AI audit](docs/ux/AI_INTEGRATION_AUDIT.md) for the dated pre-transformation baseline.
 
 ### Projects, integrity and recovery
 
@@ -213,6 +311,7 @@ Important boundaries:
 - router audit stores operation metadata/hashes rather than private raw arguments;
 - current retrieval is local lexical retrieval, not an exaggerated “semantic RAG” claim;
 - provider list/configuration does not imply a live connectivity check unless one was explicitly performed.
+- the published v0.2.0 desktop does not offer contextual assistant entry from every task screen; the UX worktree adds an optional panel with preview and explicit local-model execution, but configuring a provider does not itself execute a completion.
 
 See [`docs/verification/AI_CAPABILITIES.md`](docs/verification/AI_CAPABILITIES.md) for the evidence-backed capability matrix and open evaluation work.
 
@@ -303,7 +402,7 @@ The design contract requires visible focus, keyboard activation, non-color statu
 
 ## Native packaging
 
-The Rust application runtime has no hidden Python/PyQt dependency. Packaging helpers may use Python or shell tooling to stage binaries, verify archives and invoke native packagers; the shipped desktop executable itself is Rust.
+The Rust application runtime has no hidden Python/PyQt dependency. Packaging helpers may use Python or shell tooling to stage binaries, verify archives and invoke native packagers; the shipped desktop executable itself is Rust. The historical Python runtime remains recoverable from the Git recovery tag; interop fixtures are retained for archive-compatibility tests.
 
 | Platform | Native packaging implementation |
 | --- | --- |
@@ -346,11 +445,11 @@ cargo +1.94.1 run --locked -p researchweave-cli -- --help
 
 ## Verification and release gates
 
-ResearchWeave intentionally distinguishes **implemented**, **tested**, **locally verified**, and **release verified**.
+ResearchWeave intentionally distinguishes **implemented**, **tested**, **locally verified**, and **release verified**. Historical candidate reports document test runs and screenshots from specific commits; those records are useful evidence for their tested sources and must not be carried forward as a pass for the new UX worktree.
 
-The current Rust completion pass has observed locked all-features workspace tests and strict workspace Clippy locally, plus hosted native-package/GUI evidence across the four target runner families on candidate commits. Windows UIA coverage includes project creation/open, Unicode editing, question/protocol/review/extraction, data/statistics, persisted results, qualitative/mixed methods, manuscript/notebook recovery, publishing, Agent approval/deny behavior, provider profiles, responsive navigation, high contrast and scaling. Exact run IDs and commit-scoped limitations are recorded in the Rust verification ledgers rather than generalized across later source changes.
+The earlier Linux native `77295db...` binary reached **40/40 navigation with eight then-placeholders** and separately passed a short 207-character Unicode Search → Reader test. A later `72ebceea...` binary reached **40/40 route activations with zero explicit placeholders**. The **newest `707b1c...` binary passed r6 full 40/40 route navigation with zero explicit placeholders and r5 7/7 utility-link plus source-bound Evidence approval/record/history functional checks**. These are distinct runs; both new manifests record unchanged Slint/host source hashes, with independent binary-to-source build provenance still needed. Separate private Xvfb 15-page manuscript, Data View and found-text AI tasks passed on their own candidate snapshots; Windows working-source **193 tests**, formatting and strict Clippy passed locally. None constitutes final exact-commit native installer, complete source-to-claim citation or accessibility acceptance.
 
-The current exact worktree has freshly passed the full source gates below; they remain the required commands for any later candidate-changing source edit:
+**Before declaring a new build ready**, execute and record exit codes for the following commands at the exact new source commit:
 
 ```powershell
 cargo fmt --all -- --check
@@ -359,15 +458,16 @@ cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 cargo build --workspace --locked
 ```
 
-Candidate security/supply-chain verification includes `cargo audit`, `cargo deny`, a Git-history Gitleaks scan, CycloneDX generation, a deterministic Cargo license inventory, dependency/license/source policy, and package hash verification. Those checks do **not** substitute for an exact-source native matrix. See [`docs/verification/REGRESSION_RESULTS.md`](docs/verification/REGRESSION_RESULTS.md) and [`docs/verification/rust-rewrite/release-candidate-gates.md`](docs/verification/rust-rewrite/release-candidate-gates.md).
+Candidate security/supply-chain verification includes `cargo audit`, `cargo deny`, a Git-history Gitleaks scan, CycloneDX generation, a deterministic Cargo license inventory, dependency/license/source policy, and package hash verification. These also require fresh exact-source evidence. See [`docs/verification/REGRESSION_RESULTS.md`](docs/verification/REGRESSION_RESULTS.md) and [`docs/verification/rust-rewrite/release-candidate-gates.md`](docs/verification/rust-rewrite/release-candidate-gates.md).
 
-### Remaining release-blocking evidence
+### Next-release acceptance gate
 
-The project does **not** fabricate evidence for environments or services that were not exercised. The final public Rust release remains blocked on:
+The already published **v0.2.0 download links remain above**. Publishing a later UX transformation version requires:
 
 - a fully green hosted native/security matrix for the final exact source commit;
-- final tag-triggered native release jobs and checksum aggregation;
-- anonymous public download/hash/README/latest verification after publication.
+- actual Windows, macOS ARM/Intel and Linux installed-package GUI and accessibility acceptance;
+- successful tag-triggered native release jobs, checksum aggregation and public download/hash verification;
+- an updated screenshot set from the actual candidate and accurate feature/limitation disclosure.
 
 Signing/notarization is conditional on real credentials being configured. If they are absent, the release publishes checksums and states unsigned/unnotarized status rather than blocking or inventing signing evidence.
 
@@ -388,7 +488,7 @@ crates/
 assets/                     brand, icons, public Rust screenshots
 docs/                       design, security, research and verification evidence
 packaging/rust/             native package staging/build/smoke helpers
-scripts/rust_rewrite/       rewrite/release verification helpers
+scripts/rust_rewrite/       Rust migration/recovery census and performance helpers
 .github/workflows/          Rust quality and release-candidate workflows
 ```
 
@@ -408,7 +508,7 @@ scripts/rust_rewrite/       rewrite/release verification helpers
 
 ## Current product boundaries
 
-ResearchWeave already has broad working infrastructure, but the repository intentionally keeps ambitious gaps visible. Examples include Word-class track changes/comments, a fully rich document tree, reversible reference deduplication, semantic/hybrid retrieval, AI screening/extraction evaluation, executable notebook kernels, Bayesian/multilevel breadth, media timeline coding, external knowledge-base round-trip and advanced knowledge-graph workflows.
+ResearchWeave already has broad working infrastructure, but important gaps remain visible. The unreleased Rust UX branch implements Keep-inspired quick-note cards, a project-scoped local note archive, **literal project-local source Search and paged verified-text Reader screens**, while drag-and-drop note organization and full structured knowledge linking remain future work. The **short synthetic Search → Reader native GUI task passed on private Linux Xvfb**, but long-text pagination and cross-platform integration remain unverified. Other gaps include Word-class track changes/comments, a rich document tree, evidence anchoring and PDF selection/annotation controls, selection-grounded citation workflows, reversible reference deduplication, semantic/hybrid retrieval, AI screening/extraction evaluation, executable notebook kernels, Bayesian/multilevel breadth, media timeline coding, external knowledge-base round-trip and advanced knowledge-graph workflows.
 
 Those are tracked as product work rather than represented by placeholder buttons or inflated README claims.
 
