@@ -33,3 +33,15 @@ Source SHA-256, before this evidence-only document:
 - `scripts/qa/mission-atspi-navigation.py`: `c53c89a8623abc4ae92c1f21e127fd4163cddc74d6e08aa5f93db4c569a7b93d`
 
 Open for release: complete packaged Windows UI Automation including the new report Save button, native macOS Intel/Apple Silicon package and accessibility acceptance, exact-tag Linux package smoke, and release candidate security/SBOM checks. Verified chart/table report items and structured manuscript insertion remain substantial separate product requirements.
+
+## Optimized offline Linux package qualification of this exact feature source
+
+After committing the feature as `0ab5f00` and fast-forwarding the local completion branch, a fresh optimized native Linux build completed offline. Its executable SHA-256 is `ba6eaccd235383c2ee0c814fe6332b99d74c8619864e2a84592247d2e4e9375d`. Hash-pinned cached PDFium, AppImage tooling and runtime passed their digest checks, and `scripts/qa/offline-linux-package.sh` returned `NATIVE_PACKAGE_SMOKE_OK linux-x64 0.2.0` for **both** formats and `OFFLINE_LINUX_PACKAGES_VERIFIED` for this optimized executable.
+
+The extracted actual DEB/AppImage binaries both passed project/PDF smoke and durable synthetic workflow initialization/verification. Each passed separate private Xvfb/AT-SPI native GUI launch and relaunch and subsequent project recovery: `UNPRIVILEGED_LINUX_PACKAGES_OK version=0.2.0`.
+
+- AppImage SHA-256: `9d304f29992bf8757112080bd46519a6ec1dd300cbb19dcaa39fa1200ff011ac`
+- Debian amd64 SHA-256: `02dd5e7b22c8800ea51b03a63f5f6cf2434943d1ef787f5f25c14b6b21844584`
+- Local review-only copies: `target/offline-release-candidate-head-0ab5f00/`, with `SHA256SUMS-offline-linux.txt`; not uploaded to a public release.
+
+These artifacts retain the workspace's `0.2.0` version metadata, so they must not be confused with official v0.2.0 downloads. Privileged Debian installation and Windows/macOS binaries remain unverified for this commit.

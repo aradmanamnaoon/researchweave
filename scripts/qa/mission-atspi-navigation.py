@@ -676,7 +676,17 @@ def main() -> int:
         if match is None:
             raise RuntimeError("Recorded immutable analysis result ID was not exposed")
         result_id = match.group(1)
-        edit_text(app, "Analysis report result IDs", result_id)
+        if read_field(app, "Analysis Results result ID") != result_id:
+            raise RuntimeError("Saved immutable result ID was not selected automatically")
+        if read_field(app, "Analysis report result IDs") != result_id:
+            raise RuntimeError("First recorded result was not offered for reporting automatically")
+        edit_text(app, "Analysis report result IDs", "invalid")
+        if not activate(app, "Use selected immutable result in analysis report"):
+            raise RuntimeError("Selected-result report shortcut is unreachable")
+        time.sleep(0.15)
+        if read_field(app, "Analysis report result IDs") != result_id:
+            raise RuntimeError("Selected result shortcut did not restore the current verified ID")
+        print("ANALYSIS_RESULT_SELECTION_AND_REPORT_SHORTCUT_OK")
         if not activate(app, "Prepare verified analysis report Markdown file"):
             raise RuntimeError("Native analysis report preparation is not actionable")
         time.sleep(0.3)
@@ -778,6 +788,14 @@ def main() -> int:
                 raise RuntimeError("Old project statistics or identifiers leaked into new project")
         print("DATASET_CONTEXT_CLEARED_AFTER_PROJECT_SWITCH_OK")
         print("PROJECT_RESULT_ISOLATION_OK")
+        if not activate(app, "Analysis Results"):
+            raise RuntimeError("Cannot inspect analysis selection after project switch")
+        time.sleep(0.25)
+        if read_field(app, "Analysis Results result ID") or read_field(
+            app, "Analysis report result IDs"
+        ):
+            raise RuntimeError("Previously saved analysis result selection leaked across projects")
+        print("ANALYSIS_RESULT_SELECTION_PROJECT_ISOLATION_OK")
         audit(app, "data-after-project-switch", output)
         if not activate(app, "Synthesize activity"):
             raise RuntimeError("Cannot inspect writing after project switch")

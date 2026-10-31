@@ -133,6 +133,8 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_data_local_path("".into());
     ui.set_recent_dataset_id("".into());
     ui.set_recent_dataset_revision("".into());
+    ui.set_selected_analysis_result_id("".into());
+    ui.set_analysis_report_selected_ids("".into());
     ui.set_analysis_results(
         "Import an immutable dataset revision or inspect saved analysis data.".into(),
     );
@@ -5512,6 +5514,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 match result {
                     Ok(executed) => {
+                        if operation.as_deref() == Some("analysis.result.save") {
+                            if let Some(result_id) = executed
+                                .pointer("/data/result_id")
+                                .and_then(serde_json::Value::as_str)
+                                .filter(|id| {
+                                    id.len() == 64
+                                        && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+                                })
+                            {
+                                ui.set_selected_analysis_result_id(result_id.into());
+                                if ui.get_analysis_report_selected_ids().is_empty() {
+                                    ui.set_analysis_report_selected_ids(result_id.into());
+                                }
+                            }
+                        }
                         match operation.as_deref() {
                             Some("dataset.variable") => ui.set_variable_results(
                                 format!(

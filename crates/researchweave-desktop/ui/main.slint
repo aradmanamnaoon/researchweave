@@ -251,6 +251,8 @@ export component MainWindow inherits Window {
     in-out property <bool> show-statistics-technical-details: false;
     in-out property <string> variable-results: "Inspect variable metadata, missingness and quality before creating a revised immutable dataset.";
     in-out property <string> analysis-report-results: "Persist verified statistical outputs, reload them by digest, and compose deterministic provenance reports.";
+    in-out property <string> selected-analysis-result-id: "";
+    in-out property <string> analysis-report-selected-ids: "";
     in-out property <string> mixed-methods-results: "Combine an immutable dataset revision with persisted qualitative case mappings. Caller-supplied coding provenance is not accepted.";
     in-out property <string> writing-results: "Preview and save a versioned manuscript section.";
     in-out property <string> agent-results: "Durable project-scoped assistant conversations and prompt templates are available offline.";
@@ -2090,15 +2092,21 @@ export component MainWindow inherits Window {
                                             Text { text: "Inspect, replay & report"; color: Theme.ink; font-size: 14px * Theme.ui-scale / 100; font-weight: 600; }
                                             HorizontalLayout {
                                                 spacing: 6px;
-                                                result-id := LineEdit { placeholder-text: "Result ID"; accessible-label: "Analysis Results result ID"; }
+                                                result-id := LineEdit { text <=> root.selected-analysis-result-id; placeholder-text: "Result ID"; accessible-label: "Analysis Results result ID"; }
                                                 Button { text: "Load"; accessible-label: "Load verified analysis result"; clicked => { root.load-analysis-result(result-id.text); } }
                                                 Button { text: "Replay"; accessible-label: "Export analysis replay script"; clicked => { root.export-analysis-script(result-id.text); } }
                                             }
                                             report-title := LineEdit { text: "Analysis report"; placeholder-text: "Report title"; accessible-label: "Analysis report title"; }
                                             HorizontalLayout {
                                                 spacing: 6px;
-                                                report-result-ids := LineEdit { placeholder-text: "Comma-separated result IDs"; accessible-label: "Analysis report result IDs"; }
+                                                report-result-ids := LineEdit { text <=> root.analysis-report-selected-ids; placeholder-text: "Comma-separated result IDs"; accessible-label: "Analysis report result IDs"; }
                                                 Button { text: "Render report"; accessible-label: "Render verified analysis report"; clicked => { root.render-analysis-report(report-title.text, report-result-ids.text); } }
+                                            }
+                                            Button {
+                                                text: "Use selected result";
+                                                accessible-label: "Use selected immutable result in analysis report";
+                                                enabled: root.selected-analysis-result-id != "";
+                                                clicked => { root.analysis-report-selected-ids = root.selected-analysis-result-id; }
                                             }
                                             Button {
                                                 text: "Prepare report Markdown";

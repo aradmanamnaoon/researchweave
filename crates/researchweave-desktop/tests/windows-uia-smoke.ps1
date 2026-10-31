@@ -1165,6 +1165,10 @@ try {
     if (-not $resultIdMatch.Success) { throw 'Recorded analysis result did not expose its immutable result ID' }
     $resultId = $resultIdMatch.Groups[1].Value
     $resultIdEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis Results result ID'
+    $selectedResult = ([System.Windows.Automation.ValuePattern]$resultIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($selectedResult -ne $resultId) {
+        throw 'Saved verified analysis result ID did not populate the inspect/replay control'
+    }
     ([System.Windows.Automation.ValuePattern]$resultIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($resultId)
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Load verified analysis result').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
@@ -1176,7 +1180,15 @@ try {
         throw 'Verified persisted analysis result did not reload its computed mean'
     }
     $reportIds = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis report result IDs'
-    ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($resultId)
+    $offeredId = ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($offeredId -ne $resultId) {
+        throw 'First verified analysis result was not offered for the report automatically'
+    }
+    ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('invalid')
+    Invoke-AccessibleButton $window 'Use selected immutable result in analysis report'
+    $reportIds = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis report result IDs'
+    $reselectedId = ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($reselectedId -ne $resultId) { throw 'Use selected result failed to populate the report ID' }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Render verified analysis report').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $reportNames = @($window.FindAll(
