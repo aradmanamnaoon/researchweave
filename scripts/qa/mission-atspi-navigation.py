@@ -345,6 +345,24 @@ def main() -> int:
     if not activate(app, "Inspect local protocol freeze receipt"):
         raise RuntimeError("Cannot inspect newly recorded local baseline")
     time.sleep(0.2)
+    frozen_summary = "\n".join((n.name or "") for n in nodes_named(
+        app, "Protocol freeze summary"
+    ))
+    freeze_hash_match = re.search(r"Snapshot SHA-256:\s*([a-f0-9]{64})", frozen_summary)
+    if freeze_hash_match is None:
+        raise RuntimeError("Visible local protocol summary omitted its full digest")
+    freeze_hash = freeze_hash_match.group(1)
+    if (
+        "Frozen locally" not in frozen_summary
+        or "baseline v1" not in frozen_summary
+        or "0 post-baseline amendment" not in frozen_summary
+        or "no independent registration or trusted timestamp" not in frozen_summary
+    ):
+        raise RuntimeError("Frozen protocol summary does not expose its readable local provenance")
+    print("LOCAL_PROTOCOL_FREEZE_ACCESSIBLE_SUMMARY_OK")
+    # Summary is deliberately shown first in the long scrollable Protocol
+    # workspace. Verify the detailed JSON only after scrolling to it.
+    scroll_protocol(True, 3)
     frozen_status = "\n".join((n.name or "") for n in nodes_named(
         app, "Protocol local freeze status"
     ))
@@ -355,10 +373,8 @@ def main() -> int:
         or '"local_only": true' not in frozen_status
     ):
         raise RuntimeError("Local protocol baseline receipt is not explicit and inspectable")
-    freeze_hash_match = re.search(r'"snapshot_sha256":\s*"([a-f0-9]{64})"', frozen_status)
-    if freeze_hash_match is None:
-        raise RuntimeError("Frozen protocol SHA-256 was not exposed")
-    freeze_hash = freeze_hash_match.group(1)
+    if f'"snapshot_sha256": "{freeze_hash}"' not in frozen_status:
+        raise RuntimeError("Detailed native freeze receipt disagrees with the readable digest")
     audit(app, "protocol-local-baseline-frozen", output)
     if original_project is not None:
         with sqlite3.connect(original_project / "data/project.sqlite") as db:
@@ -370,6 +386,7 @@ def main() -> int:
         event = json.loads(freeze_events[0][0])
         if event.get("protocol_id") != protocol_id or event.get("snapshot_sha256") != freeze_hash:
             raise RuntimeError("Persisted local freeze event is not bound to visible SHA-256")
+    scroll_protocol(False, 3)
     if not activate(app, "Preview local protocol baseline freeze"):
         raise RuntimeError("Cannot probe one-time freeze enforcement")
     time.sleep(0.2)
@@ -390,6 +407,12 @@ def main() -> int:
     if not activate(app, "Inspect local protocol freeze receipt"):
         raise RuntimeError("Cannot verify baseline after post-freeze amendment")
     time.sleep(0.2)
+    amended_summary = "\n".join((n.name or "") for n in nodes_named(
+        app, "Protocol freeze summary"
+    ))
+    if "1 post-baseline amendment" not in amended_summary or freeze_hash not in amended_summary:
+        raise RuntimeError("Accessible protocol baseline summary lost later amendment provenance")
+    scroll_protocol(True, 3)
     amended_status = "\n".join((n.name or "") for n in nodes_named(
         app, "Protocol local freeze status"
     ))
@@ -695,7 +718,36 @@ def main() -> int:
             raise RuntimeError("Cannot collapse inspect pane before writing second section")
         edit_text(app, "Manuscript section", "Methods")
         edit_text(app, "Manuscript section body", "Methods use only synthetic independent measurements.")
-        time.sleep(1.3)
+        # The 800ms autosave is asynchronous. On a contended runner it may
+        # complete later than the previous fixed 1.3s sleep. Wait only until
+        # a genuine project SQLite revision exists; a missing save still fails.
+        if original_project is None:
+            raise RuntimeError("Manuscript persistence requires the disposable project")
+        for _ in range(20):
+            with sqlite3.connect(original_project / "data/project.sqlite") as db:
+                saved_methods = db.execute(
+                    "SELECT body FROM manuscripts WHERE id=? AND section=? "
+                    "ORDER BY revision DESC LIMIT 1",
+                    ("synthetic-research", "Methods"),
+                ).fetchone()
+            if saved_methods and saved_methods[0] == "Methods use only synthetic independent measurements.":
+                print("MANUSCRIPT_METHODS_AUTOSAVE_SQLITE_VERIFIED")
+                break
+            time.sleep(0.3)
+        else:
+            with sqlite3.connect(original_project / "data/project.sqlite") as db:
+                persisted_sections = db.execute(
+                    "SELECT id,section,revision,body FROM manuscripts ORDER BY id,section,revision"
+                ).fetchall()
+            print("MANUSCRIPT_AUTOSAVE_MISSING_DB=" + repr(persisted_sections))
+            print("MANUSCRIPT_AUTOSAVE_MISSING_UI=" + repr([
+                (node.name or "")[:200] for node, _ in walk(app)
+                if "autosav" in (node.name or "").casefold()
+                or "draft" in (node.name or "").casefold()
+                or "status:" in (node.name or "").casefold()
+            ]))
+            audit(app, "manuscript-methods-autosave-missing", output)
+            raise RuntimeError("Manuscript Methods draft never reached a persisted revision")
         for _ in range(10):
             if activate(app, "Toggle saved manuscript sections outline"):
                 break

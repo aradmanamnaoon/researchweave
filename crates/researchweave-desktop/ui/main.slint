@@ -241,6 +241,7 @@ export component MainWindow inherits Window {
     in-out property <string> protocol-export-receipt: "";
     in-out property <string> protocol-export-id: "";
     in-out property <string> protocol-freeze-status: "No local freeze inspected. A local digest and computer timestamp are not an external preregistration.";
+    in-out property <string> protocol-freeze-summary: "No local baseline inspected yet.";
     in-out property <string> reference-results: "Register or inspect project references.";
     in-out property <string> review-results: "Use persisted references to build and screen a review.";
     in-out property <string> extraction-results: "Create a versioned extraction schema, then record validated values for a review record.";
@@ -1474,6 +1475,13 @@ export component MainWindow inherits Window {
                                         text: "Freeze one existing protocol version with an auditable local event and SHA-256 receipt. Later amendments remain explicitly visible. This does not register or timestamp the protocol with an independent service.";
                                         color: Theme.muted-ink;
                                         wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: root.protocol-freeze-summary;
+                                        color: Theme.ink;
+                                        font-weight: 600;
+                                        wrap: word-wrap;
+                                        accessible-label: "Protocol freeze summary " + root.protocol-freeze-summary;
                                     }
                                     HorizontalLayout {
                                         spacing: 8px;

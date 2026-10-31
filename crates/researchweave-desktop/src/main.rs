@@ -175,6 +175,7 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_protocol_freeze_status(
         "No local freeze inspected. A local digest and computer timestamp are not an external preregistration.".into(),
     );
+    ui.set_protocol_freeze_summary("No local baseline inspected yet.".into());
     ui.set_reference_results("Register or inspect project references.".into());
     ui.set_review_results("Use persisted references to build and screen a review.".into());
     ui.set_extraction_results(
@@ -2598,6 +2599,55 @@ fn pretty_result_data(result: &serde_json::Value) -> String {
         .unwrap_or_else(|_| "Operation completed, but its result could not be formatted".into())
 }
 
+/// Human-readable, explicitly local-only protocol receipt derived from the
+/// existing verified read/record response, never from unsaved editor fields.
+fn protocol_freeze_summary(result: &serde_json::Value) -> Result<String, String> {
+    let data = result
+        .get("data")
+        .ok_or("Protocol baseline response has no data")?;
+    if result["status"] != "ok"
+        || data["local_only"] != true
+        || data["external_registration_verified"] != false
+    {
+        return Err("Protocol baseline local provenance could not be verified".into());
+    }
+    if data["frozen"] == false {
+        let current = data["current_version"]
+            .as_i64()
+            .filter(|version| *version > 0)
+            .ok_or("Protocol baseline current version is invalid")?;
+        return Ok(format!(
+            "Not frozen · protocol v{current}. Preview and explicitly record a local-only baseline."
+        ));
+    }
+    if data["frozen"] != true {
+        return Err("Protocol baseline frozen state is missing".into());
+    }
+    let baseline = data["frozen_version"]
+        .as_i64()
+        .filter(|version| *version > 0)
+        .ok_or("Protocol baseline frozen version is invalid")?;
+    let amendments = data["post_freeze_amendment_versions"]
+        .as_i64()
+        .filter(|count| *count >= 0)
+        .ok_or("Protocol baseline amendment count is invalid")?;
+    let expected_latest = baseline
+        .checked_add(amendments)
+        .ok_or("Protocol baseline version count overflow")?;
+    if data["current_version"] != serde_json::Value::Null
+        && data["current_version"].as_i64() != Some(expected_latest)
+    {
+        return Err("Protocol baseline versions are inconsistent".into());
+    }
+    let digest = data["snapshot_sha256"]
+        .as_str()
+        .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or("Protocol baseline digest is invalid")?;
+    Ok(format!(
+        "Frozen locally · baseline v{baseline} · {amendments} post-baseline amendment version(s).\nSnapshot SHA-256: {digest}\nLocal event only; no independent registration or trusted timestamp."
+    ))
+}
+
 fn compact_stat_number(value: Option<&serde_json::Value>) -> String {
     value
         .and_then(serde_json::Value::as_f64)
@@ -4327,6 +4377,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok((recorded, revision)) => {
                         let data = &recorded["data"];
+                        ui.set_protocol_freeze_summary(
+                            protocol_freeze_summary(&recorded)
+                                .unwrap_or_else(|error| format!("Baseline recorded; {error}"))
+                                .into(),
+                        );
                         ui.set_protocol_freeze_status(
                             format!(
                                 "Local baseline v{} frozen at computer time {}. Snapshot SHA-256: {}. No independent registration or trusted timestamp was performed.",
@@ -4368,6 +4423,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     });
                 match result {
                     Ok(value) => {
+                        ui.set_protocol_freeze_summary(
+                            protocol_freeze_summary(&value)
+                                .unwrap_or_else(|error| format!("Inspect receipt: {error}"))
+                                .into(),
+                        );
                         ui.set_protocol_freeze_status(pretty_result_data(&value).into());
                         ui.set_status(
                             "Local protocol baseline status verified against persisted history"
@@ -4375,6 +4435,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
                     Err(error) => {
+                        ui.set_protocol_freeze_summary(
+                            "Local baseline could not be inspected.".into(),
+                        );
                         ui.set_protocol_freeze_status(error.clone().into());
                         ui.set_status(error.into());
                     }
@@ -8028,6 +8091,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn protocol_freeze_summary_is_source_bound_and_never_implies_external_registration() {
+        let unfrozen = serde_json::json!({
+            "status":"ok", "data":{
+                "frozen":false,"current_version":2,"local_only":true,
+                "external_registration_verified":false
+            }
+        });
+        assert!(protocol_freeze_summary(&unfrozen)
+            .unwrap()
+            .contains("Not frozen · protocol v2"));
+        let digest = "a".repeat(64);
+        let frozen = serde_json::json!({
+            "status":"ok", "data":{
+                "frozen":true,"frozen_version":1,"current_version":2,
+                "post_freeze_amendment_versions":1,"snapshot_sha256":digest,
+                "local_only":true,"external_registration_verified":false
+            }
+        });
+        let summary = protocol_freeze_summary(&frozen).unwrap();
+        assert!(summary.contains("baseline v1 · 1 post-baseline amendment"));
+        assert!(summary.contains(&digest));
+        assert!(summary.contains("no independent registration or trusted timestamp"));
+        let mut invalid = frozen.clone();
+        invalid["data"]["external_registration_verified"] = serde_json::json!(true);
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["data"]["current_version"] = serde_json::json!(10);
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["data"]["snapshot_sha256"] = serde_json::json!("not a sha256");
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["data"]["post_freeze_amendment_versions"] = serde_json::json!(-1);
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["status"] = serde_json::json!("error");
+        assert!(protocol_freeze_summary(&invalid).is_err());
+    }
 
     #[test]
     fn recent_dataset_shortcut_requires_a_successfully_persisted_import() {

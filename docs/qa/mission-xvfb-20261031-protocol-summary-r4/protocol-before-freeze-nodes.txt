@@ -1,0 +1,54 @@
+0:application:researchweave-desktop
+1:frame:ResearchWeave · Research workbench
+2:landmark:Activity rail
+3:label:WORKBENCH
+3:button:Home activity
+3:button:Sources activity
+3:button:Analyze activity
+3:button:Synthesize activity
+3:button:Automate activity
+3:button:Manage activity
+2:landmark:Home navigation
+3:label:Home
+3:button:Home navigation start
+3:label:My Research
+3:button:Welcome workspace screen
+3:button:Dashboard workspace screen
+3:button:Question workspace screen
+3:button:Protocol workspace screen
+2:landmark:Protocol work area
+3:label:Home  /  Protocol
+3:label:Protocol
+3:entry:Command palette
+3:label:Ctrl+K
+3:label:My Research · r0
+3:label:Project
+3:label:Protocol · Project
+3:label:Research protocol
+3:label:Create or amend a versioned protocol through the shared approval and audit path. Preview the persisted Markdown before explicitly saving to disk without overwri
+3:entry:Protocol title
+3:entry:Protocol design
+3:entry:Protocol author
+3:entry:Protocol objective
+3:button:Preview protocol
+3:button:Record previewed protocol
+3:entry:Protocol history ID
+3:button:Load protocol history
+3:button:View protocol Markdown export
+3:entry:Protocol Markdown destination path
+3:button:Save prepared protocol Markdown without overwrite
+3:label:The explicit save is approval-audited, checks the source revision and SHA-256, never overwrites an existing file, and does not upload anything.
+3:entry:Protocol amendment rationale
+3:button:Preview protocol amendment
+3:label:Amendments preserve all existing protocol-body fields, changing only nonempty design/objective inputs. A blank input keeps its previous value. Preview before re
+3:label:LOCAL BASELINE FREEZE
+3:label:Freeze one existing protocol version with an auditable local event and SHA-256 receipt. Later amendments remain explicitly visible. This does not register or ti
+3:label:Protocol freeze summary No local baseline inspected yet.
+2:landmark:Bottom job tray
+3:button:Open jobs
+3:label:No active local jobs
+3:button:Open notifications
+2:landmark:Workbench status
+3:label:Status: Project created in managed local storage
+3:label:LOCAL FIRST
+3:label:Home · Protocol

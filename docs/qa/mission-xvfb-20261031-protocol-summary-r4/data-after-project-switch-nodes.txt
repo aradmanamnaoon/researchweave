@@ -1,0 +1,60 @@
+0:application:researchweave-desktop
+1:frame:ResearchWeave · Research workbench
+2:landmark:Activity rail
+3:label:WORKBENCH
+3:button:Home activity
+3:button:Sources activity
+3:button:Analyze activity
+3:button:Synthesize activity
+3:button:Automate activity
+3:button:Manage activity
+2:landmark:Analyze navigation
+3:label:Analyze
+3:button:Analyze navigation start
+3:label:My Research
+3:label:DATA
+3:button:Data View workspace screen
+3:button:Variable View workspace screen
+3:label:ANALYSIS
+3:button:Statistics workspace screen
+3:button:Analysis Results workspace screen
+3:button:Qualitative workspace screen
+3:button:Codebook workspace screen
+3:button:Mixed Methods workspace screen
+2:landmark:Analysis Results work area
+3:label:Analyze  /  Analysis Results
+3:label:Analysis Results
+3:entry:Command palette
+3:label:Ctrl+K
+3:label:My Research · r0
+3:label:Analysis
+3:label:Analysis Results · Analysis
+3:label:Analysis results
+3:label:Persist a recomputed statistical result against an immutable dataset revision, reload it by SHA-256 result ID, export a deterministic replay script, or compose
+3:label:Persist result
+3:entry:Analysis Results dataset ID
+3:entry:Analysis Results dataset revision
+3:entry:Analysis Results numeric column
+3:button:Preview immutable analysis result
+3:button:Record previewed immutable analysis result
+3:label:Inspect, replay & report
+3:entry:Analysis Results result ID
+3:button:Load verified analysis result
+3:button:Export analysis replay script
+3:entry:Analysis report title
+3:entry:Analysis report result IDs
+3:button:Render verified analysis report
+3:button:Use selected immutable result in analysis report
+3:button:Prepare verified analysis report Markdown file
+3:entry:Analysis report export destination path
+3:button:Save prepared analysis report without overwrite
+3:label:Analysis Results operation result Persist verified statistical outputs, reload them by digest, and compose deterministic provenance reports.
+3:label:Reports reproduce stored outputs and provenance only. ResearchWeave does not generate causal or scientific interpretation here.
+2:landmark:Bottom job tray
+3:button:Open jobs
+3:label:No active local jobs
+3:button:Open notifications
+2:landmark:Workbench status
+3:label:Status: Preview a data import before importing it
+3:label:LOCAL FIRST
+3:label:Analyze · Analysis Results
