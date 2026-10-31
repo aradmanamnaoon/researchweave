@@ -1399,8 +1399,8 @@ export component MainWindow inherits Window {
                                 clicked => { root.page = 7; }
                             }
                             notebook-body := TextEdit {
-                                min-height: 260px;
-                                preferred-height: 400px;
+                                min-height: root.height < 700px ? 170px : 260px;
+                                preferred-height: root.height < 700px ? 210px : 400px;
                                 accessible-label: "Project notebook text";
                                 text: root.notebook-draft;
                                 edited(text) => { root.notebook-draft = text; root.notebook-draft-edited(text); }
@@ -1952,24 +1952,6 @@ export component MainWindow inherits Window {
                                 spacing: 8px;
                                 manuscript-citations := LineEdit { accessible-label: "Manuscript citations"; placeholder-text: "Citation IDs separated by commas"; text: root.manuscript-draft-citations; edited(text) => { root.manuscript-draft-citations = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
                             }
-                            Rectangle {
-                                min-height: 370px;
-                                preferred-height: 560px;
-                                background: Theme.reader-canvas;
-                                border-color: Theme.divider;
-                                border-width: 1px;
-                                border-radius: Theme.panel-radius;
-                                VerticalLayout {
-                                    padding: Theme.space5;
-                                    manuscript-body := TextEdit {
-                                        min-height: 320px;
-                                        vertical-stretch: 1;
-                                        accessible-label: "Manuscript section body";
-                                        text: root.manuscript-draft-body;
-                                        edited(text) => { root.manuscript-draft-body = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, text); }
-                                    }
-                                }
-                            }
                             HorizontalLayout {
                                 min-height: 36px;
                                 preferred-height: 36px;
@@ -1978,6 +1960,24 @@ export component MainWindow inherits Window {
                                 Button { text: "Preview section"; accessible-label: "Preview manuscript section"; clicked => { root.preview-writing-section(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
                                 Button { text: "Record previewed section"; accessible-label: "Record previewed manuscript section"; clicked => { root.apply-evidence-preview(); } }
                                 Button { text: "Inspect manuscript"; accessible-label: "Inspect manuscript"; clicked => { root.inspect-manuscript(manuscript-id.text); } }
+                            }
+                            Rectangle {
+                                min-height: root.height < 700px ? 275px : 370px;
+                                preferred-height: root.height < 700px ? 330px : 560px;
+                                background: Theme.reader-canvas;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: Theme.space5;
+                                    manuscript-body := TextEdit {
+                                        min-height: root.height < 700px ? 220px : 320px;
+                                        vertical-stretch: 1;
+                                        accessible-label: "Manuscript section body";
+                                        text: root.manuscript-draft-body;
+                                        edited(text) => { root.manuscript-draft-body = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, text); }
+                                    }
+                                }
                             }
                             HorizontalLayout {
                                 min-height: 36px;
