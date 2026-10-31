@@ -41,8 +41,9 @@ fn export_extension(operation: &str, arguments: &Value) -> Result<&'static str, 
         },
         "writing.submission_export" => Ok("zip"),
         "protocol.export" => Ok("md"),
+        "protocol.freeze_receipt" => Ok("md"),
         "analysis.report.render" => Ok("md"),
-        _ => Err("Only verified protocol, analysis report, manuscript and draft submission artifacts can be saved".into()),
+        _ => Err("Only verified protocol, protocol baseline, analysis report, manuscript and draft submission artifacts can be saved".into()),
     }
 }
 
@@ -57,7 +58,10 @@ fn render_artifact(
     } else {
         evidence_read_at(project, operation, arguments, root)?
     };
-    if matches!(operation, "protocol.export" | "analysis.report.render") {
+    if matches!(
+        operation,
+        "protocol.export" | "protocol.freeze_receipt" | "analysis.report.render"
+    ) {
         // The existing read-only protocol endpoint returns verified persisted
         // Markdown text rather than the binary receipt used by publishing.
         // Analysis reports similarly compose verified immutable result IDs.
@@ -76,6 +80,33 @@ fn render_artifact(
                 || !report_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
             {
                 return Err("Analysis report is missing verified provenance".into());
+            }
+        }
+        if operation == "protocol.freeze_receipt" {
+            let data = result
+                .get("data")
+                .ok_or("Verified local baseline receipt is unavailable")?;
+            let valid_hash = |key: &str| {
+                data[key].as_str().is_some_and(|hash| {
+                    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+            };
+            if data["frozen"] != true
+                || data["local_only"] != true
+                || data["external_registration_verified"] != false
+                || data["written_to_disk"] != false
+                || data["frozen_version"]
+                    .as_i64()
+                    .is_none_or(|version| version < 1)
+                || data["event_sequence"]
+                    .as_i64()
+                    .is_none_or(|sequence| sequence < 1)
+                || !valid_hash("snapshot_sha256")
+                || !valid_hash("event_hash")
+            {
+                return Err(
+                    "Local baseline export lacks authoritative frozen-event provenance".into(),
+                );
             }
         }
         let body = result
@@ -515,6 +546,123 @@ mod tests {
         let receipt = json!({"data":{"base64":"dGVzdA==","byte_length":5,
             "sha256":hex::encode(Sha256::digest(b"test"))}});
         assert!(checked_bytes(&receipt).is_err());
+    }
+
+    #[test]
+    fn frozen_protocol_receipt_requires_approved_one_use_file_save_and_revalidates_amendments() {
+        let root = std::env::temp_dir().join(format!("rw-protocol-receipt-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let project = root.join("study");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Prospective protocol export",
+            true,
+            &root.join("project-create-audit.sqlite"),
+        )
+        .unwrap();
+        let host = root.join("host");
+        let args = json!({
+            "title":"Predeclared design", "author":"Local author",
+            "body":{"design":"observational","objective":"Measure outcome"}
+        });
+        let (creation, _) =
+            evidence_preview_at(&project, "protocol.create", "protocol", args, &host).unwrap();
+        let created = evidence_execute_pending(&creation, &project, &host)
+            .unwrap()
+            .0;
+        let protocol_id = created["data"]["protocol_id"].as_str().unwrap();
+        let request = json!({"protocol_id":protocol_id});
+        assert!(prepare(&project, "protocol.freeze_receipt", request.clone(), &host).is_err());
+        let (freeze, _) = evidence_preview_at(
+            &project,
+            "protocol.freeze",
+            "protocol",
+            json!({"protocol_id":protocol_id,"expected_version":1}),
+            &host,
+        )
+        .unwrap();
+        let frozen = evidence_execute_pending(&freeze, &project, &host)
+            .unwrap()
+            .0;
+        let snapshot = frozen["data"]["snapshot_sha256"].as_str().unwrap();
+        let (prepared, body) =
+            prepare(&project, "protocol.freeze_receipt", request.clone(), &host).unwrap();
+        assert_eq!(body["data"]["snapshot_sha256"], snapshot);
+        assert_eq!(body["data"]["written_to_disk"], false);
+        assert!(body["data"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("NOT externally verified preregistration"));
+        let destination = root.join("local-baseline.md");
+        assert!(!destination.exists());
+        assert!(save_for_screen(
+            &prepared,
+            &project,
+            destination.to_str().unwrap(),
+            &host,
+            "protocol.export"
+        )
+        .is_err());
+        assert!(!destination.exists());
+        assert!(save_for_screen(
+            &prepared,
+            &project,
+            root.join("wrong.pdf").to_str().unwrap(),
+            &host,
+            "protocol.freeze_receipt"
+        )
+        .is_err());
+        let saved = save_for_screen(
+            &prepared,
+            &project,
+            destination.to_str().unwrap(),
+            &host,
+            "protocol.freeze_receipt",
+        )
+        .unwrap();
+        assert_eq!(saved["written_to_disk"], true);
+        assert_eq!(saved["submission_performed"], false);
+        let bytes = fs::read(&destination).unwrap();
+        assert_eq!(hex::encode(Sha256::digest(&bytes)), saved["sha256"]);
+        assert!(String::from_utf8(bytes.clone()).unwrap().contains(snapshot));
+        assert!(save(&prepared, &project, destination.to_str().unwrap(), &host).is_err());
+        assert_eq!(fs::read(&destination).unwrap(), bytes);
+
+        let audit = AuditStore::open(host.join("operation-audit.sqlite")).unwrap();
+        assert!(audit
+            .events()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.operation == "export.file_save"
+                && entry.effect == "sensitive-export"
+                && entry.status == "ok"));
+        drop(audit);
+
+        let (stale, _) =
+            prepare(&project, "protocol.freeze_receipt", request.clone(), &host).unwrap();
+        let (amend, _) = evidence_preview_at(
+            &project,
+            "protocol.amend",
+            "protocol",
+            json!({
+                "protocol_id":protocol_id,
+                "author":"Local author",
+                "rationale":"Declared post-baseline amendment",
+                "body":{"design":"observational","objective":"Measure outcome", "secondary":"Additional field"}
+            }),
+            &host,
+        ).unwrap();
+        evidence_execute_pending(&amend, &project, &host).unwrap();
+        let stale_destination = root.join("stale-baseline.md");
+        assert!(save(&stale, &project, stale_destination.to_str().unwrap(), &host).is_err());
+        assert!(!stale_destination.exists());
+        let (_, newer) = prepare(&project, "protocol.freeze_receipt", request, &host).unwrap();
+        assert_eq!(newer["data"]["snapshot_sha256"], snapshot);
+        assert!(newer["data"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"post_freeze_amendment_versions\": 1"));
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

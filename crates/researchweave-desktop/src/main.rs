@@ -176,6 +176,7 @@ fn reset_project_visible_state(ui: &MainWindow) {
         "No local freeze inspected. A local digest and computer timestamp are not an external preregistration.".into(),
     );
     ui.set_protocol_freeze_summary("No local baseline inspected yet.".into());
+    ui.set_protocol_freeze_export_receipt("".into());
     ui.set_reference_results("Register or inspect project references.".into());
     ui.set_review_results("Use persisted references to build and screen a review.".into());
     ui.set_extraction_results(
@@ -4652,6 +4653,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_load_protocol_freeze_receipt({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        move |protocol_id| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|path| {
+                        physical_export::prepare(
+                            path,
+                            "protocol.freeze_receipt",
+                            serde_json::json!({"protocol_id":protocol_id.as_str().trim()}),
+                            &host_data_root()?,
+                        )
+                    });
+                match result {
+                    Ok((pending, receipt)) => {
+                        *pending_physical_export.borrow_mut() = Some(pending);
+                        ui.set_protocol_freeze_export_receipt("".into());
+                        ui.set_protocol_results(
+                            format!(
+                                "VERIFIED LOCAL BASELINE RECEIPT PREVIEW ONLY. No file saved; no external preregistration or trusted timestamp. Review then choose explicit Save:\n{}",
+                                receipt.pointer("/data/text").and_then(serde_json::Value::as_str).unwrap_or_default()
+                            ).into()
+                        );
+                        ui.set_status("Local protocol baseline receipt prepared, not saved".into());
+                    }
+                    Err(error) => {
+                        pending_physical_export.borrow_mut().take();
+                        ui.set_protocol_freeze_export_receipt(error.clone().into());
+                        ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
     app.on_preview_reference({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -7537,6 +7578,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     (_, None) if screen_operation.as_str() == "analysis.report.render" => {
                         Err("Prepare a verified analysis report before saving".into())
                     }
+                    (_, None) if screen_operation.as_str() == "protocol.freeze_receipt" => {
+                        Err("Prepare a verified local protocol baseline receipt before saving".into())
+                    }
                     (_, None) => Err("Prepare a manuscript or draft ZIP before saving".into()),
                 };
                 match result {
@@ -7552,6 +7596,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 format!("Protocol saved SHA-256: {digest}").into(),
                             );
                             ui.set_protocol_results(message.into());
+                        } else if screen_operation.as_str() == "protocol.freeze_receipt" {
+                            let digest = receipt["sha256"].as_str().unwrap_or_default();
+                            ui.set_protocol_freeze_export_receipt(
+                                format!("Local baseline receipt saved without overwrite. Verified file SHA-256: {digest}").into(),
+                            );
+                            ui.set_protocol_results(message.into());
                         } else if screen_operation.as_str() == "analysis.report.render" {
                             ui.set_analysis_report_results(message.into());
                         } else {
@@ -7562,6 +7612,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(error) => {
                         if screen_operation.as_str() == "protocol.export" {
                             ui.set_protocol_export_receipt("".into());
+                            ui.set_protocol_results(error.clone().into());
+                        } else if screen_operation.as_str() == "protocol.freeze_receipt" {
+                            ui.set_protocol_freeze_export_receipt(error.clone().into());
                             ui.set_protocol_results(error.clone().into());
                         } else if screen_operation.as_str() == "analysis.report.render" {
                             ui.set_analysis_report_results(error.clone().into());

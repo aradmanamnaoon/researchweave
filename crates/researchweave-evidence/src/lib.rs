@@ -76,6 +76,10 @@ impl EvidenceHandler {
             ),
             ("protocol.export", &["project_id", "protocol_id"][..]),
             ("protocol.freeze_status", &["project_id", "protocol_id"][..]),
+            (
+                "protocol.freeze_receipt",
+                &["project_id", "protocol_id"][..],
+            ),
             ("question.history", &["project_id", "question_id"][..]),
             ("evidence.note_history", &["project_id", "note_id"][..]),
             ("evidence.notebook_export", &["project_id"][..]),
@@ -458,6 +462,9 @@ impl EvidenceHandler {
         }
         if operation == "protocol.freeze_status" {
             return protocol_freeze::status(&store, args);
+        }
+        if operation == "protocol.freeze_receipt" {
+            return protocol_freeze::receipt(&store, args);
         }
         if matches!(operation, "question.create" | "question.amend") {
             return question_mutate(&mut store, operation, args, ctx);

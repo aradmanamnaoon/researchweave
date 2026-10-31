@@ -242,6 +242,7 @@ export component MainWindow inherits Window {
     in-out property <string> protocol-export-id: "";
     in-out property <string> protocol-freeze-status: "No local freeze inspected. A local digest and computer timestamp are not an external preregistration.";
     in-out property <string> protocol-freeze-summary: "No local baseline inspected yet.";
+    in-out property <string> protocol-freeze-export-receipt: "";
     in-out property <string> reference-results: "Register or inspect project references.";
     in-out property <string> review-results: "Use persisted references to build and screen a review.";
     in-out property <string> extraction-results: "Create a versioned extraction schema, then record validated values for a review record.";
@@ -335,6 +336,7 @@ export component MainWindow inherits Window {
     callback preview-protocol-freeze(string);
     callback record-protocol-freeze();
     callback inspect-protocol-freeze(string);
+    callback load-protocol-freeze-receipt(string);
     callback apply-evidence-preview();
     callback load-question-history(string);
     callback load-protocol-history(string);
@@ -1500,6 +1502,36 @@ export component MainWindow inherits Window {
                                         text: "Inspect frozen baseline";
                                         accessible-label: "Inspect local protocol freeze receipt";
                                         clicked => { root.inspect-protocol-freeze(protocol-id.text); }
+                                    }
+                                    Button {
+                                        text: "Prepare baseline receipt .md";
+                                        accessible-label: "Prepare local protocol baseline receipt Markdown";
+                                        clicked => { root.load-protocol-freeze-receipt(protocol-id.text); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        protocol-freeze-save-path := LineEdit {
+                                            horizontal-stretch: 1;
+                                            accessible-label: "Local protocol baseline receipt destination path";
+                                            placeholder-text: "Absolute destination ending in .md";
+                                        }
+                                        Button {
+                                            text: "Save verified receipt";
+                                            accessible-label: "Save verified local baseline receipt without overwrite";
+                                            clicked => { root.save-prepared-export(protocol-freeze-save-path.text, "protocol.freeze_receipt"); }
+                                        }
+                                    }
+                                    Text {
+                                        text: "Prepare and review the persisted baseline first. File Save is separately approval-audited, revalidates the current project revision, and never overwrites an existing file.";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: root.protocol-freeze-export-receipt;
+                                        visible: root.protocol-freeze-export-receipt != "";
+                                        color: Theme.ink;
+                                        wrap: word-wrap;
+                                        accessible-label: "Local protocol baseline file receipt " + root.protocol-freeze-export-receipt;
                                     }
                                     Text {
                                         text: root.protocol-freeze-status;

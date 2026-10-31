@@ -154,6 +154,54 @@ pub(super) fn status(store: &ProjectStore, args: &Value) -> Result<Value, String
     }))
 }
 
+/// A read-only, deterministic Markdown representation of the authoritative
+/// local baseline event. The 4-space-indented JSON prevents user-supplied
+/// author/actor strings from becoming executable Markdown instructions.
+/// No file is written here; physical delivery requires a separately approved
+/// sensitive-export action at the desktop boundary.
+pub(super) fn receipt(store: &ProjectStore, args: &Value) -> Result<Value, String> {
+    let data = status(store, args)?;
+    if data["frozen"] != true
+        || data["local_only"] != true
+        || data["external_registration_verified"] != false
+    {
+        return Err(
+            "Freeze an existing protocol before exporting its local baseline receipt".into(),
+        );
+    }
+    let project_id = store.info().map_err(|_| "project identity unavailable")?.id;
+    let record = json!({"project_id":project_id,"local_baseline":data});
+    let canonical = serde_json::to_string_pretty(&record)
+        .map_err(|_| "Local baseline receipt could not be serialized")?;
+    let indented = canonical
+        .lines()
+        .map(|line| format!("    {line}"))
+        .collect::<Vec<_>>()
+        .join("\n");
+    let text = format!(
+        "# ResearchWeave local protocol baseline receipt\n\n\
+         **Local-only provenance; NOT externally verified preregistration.** \
+         The computer clock, local event sequence, event digest and unverified \
+         actor do not establish an independent timestamp or identity.\n\n\
+         The snapshot digest binds the original persisted protocol version; \
+         subsequent amendments are reported without rewriting that version.\n\n\
+         ## Verified local record\n\n{indented}\n"
+    );
+    Ok(json!({
+        "text":text,
+        "project_id":project_id,
+        "protocol_id":record["local_baseline"]["protocol_id"],
+        "frozen":true,
+        "frozen_version":record["local_baseline"]["frozen_version"],
+        "snapshot_sha256":record["local_baseline"]["snapshot_sha256"],
+        "event_hash":record["local_baseline"]["event_hash"],
+        "event_sequence":record["local_baseline"]["event_sequence"],
+        "local_only":true,
+        "external_registration_verified":false,
+        "written_to_disk":false
+    }))
+}
+
 pub(super) fn write(
     store: &mut ProjectStore,
     args: &Value,
@@ -261,6 +309,11 @@ mod tests {
         let subject = json!({"project_id":project_id.to_string(),"protocol_id":protocol_id});
         let fresh = handler.execute("protocol.freeze_status", &subject, &scoped_context(1));
         assert_eq!(fresh["data"]["frozen"], false);
+        assert_eq!(
+            handler.execute("protocol.freeze_receipt", &subject, &scoped_context(1))["status"],
+            "error",
+            "unfrozen protocols cannot export a baseline receipt"
+        );
         let freeze = json!({
             "project_id":project_id.to_string(),
             "protocol_id":protocol_id,
@@ -308,6 +361,15 @@ mod tests {
         assert_eq!(locked["data"]["post_freeze_amendment_versions"], 0);
         assert_eq!(locked["data"]["snapshot_sha256"], preview_hash);
         assert_eq!(locked["data"]["event_hash"].as_str().unwrap().len(), 64);
+        let receipt = handler.execute("protocol.freeze_receipt", &subject, &scoped_context(2));
+        assert_eq!(receipt["status"], "ok", "{receipt}");
+        assert_eq!(receipt["data"]["snapshot_sha256"], preview_hash);
+        assert_eq!(receipt["data"]["written_to_disk"], false);
+        assert_eq!(receipt["data"]["event_hash"], locked["data"]["event_hash"]);
+        let markdown = receipt["data"]["text"].as_str().unwrap();
+        assert!(markdown.contains("NOT externally verified preregistration"));
+        assert!(markdown.contains(&preview_hash));
+        assert!(markdown.contains("    \"local_baseline\""));
         assert_eq!(
             handler.preview("protocol.freeze", &freeze, &scoped_context(2))["status"],
             "error",
@@ -338,6 +400,14 @@ mod tests {
         assert_eq!(reloaded["data"]["current_version"], 2);
         assert_eq!(reloaded["data"]["post_freeze_amendment_versions"], 1);
         assert_eq!(reloaded["data"]["snapshot_sha256"], preview_hash);
+        let amended_receipt =
+            handler.execute("protocol.freeze_receipt", &subject, &scoped_context(3));
+        assert_eq!(amended_receipt["status"], "ok", "{amended_receipt}");
+        assert!(amended_receipt["data"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"post_freeze_amendment_versions\": 1"));
+        assert_eq!(amended_receipt["data"]["snapshot_sha256"], preview_hash);
         let wrong_scope = DispatchContext {
             project_id: Uuid::new_v4(),
             ..scoped_context(3)
@@ -346,6 +416,11 @@ mod tests {
             handler.execute("protocol.freeze_status", &subject, &wrong_scope)["status"],
             "error",
             "local freeze receipt must never leak across project scope"
+        );
+        assert_eq!(
+            handler.execute("protocol.freeze_receipt", &subject, &wrong_scope)["status"],
+            "error",
+            "local freeze export must never leak across project scope"
         );
 
         let tampered = ProjectStore::open(&project_root).unwrap();
@@ -366,5 +441,10 @@ mod tests {
             .as_str()
             .unwrap()
             .contains("SHA-256"));
+        assert_eq!(
+            handler.execute("protocol.freeze_receipt", &subject, &scoped_context(3))["status"],
+            "error",
+            "tampered baseline content must block an export receipt"
+        );
     }
 }

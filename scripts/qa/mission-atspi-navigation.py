@@ -386,7 +386,96 @@ def main() -> int:
         event = json.loads(freeze_events[0][0])
         if event.get("protocol_id") != protocol_id or event.get("snapshot_sha256") != freeze_hash:
             raise RuntimeError("Persisted local freeze event is not bound to visible SHA-256")
-    scroll_protocol(False, 3)
+    scroll_protocol(False, 10)
+    for _ in range(18):
+        if activate(app, "Prepare local protocol baseline receipt Markdown"):
+            break
+        scroll_protocol(True, 1)
+    else:
+        audit(app, "protocol-baseline-export-button-missing", output)
+        raise RuntimeError("Frozen baseline cannot prepare a physical Markdown receipt")
+    time.sleep(0.25)
+    prepared_receipt = "\n".join((n.name or "") for n, _ in walk(app))
+    for _ in range(10):
+        if (
+            "VERIFIED LOCAL BASELINE RECEIPT PREVIEW ONLY" in prepared_receipt
+            and freeze_hash in prepared_receipt
+        ):
+            break
+        scroll_protocol(True, 1)
+        prepared_receipt = "\n".join((n.name or "") for n, _ in walk(app))
+    if (
+        "VERIFIED LOCAL BASELINE RECEIPT PREVIEW ONLY" not in prepared_receipt
+        or "NOT externally verified preregistration" not in prepared_receipt
+        or freeze_hash not in prepared_receipt
+    ):
+        print("BASELINE_PHYSICAL_PREVIEW_DIAGNOSTIC=" + repr(prepared_receipt[-3300:]))
+        audit(app, "protocol-physical-preview-diagnostic", output)
+        raise RuntimeError("Protocol baseline physical receipt preview omitted persisted provenance")
+    physical_receipt_path = output / "verified-local-protocol-baseline.md"
+    scroll_protocol(False, 16)
+    for _ in range(25):
+        try:
+            edit_text(
+                app,
+                "Local protocol baseline receipt destination path",
+                str(physical_receipt_path),
+                allow_unreadable=True,
+            )
+            break
+        except RuntimeError as error:
+            if "Missing editable field" not in str(error):
+                raise
+            scroll_protocol(True, 1)
+    else:
+        audit(app, "protocol-physical-path-missing", output)
+        raise RuntimeError("Local protocol baseline path field not reachable through scrolling")
+    if physical_receipt_path.exists():
+        raise RuntimeError("Local baseline preview unexpectedly wrote a physical file")
+    if not activate(app, "Save verified local baseline receipt without overwrite"):
+        raise RuntimeError("Local protocol baseline save requires an explicit native action")
+    time.sleep(0.3)
+    if not physical_receipt_path.is_file():
+        raise RuntimeError("Approved local baseline Save did not create a physical Markdown file")
+    physical_bytes = physical_receipt_path.read_bytes()
+    if (
+        freeze_hash.encode("ascii") not in physical_bytes
+        or b"NOT externally verified preregistration" not in physical_bytes
+        or b'"local_only": true' not in physical_bytes
+        or b'"external_registration_verified": false' not in physical_bytes
+    ):
+        raise RuntimeError("Physical local baseline receipt lost its audited scientific semantics")
+    physical_digest = hashlib.sha256(physical_bytes).hexdigest()
+    saved_receipt = "\n".join((n.name or "") for n in nodes_named(
+        app, "Local protocol baseline file receipt"
+    ))
+    for _ in range(12):
+        if physical_digest in saved_receipt:
+            break
+        scroll_protocol(True, 1)
+        saved_receipt = "\n".join((n.name or "") for n in nodes_named(
+            app, "Local protocol baseline file receipt"
+        ))
+    if physical_digest not in saved_receipt:
+        audit(app, "protocol-baseline-file-receipt-missing", output)
+        raise RuntimeError("Physical baseline file SHA-256 does not match visible native receipt")
+    scroll_protocol(False, 12)
+    for _ in range(18):
+        if activate(app, "Save verified local baseline receipt without overwrite"):
+            break
+        scroll_protocol(True, 1)
+    else:
+        raise RuntimeError("Repeated local baseline Save is not actionable for refusal")
+    time.sleep(0.15)
+    if physical_receipt_path.read_bytes() != physical_bytes:
+        raise RuntimeError("Repeated local baseline Save unexpectedly rewrote the existing file")
+    with sqlite3.connect(original_project / "data/project.sqlite") as db:
+        count = db.execute(
+            "SELECT count(*) FROM events WHERE operation='protocol.freeze'"
+        ).fetchone()[0]
+    if count != 1:
+        raise RuntimeError("Physical receipt changed the immutable baseline event count")
+    print("LOCAL_PROTOCOL_FREEZE_PHYSICAL_MARKDOWN_SHA_NO_OVERWRITE_OK")
     if not activate(app, "Preview local protocol baseline freeze"):
         raise RuntimeError("Cannot probe one-time freeze enforcement")
     time.sleep(0.2)
