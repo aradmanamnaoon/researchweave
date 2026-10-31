@@ -12,11 +12,15 @@ use std::{
     fs::{self, OpenOptions},
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU8, Ordering},
     sync::Arc,
 };
 use uuid::Uuid;
 
 const MAX_EXPORT_BYTES: usize = 32 * 1024 * 1024;
+const EXPORT_UNUSED: u8 = 0;
+const EXPORT_IN_FLIGHT: u8 = 1;
+const EXPORT_CONSUMED: u8 = 2;
 
 #[derive(Clone)]
 pub(super) struct PreparedPhysicalExport {
@@ -28,6 +32,10 @@ pub(super) struct PreparedPhysicalExport {
     sha256: String,
     extension: String,
     length: usize,
+    /// Every clone of this prepared artifact shares one process-local use
+    /// reservation; separate host approvals cannot replay a prepared payload
+    /// to multiple filenames or race to write simultaneously.
+    usage: Arc<AtomicU8>,
 }
 
 fn export_extension(operation: &str, arguments: &Value) -> Result<&'static str, String> {
@@ -192,6 +200,7 @@ pub(super) fn prepare(
             sha256,
             extension: extension.to_owned(),
             length: bytes.len(),
+            usage: Arc::new(AtomicU8::new(EXPORT_UNUSED)),
         },
         result,
     ))
@@ -364,14 +373,36 @@ fn write_verified(
     if sha256 != pending.sha256 || bytes.len() != pending.length {
         return Err("Artifact changed since preparation; prepare again".into());
     }
-    let mut output = OpenOptions::new()
+    pending
+        .usage
+        .compare_exchange(
+            EXPORT_UNUSED,
+            EXPORT_IN_FLIGHT,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
+        .map_err(|_| "Prepared physical export has already been used; prepare again".to_owned())?;
+    let open_result = OpenOptions::new()
         .read(true)
         .write(true)
         .create_new(true)
-        .open(target)
-        .map_err(|error| {
-            format!("Cannot create output (existing files are never replaced): {error}")
-        })?;
+        .open(target);
+    let mut output = match open_result {
+        Ok(output) => {
+            // Creating a file is irreversible if a later write or audit fails:
+            // never allow this prepared payload to create a second file.
+            pending.usage.store(EXPORT_CONSUMED, Ordering::Release);
+            output
+        }
+        Err(error) => {
+            // No file was created. Allow this same prepared receipt to be
+            // corrected (e.g. choose a non-existing filename) and retried.
+            pending.usage.store(EXPORT_UNUSED, Ordering::Release);
+            return Err(format!(
+                "Cannot create output (existing files are never replaced): {error}"
+            ));
+        }
+    };
     let written = (|| -> Result<(), String> {
         output
             .write_all(&bytes)
@@ -587,6 +618,7 @@ mod tests {
         let snapshot = frozen["data"]["snapshot_sha256"].as_str().unwrap();
         let (prepared, body) =
             prepare(&project, "protocol.freeze_receipt", request.clone(), &host).unwrap();
+        let cloned_pending = prepared.clone();
         assert_eq!(body["data"]["snapshot_sha256"], snapshot);
         assert_eq!(body["data"]["written_to_disk"], false);
         assert!(body["data"]["text"]
@@ -626,7 +658,34 @@ mod tests {
         assert_eq!(hex::encode(Sha256::digest(&bytes)), saved["sha256"]);
         assert!(String::from_utf8(bytes.clone()).unwrap().contains(snapshot));
         assert!(save(&prepared, &project, destination.to_str().unwrap(), &host).is_err());
+        let replay_destination = root.join("replayed-local-baseline.md");
+        assert!(
+            save(
+                &cloned_pending,
+                &project,
+                replay_destination.to_str().unwrap(),
+                &host
+            )
+            .is_err(),
+            "a clone of a used preparation cannot write a second destination"
+        );
+        assert!(!replay_destination.exists());
         assert_eq!(fs::read(&destination).unwrap(), bytes);
+
+        let (retryable, _) =
+            prepare(&project, "protocol.freeze_receipt", request.clone(), &host).unwrap();
+        assert!(save(&retryable, &project, destination.to_str().unwrap(), &host).is_err());
+        let after_existing_error = root.join("new-baseline-receipt.md");
+        assert!(
+            save(
+                &retryable,
+                &project,
+                after_existing_error.to_str().unwrap(),
+                &host
+            )
+            .is_ok(),
+            "a filename collision must not consume a preparation that wrote nothing"
+        );
 
         let audit = AuditStore::open(host.join("operation-audit.sqlite")).unwrap();
         assert!(audit
