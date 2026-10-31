@@ -12,7 +12,7 @@
 | 3 | PRIME / future workers | Use skill-specific probes, real isolated native GUI, screenshots, source-identified package checks |
 | 4 | PRIME | Verify native Windows/macOS/Linux artifacts and security from new source SHA, push/release/check public hashes |
 
-**Delegation incident:** Connector reported two worker startup failures; both tasks remain pending. Agent family has two available worker slots; do not claim 17 workers, any worker commits, or completed parallel testing.
+**Delegation incident:** Connector reported four worker startup failures across two attempted waves; none returned implementation or verified reports. Agent family currently has two free worker slots; do not claim 17 active workers, any worker commits, or completed parallel testing. PRIME directly implemented and independently verified the first UX and project-safety slices in isolated worktrees.
 
 **Resources:** Drive D had about 1.4 GB free before fresh compilation. A new Cargo target cache under the newly created PRIME worktree exhausted D and was removed, recovering about 1.37 GB. All subsequent Cargo outputs must use **drive C**, leaving root and pre-existing artifacts intact.
 

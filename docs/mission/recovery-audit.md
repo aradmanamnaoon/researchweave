@@ -10,6 +10,8 @@ The folder `D:\coding\codex\researchweave-recovery\researchweave-working-2026103
 
 The newer `origin/main` is the published **local-only Rust v0.2.0** product, with nine workspace crates. The old root has eleven crates, including obsolete cloud/sync work. Commit `bf9baf7` and the current `AGENTS.md` explicitly record that remote project sync was removed at the user's request. Old untracked cloud code must never be mechanically copied into the current product.
 
+A read-only, extension-scoped file comparison across the original and new `crates/` trees identified **63** old Rust/Slint/TOML/Markdown source files, of which **59** have corresponding paths but changed contents and **4** are original-only: `crates/researchweave-cloud/src/lib.rs`, `crates/researchweave-cloud/Cargo.toml`, `crates/researchweave-sync/src/lib.rs`, and `crates/researchweave-sync/Cargo.toml`. These four belong entirely to the intentionally retired cloud/sync workspace. Every shared source file needs a behavior-specific review before porting; byte differences alone are not proof of missing features.
+
 `gh release view v0.2.0` confirmed that a public release exists with Windows installer, macOS arm64/x64 DMGs, Linux x86_64 AppImage/amd64 DEB and `SHA256SUMS.txt`. These prove the *existing* v0.2.0 asset listing, not any new changes in this mission.
 
 New independent, clean worktrees were created from `976656d`: `target/mission-prime-20261031`, `target/mission-notes-20261031`, `target/mission-writing-20261031`. The original dirty working tree remains untouched. Two remote worker chats were attempted but failed during initialization; worker code changes must not be assumed.
@@ -18,9 +20,10 @@ New independent, clean worktrees were created from `976656d`: `target/mission-pr
 
 - **PARTIAL:** Notebook screen exists without verified Google Keep style capture, cards, pin/archive/search and restart UX.
 - **PARTIAL:** Manuscript supports structured text and persisted exports, but lacks a verified paginated Word-like rich document model.
-- **PARTIAL:** Data and statistics have independently tested computations but advanced UI guidance, interactive tables, assumption help and screen-reader results need more work.
+- **PARTIAL, IMPROVED:** Data import now surfaces a verified immutable ID/revision and carries them into Variables and Statistics; real Linux GUI imported synthetic CSV, computed native descriptives and verified output and project isolation. Advanced interactive tables, assumption help, data cleaning and accessible plots need more work.
+- **CONFIRMED DEFECT FIX:** Switching projects previously left a former project's raw statistical results on-screen and retained an imported file path. A project-bound visible-state reset, pending-action invalidation and real two-project GUI regression now prevent these leaks.
 - **PARTIAL:** Existing semantic palette and icons are established, yet native control accent consistency and all-screen theme parity remain open.
-- **PARTIAL:** Contextual opt-in AI, interrupted save recovery, UI focus/IME and cross-platform GUI evidence still require fresh acceptance.
+- **PARTIAL:** Notebook/manuscript autosave and reopening the original project after switching to another were verified with typed synthetic text in isolated native GUI. Crash-during-unsaved-write, contextual AI provider flow, IME/screen reader and cross-platform GUI evidence still require fresh acceptance.
 - **WORKING (historical only):** project create/open, scientific revision history, encrypted local archive, published v0.2.0 release; must rerun after new changes.
 - **RETIRED:** remote cloud project synchronization, consistent with the later v0.2.0 local-only decision.
 

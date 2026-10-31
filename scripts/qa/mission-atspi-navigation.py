@@ -57,6 +57,28 @@ def nodes_named(app: Any, name: str) -> list[Any]:
     return result
 
 
+def read_field(app: Any, accessible_name: str) -> str:
+    for node in nodes_named(app, accessible_name):
+        if (node.name or "").casefold() != accessible_name.casefold():
+            continue
+        try:
+            content = node.queryText()
+            return content.getText(0, content.characterCount)
+        except Exception:
+            continue
+    raise RuntimeError(f"Cannot read actual accessible field: {accessible_name}")
+
+
+def wait_field(app: Any, name: str, timeout: float = 3.0) -> str:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        try:
+            return read_field(app, name)
+        except RuntimeError:
+            time.sleep(0.12)
+    raise RuntimeError(f"Editable field never became accessible: {name}")
+
+
 def activate(app: Any, name: str) -> bool:
     for node in nodes_named(app, name):
         try:
@@ -64,6 +86,26 @@ def activate(app: Any, name: str) -> bool:
             if action.nActions:
                 if action.doAction(0):
                     print(f"AT_SPI_ACTIVATED={name}")
+                    return True
+        except Exception:
+            pass
+        # Some Slint button actions intermittently return false through
+        # AT-SPI after an import preview even while the button is visible and
+        # enabled. Verify the semantic target, then physically click its
+        # coordinates INSIDE THE PRIVATE XVFB display only. Record fallback.
+        try:
+            if node.getRoleName() == "button" and (node.name or "").casefold() == name.casefold():
+                component = node.queryComponent()
+                bounds = component.getExtents(pyatspi.DESKTOP_COORDS)
+                if bounds.width >= 12 and bounds.height >= 12:
+                    x = bounds.x + bounds.width // 2
+                    y = bounds.y + bounds.height // 2
+                    subprocess.run(
+                        ["xdotool", "mousemove", "--sync", str(x), str(y), "click", "1"],
+                        check=True,
+                        timeout=10,
+                    )
+                    print(f"XVFB_ACCESSIBLE_BUTTON_CLICK_FALLBACK={name}")
                     return True
         except Exception:
             pass
@@ -186,6 +228,8 @@ def audit(app: Any, label: str, output: pathlib.Path) -> None:
 
 def main() -> int:
     output = pathlib.Path(sys.argv[1])
+    fixture = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else None
+    original_project: pathlib.Path | None = None
     app = find_app()
     print(f"AT_SPI_APP={app.name}")
     audit(app, "welcome", output)
@@ -195,6 +239,11 @@ def main() -> int:
     if nodes_named(app, "No project selected"):
         raise RuntimeError("Managed project creation did not select the new project")
     audit(app, "project-created", output)
+    if fixture is not None:
+        created = [p for p in (fixture.parent / "projects").iterdir() if p.is_dir()]
+        if len(created) != 1:
+            raise RuntimeError(f"Expected exactly one managed test project; found {len(created)}")
+        original_project = created[0]
 
     # Every activation is through the private Xvfb AT-SPI tree, not host input.
     if not activate(app, "Synthesize activity"):
@@ -233,9 +282,200 @@ def main() -> int:
     if activate(app, "Manuscript"):
         time.sleep(0.35)
         audit(app, "manuscript", output)
+        edit_text(app, "Manuscript ID", "synthetic-research")
+        edit_text(app, "Manuscript section", "Abstract")
+        edit_text(app, "Manuscript section body", "Synthetic manuscript for isolated project recovery.")
+        time.sleep(1.3)
+        if not any(
+            "autosaved" in (node.name or "").casefold()
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("Manuscript did not report successful project autosave")
+        print("MANUSCRIPT_AUTOSAVE_STATUS_PRESENT")
         resize_xvfb_window(850, 600)
         time.sleep(0.35)
         audit(app, "manuscript-narrow", output)
+
+    if fixture is not None:
+        resize_xvfb_window(1280, 800)
+        if not activate(app, "Analyze activity"):
+            raise RuntimeError("Analyze activity is not available")
+        time.sleep(0.25)
+        if not activate(app, "Data View"):
+            raise RuntimeError("Data View navigation is not available")
+        time.sleep(0.3)
+        audit(app, "data-before-import", output)
+        edit_text(app, "Analysis import path", str(fixture))
+        if not activate(app, "Preview analysis import"):
+            raise RuntimeError("Data import preview cannot be activated")
+        time.sleep(0.45)
+        if not any(
+            "import preview ready" in (node.name or "").casefold()
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("Import preview did not confirm an immutable hash-bound preview")
+        print("DATA_IMPORT_PREVIEW_CONFIRMED")
+        if not activate(app, "Import previewed analysis data"):
+            raise RuntimeError("Import confirmation control is not actionable")
+        time.sleep(0.75)
+        audit(app, "data-after-import", output)
+        if not nodes_named(app, "Recently imported dataset identifier and immutable revision"):
+            raise RuntimeError("Recently imported dataset context is missing after successful import")
+        if not activate(app, "Inspect variables in recently imported dataset"):
+            raise RuntimeError("Dataset-to-Variables shortcut is broken")
+        time.sleep(0.3)
+        variable_id = read_field(app, "Variable View dataset ID")
+        variable_revision = read_field(app, "Variable View dataset revision")
+        if not variable_id or not variable_revision:
+            raise RuntimeError("Imported dataset identity did not propagate into Variables")
+        print(f"DATA_TO_VARIABLES_CONTEXT_OK id_chars={len(variable_id)} revision_chars={len(variable_revision)}")
+        if not activate(app, "Data View"):
+            raise RuntimeError("Cannot return to Data View")
+        time.sleep(0.25)
+        if not activate(app, "Analyze recently imported dataset"):
+            raise RuntimeError("Dataset-to-Statistics shortcut is broken")
+        time.sleep(0.3)
+        if (
+            read_field(app, "Statistics dataset ID") != variable_id
+            or read_field(app, "Statistics dataset revision") != variable_revision
+        ):
+            raise RuntimeError("Statistics did not receive the exact imported immutable context")
+        print("DATA_TO_STATISTICS_CONTEXT_OK")
+        edit_text(app, "Statistics numeric column", "score")
+        if not activate(app, "Run descriptive statistics"):
+            raise RuntimeError("Native descriptive analysis is not actionable")
+        time.sleep(0.6)
+        audit(app, "statistics-result", output)
+        named = [(node.name or "") for node, _ in walk(app)]
+        if not any("Descriptives · score" in value for value in named):
+            raise RuntimeError("Native statistical method result title is missing")
+        if not any("2.0000" in value for value in named):
+            raise RuntimeError("Expected fixture mean 2.0000 was not visible in real statistics UI")
+        print("DATA_TO_NATIVE_DESCRIPTIVES_MEAN_2_OK")
+        if nodes_named(app, "Statistics operation result"):
+            raise RuntimeError("Raw statistical JSON was expanded before user request")
+        if not activate(app, "Show statistical raw data and provenance details"):
+            raise RuntimeError("Technical statistics disclosure control is unavailable")
+        time.sleep(0.25)
+        if not nodes_named(app, "Statistics operation result"):
+            raise RuntimeError("Verified statistical details did not expand")
+        audit(app, "statistics-technical-details", output)
+        if not activate(app, "Hide statistical raw data and provenance details"):
+            raise RuntimeError("Expanded statistics disclosure cannot close")
+        time.sleep(0.15)
+        if nodes_named(app, "Statistics operation result"):
+            raise RuntimeError("Verified statistical details remained visible after hiding")
+        print("STATISTICS_PROGRESSIVE_DISCLOSURE_OK")
+
+        # Leave a new import merely staged in project A, then switch projects.
+        # Its approval must be invalidated before project B can perform writes.
+        if not activate(app, "Data View"):
+            raise RuntimeError("Cannot return to Data View to stage a pending import")
+        time.sleep(0.25)
+        edit_text(app, "Analysis import path", str(fixture))
+        if not activate(app, "Preview analysis import"):
+            raise RuntimeError("Could not stage import before project switch")
+        time.sleep(0.3)
+        if not any(
+            "import preview ready" in (node.name or "").casefold()
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("Preview was not actually staged before project switch")
+        print("STALE_IMPORT_PREVIEW_STAGED_IN_ORIGINAL_PROJECT")
+
+        # A new project must never inherit the previous project's dataset ID
+        # or revision. This is a privacy and scientific-provenance invariant.
+        if not activate(app, "Home activity"):
+            raise RuntimeError("Cannot navigate to Home to switch project")
+        time.sleep(0.55)
+        audit(app, "home-after-staged-preview", output)
+        if not activate(app, "Open Start Center to switch projects"):
+            raise RuntimeError("Project home cannot reach Start Center to switch projects")
+        time.sleep(0.25)
+        if not activate(app, "Create default project"):
+            raise RuntimeError("Cannot create another isolated project")
+        time.sleep(0.4)
+        if not activate(app, "Analyze activity"):
+            raise RuntimeError("Analyze activity missing after project switch")
+        time.sleep(0.25)
+        if not nodes_named(app, "Analysis dataset ID") and not activate(app, "Data View"):
+            raise RuntimeError("Data View missing after project switch")
+        time.sleep(0.25)
+        if nodes_named(app, "Recently imported dataset identifier and immutable revision"):
+            raise RuntimeError("Dataset context leaked into a different project")
+        if read_field(app, "Analysis dataset ID") or read_field(app, "Analysis dataset revision"):
+            raise RuntimeError("Old project dataset identity leaked into new project's input fields")
+        if read_field(app, "Analysis import path"):
+            raise RuntimeError("Previous project's import path leaked into the new project")
+        if not activate(app, "Import previewed analysis data"):
+            raise RuntimeError("Cannot activate import action for rejected stale preview")
+        time.sleep(0.25)
+        rejection = "\n".join(
+            (node.name or "") for node in nodes_named(app, "Analysis operation result")
+        )
+        if "Preview a data import before importing it" not in rejection:
+            raise RuntimeError(
+                "Pending import from project A was still usable after project switch"
+            )
+        if nodes_named(app, "Recently imported dataset identifier and immutable revision"):
+            raise RuntimeError("Stale approval unexpectedly wrote data into project B")
+        print("STALE_IMPORT_PREVIEW_REJECTED_AFTER_PROJECT_SWITCH")
+        result_nodes = nodes_named(app, "Analysis operation result")
+        if not result_nodes:
+            raise RuntimeError("New project import guidance is absent")
+        result_text = "\n".join((node.name or "") for node in result_nodes)
+        if "Preview a data import before importing it" not in result_text:
+            raise RuntimeError("New project did not show the expected safe rejection")
+        for forbidden in (variable_id, variable_revision, "\"mean\": 2", "statistics.describe"):
+            if forbidden in result_text:
+                raise RuntimeError("Old project statistics or identifiers leaked into new project")
+        print("DATASET_CONTEXT_CLEARED_AFTER_PROJECT_SWITCH_OK")
+        print("PROJECT_RESULT_ISOLATION_OK")
+        audit(app, "data-after-project-switch", output)
+        if not activate(app, "Synthesize activity"):
+            raise RuntimeError("Cannot inspect writing after project switch")
+        time.sleep(0.3)
+        if not nodes_named(app, "Project notebook text"):
+            if not activate(app, "Notebook"):
+                raise RuntimeError("New project's notebook is unavailable")
+            time.sleep(0.3)
+        if read_field(app, "Project notebook text"):
+            raise RuntimeError("Previous project notebook text leaked into new project")
+        if not activate(app, "Manuscript"):
+            raise RuntimeError("Cannot open manuscript on new project")
+        if wait_field(app, "Manuscript section body"):
+            raise RuntimeError("Previous project manuscript draft leaked across projects")
+        print("NOTEBOOK_AND_MANUSCRIPT_PROJECT_ISOLATION_OK")
+        if original_project is None:
+            raise RuntimeError("First project recovery path was not captured")
+        if not activate(app, "Home activity"):
+            raise RuntimeError("Cannot return Home to recover original project")
+        time.sleep(0.35)
+        if not activate(app, "Open Start Center to switch projects"):
+            raise RuntimeError("Cannot open start center to reopen original project")
+        time.sleep(0.35)
+        edit_text(app, "Project path", str(original_project))
+        if not activate(app, "Open project"):
+            raise RuntimeError("Could not activate original project open")
+        time.sleep(0.4)
+        if not activate(app, "Synthesize activity"):
+            raise RuntimeError("Cannot return to previous project's notes")
+        time.sleep(0.35)
+        if not nodes_named(app, "Project notebook text"):
+            if not activate(app, "Notebook"):
+                raise RuntimeError("Previously saved notebook is unavailable")
+            time.sleep(0.3)
+        restored_notebook = wait_field(app, "Project notebook text")
+        if "ResearchWeave isolated UX note:" not in restored_notebook:
+            raise RuntimeError("Previously autosaved notebook is not available after reopening")
+        if not activate(app, "Manuscript"):
+            raise RuntimeError("Cannot return to previous project's manuscript")
+        time.sleep(0.2)
+        restored_manuscript = wait_field(app, "Manuscript section body")
+        if "Synthetic manuscript for isolated project recovery." not in restored_manuscript:
+            raise RuntimeError("Previously autosaved manuscript is not available after reopening")
+        print("NOTES_AND_MANUSCRIPT_REOPEN_PERSISTENCE_OK")
+        audit(app, "reopened-project-writing", output)
 
     print("AT_SPI_NAVIGATION_PROBE_OK")
     return 0

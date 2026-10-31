@@ -13,6 +13,12 @@ mkdir -p "$output"
 output="$(cd "$output" && pwd)"
 data_root="$(mktemp -d)"
 home_root="$(mktemp -d)"
+cat > "$data_root/measurements.csv" <<'CSV'
+case_id,score,group
+c1,1,A
+c2,2,A
+c3,3,B
+CSV
 cleanup() {
     rm -rf -- "$data_root" "$home_root"
 }
@@ -47,7 +53,7 @@ dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' \
         dbus-send --session --print-reply --dest=org.a11y.Bus \
             /org/a11y/bus org.freedesktop.DBus.Properties.Set \
             string:org.a11y.Status string:IsEnabled variant:boolean:true >/dev/null
-        python3 "$probe" "$output" | tee "$output/atspi-navigation.txt"
+        python3 "$probe" "$output" "$RESEARCHWEAVE_HOST_DATA_DIR/measurements.csv" | tee "$output/atspi-navigation.txt"
         if ! kill -0 "$pid" >/dev/null 2>&1; then
             echo GUI_DIED_AFTER_INTERACTION
             exit 21
