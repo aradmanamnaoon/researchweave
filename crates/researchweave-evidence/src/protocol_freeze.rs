@@ -264,7 +264,9 @@ mod tests {
     use super::*;
     use crate::EvidenceHandler;
     use researchweave_core::OperationHandler;
-    use researchweave_project::ProjectInfo;
+    use researchweave_project::{
+        archive_project_encrypted, restore_encrypted_archive, verify_encrypted_archive, ProjectInfo,
+    };
     use uuid::Uuid;
 
     #[test]
@@ -446,5 +448,154 @@ mod tests {
             "error",
             "tampered baseline content must block an export receipt"
         );
+    }
+
+    #[test]
+    fn frozen_protocol_survives_encrypted_archive_restore_without_losing_event_chain() {
+        let fixture = tempfile::tempdir().unwrap();
+        let projects = fixture.path().join("projects");
+        std::fs::create_dir(&projects).unwrap();
+        let project_id = Uuid::new_v4();
+        let project_path = projects.join(project_id.to_string());
+        let store = ProjectStore::create(
+            &project_path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Encrypted frozen research protocol".into(),
+                question: "Can local provenance survive an archive?".into(),
+                design: "observational".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: "2026-10-31T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+        drop(store);
+        let handler = EvidenceHandler::new(projects.clone());
+        let scoped = |revision| DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "unverified-local-researcher".into(),
+            expected_revision: Some(revision),
+        };
+        let created = handler.execute(
+            "protocol.create",
+            &json!({
+                "project_id":project_id.to_string(),
+                "title":"Pre-analysis protocol",
+                "author":"Local researcher",
+                "body":{"design":"observational","objective":"Prespecified primary"}
+            }),
+            &scoped(0),
+        );
+        assert_eq!(created["status"], "ok", "{created}");
+        let protocol_id = created["data"]["protocol_id"].as_str().unwrap();
+        let subject = json!({"project_id":project_id.to_string(),"protocol_id":protocol_id});
+        let frozen = handler.execute(
+            "protocol.freeze",
+            &json!({"project_id":project_id.to_string(),"protocol_id":protocol_id,"expected_version":1}),
+            &scoped(1),
+        );
+        assert_eq!(frozen["status"], "ok", "{frozen}");
+        let amended = handler.execute(
+            "protocol.amend",
+            &json!({
+                "project_id":project_id.to_string(),
+                "protocol_id":protocol_id,
+                "author":"Local researcher",
+                "rationale":"Disclosure after baseline",
+                "body":{"design":"observational","objective":"Prespecified primary","secondary":"Declared later"}
+            }),
+            &scoped(2),
+        );
+        assert_eq!(amended["status"], "ok", "{amended}");
+        let before = handler.execute("protocol.freeze_status", &subject, &scoped(3));
+        assert_eq!(before["status"], "ok", "{before}");
+        assert_eq!(before["data"]["post_freeze_amendment_versions"], 1);
+        let first_receipt = handler.execute("protocol.freeze_receipt", &subject, &scoped(3));
+        assert_eq!(first_receipt["status"], "ok", "{first_receipt}");
+        let archive = fixture.path().join("baseline.rwproj.enc");
+        let password = "fixture-only-password-not-for-production";
+        let source = ProjectStore::open(&project_path).unwrap();
+        let archived = archive_project_encrypted(&source, &archive, password).unwrap();
+        assert_eq!(archived.project_id, project_id.to_string());
+        assert_eq!(archived.project_revision, 3);
+        assert_eq!(
+            verify_encrypted_archive(&archive, password)
+                .unwrap()
+                .project_revision,
+            3
+        );
+        assert!(verify_encrypted_archive(&archive, "incorrect password").is_err());
+        assert!(!fixture.path().join("rejected").exists());
+        assert!(restore_encrypted_archive(
+            &archive,
+            &fixture.path().join("rejected"),
+            "incorrect password"
+        )
+        .is_err());
+        assert!(!fixture.path().join("rejected").exists());
+        drop(source);
+
+        let restored_root = fixture.path().join("restored");
+        std::fs::create_dir(&restored_root).unwrap();
+        let restored_path = restored_root.join(project_id.to_string());
+        let restored = restore_encrypted_archive(&archive, &restored_path, password).unwrap();
+        assert_eq!(restored.project_id, project_id.to_string());
+        assert_eq!(restored.project_revision, 3);
+        assert!(restore_encrypted_archive(&archive, &restored_path, password).is_err());
+        let reopened = ProjectStore::open(&restored_path).unwrap();
+        assert_eq!(reopened.info().unwrap().revision, 3);
+        let protocol_versions: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT count(*) FROM protocols WHERE id=?1",
+                [protocol_id],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(protocol_versions, 2);
+        let freeze_count: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT count(*) FROM events WHERE operation='protocol.freeze'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(freeze_count, 1);
+        drop(reopened);
+
+        let recovered_handler = EvidenceHandler::new(restored_root);
+        let after = recovered_handler.execute("protocol.freeze_status", &subject, &scoped(3));
+        assert_eq!(after["status"], "ok", "{after}");
+        assert_eq!(
+            before["data"], after["data"],
+            "archive restoration must not rewrite local baseline provenance"
+        );
+        let second_receipt =
+            recovered_handler.execute("protocol.freeze_receipt", &subject, &scoped(3));
+        assert_eq!(second_receipt["status"], "ok", "{second_receipt}");
+        assert_eq!(first_receipt["data"], second_receipt["data"]);
+        let duplicate = recovered_handler.execute(
+            "protocol.freeze",
+            &json!({"project_id":project_id.to_string(),"protocol_id":protocol_id,"expected_version":2}),
+            &scoped(3),
+        );
+        assert_eq!(
+            duplicate["status"], "error",
+            "restored baseline must stay one-use"
+        );
+        let reopened = ProjectStore::open(&restored_path).unwrap();
+        let count_after: i64 = reopened
+            .connection()
+            .query_row(
+                "SELECT count(*) FROM events WHERE operation='protocol.freeze'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(count_after, 1);
     }
 }
