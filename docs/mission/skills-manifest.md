@@ -4,7 +4,7 @@ Exactly 100 local ResearchWeave skill folders were detected, each with SKILL.md 
 
 **Task allocation:** 10 domain UX, 5 competitor-pattern UX, 15 general UX and 70 engineering/reliability support. Allocation is a prospective task assignment, not use evidence. Four attempted worker chats failed initialization.
 
-**Actual usage:** 20 distinct skills were read and applied to audited source, implemented UI/backend changes or reproducible native-GUI probes. See `docs/mission/skills-application-evidence-2026-10-31.md` for exact task/output/acceptance. **80 of 100 receive no use credit.** An applied skill is not automatically fully accepted: platform and scenario gaps remain and are stated per row. No worker-delivered usage credit is claimed.
+**Actual usage:** 21 distinct skills were read and applied to audited source, implemented UI/backend changes or reproducible native-GUI probes. See `docs/mission/skills-application-evidence-2026-10-31.md` for exact task/output/acceptance. **79 of 100 receive no use credit.** An applied skill is not automatically fully accepted: platform and scenario gaps remain and are stated per row. No worker-delivered usage credit is claimed.
 
 | Name | Primary allocation | SKILL.md SHA-256 | Status | Assigned task / evidence |
 | --- | --- | --- | --- | --- |
@@ -35,7 +35,7 @@ Exactly 100 local ResearchWeave skill folders were detected, each with SKILL.md 
 | contextual-research-vocabulary | Engineering/support | 245bf181a74a93e14156accdaa8779bd67dfd15a01bf865308008cbadba56ff5 | Installed; use unverified | Future task-specific probe / evidence pending |
 | control-state-cues | Engineering/support | 58efb913d229602d0ce1e45ed61300a91ed60d6a1d8ada51516bd1fd4d44113d | Applied; acceptance partial | Quick Notes Done next action only for unfinished items, accessible text and state verified in Xvfb r32; full control matrix/high contrast pending |
 | cross-platform-dialog-behavior | Engineering/support | d32b908987e17d92fa66a2967f6988463c8e4fc15ca90d28ba6479b58e30d321 | Installed; use unverified | Future task-specific probe / evidence pending |
-| cross-platform-release-usability | Engineering/support | 43e40d0ab7d1aa57a1ca49f3ee2f20e519390250924864ff62b47fe7aff54dd4 | Installed; use unverified | Future task-specific probe / evidence pending |
+| cross-platform-release-usability | Engineering/support | 43e40d0ab7d1aa57a1ca49f3ee2f20e519390250924864ff62b47fe7aff54dd4 | Applied; acceptance partial | Audited failing Windows installed candidate and split mandatory CLI/UIA gates with retained diagnostics; platform source-matched package acceptance pending |
 | cross-platform-screen-readers | Engineering/support | e47f57da7235179d2de9ed3602eeb6827a72ffdbd3c1ed6f07de2a71c0c3f1f1 | Installed; use unverified | Future task-specific probe / evidence pending |
 | data-grid-keyboard-reading | Engineering/support | 11a9ae509adf8c894eeb93dc674c9b2ce8192493ef8754b5b1cf686cc38edf68 | Installed; use unverified | Future task-specific probe / evidence pending |
 | dataset-import-preview | Domain UX | 9d1df619a5b3f7b1cadfa42b7b82484a26e39986ecde125b07c3b1011db145db | Applied; acceptance partial | See skills-application-evidence-2026-10-31.md and qa/mission-xvfb-20261031-r19 |

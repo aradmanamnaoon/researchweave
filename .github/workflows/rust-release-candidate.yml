@@ -189,16 +189,48 @@ jobs:
           if (!(Test-Path $iscc)) { throw 'Inno Setup compiler unavailable' }
           & $iscc "/DAppVersion=$env:RELEASE_VERSION" "/DSourceDir=$((Resolve-Path target/native-package/windows-x64).Path)" packaging/rust/windows.iss
           if ($LASTEXITCODE -ne 0) { throw 'Installer build failed' }
-      - name: Windows installed candidate smoke
+      - name: Windows installed candidate command-line smoke
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          $log = & packaging/rust/windows-installed-smoke.ps1 -Setup "dist/ResearchWeave-v$env:RELEASE_VERSION-windows-x64-setup.exe" -Fixture "docs/verification/rust-rewrite/pdfium-deterministic-fixture.pdf" -RunUIA
-          $log | ForEach-Object { Write-Output $_ }
+          New-Item -ItemType Directory -Path 'target/qa' -Force | Out-Null
+          $logFile = 'target/qa/windows-installed-cli.log'
+          try {
+            $log = & packaging/rust/windows-installed-smoke.ps1 -Setup "dist/ResearchWeave-v$env:RELEASE_VERSION-windows-x64-setup.exe" -Fixture "docs/verification/rust-rewrite/pdfium-deterministic-fixture.pdf" *>&1 | Tee-Object -FilePath $logFile
+          } catch {
+            $_ | Out-String | Add-Content -Path $logFile
+            throw
+          }
           if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "Installed candidate smoke failed: $LASTEXITCODE" }
           if (-not ($log | Where-Object { $_ -match '^PACKAGED_QA_OK pdfium_sha256=[A-F0-9]{64} exe_sha256=[A-F0-9]{64}$' })) {
-            throw 'Installed candidate did not complete verification and cleanup'
+            throw 'Installed CLI candidate did not complete verification and cleanup'
           }
+      - name: Windows installed candidate UI Automation smoke
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Path 'target/qa' -Force | Out-Null
+          $logFile = 'target/qa/windows-installed-uia.log'
+          try {
+            $log = & packaging/rust/windows-installed-smoke.ps1 -Setup "dist/ResearchWeave-v$env:RELEASE_VERSION-windows-x64-setup.exe" -Fixture "docs/verification/rust-rewrite/pdfium-deterministic-fixture.pdf" -RunUIA -Screenshot 'target/qa/windows-installed-uia.png' *>&1 | Tee-Object -FilePath $logFile
+          } catch {
+            $_ | Out-String | Add-Content -Path $logFile
+            throw
+          }
+          if ($LASTEXITCODE -and $LASTEXITCODE -ne 0) { throw "Installed UIA candidate smoke failed: $LASTEXITCODE" }
+          if (-not ($log | Where-Object { $_ -match '^PACKAGED_QA_OK pdfium_sha256=[A-F0-9]{64} exe_sha256=[A-F0-9]{64}$' })) {
+            throw 'Installed native UIA candidate did not complete verification and cleanup'
+          }
+      - name: Archive Windows native smoke diagnostics
+        if: ${{ always() && runner.os == 'Windows' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-windows-native-smoke-diagnostics
+          path: |
+            target/qa/windows-installed-*.log
+            target/qa/windows-installed-uia.png
+          if-no-files-found: warn
+          retention-days: 7
       - name: macOS/Linux native packages
         if: runner.os != 'Windows'
         shell: bash
