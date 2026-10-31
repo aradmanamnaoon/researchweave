@@ -234,7 +234,18 @@ jobs:
       - name: macOS/Linux native packages
         if: runner.os != 'Windows'
         shell: bash
-        run: bash packaging/rust/package-unix.sh "$PLATFORM" "$RELEASE_VERSION"
+        run: |
+          set -euo pipefail
+          mkdir -p target/qa
+          bash packaging/rust/package-unix.sh "$PLATFORM" "$RELEASE_VERSION" 2>&1 | tee "target/qa/native-package-$PLATFORM.log"
+      - name: Archive macOS package diagnostics on failure
+        if: ${{ failure() && runner.os == 'macOS' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-${{ matrix.platform }}-package-diagnostics
+          path: target/qa/native-package-${{ matrix.platform }}.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Smoke actual macOS/Linux native packages
         if: runner.os != 'Windows'
         shell: bash

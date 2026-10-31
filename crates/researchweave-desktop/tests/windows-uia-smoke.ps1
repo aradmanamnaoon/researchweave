@@ -421,6 +421,49 @@ try {
     $title = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project title'
     ([System.Windows.Automation.ValuePattern]$path.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($temporary)
     ([System.Windows.Automation.ValuePattern]$title.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue("UIA Persian $persianWord")
+    $folderBrowse = Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose project folder with native dialog'
+    if (-not $folderBrowse.Current.IsEnabled) { throw 'Native project folder selection is disabled' }
+    $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+    $beforeFolderDialog = @($desktop.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.NativeWindowHandle })
+    Invoke-AccessibleButton $window 'Choose project folder with native dialog'
+    $folderDialog = $null
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        foreach ($candidate in $desktop.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )) {
+            $candidateInfo = $candidate.Current
+            if ($candidateInfo.ControlType -eq [System.Windows.Automation.ControlType]::Window -and
+                $candidateInfo.NativeWindowHandle -ne 0 -and
+                $beforeFolderDialog -notcontains $candidateInfo.NativeWindowHandle -and
+                ($candidateInfo.ProcessId -eq $p.Id -or $candidateInfo.ClassName -eq '#32770') -and
+                -not $candidateInfo.IsOffscreen) {
+                $folderDialog = $candidate
+                break
+            }
+        }
+        if ($folderDialog) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $folderDialog) { throw 'Native project folder button did not open the real Windows folder chooser' }
+    $folderDialog.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+    $folderCanceledCleanly = $false
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        $path = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project path'
+        $value = ([System.Windows.Automation.ValuePattern]$path.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose project folder with native dialog').Current.IsEnabled
+        if ($ready -and $value -eq $temporary) {
+            $folderCanceledCleanly = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $folderCanceledCleanly) { throw 'Canceling native project folder selection changed the typed path or left the dialog busy' }
+    Write-Output 'PASS: native project folder dialog opens, cancels and preserves the typed path'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Create project').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 600
     if (-not (Test-Path (Join-Path $temporary 'data/project.sqlite'))) { throw 'Create via UIA did not create SQLite project' }
@@ -444,8 +487,12 @@ try {
     # Exercise the actual Ctrl+K shortcut and Enter activation.
     # Page transitions recreate Slint accessibility nodes; never retain a stale
     # element reference across navigation.
-    $path = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project path'
-    $path.SetFocus()
+    # Opening a project intentionally transitions from Welcome to Dashboard.
+    # The Welcome-only Project path input has been destroyed. Anchor the
+    # Ctrl+K shortcut on a real Dashboard button instead of querying a stale
+    # page; command palette focus must still be achieved by actual keyboard.
+    $dashboardAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Open Start Center to switch projects'
+    $dashboardAnchor.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('^k')
     $focused = $null
     for ($attempt = 0; $attempt -lt 12; $attempt++) {
@@ -453,7 +500,7 @@ try {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         if ($focused -and $focused.Current.Name -eq 'Command palette') { break }
         if ($attempt -eq 5) {
-            $path.SetFocus()
+            $dashboardAnchor.SetFocus()
             [System.Windows.Forms.SendKeys]::SendWait('^k')
         }
     }
@@ -590,6 +637,49 @@ try {
         throw 'Protocol physical export overwrote an existing destination'
     }
     Write-Output 'PASS: Approved persisted Protocol -> physical Markdown with version history, digest and no overwrite'
+
+    Invoke-AccessibleButton $window 'Inspect local protocol freeze receipt'
+    Start-Sleep -Milliseconds 160
+    $unfrozen = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($unfrozen | Where-Object { $_ -match '"frozen": false' })) {
+        throw 'Newly recorded protocol was incorrectly marked frozen before approval'
+    }
+    Invoke-AccessibleButton $window 'Preview local protocol baseline freeze'
+    Start-Sleep -Milliseconds 180
+    $freezePreview = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($freezePreview | Where-Object { $_ -like '*LOCAL FREEZE PREVIEW ONLY*' })) {
+        throw 'Local protocol freeze did not provide a separate non-mutating preview'
+    }
+    Invoke-AccessibleButton $window 'Record previewed local protocol baseline freeze'
+    Start-Sleep -Milliseconds 260
+    Invoke-AccessibleButton $window 'Inspect local protocol freeze receipt'
+    Start-Sleep -Milliseconds 180
+    $frozenNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($frozenNames | Where-Object { $_ -match '"frozen": true' }) -or
+        -not ($frozenNames | Where-Object { $_ -match '"frozen_version": 1' }) -or
+        -not ($frozenNames | Where-Object { $_ -match '"external_registration_verified": false' }) -or
+        -not ($frozenNames | Where-Object { $_ -match '"snapshot_sha256": "[0-9a-f]{64}"' })) {
+        throw 'Approved local protocol freeze lacked immutable receipt, exact baseline version or external-registry disclaimer'
+    }
+    Invoke-AccessibleButton $window 'Preview local protocol baseline freeze'
+    Start-Sleep -Milliseconds 180
+    $duplicateFreeze = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($duplicateFreeze | Where-Object { $_ -like '*already has an immutable local freeze baseline*' })) {
+        throw 'Existing local protocol freeze was not protected from duplicate recording'
+    }
+    Write-Output 'PASS: approved immutable local protocol baseline freeze, SHA-256 receipt and one-time enforcement'
 
     # Use the installed native PDFium binary, not an in-process mock, to
     # navigate a deterministic two-page PDF with distinct searchable content.
@@ -1122,6 +1212,10 @@ try {
     if (-not $resultIdMatch.Success) { throw 'Recorded analysis result did not expose its immutable result ID' }
     $resultId = $resultIdMatch.Groups[1].Value
     $resultIdEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis Results result ID'
+    $selectedResult = ([System.Windows.Automation.ValuePattern]$resultIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($selectedResult -ne $resultId) {
+        throw 'Saved verified analysis result ID did not populate the inspect/replay control'
+    }
     ([System.Windows.Automation.ValuePattern]$resultIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($resultId)
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Load verified analysis result').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
@@ -1133,7 +1227,15 @@ try {
         throw 'Verified persisted analysis result did not reload its computed mean'
     }
     $reportIds = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis report result IDs'
-    ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($resultId)
+    $offeredId = ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($offeredId -ne $resultId) {
+        throw 'First verified analysis result was not offered for the report automatically'
+    }
+    ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('invalid')
+    Invoke-AccessibleButton $window 'Use selected immutable result in analysis report'
+    $reportIds = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis report result IDs'
+    $reselectedId = ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($reselectedId -ne $resultId) { throw 'Use selected result failed to populate the report ID' }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Render verified analysis report').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $reportNames = @($window.FindAll(
@@ -1146,6 +1248,44 @@ try {
     if (-not ($reportNames | Where-Object { $_ -match '"report_sha256": "[0-9a-f]{64}"' })) {
         throw 'Analysis report did not expose a deterministic report digest'
     }
+    Invoke-AccessibleButton $window 'Prepare verified analysis report Markdown file'
+    Start-Sleep -Milliseconds 200
+    $preparedReportNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($preparedReportNames | Where-Object { $_ -like '*Verified analysis report prepared; no file saved yet*' })) {
+        throw 'Analysis report Markdown preparation did not present a distinct pending export state'
+    }
+    $reportDestination = Join-Path $hostData ('uia-analysis-report-' + [guid]::NewGuid().ToString('N') + '.md')
+    $reportPathEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis report export destination path'
+    ([System.Windows.Automation.ValuePattern]$reportPathEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($reportDestination)
+    Invoke-AccessibleButton $window 'Save prepared analysis report without overwrite'
+    Start-Sleep -Milliseconds 220
+    if (-not (Test-Path -LiteralPath $reportDestination -PathType Leaf)) {
+        throw 'Physical analysis report Markdown was not created by the explicit Save control'
+    }
+    $reportBody = [System.IO.File]::ReadAllText($reportDestination)
+    if (-not $reportBody.Contains('# Analysis report') -or
+        -not $reportBody.Contains('statistics.describe') -or
+        -not $reportBody.Contains($resultId) -or
+        -not $reportBody.Contains($datasetRevision)) {
+        throw 'Physically exported analysis report omitted verified result or revision provenance'
+    }
+    $reportSha256 = (Get-FileHash -LiteralPath $reportDestination -Algorithm SHA256).Hash.ToLowerInvariant()
+    $reportSaveNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($reportSaveNames | Where-Object { $_ -like "*$reportSha256*" })) {
+        throw 'Physical analysis report checksum is absent from the verified save receipt'
+    }
+    Invoke-AccessibleButton $window 'Save prepared analysis report without overwrite'
+    Start-Sleep -Milliseconds 140
+    if ([System.IO.File]::ReadAllText($reportDestination) -cne $reportBody) {
+        throw 'Repeated analysis report Save mutated the existing file'
+    }
+    Write-Output 'PASS: verified analysis report saves physical Markdown with immutable result provenance and SHA-256 receipt'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export analysis replay script').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $scriptNames = @($window.FindAll(
@@ -1250,6 +1390,20 @@ try {
     $markdownExport = FocusByTab $manuscriptEditor ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown' 8
     $markdownExport.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
+    # We deliberately collapsed the operation-details pane to reach Export
+    # through the Windows keyboard focus order. The export callback updates its
+    # prepared receipt and the bottom status, but does not reopen that pane.
+    # Check the visible status, explicitly reopen the result for inspection,
+    # then collapse it again so subsequent Save controls remain reachable.
+    $preparedStatusNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($preparedStatusNames | Where-Object { $_ -like '*Manuscript MARKDOWN prepared; no file saved yet*' })) {
+        throw 'Manuscript export did not report a prepared Markdown artifact'
+    }
+    Invoke-AccessibleButton $window 'Toggle manuscript operation details'
+    Start-Sleep -Milliseconds 160
     $writingExportNames = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
@@ -1257,8 +1411,17 @@ try {
     if (-not ($writingExportNames | Where-Object { $_ -like '*## Results*Persisted UIA result supported by the registered reference.*' })) {
         throw 'Manuscript Markdown export was not generated from persisted section revisions'
     }
+    Invoke-AccessibleButton $window 'Toggle manuscript operation details'
+    Start-Sleep -Milliseconds 120
+    Write-Output 'PASS: manuscript Markdown export visible in the explicitly expanded result pane'
     $physicalMarkdown = Join-Path $hostData ('uia-physical-' + [guid]::NewGuid().ToString('N') + '.md')
-    $markdownPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path'
+    # Slint omits the lower Save row from UIA while it is outside the visible
+    # scroll viewport. Tab from the *live* Export action to the destination
+    # field; this uses the actual accessible Windows keyboard focus order and
+    # scrolls the field into view instead of treating an offscreen node as
+    # missing or skipping the physical file-save assertion.
+    $exportAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown'
+    $markdownPath = FocusByTab $exportAnchor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path' 9
     ([System.Windows.Automation.ValuePattern]$markdownPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($physicalMarkdown)
     Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
     Start-Sleep -Milliseconds 220
@@ -1289,7 +1452,8 @@ try {
     if (-not ($overwriteResult | Where-Object { $_ -like '*Prepare a manuscript or draft ZIP before saving*' })) {
         throw 'Repeated Save was not rejected after consuming its prepared artifact'
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $exportAgain = FocusByShiftTab $markdownPath ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown' 9
+    $exportAgain.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 150
     Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
     Start-Sleep -Milliseconds 150
@@ -1303,7 +1467,8 @@ try {
     if ([System.IO.File]::ReadAllText($physicalMarkdown) -ne $physicalMarkdownText) {
         throw 'Physical export overwrote a pre-existing file after a fresh preparation'
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript DOCX').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $docxExport = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript DOCX'
+    $docxExport.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $writingDocxNames = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
@@ -1316,7 +1481,8 @@ try {
         throw 'Manuscript DOCX export did not expose the verified structural feature receipt'
     }
     $physicalDocx = Join-Path $hostData ('uia-physical-' + [guid]::NewGuid().ToString('N') + '.docx')
-    $markdownPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path'
+    $docxExportAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript DOCX'
+    $markdownPath = FocusByTab $docxExportAnchor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path' 9
     ([System.Windows.Automation.ValuePattern]$markdownPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($physicalDocx)
     Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
     Start-Sleep -Milliseconds 220

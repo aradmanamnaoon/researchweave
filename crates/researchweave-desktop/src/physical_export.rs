@@ -1,6 +1,6 @@
 //! Explicit, non-overwriting desktop file delivery for read-only, revision-bound
 //! manuscript and draft submission artifacts. This never submits data to a journal.
-use super::{evidence_read_at, now_seconds, ProjectStore};
+use super::{analysis_read_at, evidence_read_at, now_seconds, ProjectStore};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use researchweave_core::{
     AuditStore, Authority, Capability, Command, CommandRouter, DispatchContext, Effect,
@@ -12,11 +12,15 @@ use std::{
     fs::{self, OpenOptions},
     io::{Read, Seek, Write},
     path::{Path, PathBuf},
+    sync::atomic::{AtomicU8, Ordering},
     sync::Arc,
 };
 use uuid::Uuid;
 
 const MAX_EXPORT_BYTES: usize = 32 * 1024 * 1024;
+const EXPORT_UNUSED: u8 = 0;
+const EXPORT_IN_FLIGHT: u8 = 1;
+const EXPORT_CONSUMED: u8 = 2;
 
 #[derive(Clone)]
 pub(super) struct PreparedPhysicalExport {
@@ -28,6 +32,10 @@ pub(super) struct PreparedPhysicalExport {
     sha256: String,
     extension: String,
     length: usize,
+    /// Every clone of this prepared artifact shares one process-local use
+    /// reservation; separate host approvals cannot replay a prepared payload
+    /// to multiple filenames or race to write simultaneously.
+    usage: Arc<AtomicU8>,
 }
 
 fn export_extension(operation: &str, arguments: &Value) -> Result<&'static str, String> {
@@ -41,7 +49,9 @@ fn export_extension(operation: &str, arguments: &Value) -> Result<&'static str, 
         },
         "writing.submission_export" => Ok("zip"),
         "protocol.export" => Ok("md"),
-        _ => Err("Only protocol, manuscript and draft submission artifacts can be saved".into()),
+        "protocol.freeze_receipt" => Ok("md"),
+        "analysis.report.render" => Ok("md"),
+        _ => Err("Only verified protocol, protocol baseline, analysis report, manuscript and draft submission artifacts can be saved".into()),
     }
 }
 
@@ -51,18 +61,69 @@ fn render_artifact(
     arguments: Value,
     root: &Path,
 ) -> Result<Value, String> {
-    let mut result = evidence_read_at(project, operation, arguments, root)?;
-    if operation == "protocol.export" {
+    let mut result = if operation == "analysis.report.render" {
+        analysis_read_at(project, operation, arguments, root)?
+    } else {
+        evidence_read_at(project, operation, arguments, root)?
+    };
+    if matches!(
+        operation,
+        "protocol.export" | "protocol.freeze_receipt" | "analysis.report.render"
+    ) {
         // The existing read-only protocol endpoint returns verified persisted
         // Markdown text rather than the binary receipt used by publishing.
-        // Adapt only at the trusted desktop boundary; do not change its API.
+        // Analysis reports similarly compose verified immutable result IDs.
+        // Adapt only at the trusted desktop boundary; do not change either API.
+        if operation == "analysis.report.render" {
+            let data = result
+                .get("data")
+                .ok_or("Analysis report receipt unavailable")?;
+            let report_hash = data["report_sha256"]
+                .as_str()
+                .ok_or("Analysis report has no provenance digest")?;
+            if data["format"] != "markdown"
+                || data["scientific_interpretation_generated"] != false
+                || !data["manifest"].is_object()
+                || report_hash.len() != 64
+                || !report_hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+            {
+                return Err("Analysis report is missing verified provenance".into());
+            }
+        }
+        if operation == "protocol.freeze_receipt" {
+            let data = result
+                .get("data")
+                .ok_or("Verified local baseline receipt is unavailable")?;
+            let valid_hash = |key: &str| {
+                data[key].as_str().is_some_and(|hash| {
+                    hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit())
+                })
+            };
+            if data["frozen"] != true
+                || data["local_only"] != true
+                || data["external_registration_verified"] != false
+                || data["written_to_disk"] != false
+                || data["frozen_version"]
+                    .as_i64()
+                    .is_none_or(|version| version < 1)
+                || data["event_sequence"]
+                    .as_i64()
+                    .is_none_or(|sequence| sequence < 1)
+                || !valid_hash("snapshot_sha256")
+                || !valid_hash("event_hash")
+            {
+                return Err(
+                    "Local baseline export lacks authoritative frozen-event provenance".into(),
+                );
+            }
+        }
         let body = result
             .pointer("/data/text")
             .and_then(Value::as_str)
-            .ok_or("Protocol export did not return Markdown")?
+            .ok_or("Verified export did not return Markdown")?
             .as_bytes();
         if body.is_empty() || body.len() > MAX_EXPORT_BYTES {
-            return Err("Protocol Markdown is empty or exceeds export limit".into());
+            return Err("Verified Markdown is empty or exceeds export limit".into());
         }
         let length = body.len();
         let digest = hex::encode(Sha256::digest(body));
@@ -70,7 +131,7 @@ fn render_artifact(
         let object = result
             .get_mut("data")
             .and_then(Value::as_object_mut)
-            .ok_or("Protocol export receipt is malformed")?;
+            .ok_or("Verified Markdown receipt is malformed")?;
         object.insert("base64".into(), Value::String(encoded));
         object.insert("sha256".into(), Value::String(digest));
         object.insert("byte_length".into(), json!(length));
@@ -139,6 +200,7 @@ pub(super) fn prepare(
             sha256,
             extension: extension.to_owned(),
             length: bytes.len(),
+            usage: Arc::new(AtomicU8::new(EXPORT_UNUSED)),
         },
         result,
     ))
@@ -311,14 +373,36 @@ fn write_verified(
     if sha256 != pending.sha256 || bytes.len() != pending.length {
         return Err("Artifact changed since preparation; prepare again".into());
     }
-    let mut output = OpenOptions::new()
+    pending
+        .usage
+        .compare_exchange(
+            EXPORT_UNUSED,
+            EXPORT_IN_FLIGHT,
+            Ordering::AcqRel,
+            Ordering::Acquire,
+        )
+        .map_err(|_| "Prepared physical export has already been used; prepare again".to_owned())?;
+    let open_result = OpenOptions::new()
         .read(true)
         .write(true)
         .create_new(true)
-        .open(target)
-        .map_err(|error| {
-            format!("Cannot create output (existing files are never replaced): {error}")
-        })?;
+        .open(target);
+    let mut output = match open_result {
+        Ok(output) => {
+            // Creating a file is irreversible if a later write or audit fails:
+            // never allow this prepared payload to create a second file.
+            pending.usage.store(EXPORT_CONSUMED, Ordering::Release);
+            output
+        }
+        Err(error) => {
+            // No file was created. Allow this same prepared receipt to be
+            // corrected (e.g. choose a non-existing filename) and retried.
+            pending.usage.store(EXPORT_UNUSED, Ordering::Release);
+            return Err(format!(
+                "Cannot create output (existing files are never replaced): {error}"
+            ));
+        }
+    };
     let written = (|| -> Result<(), String> {
         output
             .write_all(&bytes)
@@ -357,7 +441,11 @@ fn write_verified(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{evidence_execute_pending, evidence_preview_at, load_project_with_audit};
+    use crate::{
+        analysis_execute_command_pending, analysis_execute_pending, analysis_preview_command_at,
+        analysis_preview_import_at, evidence_execute_pending, evidence_preview_at,
+        load_project_with_audit,
+    };
     use uuid::Uuid;
 
     #[test]
@@ -489,6 +577,277 @@ mod tests {
         let receipt = json!({"data":{"base64":"dGVzdA==","byte_length":5,
             "sha256":hex::encode(Sha256::digest(b"test"))}});
         assert!(checked_bytes(&receipt).is_err());
+    }
+
+    #[test]
+    fn frozen_protocol_receipt_requires_approved_one_use_file_save_and_revalidates_amendments() {
+        let root = std::env::temp_dir().join(format!("rw-protocol-receipt-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let project = root.join("study");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Prospective protocol export",
+            true,
+            &root.join("project-create-audit.sqlite"),
+        )
+        .unwrap();
+        let host = root.join("host");
+        let args = json!({
+            "title":"Predeclared design", "author":"Local author",
+            "body":{"design":"observational","objective":"Measure outcome"}
+        });
+        let (creation, _) =
+            evidence_preview_at(&project, "protocol.create", "protocol", args, &host).unwrap();
+        let created = evidence_execute_pending(&creation, &project, &host)
+            .unwrap()
+            .0;
+        let protocol_id = created["data"]["protocol_id"].as_str().unwrap();
+        let request = json!({"protocol_id":protocol_id});
+        assert!(prepare(&project, "protocol.freeze_receipt", request.clone(), &host).is_err());
+        let (freeze, _) = evidence_preview_at(
+            &project,
+            "protocol.freeze",
+            "protocol",
+            json!({"protocol_id":protocol_id,"expected_version":1}),
+            &host,
+        )
+        .unwrap();
+        let frozen = evidence_execute_pending(&freeze, &project, &host)
+            .unwrap()
+            .0;
+        let snapshot = frozen["data"]["snapshot_sha256"].as_str().unwrap();
+        let (prepared, body) =
+            prepare(&project, "protocol.freeze_receipt", request.clone(), &host).unwrap();
+        let cloned_pending = prepared.clone();
+        assert_eq!(body["data"]["snapshot_sha256"], snapshot);
+        assert_eq!(body["data"]["written_to_disk"], false);
+        assert!(body["data"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("NOT externally verified preregistration"));
+        let destination = root.join("local-baseline.md");
+        assert!(!destination.exists());
+        assert!(save_for_screen(
+            &prepared,
+            &project,
+            destination.to_str().unwrap(),
+            &host,
+            "protocol.export"
+        )
+        .is_err());
+        assert!(!destination.exists());
+        assert!(save_for_screen(
+            &prepared,
+            &project,
+            root.join("wrong.pdf").to_str().unwrap(),
+            &host,
+            "protocol.freeze_receipt"
+        )
+        .is_err());
+        let saved = save_for_screen(
+            &prepared,
+            &project,
+            destination.to_str().unwrap(),
+            &host,
+            "protocol.freeze_receipt",
+        )
+        .unwrap();
+        assert_eq!(saved["written_to_disk"], true);
+        assert_eq!(saved["submission_performed"], false);
+        let bytes = fs::read(&destination).unwrap();
+        assert_eq!(hex::encode(Sha256::digest(&bytes)), saved["sha256"]);
+        assert!(String::from_utf8(bytes.clone()).unwrap().contains(snapshot));
+        assert!(save(&prepared, &project, destination.to_str().unwrap(), &host).is_err());
+        let replay_destination = root.join("replayed-local-baseline.md");
+        assert!(
+            save(
+                &cloned_pending,
+                &project,
+                replay_destination.to_str().unwrap(),
+                &host
+            )
+            .is_err(),
+            "a clone of a used preparation cannot write a second destination"
+        );
+        assert!(!replay_destination.exists());
+        assert_eq!(fs::read(&destination).unwrap(), bytes);
+
+        let (retryable, _) =
+            prepare(&project, "protocol.freeze_receipt", request.clone(), &host).unwrap();
+        assert!(save(&retryable, &project, destination.to_str().unwrap(), &host).is_err());
+        let after_existing_error = root.join("new-baseline-receipt.md");
+        assert!(
+            save(
+                &retryable,
+                &project,
+                after_existing_error.to_str().unwrap(),
+                &host
+            )
+            .is_ok(),
+            "a filename collision must not consume a preparation that wrote nothing"
+        );
+
+        let audit = AuditStore::open(host.join("operation-audit.sqlite")).unwrap();
+        assert!(audit
+            .events()
+            .unwrap()
+            .iter()
+            .any(|entry| entry.operation == "export.file_save"
+                && entry.effect == "sensitive-export"
+                && entry.status == "ok"));
+        drop(audit);
+
+        let (stale, _) =
+            prepare(&project, "protocol.freeze_receipt", request.clone(), &host).unwrap();
+        let (amend, _) = evidence_preview_at(
+            &project,
+            "protocol.amend",
+            "protocol",
+            json!({
+                "protocol_id":protocol_id,
+                "author":"Local author",
+                "rationale":"Declared post-baseline amendment",
+                "body":{"design":"observational","objective":"Measure outcome", "secondary":"Additional field"}
+            }),
+            &host,
+        ).unwrap();
+        evidence_execute_pending(&amend, &project, &host).unwrap();
+        let stale_destination = root.join("stale-baseline.md");
+        assert!(save(&stale, &project, stale_destination.to_str().unwrap(), &host).is_err());
+        assert!(!stale_destination.exists());
+        let (_, newer) = prepare(&project, "protocol.freeze_receipt", request, &host).unwrap();
+        assert_eq!(newer["data"]["snapshot_sha256"], snapshot);
+        assert!(newer["data"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("\"post_freeze_amendment_versions\": 1"));
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn analysis_report_markdown_is_verified_on_prepare_and_one_use_physical_save() {
+        let root = std::env::temp_dir().join(format!("rw-physical-report-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let project = root.join("study");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Report export",
+            true,
+            &root.join("project-create-audit.sqlite"),
+        )
+        .unwrap();
+        let source = root.join("measurements.csv");
+        fs::write(&source, b"score,group\n1,A\n3,A\n5,B\n").unwrap();
+        let host = root.join("host");
+        let (import, preview) =
+            analysis_preview_import_at(&project, source.to_str().unwrap(), &host).unwrap();
+        assert_eq!(preview["data"]["preview"], true);
+        let imported = analysis_execute_pending(&import, &project, &host).unwrap();
+        let arguments = json!({
+            "operation":"statistics.describe",
+            "arguments":{
+                "dataset_id":imported["data"]["dataset_id"],
+                "revision":imported["data"]["revision"],
+                "column":"score"
+            }
+        });
+        let (result_pending, analysis_preview) =
+            analysis_preview_command_at(&project, "analysis.result.save", arguments, &host)
+                .unwrap();
+        assert_eq!(analysis_preview["data"]["preview"], true);
+        let result_record =
+            analysis_execute_command_pending(&result_pending, &project, &host).unwrap();
+        let result_id = result_record["data"]["result_id"].as_str().unwrap();
+
+        let report_args = json!({
+            "title":"Verified descriptive report",
+            "result_ids":[result_id]
+        });
+        let (prepared, report) = prepare(
+            &project,
+            "analysis.report.render",
+            report_args.clone(),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(report["data"]["scientific_interpretation_generated"], false);
+        assert_eq!(report["data"]["written_to_disk"], false);
+        assert_eq!(report["data"]["manifest"]["result_ids"][0], result_id);
+        assert!(report["data"]["text"]
+            .as_str()
+            .unwrap()
+            .contains("## 1. `statistics.describe`"));
+        assert_eq!(prepared.extension, "md");
+
+        let destination = root.join("verified-report.md");
+        assert!(!destination.exists(), "preparation must not write a file");
+        assert!(save_for_screen(
+            &prepared,
+            &project,
+            destination.to_str().unwrap(),
+            &host,
+            "writing.manuscript_export"
+        )
+        .is_err());
+        assert!(!destination.exists());
+        assert!(save(
+            &prepared,
+            &project,
+            root.join("wrong.pdf").to_str().unwrap(),
+            &host
+        )
+        .is_err());
+        assert!(!root.join("wrong.pdf").exists());
+
+        let receipt = save_for_screen(
+            &prepared,
+            &project,
+            destination.to_str().unwrap(),
+            &host,
+            "analysis.report.render",
+        )
+        .unwrap();
+        assert_eq!(receipt["written_to_disk"], true);
+        assert_eq!(receipt["submission_performed"], false);
+        assert_eq!(receipt["no_overwrite"], true);
+        let body = fs::read_to_string(&destination).unwrap();
+        assert!(body.contains("Verified descriptive report"));
+        assert!(body.contains("statistics.describe"));
+        assert!(body.contains("Dataset revision:"));
+        assert_eq!(
+            hex::encode(Sha256::digest(body.as_bytes())),
+            prepared.sha256
+        );
+        assert!(save(&prepared, &project, destination.to_str().unwrap(), &host).is_err());
+        assert_eq!(fs::read_to_string(&destination).unwrap(), body);
+
+        let (stale, _) = prepare(&project, "analysis.report.render", report_args, &host).unwrap();
+        let (next, _) = evidence_preview_at(
+            &project,
+            "protocol.create",
+            "protocol",
+            json!({"title":"Revised protocol", "author":"Investigator",
+                "body":{"design":"observational","objective":"Observe score"}}),
+            &host,
+        )
+        .unwrap();
+        evidence_execute_pending(&next, &project, &host).unwrap();
+        let stale_destination = root.join("stale.md");
+        assert!(save(&stale, &project, stale_destination.to_str().unwrap(), &host).is_err());
+        assert!(
+            !stale_destination.exists(),
+            "stale report must not create a file"
+        );
+
+        let audit = AuditStore::open(host.join("operation-audit.sqlite")).unwrap();
+        let records = audit.events().unwrap();
+        assert!(records.iter().any(|record| {
+            record.operation == "export.file_save"
+                && record.effect == "sensitive-export"
+                && record.status == "ok"
+        }));
+        drop(audit);
+        fs::remove_dir_all(root).unwrap();
     }
 
     #[test]

@@ -207,6 +207,7 @@ export component MainWindow inherits Window {
     in-out property <float> progress: 0;
     in-out property <string> project-title: "No project selected";
     in-out property <int> project-revision: 0;
+    in-out property <string> project-local-path: "";
     in-out property <string> status: "Offline ready";
     in-out property <string> durable-jobs: "No completed PDF operations";
     in-out property <string> durable-notifications: "No notifications";
@@ -239,6 +240,9 @@ export component MainWindow inherits Window {
     in-out property <string> protocol-results: "Preview a protocol before recording it.";
     in-out property <string> protocol-export-receipt: "";
     in-out property <string> protocol-export-id: "";
+    in-out property <string> protocol-freeze-status: "No local freeze inspected. A local digest and computer timestamp are not an external preregistration.";
+    in-out property <string> protocol-freeze-summary: "No local baseline inspected yet.";
+    in-out property <string> protocol-freeze-export-receipt: "";
     in-out property <string> reference-results: "Register or inspect project references.";
     in-out property <string> review-results: "Use persisted references to build and screen a review.";
     in-out property <string> extraction-results: "Create a versioned extraction schema, then record validated values for a review record.";
@@ -250,6 +254,8 @@ export component MainWindow inherits Window {
     in-out property <bool> show-statistics-technical-details: false;
     in-out property <string> variable-results: "Inspect variable metadata, missingness and quality before creating a revised immutable dataset.";
     in-out property <string> analysis-report-results: "Persist verified statistical outputs, reload them by digest, and compose deterministic provenance reports.";
+    in-out property <string> selected-analysis-result-id: "";
+    in-out property <string> analysis-report-selected-ids: "";
     in-out property <string> mixed-methods-results: "Combine an immutable dataset revision with persisted qualitative case mappings. Caller-supplied coding provenance is not accepted.";
     in-out property <string> writing-results: "Preview and save a versioned manuscript section.";
     in-out property <string> agent-results: "Durable project-scoped assistant conversations and prompt templates are available offline.";
@@ -302,6 +308,8 @@ export component MainWindow inherits Window {
     in-out property <string> backup-results: "Open a project, then choose an absolute archive path.";
     in-out property <string> recovery-results: "Restore always creates a new project directory.";
     in-out property <string> command-results: "Search views, resources, settings and help";
+    in-out property <[string]> recent-project-options: [];
+    in-out property <int> recent-project-index: 0;
 
     callback load-pdf(string, string, int);
     callback find-next-pdf(string, string, int);
@@ -309,6 +317,9 @@ export component MainWindow inherits Window {
     callback create-project(string, string);
     callback create-default-project(string);
     callback open-project(string);
+    callback open-recent-project(int);
+    callback forget-recent-project(int);
+    callback choose-project-folder();
     callback start-job();
     callback run-command(string);
     callback query-command(string) -> string;
@@ -323,6 +334,10 @@ export component MainWindow inherits Window {
     callback preview-question(string, string, string, string);
     callback preview-protocol(string, string, string, string);
     callback preview-protocol-amend(string, string, string, string, string);
+    callback preview-protocol-freeze(string);
+    callback record-protocol-freeze();
+    callback inspect-protocol-freeze(string);
+    callback load-protocol-freeze-receipt(string);
     callback apply-evidence-preview();
     callback load-question-history(string);
     callback load-protocol-history(string);
@@ -353,6 +368,7 @@ export component MainWindow inherits Window {
     callback apply-analysis-command-preview();
     callback load-analysis-result(string);
     callback render-analysis-report(string, string);
+    callback prepare-analysis-report-file(string, string);
     callback export-analysis-script(string);
     callback run-mixed-joint-display(string, string, string, string, string, string);
     callback preview-writing-section(string, string, string, string);
@@ -823,13 +839,51 @@ export component MainWindow inherits Window {
                                         accessible-description: "Create a private local project without choosing a filesystem path";
                                         clicked => { root.create-default-project(project-name.text); }
                                     }
+                                    if root.recent-project-options.length > 0: VerticalLayout {
+                                        spacing: 6px;
+                                        Text {
+                                            text: "CONTINUE A RECENT PROJECT";
+                                            color: Theme.muted-ink;
+                                            font-size: 10px * Theme.ui-scale / 100;
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            ComboBox {
+                                                model: root.recent-project-options;
+                                                current-index <=> root.recent-project-index;
+                                                accessible-label: "Recent local projects";
+                                                accessible-description: "Select a previously opened project. Its original location will be checked before opening.";
+                                                horizontal-stretch: 1;
+                                            }
+                                            Button {
+                                                text: "Reopen";
+                                                accessible-label: "Reopen selected recent project";
+                                                accessible-description: "Reopen the selected local project and verify its current on-disk metadata";
+                                                clicked => { root.open-recent-project(root.recent-project-index); }
+                                            }
+                                            Button {
+                                                text: "Forget";
+                                                accessible-label: "Forget selected recent project shortcut";
+                                                accessible-description: "Remove only the selected shortcut from this device. Do not change or delete any actual research project folder.";
+                                                clicked => { root.forget-recent-project(root.recent-project-index); }
+                                            }
+                                        }
+                                    }
                                     Text { text: "CUSTOM LOCATION"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     Text { text: "PROJECT LOCATION"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     project-path := LineEdit {
                                         placeholder-text: "Absolute project folder path";
+                                        text <=> root.project-local-path;
                                         accessible-id: "project-path";
                                         accessible-label: "Project path";
                                         accessible-description: "Absolute directory path for creating or opening a local project";
+                                    }
+                                    Button {
+                                        text: root.local-file-dialog-busy ? "Choosing a local folder…" : "Browse local folders…";
+                                        accessible-label: "Choose project folder with native dialog";
+                                        accessible-description: "Choose an existing ResearchWeave project to open or a parent folder for a new project subfolder. Review the resulting path before creating; Cancel preserves the typed path.";
+                                        enabled: !root.local-file-dialog-busy;
+                                        clicked => { root.choose-project-folder(); }
                                     }
                                     Text { text: "PROJECT TITLE"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     project-name := LineEdit {
@@ -1417,7 +1471,84 @@ export component MainWindow inherits Window {
                                 clicked => { root.preview-protocol-amend(protocol-id.text, protocol-design.text, protocol-objective.text, protocol-author.text, protocol-rationale.text); }
                             }
                             Text { text: "Amendments preserve all existing protocol-body fields, changing only nonempty design/objective inputs. A blank input keeps its previous value. Preview before recording; all earlier versions remain available."; color: Theme.muted-ink; wrap: word-wrap; }
-                            Text { text: root.protocol-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Protocol operation result"; }
+                            Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text { text: "LOCAL BASELINE FREEZE"; color: Theme.ink; font-weight: 700; }
+                                    Text {
+                                        text: "Freeze one existing protocol version with an auditable local event and SHA-256 receipt. Later amendments remain explicitly visible. This does not register or timestamp the protocol with an independent service.";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: root.protocol-freeze-summary;
+                                        color: Theme.ink;
+                                        font-weight: 600;
+                                        wrap: word-wrap;
+                                        accessible-label: "Protocol freeze summary " + root.protocol-freeze-summary;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Preview freeze";
+                                            accessible-label: "Preview local protocol baseline freeze";
+                                            clicked => { root.preview-protocol-freeze(protocol-id.text); }
+                                        }
+                                        Button {
+                                            text: "Record freeze";
+                                            accessible-label: "Record previewed local protocol baseline freeze";
+                                            clicked => { root.record-protocol-freeze(); }
+                                        }
+                                    }
+                                    Button {
+                                        text: "Inspect frozen baseline";
+                                        accessible-label: "Inspect local protocol freeze receipt";
+                                        clicked => { root.inspect-protocol-freeze(protocol-id.text); }
+                                    }
+                                    Button {
+                                        text: "Prepare baseline receipt .md";
+                                        accessible-label: "Prepare local protocol baseline receipt Markdown";
+                                        clicked => { root.load-protocol-freeze-receipt(protocol-id.text); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        protocol-freeze-save-path := LineEdit {
+                                            horizontal-stretch: 1;
+                                            accessible-label: "Local protocol baseline receipt destination path";
+                                            placeholder-text: "Absolute destination ending in .md";
+                                        }
+                                        Button {
+                                            text: "Save verified receipt";
+                                            accessible-label: "Save verified local baseline receipt without overwrite";
+                                            clicked => { root.save-prepared-export(protocol-freeze-save-path.text, "protocol.freeze_receipt"); }
+                                        }
+                                    }
+                                    Text {
+                                        text: "Prepare and review the persisted baseline first. File Save is separately approval-audited, revalidates the current project revision, and never overwrites an existing file.";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: root.protocol-freeze-export-receipt;
+                                        visible: root.protocol-freeze-export-receipt != "";
+                                        color: Theme.ink;
+                                        wrap: word-wrap;
+                                        accessible-label: "Local protocol baseline file receipt " + root.protocol-freeze-export-receipt;
+                                    }
+                                    Text {
+                                        text: root.protocol-freeze-status;
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                        accessible-label: "Protocol local freeze status " + root.protocol-freeze-status;
+                                    }
+                                }
+                            }
+                            Text { text: root.protocol-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Protocol operation result " + root.protocol-results; }
                             Rectangle { vertical-stretch: 1; }
                           }
                         }
@@ -2052,17 +2183,41 @@ export component MainWindow inherits Window {
                                             Text { text: "Inspect, replay & report"; color: Theme.ink; font-size: 14px * Theme.ui-scale / 100; font-weight: 600; }
                                             HorizontalLayout {
                                                 spacing: 6px;
-                                                result-id := LineEdit { placeholder-text: "Result ID"; accessible-label: "Analysis Results result ID"; }
+                                                result-id := LineEdit { text <=> root.selected-analysis-result-id; placeholder-text: "Result ID"; accessible-label: "Analysis Results result ID"; }
                                                 Button { text: "Load"; accessible-label: "Load verified analysis result"; clicked => { root.load-analysis-result(result-id.text); } }
                                                 Button { text: "Replay"; accessible-label: "Export analysis replay script"; clicked => { root.export-analysis-script(result-id.text); } }
                                             }
                                             report-title := LineEdit { text: "Analysis report"; placeholder-text: "Report title"; accessible-label: "Analysis report title"; }
                                             HorizontalLayout {
                                                 spacing: 6px;
-                                                report-result-ids := LineEdit { placeholder-text: "Comma-separated result IDs"; accessible-label: "Analysis report result IDs"; }
+                                                report-result-ids := LineEdit { text <=> root.analysis-report-selected-ids; placeholder-text: "Comma-separated result IDs"; accessible-label: "Analysis report result IDs"; }
                                                 Button { text: "Render report"; accessible-label: "Render verified analysis report"; clicked => { root.render-analysis-report(report-title.text, report-result-ids.text); } }
                                             }
+                                            Button {
+                                                text: "Use selected result";
+                                                accessible-label: "Use selected immutable result in analysis report";
+                                                enabled: root.selected-analysis-result-id != "";
+                                                clicked => { root.analysis-report-selected-ids = root.selected-analysis-result-id; }
+                                            }
+                                            Button {
+                                                text: "Prepare report Markdown";
+                                                accessible-label: "Prepare verified analysis report Markdown file";
+                                                clicked => { root.prepare-analysis-report-file(report-title.text, report-result-ids.text); }
+                                            }
                                         }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    report-save-path := LineEdit {
+                                        horizontal-stretch: 1;
+                                        accessible-label: "Analysis report export destination path";
+                                        placeholder-text: "Absolute filename ending in .md";
+                                    }
+                                    Button {
+                                        text: "Save prepared report";
+                                        accessible-label: "Save prepared analysis report without overwrite";
+                                        clicked => { root.save-prepared-export(report-save-path.text, "analysis.report.render"); }
                                     }
                                 }
                                 Rectangle {

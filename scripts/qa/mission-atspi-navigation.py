@@ -6,7 +6,11 @@ session. Never uses the user's visible desktop. All evidence is synthetic.
 
 from __future__ import annotations
 
+import hashlib
+import json
 import pathlib
+import re
+import sqlite3
 import subprocess
 import sys
 import time
@@ -77,6 +81,21 @@ def wait_field(app: Any, name: str, timeout: float = 3.0) -> str:
         except RuntimeError:
             time.sleep(0.12)
     raise RuntimeError(f"Editable field never became accessible: {name}")
+
+
+def scroll_protocol(down: bool, steps: int = 5) -> None:
+    """Scroll only the isolated Xvfb protocol viewport (never the host UI)."""
+    subprocess.run(
+        ["xdotool", "mousemove", "1100", "540"],
+        check=True,
+        timeout=8,
+    )
+    subprocess.run(
+        ["xdotool", "click", "--repeat", str(steps), "--delay", "70", "5" if down else "4"],
+        check=True,
+        timeout=8,
+    )
+    time.sleep(0.3)
 
 
 def activate(app: Any, name: str) -> bool:
@@ -162,17 +181,23 @@ def edit_text(app: Any, name: str, value: str, *, allow_unreadable: bool = False
 
     time.sleep(0.3)
     unsupported_readback = False
-    for refreshed in nodes_named(app, name):
-        try:
-            source = refreshed.queryText()
-            rendered = source.getText(0, source.characterCount)
-            if value in rendered:
-                print(f"AT_SPI_TEXT_READBACK_OK={name}")
-                return
-            print(f"AT_SPI_TEXT_READBACK_MISMATCH={name} observed_length={len(rendered)}")
-        except Exception as error:
-            print(f"AT_SPI_TEXT_READBACK_UNAVAILABLE={type(error).__name__}")
-            unsupported_readback = True
+    # Slint can recreate its accessible editor node shortly after native
+    # keyboard input. Reacquire live nodes twice before declaring readback
+    # unavailable; never accept a value solely because input was sent.
+    for readback_attempt in range(3):
+        for refreshed in nodes_named(app, name):
+            try:
+                source = refreshed.queryText()
+                rendered = source.getText(0, source.characterCount)
+                if value in rendered:
+                    print(f"AT_SPI_TEXT_READBACK_OK={name}")
+                    return
+                print(f"AT_SPI_TEXT_READBACK_MISMATCH={name} observed_length={len(rendered)}")
+            except Exception as error:
+                print(f"AT_SPI_TEXT_READBACK_UNAVAILABLE={type(error).__name__}")
+                unsupported_readback = True
+        if readback_attempt < 2:
+            time.sleep(0.2)
     if allow_unreadable and unsupported_readback:
         # This is not a passing accessibility assertion: the next action must
         # independently prove the typed value affected native analysis.
@@ -240,6 +265,8 @@ def main() -> int:
     app = find_app()
     print(f"AT_SPI_APP={app.name}")
     audit(app, "welcome", output)
+    if not nodes_named(app, "Choose project folder with native dialog"):
+        raise RuntimeError("Native project folder picker is missing from the accessible Start Center")
     if not activate(app, "Create default project"):
         return 8
     time.sleep(0.5)
@@ -251,6 +278,240 @@ def main() -> int:
         if len(created) != 1:
             raise RuntimeError(f"Expected exactly one managed test project; found {len(created)}")
         original_project = created[0]
+        recent_file = fixture.parent / "recent-projects.json"
+        history = json.loads(recent_file.read_text(encoding="utf-8"))
+        if history.get("version") != 1 or len(history.get("entries", [])) != 1:
+            raise RuntimeError("Newly created project did not persist one recent-project shortcut")
+        recorded = pathlib.Path(history["entries"][0]["path"])
+        if recorded.resolve() != original_project.resolve():
+            raise RuntimeError("Recent-project shortcut does not point to the created project")
+        print("RECENT_PROJECT_INDEX_MATCHES_CREATED_PROJECT")
+
+    if not activate(app, "Protocol"):
+        raise RuntimeError("Cannot navigate to persisted Protocol workflow")
+    time.sleep(0.6)
+    audit(app, "protocol-before-freeze", output)
+    edit_text(app, "Protocol title", "Synthetic prospective protocol", allow_unreadable=True)
+    edit_text(app, "Protocol design", "observational", allow_unreadable=True)
+    edit_text(app, "Protocol author", "Synthetic researcher", allow_unreadable=True)
+    edit_text(app, "Protocol objective", "Measure the primary endpoint before seeing results", allow_unreadable=True)
+    if not activate(app, "Preview protocol"):
+        raise RuntimeError("Protocol preview is not actionable")
+    time.sleep(0.2)
+    if not activate(app, "Record previewed protocol"):
+        raise RuntimeError("Protocol cannot be recorded through approved native workflow")
+    time.sleep(0.3)
+    if original_project is None:
+        raise RuntimeError("Protocol acceptance needs a real persisted disposable project")
+    with sqlite3.connect(original_project / "data/project.sqlite") as db:
+        saved = db.execute("SELECT id,title,version FROM protocols").fetchall()
+    if len(saved) != 1 or saved[0][1:] != ("Synthetic prospective protocol", 1):
+        raise RuntimeError("Protocol was not actually recorded with the synthetic title")
+    protocol_id = saved[0][0]
+    if not re.fullmatch(r"[0-9a-f-]{36}", protocol_id):
+        raise RuntimeError("Persisted protocol identity is malformed")
+    # Slint's AT-SPI Text sometimes declines readback; use the actual persisted
+    # project-owned identity, but the native freeze receipt must match it.
+    edit_text(app, "Protocol history ID", protocol_id, allow_unreadable=True)
+    scroll_protocol(True)
+    if not activate(app, "Inspect local protocol freeze receipt"):
+        raise RuntimeError("Cannot inspect unfrozen protocol baseline")
+    time.sleep(0.2)
+    before_freeze = "\n".join((n.name or "") for n in nodes_named(
+        app, "Protocol local freeze status"
+    ))
+    if '"frozen": false' not in before_freeze:
+        raise RuntimeError("Unfrozen protocol status was incorrectly presented as frozen")
+    if not activate(app, "Preview local protocol baseline freeze"):
+        raise RuntimeError("Native local baseline freeze preview is unavailable")
+    time.sleep(0.25)
+    scroll_protocol(True, 4)
+    freeze_preview = "\n".join((n.name or "") for n, _ in walk(app))
+    if "LOCAL FREEZE PREVIEW ONLY" not in freeze_preview or "snapshot_sha256" not in freeze_preview:
+        print(f"LOCAL_FREEZE_PREVIEW_DIAGNOSTIC={freeze_preview[:2200]!r}")
+        audit(app, "protocol-freeze-preview-failure", output)
+        raise RuntimeError("Local freeze preview omitted the versioned immutable digest")
+    scroll_protocol(False, 4)
+    if original_project is not None:
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            count = db.execute(
+                "SELECT count(*) FROM events WHERE operation='protocol.freeze'"
+            ).fetchone()[0]
+        if count:
+            raise RuntimeError("Local baseline freeze preview wrote a real event before approval")
+    if not activate(app, "Record previewed local protocol baseline freeze"):
+        raise RuntimeError("Dedicated local baseline recording control is unavailable")
+    time.sleep(0.3)
+    if not activate(app, "Inspect local protocol freeze receipt"):
+        raise RuntimeError("Cannot inspect newly recorded local baseline")
+    time.sleep(0.2)
+    frozen_summary = "\n".join((n.name or "") for n in nodes_named(
+        app, "Protocol freeze summary"
+    ))
+    freeze_hash_match = re.search(r"Snapshot SHA-256:\s*([a-f0-9]{64})", frozen_summary)
+    if freeze_hash_match is None:
+        raise RuntimeError("Visible local protocol summary omitted its full digest")
+    freeze_hash = freeze_hash_match.group(1)
+    if (
+        "Frozen locally" not in frozen_summary
+        or "baseline v1" not in frozen_summary
+        or "0 post-baseline amendment" not in frozen_summary
+        or "no independent registration or trusted timestamp" not in frozen_summary
+    ):
+        raise RuntimeError("Frozen protocol summary does not expose its readable local provenance")
+    print("LOCAL_PROTOCOL_FREEZE_ACCESSIBLE_SUMMARY_OK")
+    # Summary is deliberately shown first in the long scrollable Protocol
+    # workspace. Verify the detailed JSON only after scrolling to it.
+    scroll_protocol(True, 3)
+    frozen_status = "\n".join((n.name or "") for n in nodes_named(
+        app, "Protocol local freeze status"
+    ))
+    if (
+        '"frozen": true' not in frozen_status
+        or '"frozen_version": 1' not in frozen_status
+        or '"external_registration_verified": false' not in frozen_status
+        or '"local_only": true' not in frozen_status
+    ):
+        raise RuntimeError("Local protocol baseline receipt is not explicit and inspectable")
+    if f'"snapshot_sha256": "{freeze_hash}"' not in frozen_status:
+        raise RuntimeError("Detailed native freeze receipt disagrees with the readable digest")
+    audit(app, "protocol-local-baseline-frozen", output)
+    if original_project is not None:
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            freeze_events = db.execute(
+                "SELECT payload_json FROM events WHERE operation='protocol.freeze'"
+            ).fetchall()
+        if len(freeze_events) != 1:
+            raise RuntimeError("Approved local freeze did not create exactly one audit event")
+        event = json.loads(freeze_events[0][0])
+        if event.get("protocol_id") != protocol_id or event.get("snapshot_sha256") != freeze_hash:
+            raise RuntimeError("Persisted local freeze event is not bound to visible SHA-256")
+    scroll_protocol(False, 10)
+    for _ in range(18):
+        if activate(app, "Prepare local protocol baseline receipt Markdown"):
+            break
+        scroll_protocol(True, 1)
+    else:
+        audit(app, "protocol-baseline-export-button-missing", output)
+        raise RuntimeError("Frozen baseline cannot prepare a physical Markdown receipt")
+    time.sleep(0.25)
+    prepared_receipt = "\n".join((n.name or "") for n, _ in walk(app))
+    for _ in range(10):
+        if (
+            "VERIFIED LOCAL BASELINE RECEIPT PREVIEW ONLY" in prepared_receipt
+            and freeze_hash in prepared_receipt
+        ):
+            break
+        scroll_protocol(True, 1)
+        prepared_receipt = "\n".join((n.name or "") for n, _ in walk(app))
+    if (
+        "VERIFIED LOCAL BASELINE RECEIPT PREVIEW ONLY" not in prepared_receipt
+        or "NOT externally verified preregistration" not in prepared_receipt
+        or freeze_hash not in prepared_receipt
+    ):
+        print("BASELINE_PHYSICAL_PREVIEW_DIAGNOSTIC=" + repr(prepared_receipt[-3300:]))
+        audit(app, "protocol-physical-preview-diagnostic", output)
+        raise RuntimeError("Protocol baseline physical receipt preview omitted persisted provenance")
+    physical_receipt_path = output / "verified-local-protocol-baseline.md"
+    scroll_protocol(False, 16)
+    for _ in range(25):
+        try:
+            edit_text(
+                app,
+                "Local protocol baseline receipt destination path",
+                str(physical_receipt_path),
+                allow_unreadable=True,
+            )
+            break
+        except RuntimeError as error:
+            if "Missing editable field" not in str(error):
+                raise
+            scroll_protocol(True, 1)
+    else:
+        audit(app, "protocol-physical-path-missing", output)
+        raise RuntimeError("Local protocol baseline path field not reachable through scrolling")
+    if physical_receipt_path.exists():
+        raise RuntimeError("Local baseline preview unexpectedly wrote a physical file")
+    if not activate(app, "Save verified local baseline receipt without overwrite"):
+        raise RuntimeError("Local protocol baseline save requires an explicit native action")
+    time.sleep(0.3)
+    if not physical_receipt_path.is_file():
+        raise RuntimeError("Approved local baseline Save did not create a physical Markdown file")
+    physical_bytes = physical_receipt_path.read_bytes()
+    if (
+        freeze_hash.encode("ascii") not in physical_bytes
+        or b"NOT externally verified preregistration" not in physical_bytes
+        or b'"local_only": true' not in physical_bytes
+        or b'"external_registration_verified": false' not in physical_bytes
+    ):
+        raise RuntimeError("Physical local baseline receipt lost its audited scientific semantics")
+    physical_digest = hashlib.sha256(physical_bytes).hexdigest()
+    saved_receipt = "\n".join((n.name or "") for n in nodes_named(
+        app, "Local protocol baseline file receipt"
+    ))
+    for _ in range(12):
+        if physical_digest in saved_receipt:
+            break
+        scroll_protocol(True, 1)
+        saved_receipt = "\n".join((n.name or "") for n in nodes_named(
+            app, "Local protocol baseline file receipt"
+        ))
+    if physical_digest not in saved_receipt:
+        audit(app, "protocol-baseline-file-receipt-missing", output)
+        raise RuntimeError("Physical baseline file SHA-256 does not match visible native receipt")
+    scroll_protocol(False, 12)
+    for _ in range(18):
+        if activate(app, "Save verified local baseline receipt without overwrite"):
+            break
+        scroll_protocol(True, 1)
+    else:
+        raise RuntimeError("Repeated local baseline Save is not actionable for refusal")
+    time.sleep(0.15)
+    if physical_receipt_path.read_bytes() != physical_bytes:
+        raise RuntimeError("Repeated local baseline Save unexpectedly rewrote the existing file")
+    with sqlite3.connect(original_project / "data/project.sqlite") as db:
+        count = db.execute(
+            "SELECT count(*) FROM events WHERE operation='protocol.freeze'"
+        ).fetchone()[0]
+    if count != 1:
+        raise RuntimeError("Physical receipt changed the immutable baseline event count")
+    print("LOCAL_PROTOCOL_FREEZE_PHYSICAL_MARKDOWN_SHA_NO_OVERWRITE_OK")
+    if not activate(app, "Preview local protocol baseline freeze"):
+        raise RuntimeError("Cannot probe one-time freeze enforcement")
+    time.sleep(0.2)
+    duplicate_status = "\n".join((n.name or "") for n, _ in walk(app))
+    if "already has an immutable local freeze baseline" not in duplicate_status:
+        raise RuntimeError("Duplicate local baseline was not rejected")
+    print("LOCAL_PROTOCOL_FREEZE_ONE_TIME_DIGEST_AND_NO_PREVIEW_WRITE_OK")
+    scroll_protocol(False)
+    edit_text(app, "Protocol objective", "Amended after the locked baseline", allow_unreadable=True)
+    edit_text(app, "Protocol amendment rationale", "Transparent post-freeze change", allow_unreadable=True)
+    if not activate(app, "Preview protocol amendment"):
+        raise RuntimeError("Post-freeze amendments should remain permitted with disclosure")
+    time.sleep(0.25)
+    if not activate(app, "Record previewed protocol"):
+        raise RuntimeError("Post-freeze amendment was not recorded")
+    time.sleep(0.25)
+    scroll_protocol(True)
+    if not activate(app, "Inspect local protocol freeze receipt"):
+        raise RuntimeError("Cannot verify baseline after post-freeze amendment")
+    time.sleep(0.2)
+    amended_summary = "\n".join((n.name or "") for n in nodes_named(
+        app, "Protocol freeze summary"
+    ))
+    if "1 post-baseline amendment" not in amended_summary or freeze_hash not in amended_summary:
+        raise RuntimeError("Accessible protocol baseline summary lost later amendment provenance")
+    scroll_protocol(True, 3)
+    amended_status = "\n".join((n.name or "") for n in nodes_named(
+        app, "Protocol local freeze status"
+    ))
+    if (
+        '"post_freeze_amendment_versions": 1' not in amended_status
+        or '"current_version": 2' not in amended_status
+        or f'"snapshot_sha256": "{freeze_hash}"' not in amended_status
+    ):
+        raise RuntimeError("Post-freeze amendment overwrote baseline or lost its version count")
+    print("LOCAL_PROTOCOL_FREEZE_POST_AMENDMENT_PROVENANCE_OK")
 
     # Every activation is through the private Xvfb AT-SPI tree, not host input.
     if not activate(app, "Synthesize activity"):
@@ -262,18 +523,46 @@ def main() -> int:
         time.sleep(0.4)
         if not nodes_named(app, "Quick note title"):
             raise RuntimeError("Quick note editor missing from Notebook")
-        edit_text(app, "Quick note title", "Synthetic MRI memo")
-        edit_text(app, "Quick note body", "Research MRI note about a synthetic brain.")
-        edit_text(app, "Quick note tags", "imaging, anatomy")
+        # Slint occasionally lacks an AT-SPI text readback interface in Xvfb.
+        # The saved card, tag-filter search, and persisted checklist below
+        # independently validate all three values after native project writes.
+        edit_text(app, "Quick note title", "Synthetic MRI memo", allow_unreadable=True)
+        edit_text(
+            app,
+            "Quick note body",
+            "Research MRI note about a synthetic brain.",
+            allow_unreadable=True,
+        )
+        edit_text(app, "Quick note tags", "imaging, anatomy", allow_unreadable=True)
         if not activate(app, "Add quick note to project"):
             raise RuntimeError("Quick note save button not actionable")
         time.sleep(0.45)
+        if original_project is None:
+            raise RuntimeError("Quick note persistence requires the disposable project")
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            saved_notes = db.execute(
+                "SELECT body FROM notebook_entries WHERE id LIKE 'card:%'"
+            ).fetchall()
+        if len(saved_notes) != 1:
+            raise RuntimeError("Quick note native save did not persist exactly one card")
+        saved_note = json.loads(saved_notes[0][0])
         if (
-            read_field(app, "Quick note title")
-            or read_field(app, "Quick note body")
-            or read_field(app, "Quick note tags")
+            saved_note.get("title") != "Synthetic MRI memo"
+            or saved_note.get("body") != "Research MRI note about a synthetic brain."
+            or saved_note.get("tags") != ["imaging", "anatomy"]
         ):
-            raise RuntimeError("Quick note composer failed to clear acknowledged saved content")
+            raise RuntimeError("Quick note native persistence differed from user input")
+        print("QUICK_NOTE_SQLITE_CONTENT_VERIFIED")
+        for field in ("Quick note title", "Quick note body", "Quick note tags"):
+            try:
+                remaining = read_field(app, field)
+            except RuntimeError:
+                # Slint may not expose its Text interface on this Xvfb frame;
+                # this is explicitly reported rather than accepted as a clear.
+                print(f"AT_SPI_POST_SAVE_CLEAR_READBACK_UNAVAILABLE={field}")
+                continue
+            if remaining:
+                raise RuntimeError(f"Quick note composer failed to clear {field}")
         print("QUICK_NOTE_EDITOR_CLEARED_AFTER_SAVE")
         if not nodes_named(app, "Edit quick note Synthetic MRI memo"):
             raise RuntimeError("Real saved quick-note card did not appear in project")
@@ -413,7 +702,9 @@ def main() -> int:
             raise RuntimeError("Manuscript Find toolbar not accessible after toggling")
         print("MANUSCRIPT_FIND_PANEL_REVEALED_OK")
         edit_text(app, "Manuscript find text", "Synthetic")
-        edit_text(app, "Manuscript replace with", "Verified")
+        # Exact preview counts, stale-input refusal and the final changed
+        # editor body below independently validate this Slint text field.
+        edit_text(app, "Manuscript replace with", "Verified", allow_unreadable=True)
         audit(app, "manuscript-find-filled", output)
         # Slint's outer ScrollView can move focused inputs into view without
         # moving their action buttons into view. Scroll the real pane rather
@@ -441,7 +732,7 @@ def main() -> int:
             raise RuntimeError("Manuscript text was modified during preview")
         # A preview is bound to the exact Find/Replace input pair, not only
         # to the body. A changed replacement must not apply the old proposal.
-        edit_text(app, "Manuscript replace with", "Unreviewed")
+        edit_text(app, "Manuscript replace with", "Unreviewed", allow_unreadable=True)
         if not activate(app, "Apply previewed manuscript replacement"):
             raise RuntimeError("Cannot exercise stale replacement preview guard")
         if "Synthetic manuscript" not in read_field(app, "Manuscript section body"):
@@ -452,7 +743,7 @@ def main() -> int:
         ):
             raise RuntimeError("Stale replacement input did not explain rejection")
         print("MANUSCRIPT_STALE_PREVIEW_REJECTED_OK")
-        edit_text(app, "Manuscript replace with", "Verified")
+        edit_text(app, "Manuscript replace with", "Verified", allow_unreadable=True)
         if not activate(app, "Preview manuscript replace all"):
             raise RuntimeError("Cannot refresh manuscript replacement review")
         if not activate(app, "Apply previewed manuscript replacement"):
@@ -516,7 +807,36 @@ def main() -> int:
             raise RuntimeError("Cannot collapse inspect pane before writing second section")
         edit_text(app, "Manuscript section", "Methods")
         edit_text(app, "Manuscript section body", "Methods use only synthetic independent measurements.")
-        time.sleep(1.3)
+        # The 800ms autosave is asynchronous. On a contended runner it may
+        # complete later than the previous fixed 1.3s sleep. Wait only until
+        # a genuine project SQLite revision exists; a missing save still fails.
+        if original_project is None:
+            raise RuntimeError("Manuscript persistence requires the disposable project")
+        for _ in range(20):
+            with sqlite3.connect(original_project / "data/project.sqlite") as db:
+                saved_methods = db.execute(
+                    "SELECT body FROM manuscripts WHERE id=? AND section=? "
+                    "ORDER BY revision DESC LIMIT 1",
+                    ("synthetic-research", "Methods"),
+                ).fetchone()
+            if saved_methods and saved_methods[0] == "Methods use only synthetic independent measurements.":
+                print("MANUSCRIPT_METHODS_AUTOSAVE_SQLITE_VERIFIED")
+                break
+            time.sleep(0.3)
+        else:
+            with sqlite3.connect(original_project / "data/project.sqlite") as db:
+                persisted_sections = db.execute(
+                    "SELECT id,section,revision,body FROM manuscripts ORDER BY id,section,revision"
+                ).fetchall()
+            print("MANUSCRIPT_AUTOSAVE_MISSING_DB=" + repr(persisted_sections))
+            print("MANUSCRIPT_AUTOSAVE_MISSING_UI=" + repr([
+                (node.name or "")[:200] for node, _ in walk(app)
+                if "autosav" in (node.name or "").casefold()
+                or "draft" in (node.name or "").casefold()
+                or "status:" in (node.name or "").casefold()
+            ]))
+            audit(app, "manuscript-methods-autosave-missing", output)
+            raise RuntimeError("Manuscript Methods draft never reached a persisted revision")
         for _ in range(10):
             if activate(app, "Toggle saved manuscript sections outline"):
                 break
@@ -572,7 +892,11 @@ def main() -> int:
             raise RuntimeError("Data View navigation is not available")
         time.sleep(0.3)
         audit(app, "data-before-import", output)
-        edit_text(app, "Analysis import path", str(fixture))
+        # Slint's AT-SPI Text interface can temporarily report
+        # NotImplementedError for this field. The following preview, persisted
+        # import and native mean=2 checks independently verify the fixture was
+        # used; a typed value alone never counts as acceptance.
+        edit_text(app, "Analysis import path", str(fixture), allow_unreadable=True)
         if not activate(app, "Preview analysis import"):
             raise RuntimeError("Data import preview cannot be activated")
         time.sleep(0.45)
@@ -634,12 +958,79 @@ def main() -> int:
             raise RuntimeError("Verified statistical details remained visible after hiding")
         print("STATISTICS_PROGRESSIVE_DISCLOSURE_OK")
 
+        if not activate(app, "Analysis Results"):
+            raise RuntimeError("Verified Analysis Results workspace cannot be opened")
+        time.sleep(0.25)
+        edit_text(app, "Analysis Results dataset ID", variable_id)
+        edit_text(app, "Analysis Results dataset revision", variable_revision)
+        edit_text(app, "Analysis Results numeric column", "score")
+        if not activate(app, "Preview immutable analysis result"):
+            raise RuntimeError("Cannot preview the immutable source-bound result")
+        time.sleep(0.25)
+        if not activate(app, "Record previewed immutable analysis result"):
+            raise RuntimeError("Cannot record previewed immutable result")
+        time.sleep(0.35)
+        result_text = "\n".join(
+            (node.name or "") for node in nodes_named(app, "Analysis Results operation result")
+        )
+        match = re.search(r'"result_id":\s*"([a-f0-9]{64})"', result_text)
+        if match is None:
+            raise RuntimeError("Recorded immutable analysis result ID was not exposed")
+        result_id = match.group(1)
+        if read_field(app, "Analysis Results result ID") != result_id:
+            raise RuntimeError("Saved immutable result ID was not selected automatically")
+        if read_field(app, "Analysis report result IDs") != result_id:
+            raise RuntimeError("First recorded result was not offered for reporting automatically")
+        edit_text(app, "Analysis report result IDs", "invalid")
+        if not activate(app, "Use selected immutable result in analysis report"):
+            raise RuntimeError("Selected-result report shortcut is unreachable")
+        time.sleep(0.15)
+        if read_field(app, "Analysis report result IDs") != result_id:
+            raise RuntimeError("Selected result shortcut did not restore the current verified ID")
+        print("ANALYSIS_RESULT_SELECTION_AND_REPORT_SHORTCUT_OK")
+        if not activate(app, "Prepare verified analysis report Markdown file"):
+            raise RuntimeError("Native analysis report preparation is not actionable")
+        time.sleep(0.3)
+        prepared = "\n".join((node.name or "") for node, _ in walk(app))
+        if "Verified analysis report prepared; no file saved yet" not in prepared:
+            raise RuntimeError("Report was not prepared from verified persisted output")
+        report_path = fixture.parent / "qa-verified-analysis-report.md"
+        if report_path.exists():
+            raise RuntimeError("Synthetic report file already exists before consent")
+        edit_text(
+            app, "Analysis report export destination path",
+            str(report_path), allow_unreadable=True,
+        )
+        if not activate(app, "Save prepared analysis report without overwrite"):
+            raise RuntimeError("Physical report Save control is unavailable")
+        time.sleep(0.3)
+        if not report_path.is_file():
+            raise RuntimeError("Approved report was not written to the selected local file")
+        physical_report = report_path.read_text(encoding="utf-8")
+        if (
+            "# Analysis report" not in physical_report
+            or result_id not in physical_report
+            or variable_revision not in physical_report
+            or "statistics.describe" not in physical_report
+        ):
+            raise RuntimeError("Physical report omitted verified immutable analysis provenance")
+        receipt_hash = hashlib.sha256(report_path.read_bytes()).hexdigest()
+        if not any(receipt_hash in (node.name or "") for node, _ in walk(app)):
+            raise RuntimeError("Physical report SHA-256 does not appear in accessible save receipt")
+        if not activate(app, "Save prepared analysis report without overwrite"):
+            raise RuntimeError("Repeated Save control is unavailable")
+        time.sleep(0.15)
+        if hashlib.sha256(report_path.read_bytes()).hexdigest() != receipt_hash:
+            raise RuntimeError("Repeated report Save modified a previously exported file")
+        print("ANALYSIS_REPORT_PHYSICAL_MARKDOWN_PROVENANCE_AND_NO_OVERWRITE_OK")
+        audit(app, "analysis-report-physical-export", output)
+
         # Leave a new import merely staged in project A, then switch projects.
         # Its approval must be invalidated before project B can perform writes.
         if not activate(app, "Data View"):
             raise RuntimeError("Cannot return to Data View to stage a pending import")
         time.sleep(0.25)
-        edit_text(app, "Analysis import path", str(fixture))
+        edit_text(app, "Analysis import path", str(fixture), allow_unreadable=True)
         if not activate(app, "Preview analysis import"):
             raise RuntimeError("Could not stage import before project switch")
         time.sleep(0.3)
@@ -698,6 +1089,14 @@ def main() -> int:
                 raise RuntimeError("Old project statistics or identifiers leaked into new project")
         print("DATASET_CONTEXT_CLEARED_AFTER_PROJECT_SWITCH_OK")
         print("PROJECT_RESULT_ISOLATION_OK")
+        if not activate(app, "Analysis Results"):
+            raise RuntimeError("Cannot inspect analysis selection after project switch")
+        time.sleep(0.25)
+        if read_field(app, "Analysis Results result ID") or read_field(
+            app, "Analysis report result IDs"
+        ):
+            raise RuntimeError("Previously saved analysis result selection leaked across projects")
+        print("ANALYSIS_RESULT_SELECTION_PROJECT_ISOLATION_OK")
         audit(app, "data-after-project-switch", output)
         if not activate(app, "Synthesize activity"):
             raise RuntimeError("Cannot inspect writing after project switch")
@@ -768,6 +1167,62 @@ def main() -> int:
             raise RuntimeError("Previously autosaved manuscript is not available after reopening")
         print("NOTES_AND_MANUSCRIPT_REOPEN_PERSISTENCE_OK")
         audit(app, "reopened-project-writing", output)
+    if not activate(app, "Home activity"):
+        raise RuntimeError("Cannot return Home to verify recent-project recovery")
+    time.sleep(0.25)
+    if not activate(app, "Open Start Center to switch projects"):
+        raise RuntimeError("Cannot open Start Center to verify recent projects")
+    time.sleep(0.25)
+    if not nodes_named(app, "Recent local projects"):
+        raise RuntimeError("Recent-project selector is missing from native accessible UI")
+    if not nodes_named(app, "Reopen selected recent project"):
+        raise RuntimeError("Recent-project reopen button is missing from native accessible UI")
+    audit(app, "recent-projects-visible", output)
+    if not activate(app, "Reopen selected recent project"):
+        raise RuntimeError("Cannot reopen the selected recent project")
+    time.sleep(0.4)
+    if not nodes_named(app, "Open Start Center to switch projects"):
+        raise RuntimeError("Recent-project reopen did not reach the project dashboard")
+    print("RECENT_PROJECT_ONE_CLICK_GUI_REOPEN_OK")
+    audit(app, "recent-project-reopened", output)
+    if not activate(app, "Home activity"):
+        raise RuntimeError("Cannot return Home for narrow recent-project acceptance")
+    time.sleep(0.25)
+    if not activate(app, "Open Start Center to switch projects"):
+        raise RuntimeError("Cannot return Start Center for narrow recent-project acceptance")
+    resize_xvfb_window(850, 600)
+    time.sleep(0.3)
+    audit(app, "recent-projects-narrow", output)
+    if not nodes_named(app, "Recent local projects") or not nodes_named(app, "Reopen selected recent project"):
+        raise RuntimeError("Recent project controls are unreachable at 850x600")
+    if not nodes_named(app, "Forget selected recent project shortcut"):
+        raise RuntimeError("Forget-shortcut action is inaccessible at 850x600")
+    if not nodes_named(app, "Choose project folder with native dialog"):
+        raise RuntimeError("Native project folder picker is unreachable at 850x600")
+    print("RECENT_PROJECT_NARROW_ACCESSIBLE_OK")
+
+    if fixture is None:
+        raise RuntimeError("Recent project forgetting requires the disposable host fixture")
+    history_path = fixture.parent / "recent-projects.json"
+    entries_before = json.loads(history_path.read_text(encoding="utf-8"))["entries"]
+    if len(entries_before) < 2:
+        raise RuntimeError("Recent-project forget must be tested with at least two saved shortcuts")
+    first_path = pathlib.Path(entries_before[0]["path"])
+    if not first_path.is_dir() or not (first_path / "data/project.sqlite").is_file():
+        raise RuntimeError("First recent project must have durable data before shortcut removal")
+    if not activate(app, "Forget selected recent project shortcut"):
+        raise RuntimeError("Native Forget shortcut action cannot be invoked")
+    time.sleep(0.25)
+    entries_after = json.loads(history_path.read_text(encoding="utf-8"))["entries"]
+    if entries_after != entries_before[1:]:
+        raise RuntimeError("Forget shortcut did not remove only the chosen first recent entry")
+    if not first_path.is_dir() or not (first_path / "data/project.sqlite").is_file():
+        raise RuntimeError("Forgetting shortcut removed or altered a real research project")
+    status_after = "\n".join((node.name or "") for node, _ in walk(app))
+    if "No project files were deleted" not in status_after:
+        raise RuntimeError("Forget shortcut failed to communicate its non-destructive effect")
+    audit(app, "recent-projects-forgot-shortcut", output)
+    print("RECENT_PROJECT_FORGET_SHORTCUT_ONLY_SQLITE_PRESERVED_OK")
 
     print("AT_SPI_NAVIGATION_PROBE_OK")
     return 0

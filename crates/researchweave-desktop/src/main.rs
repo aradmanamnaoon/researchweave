@@ -37,6 +37,7 @@ mod manuscript_search;
 mod pdf_engine;
 mod physical_export;
 mod quick_note_checklist;
+mod recent_projects;
 mod writing_autosave;
 
 fn flush_writing_drafts(
@@ -132,6 +133,8 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_data_local_path("".into());
     ui.set_recent_dataset_id("".into());
     ui.set_recent_dataset_revision("".into());
+    ui.set_selected_analysis_result_id("".into());
+    ui.set_analysis_report_selected_ids("".into());
     ui.set_analysis_results(
         "Import an immutable dataset revision or inspect saved analysis data.".into(),
     );
@@ -169,6 +172,11 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_protocol_results("Preview a protocol before recording it.".into());
     ui.set_protocol_export_receipt("".into());
     ui.set_protocol_export_id("".into());
+    ui.set_protocol_freeze_status(
+        "No local freeze inspected. A local digest and computer timestamp are not an external preregistration.".into(),
+    );
+    ui.set_protocol_freeze_summary("No local baseline inspected yet.".into());
+    ui.set_protocol_freeze_export_receipt("".into());
     ui.set_reference_results("Register or inspect project references.".into());
     ui.set_review_results("Use persisted references to build and screen a review.".into());
     ui.set_extraction_results(
@@ -874,6 +882,28 @@ fn host_data_root() -> Result<PathBuf, String> {
             .map(PathBuf::from)
             .map(|root| root.join(".local/share/researchweave"))
             .ok_or_else(|| "HOME is unavailable".into())
+    }
+}
+
+fn refresh_recent_project_shortcuts(ui: &MainWindow) -> Result<(), String> {
+    let recent = recent_projects::load(&host_data_root()?)?;
+    let labels = recent
+        .into_iter()
+        .map(|entry| slint::SharedString::from(entry.title))
+        .collect::<Vec<_>>();
+    let has_items = !labels.is_empty();
+    ui.set_recent_project_options(Rc::new(slint::VecModel::from(labels)).into());
+    ui.set_recent_project_index(if has_items { 0 } else { -1 });
+    Ok(())
+}
+
+fn remember_recent_project(ui: &MainWindow, path: &Path, title: &str) {
+    let result = host_data_root().and_then(|root| {
+        recent_projects::remember(&root, path, title)?;
+        refresh_recent_project_shortcuts(ui)
+    });
+    if let Err(error) = result {
+        ui.set_status(format!("Project ready; recent project history unavailable: {error}").into());
     }
 }
 
@@ -2570,6 +2600,55 @@ fn pretty_result_data(result: &serde_json::Value) -> String {
         .unwrap_or_else(|_| "Operation completed, but its result could not be formatted".into())
 }
 
+/// Human-readable, explicitly local-only protocol receipt derived from the
+/// existing verified read/record response, never from unsaved editor fields.
+fn protocol_freeze_summary(result: &serde_json::Value) -> Result<String, String> {
+    let data = result
+        .get("data")
+        .ok_or("Protocol baseline response has no data")?;
+    if result["status"] != "ok"
+        || data["local_only"] != true
+        || data["external_registration_verified"] != false
+    {
+        return Err("Protocol baseline local provenance could not be verified".into());
+    }
+    if data["frozen"] == false {
+        let current = data["current_version"]
+            .as_i64()
+            .filter(|version| *version > 0)
+            .ok_or("Protocol baseline current version is invalid")?;
+        return Ok(format!(
+            "Not frozen · protocol v{current}. Preview and explicitly record a local-only baseline."
+        ));
+    }
+    if data["frozen"] != true {
+        return Err("Protocol baseline frozen state is missing".into());
+    }
+    let baseline = data["frozen_version"]
+        .as_i64()
+        .filter(|version| *version > 0)
+        .ok_or("Protocol baseline frozen version is invalid")?;
+    let amendments = data["post_freeze_amendment_versions"]
+        .as_i64()
+        .filter(|count| *count >= 0)
+        .ok_or("Protocol baseline amendment count is invalid")?;
+    let expected_latest = baseline
+        .checked_add(amendments)
+        .ok_or("Protocol baseline version count overflow")?;
+    if data["current_version"] != serde_json::Value::Null
+        && data["current_version"].as_i64() != Some(expected_latest)
+    {
+        return Err("Protocol baseline versions are inconsistent".into());
+    }
+    let digest = data["snapshot_sha256"]
+        .as_str()
+        .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or("Protocol baseline digest is invalid")?;
+    Ok(format!(
+        "Frozen locally · baseline v{baseline} · {amendments} post-baseline amendment version(s).\nSnapshot SHA-256: {digest}\nLocal event only; no independent registration or trusted timestamp."
+    ))
+}
+
 fn compact_stat_number(value: Option<&serde_json::Value>) -> String {
     value
         .and_then(serde_json::Value::as_f64)
@@ -3274,6 +3353,42 @@ fn chosen_local_file_path(path: &Path) -> Result<String, String> {
         .ok_or_else(|| "Selected file path cannot be represented as Unicode".into())
 }
 
+fn chosen_local_project_folder(path: &Path) -> Result<String, String> {
+    if !path.is_absolute() {
+        return Err("Native project chooser did not return an absolute folder".into());
+    }
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("Selected project folder is unavailable: {error}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err("Choose a real project folder rather than a symbolic link".into());
+    }
+    if !metadata.is_dir() {
+        return Err("Selected project location must be a directory".into());
+    }
+    // ProjectStore::create refuses existing roots to prevent overwriting
+    // unrelated files. Native folder dialogs necessarily return existing
+    // directories, so select that directory only for a real project; when
+    // creating, propose a fresh child beneath the chosen parent.
+    let selected = if path.join("data").join("project.sqlite").is_file() {
+        path.to_path_buf()
+    } else {
+        let mut candidate = None;
+        for _ in 0..8 {
+            let child = path.join(format!("ResearchWeave-{}", Uuid::new_v4().simple()));
+            if !child.exists() {
+                candidate = Some(child);
+                break;
+            }
+        }
+        candidate.ok_or_else(|| "Could not prepare a new project folder".to_owned())?
+    };
+    selected
+        .as_path()
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "Selected project folder path is not valid Unicode".into())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(args) = std::env::args().nth(1) {
         if args == "--smoke-native-workflow" {
@@ -3321,6 +3436,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let app = MainWindow::new()?;
+    if let Err(error) = refresh_recent_project_shortcuts(&app) {
+        app.set_status(format!("Recent project history unavailable: {error}").into());
+    }
     app.on_choose_local_file({
         let weak = app.as_weak();
         move |kind| {
@@ -3374,6 +3492,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(error) = slint::spawn_local(task) {
                 ui.set_local_file_dialog_busy(false);
                 ui.set_status(format!("Native file chooser unavailable: {error}").into());
+            }
+        }
+    });
+    app.on_choose_project_folder({
+        let weak = app.as_weak();
+        move || {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            if ui.get_local_file_dialog_busy() {
+                return;
+            }
+            ui.set_local_file_dialog_busy(true);
+            let weak_task = weak.clone();
+            let task = async move {
+                let selected = rfd::AsyncFileDialog::new().pick_folder().await;
+                if let Some(ui) = weak_task.upgrade() {
+                    match selected {
+                        Some(selected) => match chosen_local_project_folder(selected.path()) {
+                            Ok(folder) => {
+                                let existing = selected
+                                    .path()
+                                    .join("data")
+                                    .join("project.sqlite")
+                                    .is_file();
+                                ui.set_project_local_path(folder.into());
+                                ui.set_status(
+                                    if existing {
+                                        "Existing local project selected. Choose Open existing."
+                                    } else {
+                                        "New child project path prepared inside the selected parent folder. Review the path, then choose Create at custom path."
+                                    }.into(),
+                                );
+                            }
+                            Err(error) => ui.set_status(error.into()),
+                        },
+                        None => ui.set_status(
+                            "Folder selection canceled; existing project path preserved".into(),
+                        ),
+                    }
+                    ui.set_local_file_dialog_busy(false);
+                }
+            };
+            if let Err(error) = slint::spawn_local(task) {
+                ui.set_local_file_dialog_busy(false);
+                ui.set_status(format!("Native project folder chooser unavailable: {error}").into());
             }
         }
     });
@@ -4137,6 +4301,151 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_preview_protocol_freeze({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        move |protocol_id| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|path| {
+                        let root = host_data_root()?;
+                        let protocol_id = protocol_id.as_str().trim();
+                        let history = evidence_read_at(
+                            path,
+                            "protocol.history",
+                            serde_json::json!({"protocol_id":protocol_id}),
+                            &root,
+                        )?;
+                        let version = history
+                            .pointer("/data/history")
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|history| history.last())
+                            .and_then(|last| last["version"].as_i64())
+                            .ok_or_else(|| "A persisted protocol version is required before freezing".to_owned())?;
+                        evidence_preview_at(
+                            path,
+                            "protocol.freeze",
+                            "protocol",
+                            serde_json::json!({
+                                "protocol_id":protocol_id,
+                                "expected_version":version
+                            }),
+                            &root,
+                        )
+                    });
+                match result {
+                    Ok((pending, preview)) => {
+                        *pending_evidence.borrow_mut() = Some(pending);
+                        ui.set_protocol_results(
+                            format!(
+                                "LOCAL FREEZE PREVIEW ONLY. Review exact version and SHA-256 below, then choose Record freeze. This does not create an external preregistration:\n{}",
+                                pretty_result_data(&preview)
+                            )
+                            .into(),
+                        );
+                        ui.set_status("Local protocol baseline freeze preview ready; no data changed".into());
+                    }
+                    Err(error) => {
+                        pending_evidence.borrow_mut().take();
+                        ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_record_protocol_freeze({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let pending = pending_evidence.borrow().clone();
+                let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                    (Some(path), Some(pending))
+                        if pending.operation == "protocol.freeze"
+                            && pending.surface == "protocol" =>
+                    {
+                        host_data_root().and_then(|root| evidence_execute_pending(pending, path, &root))
+                    }
+                    (None, _) => Err("Open a research project first".into()),
+                    (_, _) => Err("Preview a local protocol baseline freeze before recording it".into()),
+                };
+                match result {
+                    Ok((recorded, revision)) => {
+                        let data = &recorded["data"];
+                        ui.set_protocol_freeze_summary(
+                            protocol_freeze_summary(&recorded)
+                                .unwrap_or_else(|error| format!("Baseline recorded; {error}"))
+                                .into(),
+                        );
+                        ui.set_protocol_freeze_status(
+                            format!(
+                                "Local baseline v{} frozen at computer time {}. Snapshot SHA-256: {}. No independent registration or trusted timestamp was performed.",
+                                data["frozen_version"],
+                                data["recorded_at_local_clock"].as_str().unwrap_or_default(),
+                                data["snapshot_sha256"].as_str().unwrap_or_default(),
+                            )
+                            .into(),
+                        );
+                        ui.set_protocol_results(pretty_result_data(&recorded).into());
+                        ui.set_project_revision(revision as i32);
+                        ui.set_status("Approved local protocol baseline recorded and audited".into());
+                        pending_evidence.borrow_mut().take();
+                    }
+                    Err(error) => {
+                        ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_inspect_protocol_freeze({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |protocol_id| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|path| {
+                        evidence_read_at(
+                            path,
+                            "protocol.freeze_status",
+                            serde_json::json!({"protocol_id":protocol_id.as_str().trim()}),
+                            &host_data_root()?,
+                        )
+                    });
+                match result {
+                    Ok(value) => {
+                        ui.set_protocol_freeze_summary(
+                            protocol_freeze_summary(&value)
+                                .unwrap_or_else(|error| format!("Inspect receipt: {error}"))
+                                .into(),
+                        );
+                        ui.set_protocol_freeze_status(pretty_result_data(&value).into());
+                        ui.set_status(
+                            "Local protocol baseline status verified against persisted history"
+                                .into(),
+                        );
+                    }
+                    Err(error) => {
+                        ui.set_protocol_freeze_summary(
+                            "Local baseline could not be inspected.".into(),
+                        );
+                        ui.set_protocol_freeze_status(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
     app.on_apply_evidence_preview({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -4337,6 +4646,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(error) => {
                         pending_physical_export.borrow_mut().take();
                         ui.set_protocol_export_receipt("".into());
+                        ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_load_protocol_freeze_receipt({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        move |protocol_id| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|path| {
+                        physical_export::prepare(
+                            path,
+                            "protocol.freeze_receipt",
+                            serde_json::json!({"protocol_id":protocol_id.as_str().trim()}),
+                            &host_data_root()?,
+                        )
+                    });
+                match result {
+                    Ok((pending, receipt)) => {
+                        *pending_physical_export.borrow_mut() = Some(pending);
+                        ui.set_protocol_freeze_export_receipt("".into());
+                        ui.set_protocol_results(
+                            format!(
+                                "VERIFIED LOCAL BASELINE RECEIPT PREVIEW ONLY. No file saved; no external preregistration or trusted timestamp. Review then choose explicit Save:\n{}",
+                                receipt.pointer("/data/text").and_then(serde_json::Value::as_str).unwrap_or_default()
+                            ).into()
+                        );
+                        ui.set_status("Local protocol baseline receipt prepared, not saved".into());
+                    }
+                    Err(error) => {
+                        pending_physical_export.borrow_mut().take();
+                        ui.set_protocol_freeze_export_receipt(error.clone().into());
                         ui.set_protocol_results(error.clone().into());
                         ui.set_status(error.into());
                     }
@@ -5404,6 +5753,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 match result {
                     Ok(executed) => {
+                        if operation.as_deref() == Some("analysis.result.save") {
+                            if let Some(result_id) = executed
+                                .pointer("/data/result_id")
+                                .and_then(serde_json::Value::as_str)
+                                .filter(|id| {
+                                    id.len() == 64
+                                        && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+                                })
+                            {
+                                ui.set_selected_analysis_result_id(result_id.into());
+                                if ui.get_analysis_report_selected_ids().is_empty() {
+                                    ui.set_analysis_report_selected_ids(result_id.into());
+                                }
+                            }
+                        }
                         match operation.as_deref() {
                             Some("dataset.variable") => ui.set_variable_results(
                                 format!(
@@ -5502,6 +5866,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
                     Err(error) => {
+                        ui.set_analysis_report_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_prepare_analysis_report_file({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        move |title, result_ids| {
+            let ids = result_ids
+                .as_str()
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a project first".to_owned())
+                    .and_then(|path| {
+                        physical_export::prepare(
+                            path,
+                            "analysis.report.render",
+                            serde_json::json!({
+                                "title":title.as_str().trim(),
+                                "result_ids":ids
+                            }),
+                            &host_data_root()?,
+                        )
+                    });
+                match result {
+                    Ok((pending, result)) => {
+                        *pending_physical_export.borrow_mut() = Some(pending);
+                        ui.set_analysis_report_results(
+                            format!(
+                                "Verified analysis report Markdown prepared, NOT saved. Enter an absolute .md path and choose Save prepared report. Existing files will never be overwritten.\nReport provenance: {}\nMarkdown SHA-256: {}\nResult count: {}",
+                                result["data"]["report_sha256"].as_str().unwrap_or_default(),
+                                result["data"]["sha256"].as_str().unwrap_or_default(),
+                                result["data"]["manifest"]["result_ids"].as_array().map_or(0, Vec::len)
+                            )
+                            .into(),
+                        );
+                        ui.set_status(
+                            "Verified analysis report prepared; no file saved yet".into(),
+                        );
+                    }
+                    Err(error) => {
+                        pending_physical_export.borrow_mut().take();
                         ui.set_analysis_report_results(error.clone().into());
                         ui.set_status(error.into());
                     }
@@ -7158,6 +7575,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         )
                     }),
                     (None, _) => Err("Open a project first".into()),
+                    (_, None) if screen_operation.as_str() == "analysis.report.render" => {
+                        Err("Prepare a verified analysis report before saving".into())
+                    }
+                    (_, None) if screen_operation.as_str() == "protocol.freeze_receipt" => {
+                        Err("Prepare a verified local protocol baseline receipt before saving".into())
+                    }
                     (_, None) => Err("Prepare a manuscript or draft ZIP before saving".into()),
                 };
                 match result {
@@ -7173,6 +7596,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 format!("Protocol saved SHA-256: {digest}").into(),
                             );
                             ui.set_protocol_results(message.into());
+                        } else if screen_operation.as_str() == "protocol.freeze_receipt" {
+                            let digest = receipt["sha256"].as_str().unwrap_or_default();
+                            ui.set_protocol_freeze_export_receipt(
+                                format!("Local baseline receipt saved without overwrite. Verified file SHA-256: {digest}").into(),
+                            );
+                            ui.set_protocol_results(message.into());
+                        } else if screen_operation.as_str() == "analysis.report.render" {
+                            ui.set_analysis_report_results(message.into());
                         } else {
                             ui.set_writing_results(message.into());
                         }
@@ -7182,6 +7613,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if screen_operation.as_str() == "protocol.export" {
                             ui.set_protocol_export_receipt("".into());
                             ui.set_protocol_results(error.clone().into());
+                        } else if screen_operation.as_str() == "protocol.freeze_receipt" {
+                            ui.set_protocol_freeze_export_receipt(error.clone().into());
+                            ui.set_protocol_results(error.clone().into());
+                        } else if screen_operation.as_str() == "analysis.report.render" {
+                            ui.set_analysis_report_results(error.clone().into());
                         } else {
                             ui.set_writing_results(error.clone().into());
                         }
@@ -7254,7 +7690,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if draft_warning.is_none() {
                             resume_recovered_writing(&timer, &path, drafts.clone(), weak.clone());
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_recovery_results(message.clone().into());
                         ui.set_status(
@@ -7267,6 +7703,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .into(),
                         );
                         ui.set_page(1);
+                        remember_recent_project(&ui, &path, &info.title);
                     }
                     Err(error) => {
                         ui.set_recovery_results(error.clone().into());
@@ -7527,7 +7964,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 weak.clone(),
                             );
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status(
                             match draft_warning {
@@ -7539,6 +7976,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .into(),
                         );
                         ui.set_page(1);
+                        remember_recent_project(&ui, Path::new(path.as_str()), &info.title);
                     }
                     Err(error) => ui.set_status(error.into()),
                 }
@@ -7580,13 +8018,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 weak.clone(),
                             );
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status(match draft_warning {
                             Some(error) => format!("Project created; draft recovery warning: {error}"),
                             None => "Project created in managed local storage".into(),
                         }.into());
                         ui.set_page(1);
+                        remember_recent_project(&ui, &project, &info.title);
                     }
                     Err(error) => ui.set_status(error.into()),
                 }
@@ -7619,7 +8058,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 weak.clone(),
                             );
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status(
                             match draft_warning {
@@ -7631,9 +8070,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .into(),
                         );
                         ui.set_page(1);
+                        remember_recent_project(&ui, Path::new(path.as_str()), &info.title);
                     }
                     Err(error) => ui.set_status(error.into()),
                 }
+            }
+        }
+    });
+    app.on_open_recent_project({
+        let weak = app.as_weak();
+        move |selected| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            let selected =
+                usize::try_from(selected).map_err(|_| "Select a recent project".to_owned());
+            let result = selected.and_then(|index| {
+                let entries = recent_projects::load(&host_data_root()?)?;
+                entries
+                    .get(index)
+                    .map(|item| item.path.clone())
+                    .ok_or_else(|| "Selected recent project no longer exists in the list".into())
+            });
+            match result {
+                Ok(path) => ui.invoke_open_project(path.into()),
+                Err(error) => ui.set_status(error.into()),
+            }
+        }
+    });
+    app.on_forget_recent_project({
+        let weak = app.as_weak();
+        move |selected| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            let result = usize::try_from(selected)
+                .map_err(|_| "Select a recent project shortcut".to_owned())
+                .and_then(|index| {
+                    let root = host_data_root()?;
+                    let previous = recent_projects::load(&root)?;
+                    let title = previous
+                        .get(index)
+                        .map(|entry| entry.title.clone())
+                        .ok_or_else(|| "Selected shortcut is no longer in the list".to_owned())?;
+                    recent_projects::forget(&root, index)?;
+                    refresh_recent_project_shortcuts(&ui)?;
+                    Ok(title)
+                });
+            match result {
+                Ok(title) => ui.set_status(
+                    format!("Forgot recent shortcut for {title}. No project files were deleted.")
+                        .into(),
+                ),
+                Err(error) => ui.set_status(format!("Shortcut unchanged: {error}").into()),
             }
         }
     });
@@ -7685,6 +8174,46 @@ mod tests {
     use super::*;
 
     #[test]
+    fn protocol_freeze_summary_is_source_bound_and_never_implies_external_registration() {
+        let unfrozen = serde_json::json!({
+            "status":"ok", "data":{
+                "frozen":false,"current_version":2,"local_only":true,
+                "external_registration_verified":false
+            }
+        });
+        assert!(protocol_freeze_summary(&unfrozen)
+            .unwrap()
+            .contains("Not frozen · protocol v2"));
+        let digest = "a".repeat(64);
+        let frozen = serde_json::json!({
+            "status":"ok", "data":{
+                "frozen":true,"frozen_version":1,"current_version":2,
+                "post_freeze_amendment_versions":1,"snapshot_sha256":digest,
+                "local_only":true,"external_registration_verified":false
+            }
+        });
+        let summary = protocol_freeze_summary(&frozen).unwrap();
+        assert!(summary.contains("baseline v1 · 1 post-baseline amendment"));
+        assert!(summary.contains(&digest));
+        assert!(summary.contains("no independent registration or trusted timestamp"));
+        let mut invalid = frozen.clone();
+        invalid["data"]["external_registration_verified"] = serde_json::json!(true);
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["data"]["current_version"] = serde_json::json!(10);
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["data"]["snapshot_sha256"] = serde_json::json!("not a sha256");
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["data"]["post_freeze_amendment_versions"] = serde_json::json!(-1);
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["status"] = serde_json::json!("error");
+        assert!(protocol_freeze_summary(&invalid).is_err());
+    }
+
+    #[test]
     fn recent_dataset_shortcut_requires_a_successfully_persisted_import() {
         let imported = serde_json::json!({
             "status":"ok",
@@ -7725,6 +8254,47 @@ mod tests {
             chosen_local_file_path(&absolute).unwrap(),
             absolute.to_str().unwrap()
         );
+    }
+
+    #[test]
+    fn native_project_folder_selection_rejects_invalid_locations_without_mutation() {
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let temp = std::env::temp_dir().join(format!(
+            "researchweave-native-project-picker-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&temp).unwrap();
+        let _cleanup = Cleanup(temp.clone());
+        assert!(chosen_local_project_folder(Path::new("relative/folder")).is_err());
+        assert!(chosen_local_project_folder(&temp.join("missing")).is_err());
+        let file = temp.join("regular-file");
+        std::fs::write(&file, b"keep original bytes").unwrap();
+        assert!(chosen_local_project_folder(&file).is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), b"keep original bytes");
+        let unicode = temp.join("پژوهش");
+        std::fs::create_dir(&unicode).unwrap();
+        let prepared = PathBuf::from(chosen_local_project_folder(&unicode).unwrap());
+        assert_eq!(prepared.parent(), Some(unicode.as_path()));
+        assert!(!prepared.exists(), "the chooser must not create a project");
+        let preexisting = unicode.join("data");
+        std::fs::create_dir(&preexisting).unwrap();
+        std::fs::write(preexisting.join("project.sqlite"), b"existing").unwrap();
+        assert_eq!(
+            chosen_local_project_folder(&unicode).unwrap(),
+            unicode.to_str().unwrap(),
+            "an existing project folder must never be silently nested"
+        );
+        #[cfg(unix)]
+        {
+            let symlink = temp.join("linked-folder");
+            std::os::unix::fs::symlink(&unicode, &symlink).unwrap();
+            assert!(chosen_local_project_folder(&symlink).is_err());
+        }
     }
 
     #[test]
