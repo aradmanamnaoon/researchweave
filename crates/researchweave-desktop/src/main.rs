@@ -37,6 +37,7 @@ mod manuscript_search;
 mod pdf_engine;
 mod physical_export;
 mod quick_note_checklist;
+mod recent_projects;
 mod writing_autosave;
 
 fn flush_writing_drafts(
@@ -874,6 +875,28 @@ fn host_data_root() -> Result<PathBuf, String> {
             .map(PathBuf::from)
             .map(|root| root.join(".local/share/researchweave"))
             .ok_or_else(|| "HOME is unavailable".into())
+    }
+}
+
+fn refresh_recent_project_shortcuts(ui: &MainWindow) -> Result<(), String> {
+    let recent = recent_projects::load(&host_data_root()?)?;
+    let labels = recent
+        .into_iter()
+        .map(|entry| slint::SharedString::from(entry.title))
+        .collect::<Vec<_>>();
+    let has_items = !labels.is_empty();
+    ui.set_recent_project_options(Rc::new(slint::VecModel::from(labels)).into());
+    ui.set_recent_project_index(if has_items { 0 } else { -1 });
+    Ok(())
+}
+
+fn remember_recent_project(ui: &MainWindow, path: &Path, title: &str) {
+    let result = host_data_root().and_then(|root| {
+        recent_projects::remember(&root, path, title)?;
+        refresh_recent_project_shortcuts(ui)
+    });
+    if let Err(error) = result {
+        ui.set_status(format!("Project ready; recent project history unavailable: {error}").into());
     }
 }
 
@@ -3321,6 +3344,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let app = MainWindow::new()?;
+    if let Err(error) = refresh_recent_project_shortcuts(&app) {
+        app.set_status(format!("Recent project history unavailable: {error}").into());
+    }
     app.on_choose_local_file({
         let weak = app.as_weak();
         move |kind| {
@@ -7254,7 +7280,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if draft_warning.is_none() {
                             resume_recovered_writing(&timer, &path, drafts.clone(), weak.clone());
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_recovery_results(message.clone().into());
                         ui.set_status(
@@ -7267,6 +7293,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .into(),
                         );
                         ui.set_page(1);
+                        remember_recent_project(&ui, &path, &info.title);
                     }
                     Err(error) => {
                         ui.set_recovery_results(error.clone().into());
@@ -7527,7 +7554,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 weak.clone(),
                             );
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status(
                             match draft_warning {
@@ -7539,6 +7566,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .into(),
                         );
                         ui.set_page(1);
+                        remember_recent_project(&ui, Path::new(path.as_str()), &info.title);
                     }
                     Err(error) => ui.set_status(error.into()),
                 }
@@ -7580,13 +7608,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 weak.clone(),
                             );
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status(match draft_warning {
                             Some(error) => format!("Project created; draft recovery warning: {error}"),
                             None => "Project created in managed local storage".into(),
                         }.into());
                         ui.set_page(1);
+                        remember_recent_project(&ui, &project, &info.title);
                     }
                     Err(error) => ui.set_status(error.into()),
                 }
@@ -7619,7 +7648,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 weak.clone(),
                             );
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status(
                             match draft_warning {
@@ -7631,9 +7660,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .into(),
                         );
                         ui.set_page(1);
+                        remember_recent_project(&ui, Path::new(path.as_str()), &info.title);
                     }
                     Err(error) => ui.set_status(error.into()),
                 }
+            }
+        }
+    });
+    app.on_open_recent_project({
+        let weak = app.as_weak();
+        move |selected| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            let selected =
+                usize::try_from(selected).map_err(|_| "Select a recent project".to_owned());
+            let result = selected.and_then(|index| {
+                let entries = recent_projects::load(&host_data_root()?)?;
+                entries
+                    .get(index)
+                    .map(|item| item.path.clone())
+                    .ok_or_else(|| "Selected recent project no longer exists in the list".into())
+            });
+            match result {
+                Ok(path) => ui.invoke_open_project(path.into()),
+                Err(error) => ui.set_status(error.into()),
             }
         }
     });

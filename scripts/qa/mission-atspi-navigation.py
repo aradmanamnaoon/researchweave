@@ -6,6 +6,7 @@ session. Never uses the user's visible desktop. All evidence is synthetic.
 
 from __future__ import annotations
 
+import json
 import pathlib
 import subprocess
 import sys
@@ -251,6 +252,14 @@ def main() -> int:
         if len(created) != 1:
             raise RuntimeError(f"Expected exactly one managed test project; found {len(created)}")
         original_project = created[0]
+        recent_file = fixture.parent / "recent-projects.json"
+        history = json.loads(recent_file.read_text(encoding="utf-8"))
+        if history.get("version") != 1 or len(history.get("entries", [])) != 1:
+            raise RuntimeError("Newly created project did not persist one recent-project shortcut")
+        recorded = pathlib.Path(history["entries"][0]["path"])
+        if recorded.resolve() != original_project.resolve():
+            raise RuntimeError("Recent-project shortcut does not point to the created project")
+        print("RECENT_PROJECT_INDEX_MATCHES_CREATED_PROJECT")
 
     # Every activation is through the private Xvfb AT-SPI tree, not host input.
     if not activate(app, "Synthesize activity"):
@@ -768,6 +777,35 @@ def main() -> int:
             raise RuntimeError("Previously autosaved manuscript is not available after reopening")
         print("NOTES_AND_MANUSCRIPT_REOPEN_PERSISTENCE_OK")
         audit(app, "reopened-project-writing", output)
+    if not activate(app, "Home activity"):
+        raise RuntimeError("Cannot return Home to verify recent-project recovery")
+    time.sleep(0.25)
+    if not activate(app, "Open Start Center to switch projects"):
+        raise RuntimeError("Cannot open Start Center to verify recent projects")
+    time.sleep(0.25)
+    if not nodes_named(app, "Recent local projects"):
+        raise RuntimeError("Recent-project selector is missing from native accessible UI")
+    if not nodes_named(app, "Reopen selected recent project"):
+        raise RuntimeError("Recent-project reopen button is missing from native accessible UI")
+    audit(app, "recent-projects-visible", output)
+    if not activate(app, "Reopen selected recent project"):
+        raise RuntimeError("Cannot reopen the selected recent project")
+    time.sleep(0.4)
+    if not nodes_named(app, "Open Start Center to switch projects"):
+        raise RuntimeError("Recent-project reopen did not reach the project dashboard")
+    print("RECENT_PROJECT_ONE_CLICK_GUI_REOPEN_OK")
+    audit(app, "recent-project-reopened", output)
+    if not activate(app, "Home activity"):
+        raise RuntimeError("Cannot return Home for narrow recent-project acceptance")
+    time.sleep(0.25)
+    if not activate(app, "Open Start Center to switch projects"):
+        raise RuntimeError("Cannot return Start Center for narrow recent-project acceptance")
+    resize_xvfb_window(850, 600)
+    time.sleep(0.3)
+    audit(app, "recent-projects-narrow", output)
+    if not nodes_named(app, "Recent local projects") or not nodes_named(app, "Reopen selected recent project"):
+        raise RuntimeError("Recent project controls are unreachable at 850x600")
+    print("RECENT_PROJECT_NARROW_ACCESSIBLE_OK")
 
     print("AT_SPI_NAVIGATION_PROBE_OK")
     return 0

@@ -302,6 +302,8 @@ export component MainWindow inherits Window {
     in-out property <string> backup-results: "Open a project, then choose an absolute archive path.";
     in-out property <string> recovery-results: "Restore always creates a new project directory.";
     in-out property <string> command-results: "Search views, resources, settings and help";
+    in-out property <[string]> recent-project-options: [];
+    in-out property <int> recent-project-index: 0;
 
     callback load-pdf(string, string, int);
     callback find-next-pdf(string, string, int);
@@ -309,6 +311,7 @@ export component MainWindow inherits Window {
     callback create-project(string, string);
     callback create-default-project(string);
     callback open-project(string);
+    callback open-recent-project(int);
     callback start-job();
     callback run-command(string);
     callback query-command(string) -> string;
@@ -822,6 +825,30 @@ export component MainWindow inherits Window {
                                         accessible-label: "Create default project";
                                         accessible-description: "Create a private local project without choosing a filesystem path";
                                         clicked => { root.create-default-project(project-name.text); }
+                                    }
+                                    if root.recent-project-options.length > 0: VerticalLayout {
+                                        spacing: 6px;
+                                        Text {
+                                            text: "CONTINUE A RECENT PROJECT";
+                                            color: Theme.muted-ink;
+                                            font-size: 10px * Theme.ui-scale / 100;
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            ComboBox {
+                                                model: root.recent-project-options;
+                                                current-index <=> root.recent-project-index;
+                                                accessible-label: "Recent local projects";
+                                                accessible-description: "Select a previously opened project. Its original location will be checked before opening.";
+                                                horizontal-stretch: 1;
+                                            }
+                                            Button {
+                                                text: "Reopen";
+                                                accessible-label: "Reopen selected recent project";
+                                                accessible-description: "Reopen the selected local project and verify its current on-disk metadata";
+                                                clicked => { root.open-recent-project(root.recent-project-index); }
+                                            }
+                                        }
                                     }
                                     Text { text: "CUSTOM LOCATION"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     Text { text: "PROJECT LOCATION"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
