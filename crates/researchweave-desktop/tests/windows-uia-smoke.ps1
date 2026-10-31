@@ -487,8 +487,12 @@ try {
     # Exercise the actual Ctrl+K shortcut and Enter activation.
     # Page transitions recreate Slint accessibility nodes; never retain a stale
     # element reference across navigation.
-    $path = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project path'
-    $path.SetFocus()
+    # Opening a project intentionally transitions from Welcome to Dashboard.
+    # The Welcome-only Project path input has been destroyed. Anchor the
+    # Ctrl+K shortcut on a real Dashboard button instead of querying a stale
+    # page; command palette focus must still be achieved by actual keyboard.
+    $dashboardAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Open Start Center to switch projects'
+    $dashboardAnchor.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('^k')
     $focused = $null
     for ($attempt = 0; $attempt -lt 12; $attempt++) {
@@ -496,7 +500,7 @@ try {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         if ($focused -and $focused.Current.Name -eq 'Command palette') { break }
         if ($attempt -eq 5) {
-            $path.SetFocus()
+            $dashboardAnchor.SetFocus()
             [System.Windows.Forms.SendKeys]::SendWait('^k')
         }
     }
