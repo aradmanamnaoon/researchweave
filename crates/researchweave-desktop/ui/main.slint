@@ -1,11 +1,18 @@
 import { Button, ComboBox, LineEdit, TextEdit, ListView, ScrollView, Palette } from "std-widgets.slint";
 export { Palette } from "std-widgets.slint";
 
+export struct QuickNoteChecklistItem {
+    line-index: int,
+    label: string,
+    checked: bool,
+}
+
 export struct QuickNote {
     id: string,
     title: string,
     body: string,
     has-unchecked-item: bool,
+    checklist-items: [QuickNoteChecklistItem],
     tags: string,
     color: string,
     revision: int,
@@ -285,6 +292,7 @@ export component MainWindow inherits Window {
     callback save-quick-note(string, int, string, string, string, string, bool, bool);
     callback prepare-quick-note-checklist();
     callback complete-next-quick-note(string, int, string, string, string, string, bool, bool);
+    callback toggle-quick-note-checklist-item(string, int, string, string, string, string, bool, bool, int);
     callback manuscript-draft-edited(string, string, string, string);
     callback load-manuscript-sections(string);
     callback select-manuscript-section(string, int);
@@ -1562,7 +1570,22 @@ export component MainWindow inherits Window {
                                             padding: 10px;
                                             spacing: 5px;
                                             Text { text: note.pinned ? "Pinned · " + note.title : note.title; color: Theme.ink; font-weight: 700; wrap: word-wrap; }
-                                            Text { text: note.body; color: Theme.ink; wrap: word-wrap; max-height: 85px; }
+                                            if note.checklist-items.length == 0: Text { text: note.body; color: Theme.ink; wrap: word-wrap; max-height: 85px; }
+                                            if note.checklist-items.length > 0: VerticalLayout {
+                                                spacing: 4px;
+                                                for item in note.checklist-items: Button {
+                                                    text: (item.checked ? "☑ " : "☐ ") + (item.label == "" ? "Untitled item" : item.label);
+                                                    accessible-label: (item.checked ? "Mark unfinished " : "Complete ") + (item.label == "" ? "Untitled item" : item.label) + " in note " + note.title;
+                                                    clicked => {
+                                                        root.toggle-quick-note-checklist-item(note.id,note.revision,note.title,note.body,note.tags,note.color,note.pinned,note.archived,item.line-index);
+                                                    }
+                                                }
+                                                if note.checklist-items.length >= 12: Text {
+                                                    text: "Open Edit to review all items.";
+                                                    color: Theme.muted-ink;
+                                                    wrap: word-wrap;
+                                                }
+                                            }
                                             Text { text: note.tags; color: Theme.muted-ink; wrap: word-wrap; }
                                             HorizontalLayout {
                                                 spacing: 6px;

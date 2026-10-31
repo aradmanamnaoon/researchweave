@@ -383,6 +383,17 @@ fn refresh_quick_note_cards(
                 .filter_map(serde_json::Value::as_str)
                 .collect::<Vec<_>>()
                 .join(", ");
+            let body = row["body"].as_str().unwrap_or("");
+            let checklist_items = quick_note_checklist::parse_items(body)
+                .unwrap_or_default()
+                .into_iter()
+                .take(12)
+                .map(|item| QuickNoteChecklistItem {
+                    line_index: i32::try_from(item.line_index).unwrap_or(i32::MAX),
+                    label: item.text.into(),
+                    checked: item.checked,
+                })
+                .collect::<Vec<_>>();
             QuickNote {
                 id: row["id"].as_str().unwrap_or("").into(),
                 title: row["title"].as_str().unwrap_or("").into(),
@@ -390,6 +401,7 @@ fn refresh_quick_note_cards(
                 has_unchecked_item: quick_note_checklist::has_unchecked(
                     row["body"].as_str().unwrap_or(""),
                 ),
+                checklist_items: Rc::new(slint::VecModel::from(checklist_items)).into(),
                 tags: labels.into(),
                 color: row["color"].as_str().unwrap_or("paper").into(),
                 revision: row["revision"].as_i64().unwrap_or(0) as i32,
@@ -3485,7 +3497,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok((card_id, revision)) => {
                         ui.set_project_revision(revision as i32);
-                        if selected.is_empty() || selected.as_str() == card_id {
+                        // Row-level pin/archive/checklist actions can complete
+                        // while this same card has unsaved edits in the composer.
+                        // Never erase a draft merely because its card ID was
+                        // updated by a different UI control.
+                        let editor_is_source =
+                            (selected.is_empty() && ui.get_quick_note_selected_id().is_empty()
+                                || !selected.is_empty()
+                                    && selected.as_str() == card_id
+                                    && ui.get_quick_note_selected_id() == selected)
+                                && ui.get_quick_note_title() == title
+                                && ui.get_quick_note_body() == body
+                                && ui.get_quick_note_tags() == tags
+                                && ui.get_quick_note_color() == color
+                                && ui.get_quick_note_pinned() == pinned
+                                && ui.get_quick_note_archived() == archived;
+                        if editor_is_source {
                             ui.set_quick_note_selected_id("".into());
                             ui.set_quick_note_selected_revision(0);
                             ui.set_quick_note_title("".into());
@@ -3495,7 +3522,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             ui.set_quick_note_pinned(false);
                             ui.set_quick_note_archived(false);
                         }
-                        ui.set_status("Quick note recorded in project history".into());
+                        ui.set_status(if !editor_is_source
+                            && !selected.is_empty()
+                            && ui.get_quick_note_selected_id() == selected
+                        {
+                            "Card updated; unsaved editor content retained. Reload the card before saving more edits."
+                        } else {
+                            "Quick note recorded in project history"
+                        }.into());
                     }
                     Err(error) => {
                         ui.set_quick_note_results(format!("Quick note not saved: {error}").into());
@@ -3532,6 +3566,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         revision,
                         title,
                         completed.into(),
+                        tags,
+                        color,
+                        pinned,
+                        archived,
+                    ),
+                    Err(error) => ui.set_quick_note_results(error.into()),
+                }
+            }
+        }
+    });
+    app.on_toggle_quick_note_checklist_item({
+        let weak = app.as_weak();
+        move |id, revision, title, body, tags, color, pinned, archived, line_index| {
+            if let Some(ui) = weak.upgrade() {
+                let updated = usize::try_from(line_index)
+                    .map_err(|_| "Invalid checklist item index".to_owned())
+                    .and_then(|line| quick_note_checklist::toggle_at_line(body.as_str(), line));
+                match updated {
+                    Ok(text) => ui.invoke_save_quick_note(
+                        id,
+                        revision,
+                        title,
+                        text.into(),
                         tags,
                         color,
                         pinned,

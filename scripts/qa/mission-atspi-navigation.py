@@ -317,13 +317,33 @@ def main() -> int:
         if not activate(app, "Save selected quick note"):
             raise RuntimeError("Cannot persist converted checklist note")
         time.sleep(0.3)
+        task_name = "Research MRI note about a synthetic brain."
+        if not activate(app, "Edit quick note Synthetic MRI memo"):
+            raise RuntimeError("Cannot stage an unsaved card draft for preservation check")
+        edit_text(app, "Quick note body", "UNSAVED COMPOSER DRAFT SENTINEL")
+        if not activate(app, "Complete " + task_name + " in note Synthetic MRI memo"):
+            raise RuntimeError("Persisted checklist item is not directly interactive")
+        time.sleep(0.2)
+        if "UNSAVED COMPOSER DRAFT SENTINEL" not in read_field(app, "Quick note body"):
+            raise RuntimeError("Card checklist action silently erased unsaved editor changes")
+        if not activate(app, "Mark unfinished " + task_name + " in note Synthetic MRI memo"):
+            raise RuntimeError("Cannot undo completion of a specific checklist item")
+        time.sleep(0.2)
+        if "UNSAVED COMPOSER DRAFT SENTINEL" not in read_field(app, "Quick note body"):
+            raise RuntimeError("Undoing a card item silently erased the editor draft")
+        if not activate(app, "Clear quick note editor to create another"):
+            raise RuntimeError("Cannot explicitly clear the preserved test editor draft")
+        print("QUICK_NOTE_UNSAVED_COMPOSER_PRESERVED_THROUGH_CARD_ACTIONS_OK")
+        if not nodes_named(app, "Complete " + task_name + " in note Synthetic MRI memo"):
+            raise RuntimeError("Per-item checklist toggle did not preserve original note content")
+        print("QUICK_NOTE_PER_ITEM_TOGGLE_AND_UNDO_OK")
         if not activate(app, "Complete next item in quick note Synthetic MRI memo"):
             raise RuntimeError("Persisted checklist lacks interactive completion")
         time.sleep(0.3)
         if nodes_named(app, "Complete next item in quick note Synthetic MRI memo"):
             raise RuntimeError("Checked item was not updated or action was not removed")
-        if not any("- [x] Research MRI note" in (node.name or "") for node, _ in walk(app)):
-            raise RuntimeError("Checklist completion did not persist into displayed card")
+        if not nodes_named(app, "Mark unfinished " + task_name + " in note Synthetic MRI memo"):
+            raise RuntimeError("Checklist completion did not update the card's checked item control")
         print("QUICK_NOTE_CHECKLIST_PERSISTED_COMPLETION_OK")
         audit(app, "quick-note-checklist-completed", output)
         if not activate(app, "Show long form project notebook"):
@@ -723,7 +743,7 @@ def main() -> int:
         time.sleep(0.3)
         if not nodes_named(app, "Edit quick note Synthetic MRI memo"):
             raise RuntimeError("Saved quick-note card missing after reopening project A")
-        if not any("- [x] Research MRI note" in (node.name or "") for node, _ in walk(app)):
+        if not nodes_named(app, "Mark unfinished Research MRI note about a synthetic brain. in note Synthetic MRI memo"):
             raise RuntimeError("Checklist completion was not restored from project history")
         if nodes_named(app, "Complete next item in quick note Synthetic MRI memo"):
             raise RuntimeError("Completed checklist reappeared as an unfinished item after reopen")
