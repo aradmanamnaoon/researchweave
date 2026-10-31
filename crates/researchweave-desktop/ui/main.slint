@@ -7,34 +7,35 @@ export global Theme {
     in-out property <bool> compact-density: false;
     in-out property <int> ui-scale: 100;
     in-out property <bool> reduced-motion: false;
-    in-out property <color> canvas: high-contrast ? #000000 : (dark-mode ? #101923 : #f6f5f1);
-    in-out property <color> surface: high-contrast ? #111111 : (dark-mode ? #172438 : #ffffff);
-    in-out property <color> raised: high-contrast ? #1b1b1b : (dark-mode ? #1d2e3a : #edf1f0);
-    in-out property <color> ink: high-contrast ? #ffffff : (dark-mode ? #f4f6f8 : #172438);
-    in-out property <color> muted-ink: high-contrast ? #ffffff : (dark-mode ? #b9c5d3 : #5b677a);
-    in-out property <color> divider: high-contrast ? #ffffff : (dark-mode ? #81919f : #87989a);
-    // Brand accent deliberately uses a darker teal in light mode so white
-    // primary-button text remains WCAG-AA readable.
-    in-out property <color> accent: high-contrast ? #ffff00 : (dark-mode ? #55c7bd : #147a75);
-    in-out property <color> accent-subtle: high-contrast ? #262600 : (dark-mode ? #173d3b : #ddeDEA);
-    in-out property <color> accent-ink: high-contrast ? #000000 : (dark-mode ? #101923 : #ffffff);
-    in-out property <color> focus: high-contrast ? #00ffff : (dark-mode ? #a997e8 : #7564b5);
-    in-out property <color> success: high-contrast ? #7cffb2 : (dark-mode ? #7fd4af : #237a57);
-    in-out property <color> warning: high-contrast ? #ffd166 : (dark-mode ? #e0a17b : #8a5a00);
-    in-out property <color> danger: high-contrast ? #ff8899 : (dark-mode ? #ff9fad : #a9243e);
-    in-out property <color> conflict: high-contrast ? #ffffff : (dark-mode ? #a997e8 : #7564b5);
-    in-out property <color> evidence-violet: high-contrast ? #ffffff : (dark-mode ? #a997e8 : #7564b5);
-    in-out property <color> discovery-copper: high-contrast ? #ffd166 : (dark-mode ? #e0a17b : #9a5b3a);
-    in-out property <color> rail-muted: high-contrast ? #ffffff : (dark-mode ? #b9c5d3 : #b8c4d4);
-    in-out property <color> rail-background: high-contrast ? #000000 : (dark-mode ? #101923 : #172438);
-    in-out property <color> reader-canvas: high-contrast ? #000000 : (dark-mode ? #0c141d : #efede7);
-    in-out property <color> tab-strip: high-contrast ? #1b1b1b : (dark-mode ? #13202c : #edf1f0);
+    // Meridian palette: deep ink, mineral blue, amethyst, clay and warm paper.
+    in-out property <color> canvas: high-contrast ? #000000 : (dark-mode ? #111b26 : #f5f4ef);
+    in-out property <color> surface: high-contrast ? #111111 : (dark-mode ? #1c2a36 : #ffffff);
+    in-out property <color> raised: high-contrast ? #1b1b1b : (dark-mode ? #243544 : #eaeff2);
+    in-out property <color> ink: high-contrast ? #ffffff : (dark-mode ? #f5f7fa : #202b37);
+    in-out property <color> muted-ink: high-contrast ? #ffffff : (dark-mode ? #c2cfdc : #566574);
+    in-out property <color> divider: high-contrast ? #ffffff : (dark-mode ? #8798a8 : #899aa5);
+    // Stronger mineral blue on light surfaces preserves readable white CTA text.
+    in-out property <color> accent: high-contrast ? #ffff00 : (dark-mode ? #98bcd5 : #3b5b88);
+    in-out property <color> accent-subtle: high-contrast ? #262600 : (dark-mode ? #263e59 : #e3ecf6);
+    in-out property <color> accent-ink: high-contrast ? #000000 : (dark-mode ? #14202c : #ffffff);
+    in-out property <color> focus: high-contrast ? #00ffff : (dark-mode ? #c4b6ff : #6957a6);
+    in-out property <color> success: high-contrast ? #7cffb2 : (dark-mode ? #80d0ae : #227857);
+    in-out property <color> warning: high-contrast ? #ffd166 : (dark-mode ? #e8b274 : #905b18);
+    in-out property <color> danger: high-contrast ? #ff8899 : (dark-mode ? #ff9bb3 : #a83047);
+    in-out property <color> conflict: high-contrast ? #ffffff : (dark-mode ? #b4a0e4 : #6957a6);
+    in-out property <color> evidence-violet: high-contrast ? #ffffff : (dark-mode ? #b4a0e4 : #6957a6);
+    in-out property <color> discovery-copper: high-contrast ? #ffd166 : (dark-mode ? #e4a880 : #9b6042);
+    in-out property <color> rail-muted: high-contrast ? #ffffff : (dark-mode ? #c7d6e1 : #c7d6e1);
+    in-out property <color> rail-background: high-contrast ? #000000 : (dark-mode ? #172638 : #263245);
+    in-out property <color> rail-hover: high-contrast ? #262600 : (dark-mode ? #32465e : #364d69);
+    in-out property <color> reader-canvas: high-contrast ? #000000 : (dark-mode ? #0f1922 : #eceae4);
+    in-out property <color> tab-strip: high-contrast ? #1b1b1b : (dark-mode ? #182633 : #e8ebef);
     // Scientific-visualization roles. Charts must still expose numeric labels,
     // uncertainty and machine-readable data rather than encoding meaning by color.
-    in-out property <color> data-1: high-contrast ? #00ffff : (dark-mode ? #55c7bd : #147a75);
-    in-out property <color> data-2: high-contrast ? #ff99ff : (dark-mode ? #a997e8 : #7564b5);
-    in-out property <color> data-3: high-contrast ? #ffd166 : (dark-mode ? #e0a17b : #9a5b3a);
-    in-out property <color> data-4: high-contrast ? #ffffff : (dark-mode ? #8fb9e8 : #315f8f);
+    in-out property <color> data-1: high-contrast ? #00ffff : (dark-mode ? #98bcd5 : #3b5b88);
+    in-out property <color> data-2: high-contrast ? #ff99ff : (dark-mode ? #b4a0e4 : #6957a6);
+    in-out property <color> data-3: high-contrast ? #ffd166 : (dark-mode ? #e4a880 : #9b6042);
+    in-out property <color> data-4: high-contrast ? #ffffff : (dark-mode ? #84c5b3 : #2b756d);
     in-out property <length> panel-radius: 8px;
     in-out property <length> control-radius: 5px;
     in-out property <length> space1: 4px;
@@ -81,7 +82,7 @@ component ActivityNavButton inherits Rectangle {
     horizontal-stretch: 1;
     background: root.selected
         ? Theme.accent-subtle
-        : (touch.has-hover ? (Theme.dark-mode ? #213244 : #26384f) : transparent);
+        : (touch.has-hover ? Theme.rail-hover : transparent);
     border-radius: 9px;
     border-width: root.selected ? 1px : 0px;
     border-color: root.selected ? Theme.accent : transparent;
@@ -1019,6 +1020,11 @@ export component MainWindow inherits Window {
                                             root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number + 1);
                                         }
                                     }
+                                    Button {
+                                        text: "Notebook";
+                                        accessible-label: "Open project notebook from PDF reader";
+                                        clicked => { root.page = 21; }
+                                    }
                                 }
                                 Text {
                                     text: root.pdf-status + " · matches: " + root.pdf-matches;
@@ -1381,21 +1387,37 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 21: Rectangle {
                         background: Theme.raised;
+                        ScrollView {
                         VerticalLayout {
                             padding: 24px;
                             spacing: 9px;
                             Text { text: "Notebook"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
-                            Text { text: "Project notebook saves are revisioned and event-audited. Preview validates without changing the authoritative project."; color: Theme.muted-ink; wrap: word-wrap; }
-                            notebook-body := TextEdit { accessible-label: "Project notebook text"; text: root.notebook-draft; edited(text) => { root.notebook-draft = text; root.notebook-draft-edited(text); } }
+                            Text { text: "Capture research ideas here. Drafts autosave locally; project saves are revisioned and auditable."; color: Theme.muted-ink; wrap: word-wrap; }
+                            if root.pdf-local-path != "": Button {
+                                text: "Return to PDF";
+                                accessible-label: "Return to the same PDF reader";
+                                clicked => { root.page = 7; }
+                            }
+                            notebook-body := TextEdit {
+                                min-height: 260px;
+                                preferred-height: 400px;
+                                accessible-label: "Project notebook text";
+                                text: root.notebook-draft;
+                                edited(text) => { root.notebook-draft = text; root.notebook-draft-edited(text); }
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
                                 Button { text: "Preview save"; accessible-label: "Preview notebook save"; clicked => { root.preview-notebook-save(notebook-body.text); } }
                                 Button { text: "Record previewed notebook"; accessible-label: "Record previewed notebook save"; clicked => { root.apply-evidence-preview(); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
                                 Button { text: "History"; accessible-label: "Load notebook history"; clicked => { root.load-notebook-history(); } }
                                 Button { text: "Export Markdown"; accessible-label: "Export notebook Markdown"; clicked => { root.export-notebook(); } }
                             }
                             Text { text: root.notebook-results; accessible-label: "Notebook operation result " + root.notebook-results; wrap: word-wrap; color: Theme.ink; }
                             Rectangle { vertical-stretch: 1; }
+                        }
                         }
                     }
                     if root.page == 9: Rectangle {
@@ -1915,23 +1937,38 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 19: Rectangle {
                         background: Theme.raised;
+                        ScrollView {
                         VerticalLayout {
                             padding: 24px;
                             spacing: 9px;
                             Text { text: "Manuscript"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
-                            Text { text: "Save versioned manuscript sections through the project approval/audit path. Citations are preserved with each section revision."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Text { text: "Write a research section on the spacious paper canvas. Draft edits autosave; recording a version and exporting require an explicit action."; color: Theme.muted-ink; wrap: word-wrap; }
                             HorizontalLayout {
                                 spacing: 8px;
                                 manuscript-id := LineEdit { accessible-label: "Manuscript ID"; placeholder-text: "Manuscript ID"; text: root.manuscript-draft-id; edited(text) => { root.manuscript-draft-id = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
                                 manuscript-section := LineEdit { accessible-label: "Manuscript section"; placeholder-text: "Section, e.g. Results"; text: root.manuscript-draft-section; edited(text) => { root.manuscript-draft-section = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
                                 manuscript-citations := LineEdit { accessible-label: "Manuscript citations"; placeholder-text: "Citation IDs separated by commas"; text: root.manuscript-draft-citations; edited(text) => { root.manuscript-draft-citations = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
                             }
-                            manuscript-body := TextEdit {
-                                min-height: 140px;
-                                preferred-height: 220px;
-                                accessible-label: "Manuscript section body";
-                                text: root.manuscript-draft-body;
-                                edited(text) => { root.manuscript-draft-body = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, text); }
+                            Rectangle {
+                                min-height: 370px;
+                                preferred-height: 560px;
+                                background: Theme.reader-canvas;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: Theme.space5;
+                                    manuscript-body := TextEdit {
+                                        min-height: 320px;
+                                        vertical-stretch: 1;
+                                        accessible-label: "Manuscript section body";
+                                        text: root.manuscript-draft-body;
+                                        edited(text) => { root.manuscript-draft-body = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, text); }
+                                    }
+                                }
                             }
                             HorizontalLayout {
                                 min-height: 36px;
@@ -2000,6 +2037,7 @@ export component MainWindow inherits Window {
                                 }
                             }
                             Rectangle { vertical-stretch: 1; }
+                        }
                         }
                     }
                     if root.page == 22: Rectangle {
@@ -2377,7 +2415,7 @@ export component MainWindow inherits Window {
                     spacing: 14px;
                     Text {
                         text: root.status;
-                        color: Theme.surface;
+                        color: Theme.rail-muted;
                         font-size: 11px * Theme.ui-scale / 100;
                         vertical-alignment: center;
                         accessible-label: "Status: " + root.status;
@@ -2385,7 +2423,7 @@ export component MainWindow inherits Window {
                     }
                     Text {
                         text: "LOCAL FIRST";
-                        color: #9fd0cc;
+                        color: Theme.rail-muted;
                         font-size: 10px * Theme.ui-scale / 100;
                         vertical-alignment: center;
                     }
