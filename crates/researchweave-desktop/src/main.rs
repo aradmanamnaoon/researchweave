@@ -32,6 +32,7 @@ use uuid::Uuid;
 #[cfg(test)]
 mod display_contrast;
 mod durable_activity;
+mod manuscript_outline;
 mod manuscript_search;
 mod pdf_engine;
 mod physical_export;
@@ -198,6 +199,11 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_manuscript_draft_section("".into());
     ui.set_manuscript_draft_citations("".into());
     ui.set_manuscript_draft_body("".into());
+    ui.set_manuscript_sections(
+        Rc::new(slint::VecModel::from(Vec::<ManuscriptSection>::new())).into(),
+    );
+    ui.set_manuscript_outline_open(false);
+    ui.set_manuscript_outline_status("Load saved sections to navigate this manuscript.".into());
     ui.set_manuscript_word_count(0);
     ui.set_manuscript_character_count(0);
     ui.set_manuscript_find_panel_open(false);
@@ -3540,6 +3546,144 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Rc::new(RefCell::new(None));
     let writing_drafts = Rc::new(RefCell::new(writing_autosave::Drafts::default()));
     let writing_timer = Rc::new(slint::Timer::default());
+    let stored_manuscript_outline: Rc<RefCell<Option<manuscript_outline::ManuscriptOutline>>> =
+        Rc::new(RefCell::new(None));
+    app.on_load_manuscript_sections({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
+        let outline = stored_manuscript_outline.clone();
+        move |manuscript_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            outline.borrow_mut().take();
+            ui.set_manuscript_sections(Rc::new(slint::VecModel::from(Vec::<ManuscriptSection>::new())).into());
+            let result = (|| -> Result<(manuscript_outline::ManuscriptOutline, Vec<ManuscriptSection>), String> {
+                let path = active_project.borrow().clone().ok_or("Open a project first")?;
+                let root = host_data_root()?;
+                // Loading an outline must never discard an in-flight section.
+                // Finish the same autosave transaction before capturing the
+                // revision set to be presented for navigation.
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    let revision = flush_writing_drafts(&path, &mut drafts.borrow_mut(), &root)?;
+                    ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                }
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    return Err("A manuscript or notebook draft is still unsaved; resolve the autosave error first".into());
+                }
+                timer.stop();
+                let receipt = evidence_read_at(
+                    &path,
+                    "writing.inspect",
+                    serde_json::json!({"manuscript_id":manuscript_id.as_str()}),
+                    &root,
+                )?;
+                let record = manuscript_outline::ManuscriptOutline::from_inspect(
+                    &path,
+                    manuscript_id.as_str(),
+                    &receipt,
+                )?;
+                let rows = record.rows().into_iter().map(|row| ManuscriptSection {
+                    name: row.section.into(),
+                    label: row.label.into(),
+                    revision: i32::try_from(row.revision).unwrap_or(i32::MAX),
+                }).collect::<Vec<_>>();
+                Ok((record, rows))
+            })();
+            match result {
+                Ok((record, rows)) => {
+                    let count = rows.len();
+                    *outline.borrow_mut() = Some(record);
+                    ui.set_manuscript_sections(Rc::new(slint::VecModel::from(rows)).into());
+                    ui.set_manuscript_outline_status(format!("{count} saved sections. Choose a heading to load its verified revision.").into());
+                }
+                Err(error) => ui.set_manuscript_outline_status(format!("Saved sections unavailable: {error}").into()),
+            }
+        }
+    });
+    app.on_select_manuscript_section({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
+        let outline = stored_manuscript_outline.clone();
+        move |section, revision| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<manuscript_outline::SectionSelection, String> {
+                let path = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a project first")?;
+                let root = host_data_root()?;
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    let revision = flush_writing_drafts(&path, &mut drafts.borrow_mut(), &root)?;
+                    ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                }
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    return Err(
+                        "Unsaved writing changes must be resolved before selecting another section"
+                            .into(),
+                    );
+                }
+                timer.stop();
+                let manuscript_id = ui.get_manuscript_draft_id().to_string();
+                let fresh = evidence_read_at(
+                    &path,
+                    "writing.inspect",
+                    serde_json::json!({"manuscript_id":manuscript_id}),
+                    &root,
+                )?;
+                let selected = outline
+                    .borrow()
+                    .as_ref()
+                    .ok_or("Reload saved sections before selecting one")?
+                    .activate(
+                        &path,
+                        &manuscript_id,
+                        section.as_str(),
+                        i64::from(revision),
+                        &fresh,
+                        false,
+                    )?;
+                let project_id = ProjectStore::open(&path)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?
+                    .id;
+                let mut updated = drafts.borrow().clone();
+                updated.manuscript_id = selected.manuscript_id.clone();
+                updated.section = selected.section.clone();
+                updated.citations = selected.citations_editor_text();
+                updated.body = selected.body.clone();
+                updated.manuscript_dirty = false;
+                writing_autosave::save(&writing_autosave::path(&root, &project_id), &updated)?;
+                *drafts.borrow_mut() = updated;
+                Ok(selected)
+            })();
+            match result {
+                Ok(selected) => {
+                    ui.set_manuscript_draft_section(selected.section.clone().into());
+                    ui.set_manuscript_draft_citations(selected.citations_editor_text().into());
+                    ui.set_manuscript_draft_body(selected.body.clone().into());
+                    let (words, chars) = manuscript_search::counts(&selected.body);
+                    ui.set_manuscript_word_count(i32::try_from(words).unwrap_or(i32::MAX));
+                    ui.set_manuscript_character_count(i32::try_from(chars).unwrap_or(i32::MAX));
+                    ui.set_manuscript_outline_status(
+                        format!(
+                            "Loaded saved section {} (revision {}).",
+                            selected.section, selected.revision
+                        )
+                        .into(),
+                    );
+                    ui.set_manuscript_outline_open(false);
+                    ui.set_manuscript_find_panel_open(false);
+                }
+                Err(error) => {
+                    ui.set_manuscript_outline_status(format!("Section not changed: {error}").into())
+                }
+            }
+        }
+    });
     let pending_manuscript_replace: Rc<RefCell<Option<manuscript_search::PendingReplace>>> =
         Rc::new(RefCell::new(None));
     app.on_preview_manuscript_replace({

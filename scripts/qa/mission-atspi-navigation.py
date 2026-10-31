@@ -490,6 +490,55 @@ def main() -> int:
         if not any("Verified manuscript for isolated project recovery" in (node.name or "") for node, _ in walk(app)):
             raise RuntimeError("Persisted manuscript body was not accessible from native inspection")
         print("MANUSCRIPT_PERSISTED_INSPECTION_VISIBLE_OK")
+        # The outline must navigate two different *persisted* section revisions,
+        # not just swap labels or show a static navigation mock.
+        if not activate(app, "Toggle manuscript operation details"):
+            raise RuntimeError("Cannot collapse inspect pane before writing second section")
+        edit_text(app, "Manuscript section", "Methods")
+        edit_text(app, "Manuscript section body", "Methods use only synthetic independent measurements.")
+        time.sleep(1.3)
+        for _ in range(10):
+            if activate(app, "Toggle saved manuscript sections outline"):
+                break
+            subprocess.run(
+                ["xdotool", "mousemove", "1110", "360", "click", "4"],
+                check=True,
+                timeout=10,
+            )
+            time.sleep(0.15)
+        else:
+            raise RuntimeError("Saved manuscript sections outline cannot be opened")
+        time.sleep(0.3)
+        audit(app, "manuscript-section-outline", output)
+        abstract_buttons = [node.name for node, _ in walk(app) if "Open saved manuscript section Abstract" in (node.name or "")]
+        methods_buttons = [node.name for node, _ in walk(app) if "Open saved manuscript section Methods" in (node.name or "")]
+        if not abstract_buttons or not methods_buttons:
+            raise RuntimeError("Outline did not derive both persisted manuscript sections")
+        if not activate(app, abstract_buttons[0]):
+            raise RuntimeError("Selecting verified Abstract section did not activate")
+        time.sleep(0.3)
+        print("MANUSCRIPT_OUTLINE_SELECTION_STATUS=" + repr([
+            (node.name or "")[:300] for node, _ in walk(app)
+            if "section not changed" in (node.name or "").casefold()
+            or "loaded saved section" in (node.name or "").casefold()
+        ]))
+        for _ in range(10):
+            if nodes_named(app, "Manuscript section"):
+                break
+            # Scroll the *outer document pane*: the TextEdit intercepts wheel
+            # events over its canvas and will not reveal identity fields.
+            subprocess.run(["xdotool", "mousemove", "1266", "450", "click", "4"], check=True, timeout=10)
+            time.sleep(0.15)
+        audit(app, "manuscript-section-outline-selected", output)
+        # Selection moves the editing canvas into view; Slint/AT-SPI omits the
+        # off-viewport section identity LineEdit from the accessibility tree.
+        # The accessible activation result states its persisted identity and
+        # revision, while the visible TextEdit must contain the exact body.
+        if "Verified manuscript for isolated project recovery" not in read_field(app, "Manuscript section body"):
+            raise RuntimeError("Outline did not load persisted Abstract body")
+        if not any("Loaded saved section Abstract" in (node.name or "") for node, _ in walk(app)):
+            raise RuntimeError("Outline did not acknowledge the bound persisted revision")
+        print("MANUSCRIPT_VERIFIED_SECTION_OUTLINE_NAVIGATION_OK")
         resize_xvfb_window(850, 600)
         time.sleep(0.35)
         audit(app, "manuscript-narrow", output)

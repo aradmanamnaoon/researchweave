@@ -13,6 +13,12 @@ export struct QuickNote {
     archived: bool,
 }
 
+export struct ManuscriptSection {
+    name: string,
+    label: string,
+    revision: int,
+}
+
 export global Theme {
     in-out property <bool> dark-mode: false;
     in-out property <bool> high-contrast: false;
@@ -263,6 +269,9 @@ export component MainWindow inherits Window {
     in-out property <string> manuscript-draft-section: "";
     in-out property <string> manuscript-draft-citations: "";
     in-out property <string> manuscript-draft-body: "";
+    in-out property <[ManuscriptSection]> manuscript-sections: [];
+    in-out property <bool> manuscript-outline-open: false;
+    in-out property <string> manuscript-outline-status: "Load saved sections to navigate this manuscript.";
     in-out property <int> manuscript-word-count: 0;
     in-out property <int> manuscript-character-count: 0;
     in-out property <int> manuscript-editor-zoom: 100;
@@ -277,6 +286,8 @@ export component MainWindow inherits Window {
     callback prepare-quick-note-checklist();
     callback complete-next-quick-note(string, int, string, string, string, string, bool, bool);
     callback manuscript-draft-edited(string, string, string, string);
+    callback load-manuscript-sections(string);
+    callback select-manuscript-section(string, int);
     callback preview-manuscript-replace(string, string);
     callback apply-manuscript-replace();
     in-out property <string> qualitative-results: "Inspect the codebook before editing; writes require the current content hash.";
@@ -2213,6 +2224,43 @@ export component MainWindow inherits Window {
                             HorizontalLayout {
                                 spacing: 8px;
                                 manuscript-citations := LineEdit { accessible-label: "Manuscript citations"; placeholder-text: "Citation IDs separated by commas"; text <=> root.manuscript-draft-citations; edited(text) => { root.manuscript-draft-citations = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: root.manuscript-outline-open ? "Hide sections" : "Saved sections";
+                                    accessible-label: "Toggle saved manuscript sections outline";
+                                    clicked => {
+                                        root.manuscript-outline-open = !root.manuscript-outline-open;
+                                        if root.manuscript-outline-open { root.load-manuscript-sections(root.manuscript-draft-id); }
+                                    }
+                                }
+                                Text {
+                                    text: root.manuscript-outline-status;
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            if root.manuscript-outline-open: Rectangle {
+                                min-height: 45px;
+                                max-height: 178px;
+                                preferred-height: min(178px, 48px + root.manuscript-sections.length * 38px);
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                ScrollView {
+                                    VerticalLayout {
+                                        padding: 8px;
+                                        spacing: 5px;
+                                        for section in root.manuscript-sections: Button {
+                                            text: section.label;
+                                            accessible-label: "Open saved manuscript section " + section.label;
+                                            clicked => { root.select-manuscript-section(section.name, section.revision); }
+                                        }
+                                    }
+                                }
                             }
                             HorizontalLayout {
                                 min-height: 36px;
