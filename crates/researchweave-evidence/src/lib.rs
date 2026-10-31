@@ -14,6 +14,7 @@ use std::{
 use uuid::Uuid;
 mod forms;
 mod highlights;
+mod protocol_freeze;
 mod publishing;
 mod publishing_formats;
 mod qualitative;
@@ -74,6 +75,7 @@ impl EvidenceHandler {
                 &["project_id", "protocol_id", "from_version", "to_version"][..],
             ),
             ("protocol.export", &["project_id", "protocol_id"][..]),
+            ("protocol.freeze_status", &["project_id", "protocol_id"][..]),
             ("question.history", &["project_id", "question_id"][..]),
             ("evidence.note_history", &["project_id", "note_id"][..]),
             ("evidence.notebook_export", &["project_id"][..]),
@@ -149,6 +151,10 @@ impl EvidenceHandler {
             (
                 "protocol.amend",
                 &["project_id", "protocol_id", "author", "rationale", "body"],
+            ),
+            (
+                "protocol.freeze",
+                &["project_id", "protocol_id", "expected_version"],
             ),
             (
                 "question.create",
@@ -447,6 +453,12 @@ impl EvidenceHandler {
         if matches!(operation, "protocol.create" | "protocol.amend") {
             return protocol_mutate(&mut store, operation, args, ctx);
         }
+        if operation == "protocol.freeze" {
+            return protocol_freeze::write(&mut store, args, ctx);
+        }
+        if operation == "protocol.freeze_status" {
+            return protocol_freeze::status(&store, args);
+        }
         if matches!(operation, "question.create" | "question.amend") {
             return question_mutate(&mut store, operation, args, ctx);
         }
@@ -656,6 +668,7 @@ impl EvidenceHandler {
             "protocol.create" | "protocol.amend" => {
                 protocol_mutate(&mut shadow, operation, args, ctx)?
             }
+            "protocol.freeze" => protocol_freeze::write(&mut shadow, args, ctx)?,
             "question.create" | "question.amend" => {
                 question_mutate(&mut shadow, operation, args, ctx)?
             }
@@ -1984,6 +1997,7 @@ impl OperationHandler for EvidenceHandler {
             operation,
             "protocol.create"
                 | "protocol.amend"
+                | "protocol.freeze"
                 | "question.create"
                 | "question.amend"
                 | "evidence.note"

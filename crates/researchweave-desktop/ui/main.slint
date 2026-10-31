@@ -240,6 +240,7 @@ export component MainWindow inherits Window {
     in-out property <string> protocol-results: "Preview a protocol before recording it.";
     in-out property <string> protocol-export-receipt: "";
     in-out property <string> protocol-export-id: "";
+    in-out property <string> protocol-freeze-status: "No local freeze inspected. A local digest and computer timestamp are not an external preregistration.";
     in-out property <string> reference-results: "Register or inspect project references.";
     in-out property <string> review-results: "Use persisted references to build and screen a review.";
     in-out property <string> extraction-results: "Create a versioned extraction schema, then record validated values for a review record.";
@@ -330,6 +331,9 @@ export component MainWindow inherits Window {
     callback preview-question(string, string, string, string);
     callback preview-protocol(string, string, string, string);
     callback preview-protocol-amend(string, string, string, string, string);
+    callback preview-protocol-freeze(string);
+    callback record-protocol-freeze();
+    callback inspect-protocol-freeze(string);
     callback apply-evidence-preview();
     callback load-question-history(string);
     callback load-protocol-history(string);
@@ -1457,7 +1461,47 @@ export component MainWindow inherits Window {
                                 clicked => { root.preview-protocol-amend(protocol-id.text, protocol-design.text, protocol-objective.text, protocol-author.text, protocol-rationale.text); }
                             }
                             Text { text: "Amendments preserve all existing protocol-body fields, changing only nonempty design/objective inputs. A blank input keeps its previous value. Preview before recording; all earlier versions remain available."; color: Theme.muted-ink; wrap: word-wrap; }
-                            Text { text: root.protocol-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Protocol operation result"; }
+                            Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text { text: "LOCAL BASELINE FREEZE"; color: Theme.ink; font-weight: 700; }
+                                    Text {
+                                        text: "Freeze one existing protocol version with an auditable local event and SHA-256 receipt. Later amendments remain explicitly visible. This does not register or timestamp the protocol with an independent service.";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Preview freeze";
+                                            accessible-label: "Preview local protocol baseline freeze";
+                                            clicked => { root.preview-protocol-freeze(protocol-id.text); }
+                                        }
+                                        Button {
+                                            text: "Record freeze";
+                                            accessible-label: "Record previewed local protocol baseline freeze";
+                                            clicked => { root.record-protocol-freeze(); }
+                                        }
+                                    }
+                                    Button {
+                                        text: "Inspect frozen baseline";
+                                        accessible-label: "Inspect local protocol freeze receipt";
+                                        clicked => { root.inspect-protocol-freeze(protocol-id.text); }
+                                    }
+                                    Text {
+                                        text: root.protocol-freeze-status;
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                        accessible-label: "Protocol local freeze status " + root.protocol-freeze-status;
+                                    }
+                                }
+                            }
+                            Text { text: root.protocol-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Protocol operation result " + root.protocol-results; }
                             Rectangle { vertical-stretch: 1; }
                           }
                         }

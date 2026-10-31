@@ -172,6 +172,9 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_protocol_results("Preview a protocol before recording it.".into());
     ui.set_protocol_export_receipt("".into());
     ui.set_protocol_export_id("".into());
+    ui.set_protocol_freeze_status(
+        "No local freeze inspected. A local digest and computer timestamp are not an external preregistration.".into(),
+    );
     ui.set_reference_results("Register or inspect project references.".into());
     ui.set_review_results("Use persisted references to build and screen a review.".into());
     ui.set_extraction_results(
@@ -4241,6 +4244,138 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(error) => {
                         pending_evidence.borrow_mut().take();
                         ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_preview_protocol_freeze({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        move |protocol_id| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|path| {
+                        let root = host_data_root()?;
+                        let protocol_id = protocol_id.as_str().trim();
+                        let history = evidence_read_at(
+                            path,
+                            "protocol.history",
+                            serde_json::json!({"protocol_id":protocol_id}),
+                            &root,
+                        )?;
+                        let version = history
+                            .pointer("/data/history")
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|history| history.last())
+                            .and_then(|last| last["version"].as_i64())
+                            .ok_or_else(|| "A persisted protocol version is required before freezing".to_owned())?;
+                        evidence_preview_at(
+                            path,
+                            "protocol.freeze",
+                            "protocol",
+                            serde_json::json!({
+                                "protocol_id":protocol_id,
+                                "expected_version":version
+                            }),
+                            &root,
+                        )
+                    });
+                match result {
+                    Ok((pending, preview)) => {
+                        *pending_evidence.borrow_mut() = Some(pending);
+                        ui.set_protocol_results(
+                            format!(
+                                "LOCAL FREEZE PREVIEW ONLY. Review exact version and SHA-256 below, then choose Record freeze. This does not create an external preregistration:\n{}",
+                                pretty_result_data(&preview)
+                            )
+                            .into(),
+                        );
+                        ui.set_status("Local protocol baseline freeze preview ready; no data changed".into());
+                    }
+                    Err(error) => {
+                        pending_evidence.borrow_mut().take();
+                        ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_record_protocol_freeze({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let pending = pending_evidence.borrow().clone();
+                let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                    (Some(path), Some(pending))
+                        if pending.operation == "protocol.freeze"
+                            && pending.surface == "protocol" =>
+                    {
+                        host_data_root().and_then(|root| evidence_execute_pending(pending, path, &root))
+                    }
+                    (None, _) => Err("Open a research project first".into()),
+                    (_, _) => Err("Preview a local protocol baseline freeze before recording it".into()),
+                };
+                match result {
+                    Ok((recorded, revision)) => {
+                        let data = &recorded["data"];
+                        ui.set_protocol_freeze_status(
+                            format!(
+                                "Local baseline v{} frozen at computer time {}. Snapshot SHA-256: {}. No independent registration or trusted timestamp was performed.",
+                                data["frozen_version"],
+                                data["recorded_at_local_clock"].as_str().unwrap_or_default(),
+                                data["snapshot_sha256"].as_str().unwrap_or_default(),
+                            )
+                            .into(),
+                        );
+                        ui.set_protocol_results(pretty_result_data(&recorded).into());
+                        ui.set_project_revision(revision as i32);
+                        ui.set_status("Approved local protocol baseline recorded and audited".into());
+                        pending_evidence.borrow_mut().take();
+                    }
+                    Err(error) => {
+                        ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_inspect_protocol_freeze({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |protocol_id| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|path| {
+                        evidence_read_at(
+                            path,
+                            "protocol.freeze_status",
+                            serde_json::json!({"protocol_id":protocol_id.as_str().trim()}),
+                            &host_data_root()?,
+                        )
+                    });
+                match result {
+                    Ok(value) => {
+                        ui.set_protocol_freeze_status(pretty_result_data(&value).into());
+                        ui.set_status(
+                            "Local protocol baseline status verified against persisted history"
+                                .into(),
+                        );
+                    }
+                    Err(error) => {
+                        ui.set_protocol_freeze_status(error.clone().into());
                         ui.set_status(error.into());
                     }
                 }

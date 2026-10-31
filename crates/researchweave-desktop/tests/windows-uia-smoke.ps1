@@ -634,6 +634,49 @@ try {
     }
     Write-Output 'PASS: Approved persisted Protocol -> physical Markdown with version history, digest and no overwrite'
 
+    Invoke-AccessibleButton $window 'Inspect local protocol freeze receipt'
+    Start-Sleep -Milliseconds 160
+    $unfrozen = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($unfrozen | Where-Object { $_ -match '"frozen": false' })) {
+        throw 'Newly recorded protocol was incorrectly marked frozen before approval'
+    }
+    Invoke-AccessibleButton $window 'Preview local protocol baseline freeze'
+    Start-Sleep -Milliseconds 180
+    $freezePreview = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($freezePreview | Where-Object { $_ -like '*LOCAL FREEZE PREVIEW ONLY*' })) {
+        throw 'Local protocol freeze did not provide a separate non-mutating preview'
+    }
+    Invoke-AccessibleButton $window 'Record previewed local protocol baseline freeze'
+    Start-Sleep -Milliseconds 260
+    Invoke-AccessibleButton $window 'Inspect local protocol freeze receipt'
+    Start-Sleep -Milliseconds 180
+    $frozenNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($frozenNames | Where-Object { $_ -match '"frozen": true' }) -or
+        -not ($frozenNames | Where-Object { $_ -match '"frozen_version": 1' }) -or
+        -not ($frozenNames | Where-Object { $_ -match '"external_registration_verified": false' }) -or
+        -not ($frozenNames | Where-Object { $_ -match '"snapshot_sha256": "[0-9a-f]{64}"' })) {
+        throw 'Approved local protocol freeze lacked immutable receipt, exact baseline version or external-registry disclaimer'
+    }
+    Invoke-AccessibleButton $window 'Preview local protocol baseline freeze'
+    Start-Sleep -Milliseconds 180
+    $duplicateFreeze = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($duplicateFreeze | Where-Object { $_ -like '*already has an immutable local freeze baseline*' })) {
+        throw 'Existing local protocol freeze was not protected from duplicate recording'
+    }
+    Write-Output 'PASS: approved immutable local protocol baseline freeze, SHA-256 receipt and one-time enforcement'
+
     # Use the installed native PDFium binary, not an in-process mock, to
     # navigate a deterministic two-page PDF with distinct searchable content.
     $twoPagePdf = (Resolve-Path (Join-Path $PSScriptRoot '../../../docs/verification/rust-rewrite/pdfium-two-page-ui-fixture.pdf')).Path
