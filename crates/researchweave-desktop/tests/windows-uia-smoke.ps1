@@ -1250,6 +1250,20 @@ try {
     $markdownExport = FocusByTab $manuscriptEditor ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown' 8
     $markdownExport.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
+    # We deliberately collapsed the operation-details pane to reach Export
+    # through the Windows keyboard focus order. The export callback updates its
+    # prepared receipt and the bottom status, but does not reopen that pane.
+    # Check the visible status, explicitly reopen the result for inspection,
+    # then collapse it again so subsequent Save controls remain reachable.
+    $preparedStatusNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($preparedStatusNames | Where-Object { $_ -like '*Manuscript MARKDOWN prepared; no file saved yet*' })) {
+        throw 'Manuscript export did not report a prepared Markdown artifact'
+    }
+    Invoke-AccessibleButton $window 'Toggle manuscript operation details'
+    Start-Sleep -Milliseconds 160
     $writingExportNames = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
@@ -1257,6 +1271,9 @@ try {
     if (-not ($writingExportNames | Where-Object { $_ -like '*## Results*Persisted UIA result supported by the registered reference.*' })) {
         throw 'Manuscript Markdown export was not generated from persisted section revisions'
     }
+    Invoke-AccessibleButton $window 'Toggle manuscript operation details'
+    Start-Sleep -Milliseconds 120
+    Write-Output 'PASS: manuscript Markdown export visible in the explicitly expanded result pane'
     $physicalMarkdown = Join-Path $hostData ('uia-physical-' + [guid]::NewGuid().ToString('N') + '.md')
     $markdownPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path'
     ([System.Windows.Automation.ValuePattern]$markdownPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($physicalMarkdown)
