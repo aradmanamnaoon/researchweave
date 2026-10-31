@@ -1411,7 +1411,13 @@ try {
     Start-Sleep -Milliseconds 120
     Write-Output 'PASS: manuscript Markdown export visible in the explicitly expanded result pane'
     $physicalMarkdown = Join-Path $hostData ('uia-physical-' + [guid]::NewGuid().ToString('N') + '.md')
-    $markdownPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path'
+    # Slint omits the lower Save row from UIA while it is outside the visible
+    # scroll viewport. Tab from the *live* Export action to the destination
+    # field; this uses the actual accessible Windows keyboard focus order and
+    # scrolls the field into view instead of treating an offscreen node as
+    # missing or skipping the physical file-save assertion.
+    $exportAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown'
+    $markdownPath = FocusByTab $exportAnchor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path' 9
     ([System.Windows.Automation.ValuePattern]$markdownPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($physicalMarkdown)
     Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
     Start-Sleep -Milliseconds 220
@@ -1442,7 +1448,8 @@ try {
     if (-not ($overwriteResult | Where-Object { $_ -like '*Prepare a manuscript or draft ZIP before saving*' })) {
         throw 'Repeated Save was not rejected after consuming its prepared artifact'
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $exportAgain = FocusByShiftTab $markdownPath ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown' 9
+    $exportAgain.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 150
     Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
     Start-Sleep -Milliseconds 150
@@ -1456,7 +1463,8 @@ try {
     if ([System.IO.File]::ReadAllText($physicalMarkdown) -ne $physicalMarkdownText) {
         throw 'Physical export overwrote a pre-existing file after a fresh preparation'
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript DOCX').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $docxExport = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript DOCX'
+    $docxExport.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $writingDocxNames = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
@@ -1469,7 +1477,8 @@ try {
         throw 'Manuscript DOCX export did not expose the verified structural feature receipt'
     }
     $physicalDocx = Join-Path $hostData ('uia-physical-' + [guid]::NewGuid().ToString('N') + '.docx')
-    $markdownPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path'
+    $docxExportAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript DOCX'
+    $markdownPath = FocusByTab $docxExportAnchor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path' 9
     ([System.Windows.Automation.ValuePattern]$markdownPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($physicalDocx)
     Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
     Start-Sleep -Milliseconds 220
