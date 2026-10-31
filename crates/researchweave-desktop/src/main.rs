@@ -32,6 +32,7 @@ use uuid::Uuid;
 #[cfg(test)]
 mod display_contrast;
 mod durable_activity;
+mod manuscript_search;
 mod pdf_engine;
 mod physical_export;
 mod writing_autosave;
@@ -109,6 +110,9 @@ fn restore_writing_drafts(
     ui.set_manuscript_draft_section(recovered.section.clone().into());
     ui.set_manuscript_draft_citations(recovered.citations.clone().into());
     ui.set_manuscript_draft_body(recovered.body.clone().into());
+    let (words, characters) = manuscript_search::counts(&recovered.body);
+    ui.set_manuscript_word_count(i32::try_from(words).unwrap_or(i32::MAX));
+    ui.set_manuscript_character_count(i32::try_from(characters).unwrap_or(i32::MAX));
     if recovered.notebook_dirty {
         ui.set_notebook_results("Recovered notebook edits awaiting project autosave".into());
     }
@@ -193,6 +197,15 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_manuscript_draft_section("".into());
     ui.set_manuscript_draft_citations("".into());
     ui.set_manuscript_draft_body("".into());
+    ui.set_manuscript_word_count(0);
+    ui.set_manuscript_character_count(0);
+    ui.set_manuscript_find_panel_open(false);
+    ui.set_manuscript_operation_details_open(false);
+    ui.set_manuscript_find_term("".into());
+    ui.set_manuscript_replace_term("".into());
+    ui.set_manuscript_replace_status(
+        "Find and replace operates on this section only. Review before applying.".into(),
+    );
     ui.set_agent_results(
         "Durable project-scoped assistant conversations and prompt templates are available offline."
             .into(),
@@ -3486,6 +3499,94 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Rc::new(RefCell::new(None));
     let writing_drafts = Rc::new(RefCell::new(writing_autosave::Drafts::default()));
     let writing_timer = Rc::new(slint::Timer::default());
+    let pending_manuscript_replace: Rc<RefCell<Option<manuscript_search::PendingReplace>>> =
+        Rc::new(RefCell::new(None));
+    app.on_preview_manuscript_replace({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_replace = pending_manuscript_replace.clone();
+        move |search, replacement| {
+            if let Some(ui) = weak.upgrade() {
+                pending_replace.borrow_mut().take();
+                let result = (|| -> Result<manuscript_search::PendingReplace, String> {
+                    let project = active_project
+                        .borrow()
+                        .as_ref()
+                        .cloned()
+                        .ok_or("Open a project before editing the manuscript")?;
+                    let original = ui.get_manuscript_draft_body().to_string();
+                    let (replacement_body, occurrences) =
+                        manuscript_search::prepare_replace(&original, search.as_str(), replacement.as_str())?;
+                    Ok(manuscript_search::PendingReplace {
+                        project,
+                        manuscript_id: ui.get_manuscript_draft_id().to_string(),
+                        section: ui.get_manuscript_draft_section().to_string(),
+                        search_term: search.to_string(),
+                        replace_term: replacement.to_string(),
+                        expected_draft_hash: manuscript_search::hash(&original),
+                        replacement_body,
+                        occurrences,
+                    })
+                })();
+                match result {
+                    Ok(pending) => {
+                        let count = pending.occurrences;
+                        *pending_replace.borrow_mut() = Some(pending);
+                        ui.set_manuscript_replace_status(
+                            format!("{count} exact occurrences found. No changes made. Review and choose Apply previewed replacement.").into()
+                        );
+                    }
+                    Err(error) => ui.set_manuscript_replace_status(error.into()),
+                }
+            }
+        }
+    });
+    app.on_apply_manuscript_replace({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_replace = pending_manuscript_replace.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let result = (|| -> Result<(String, usize), String> {
+                    let pending = pending_replace.borrow_mut().take()
+                        .ok_or("Preview a replacement before applying it")?;
+                    let active = active_project.borrow().clone()
+                        .ok_or("Open a project before editing the manuscript")?;
+                    if active.canonicalize().ok() != pending.project.canonicalize().ok()
+                        || active.canonicalize().is_err()
+                    {
+                        return Err("Project changed after preview; preview again".into());
+                    }
+                    if !pending.matches_draft(
+                        ui.get_manuscript_draft_id().as_str(),
+                        ui.get_manuscript_draft_section().as_str(),
+                        ui.get_manuscript_draft_body().as_str(),
+                        ui.get_manuscript_find_term().as_str(),
+                        ui.get_manuscript_replace_term().as_str(),
+                    )
+                    {
+                        return Err("Manuscript or replacement inputs changed after preview; preview again".into());
+                    }
+                    Ok((pending.replacement_body, pending.occurrences))
+                })();
+                match result {
+                    Ok((replacement_body, count)) => {
+                        ui.set_manuscript_draft_body(replacement_body.clone().into());
+                        ui.invoke_manuscript_draft_edited(
+                            ui.get_manuscript_draft_id(),
+                            ui.get_manuscript_draft_section(),
+                            ui.get_manuscript_draft_citations(),
+                            replacement_body.into(),
+                        );
+                        ui.set_manuscript_replace_status(
+                            format!("Applied {count} replacements to this draft. Autosave is pending; exported document is unchanged until saved.").into()
+                        );
+                    }
+                    Err(error) => ui.set_manuscript_replace_status(error.into()),
+                }
+            }
+        }
+    });
     app.on_notebook_draft_edited({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -3549,6 +3650,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |id, section, citations, body| {
+            if let Some(ui) = weak.upgrade() {
+                let (words, chars) = manuscript_search::counts(body.as_str());
+                ui.set_manuscript_word_count(i32::try_from(words).unwrap_or(i32::MAX));
+                ui.set_manuscript_character_count(i32::try_from(chars).unwrap_or(i32::MAX));
+            }
             let Some(project) = active_project.borrow().clone() else {
                 return;
             };
@@ -3625,6 +3731,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let pending_analysis_command = pending_analysis_command.clone();
         let pending_ai = pending_ai.clone();
         let selected_agent_action = selected_agent_action.clone();
+        let pending_manuscript_replace = pending_manuscript_replace.clone();
         move || {
             pending_project_metadata.borrow_mut().take();
             pending_evidence.borrow_mut().take();
@@ -3634,6 +3741,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             pending_analysis_command.borrow_mut().take();
             pending_ai.borrow_mut().take();
             selected_agent_action.borrow_mut().take();
+            pending_manuscript_replace.borrow_mut().take();
         }
     });
     app.on_preview_question({
@@ -3845,6 +3953,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         } else if surface == "writing" {
                             ui.set_writing_results(message.into());
+                            ui.set_manuscript_operation_details_open(true);
                         } else if surface == "extraction" {
                             ui.set_extraction_results(message.into());
                         } else if surface == "notebook" {
@@ -6543,8 +6652,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let weak = app.as_weak();
         let active_project = active_project.clone();
         let pending_evidence = pending_evidence.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
         move |manuscript_id, section, citations, body| {
             if let Some(ui) = weak.upgrade() {
+                pending_evidence.borrow_mut().take();
                 let citations: Vec<_> = citations
                     .as_str()
                     .split(',')
@@ -6552,25 +6664,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .filter(|citation| !citation.is_empty())
                     .map(str::to_owned)
                     .collect();
-                let result = active_project
-                    .borrow()
-                    .as_ref()
-                    .ok_or_else(|| "Open a project first".to_string())
-                    .and_then(|path| {
-                        let root = host_data_root()?;
-                        evidence_preview_at(
-                            path,
-                            "writing.section_save",
-                            "writing",
-                            serde_json::json!({
-                                "manuscript_id":manuscript_id.as_str().trim(),
-                                "section":section.as_str().trim(),
-                                "body":body.as_str(),
-                                "citations":citations
-                            }),
-                            &root,
-                        )
-                    });
+                let result = (|| {
+                    let project = active_project
+                        .borrow()
+                        .as_ref()
+                        .cloned()
+                        .ok_or_else(|| "Open a project first".to_string())?;
+                    let root = host_data_root()?;
+                    // A pending debounce must not advance the project revision
+                    // after the explicit preview has bound its approval token.
+                    // Flush first, then stop only a fully satisfied autosave.
+                    if recovered_writing_requires_flush(&drafts.borrow()) {
+                        let revision =
+                            flush_writing_drafts(&project, &mut drafts.borrow_mut(), &root)?;
+                        ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                    }
+                    if !recovered_writing_requires_flush(&drafts.borrow()) {
+                        timer.stop();
+                    }
+                    evidence_preview_at(
+                        &project,
+                        "writing.section_save",
+                        "writing",
+                        serde_json::json!({
+                            "manuscript_id":manuscript_id.as_str().trim(),
+                            "section":section.as_str().trim(),
+                            "body":body.as_str(),
+                            "citations":citations
+                        }),
+                        &root,
+                    )
+                })();
                 match result {
                     Ok((pending, preview)) => {
                         *pending_evidence.borrow_mut() = Some(pending);
@@ -6581,11 +6705,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             )
                             .into(),
                         );
+                        ui.set_manuscript_operation_details_open(true);
                         ui.set_status("Manuscript section preview ready; project unchanged".into());
                     }
                     Err(error) => {
                         pending_evidence.borrow_mut().take();
                         ui.set_writing_results(error.clone().into());
+                        ui.set_manuscript_operation_details_open(true);
                         ui.set_status(error.into());
                     }
                 }
@@ -6613,10 +6739,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(result) => {
                         ui.set_writing_results(pretty_result_data(&result).into());
+                        ui.set_manuscript_operation_details_open(true);
                         ui.set_status("Persisted manuscript revisions loaded".into());
                     }
                     Err(error) => {
                         ui.set_writing_results(error.clone().into());
+                        ui.set_manuscript_operation_details_open(true);
                         ui.set_status(error.into());
                     }
                 }

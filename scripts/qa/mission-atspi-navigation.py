@@ -113,7 +113,7 @@ def activate(app: Any, name: str) -> bool:
     return False
 
 
-def edit_text(app: Any, name: str, value: str) -> None:
+def edit_text(app: Any, name: str, value: str, *, allow_unreadable: bool = False) -> None:
     targets = nodes_named(app, name)
     if not targets:
         raise RuntimeError(f"Missing editable field: {name}")
@@ -161,6 +161,7 @@ def edit_text(app: Any, name: str, value: str) -> None:
         raise RuntimeError(f"Could not edit field with AT-SPI or Xvfb input: {name}")
 
     time.sleep(0.3)
+    unsupported_readback = False
     for refreshed in nodes_named(app, name):
         try:
             source = refreshed.queryText()
@@ -171,6 +172,12 @@ def edit_text(app: Any, name: str, value: str) -> None:
             print(f"AT_SPI_TEXT_READBACK_MISMATCH={name} observed_length={len(rendered)}")
         except Exception as error:
             print(f"AT_SPI_TEXT_READBACK_UNAVAILABLE={type(error).__name__}")
+            unsupported_readback = True
+    if allow_unreadable and unsupported_readback:
+        # This is not a passing accessibility assertion: the next action must
+        # independently prove the typed value affected native analysis.
+        print(f"AT_SPI_READBACK_DEFERRED_TO_NATIVE_RESULT={name}")
+        return
     raise RuntimeError(f"Text never appeared in the real app's accessible editor: {name}")
 
 
@@ -337,12 +344,134 @@ def main() -> int:
         edit_text(app, "Manuscript section", "Abstract")
         edit_text(app, "Manuscript section body", "Synthetic manuscript for isolated project recovery.")
         time.sleep(1.3)
+        visible = [(node.name or "") for node, _ in walk(app)]
+        if not any("words" in name and "characters" in name for name in visible):
+            raise RuntimeError("Manuscript live word/character count missing")
+        if not activate(app, "Increase manuscript editor display zoom"):
+            raise RuntimeError("Manuscript zoom increase control is unavailable")
+        if not any("125% editor zoom" in (node.name or "") for node, _ in walk(app)):
+            raise RuntimeError("Manuscript zoom increase did not update display percentage")
+        if not activate(app, "Decrease manuscript editor display zoom"):
+            raise RuntimeError("Manuscript zoom decrease control is unavailable")
+        print("MANUSCRIPT_WORD_COUNT_AND_VISUAL_ZOOM_OK")
+        if nodes_named(app, "Manuscript find text"):
+            raise RuntimeError("Manuscript Find panel must be collapsed initially")
+        if not activate(app, "Toggle manuscript find and replace"):
+            raise RuntimeError("Cannot reveal manuscript Find toolbar")
+        # Editing focuses the large canvas and can leave the scroll viewport
+        # below the new toolbar. Move back to the toolbar's start, rather than
+        # assuming a newly revealed widget is automatically in the viewport.
+        for _ in range(9):
+            if nodes_named(app, "Manuscript find text"):
+                break
+            subprocess.run(
+                ["xdotool", "mousemove", "1110", "360", "click", "4"],
+                check=True,
+                timeout=10,
+            )
+            time.sleep(0.12)
+        if not nodes_named(app, "Manuscript find text"):
+            audit(app, "manuscript-find-unreachable", output)
+            raise RuntimeError("Manuscript Find toolbar not accessible after toggling")
+        print("MANUSCRIPT_FIND_PANEL_REVEALED_OK")
+        edit_text(app, "Manuscript find text", "Synthetic")
+        edit_text(app, "Manuscript replace with", "Verified")
+        audit(app, "manuscript-find-filled", output)
+        # Slint's outer ScrollView can move focused inputs into view without
+        # moving their action buttons into view. Scroll the real pane rather
+        # than marking an off-viewport action as an application failure.
+        for attempt in range(12):
+            if activate(app, "Preview manuscript replace all"):
+                break
+            subprocess.run(
+                ["xdotool", "mousemove", "1110", "535", "click", "5"],
+                check=True,
+                timeout=10,
+            )
+            time.sleep(0.15)
+        else:
+            raise RuntimeError("Cannot prepare manuscript find-and-replace")
+        time.sleep(0.2)
+        audit(app, "manuscript-replace-preview", output)
+        print("MANUSCRIPT_PREVIEW_STATUS_NODES=" + repr([node.name for node, _ in walk(app) if "replace" in (node.name or "").lower() or "occurrence" in (node.name or "").lower()]))
+        if not any(
+            "1 exact occurrences found" in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("Manuscript replacement did not preview the exact match count")
+        if "Synthetic manuscript" not in read_field(app, "Manuscript section body"):
+            raise RuntimeError("Manuscript text was modified during preview")
+        # A preview is bound to the exact Find/Replace input pair, not only
+        # to the body. A changed replacement must not apply the old proposal.
+        edit_text(app, "Manuscript replace with", "Unreviewed")
+        if not activate(app, "Apply previewed manuscript replacement"):
+            raise RuntimeError("Cannot exercise stale replacement preview guard")
+        if "Synthetic manuscript" not in read_field(app, "Manuscript section body"):
+            raise RuntimeError("Changed replacement input applied an unreviewed draft")
+        if not any(
+            "replacement inputs changed after preview" in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("Stale replacement input did not explain rejection")
+        print("MANUSCRIPT_STALE_PREVIEW_REJECTED_OK")
+        edit_text(app, "Manuscript replace with", "Verified")
+        if not activate(app, "Preview manuscript replace all"):
+            raise RuntimeError("Cannot refresh manuscript replacement review")
+        if not activate(app, "Apply previewed manuscript replacement"):
+            raise RuntimeError("Cannot apply reviewed manuscript replacement")
+        time.sleep(0.3)
+        print("MANUSCRIPT_APPLY_STATUS=" + repr([node.name for node, _ in walk(app) if "Manuscript replacement status" in (node.name or "")]))
+        if "Verified manuscript" not in read_field(app, "Manuscript section body"):
+            raise RuntimeError("Manuscript reviewed replacement did not change real editor")
+        if not any(
+            "Applied 1 replacements" in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("Applied manuscript replacement did not report its exact effect")
+        print("MANUSCRIPT_PREVIEWED_REPLACE_ALL_OK")
         if not any(
             "autosaved" in (node.name or "").casefold()
             for node, _ in walk(app)
         ):
             raise RuntimeError("Manuscript did not report successful project autosave")
         print("MANUSCRIPT_AUTOSAVE_STATUS_PRESENT")
+        if not activate(app, "Preview manuscript section"):
+            raise RuntimeError("Explicit manuscript section preview is not actionable")
+        time.sleep(0.3)
+        audit(app, "manuscript-section-preview-attempt", output)
+        print("MANUSCRIPT_SECTION_PREVIEW_DIAGNOSTIC=" + repr([
+            node.name for node, _ in walk(app) if
+            "preview" in (node.name or "").casefold()
+            or "operation result" in (node.name or "").casefold()
+            or "status:" in (node.name or "").casefold()
+        ]))
+        if not any(
+            "Writing operation result Preview ready. Section save will apply exactly this payload" in (node.name or "")
+            and '"body_sha256"' in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("Manuscript section preview did not confirm readiness")
+        if not activate(app, "Record previewed manuscript section"):
+            raise RuntimeError("Explicit manuscript section recording is not actionable")
+        time.sleep(0.3)
+        audit(app, "manuscript-section-record-attempt", output)
+        print("MANUSCRIPT_SECTION_RECORD_DIAGNOSTIC=" + repr([
+            (node.name or "")[:600] for node, _ in walk(app)
+            if "Writing operation result" in (node.name or "")
+            or "Status:" in (node.name or "")
+        ]))
+        if not any(
+            "Writing operation result Recorded through approved local-write command" in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("Manuscript section recording was not acknowledged")
+        if not activate(app, "Inspect manuscript"):
+            raise RuntimeError("Manuscript persisted revision inspection is not actionable")
+        time.sleep(0.3)
+        audit(app, "manuscript-inspect", output)
+        if not any("Verified manuscript for isolated project recovery" in (node.name or "") for node, _ in walk(app)):
+            raise RuntimeError("Persisted manuscript body was not accessible from native inspection")
+        print("MANUSCRIPT_PERSISTED_INSPECTION_VISIBLE_OK")
         resize_xvfb_window(850, 600)
         time.sleep(0.35)
         audit(app, "manuscript-narrow", output)
@@ -392,7 +521,7 @@ def main() -> int:
         ):
             raise RuntimeError("Statistics did not receive the exact imported immutable context")
         print("DATA_TO_STATISTICS_CONTEXT_OK")
-        edit_text(app, "Statistics numeric column", "score")
+        edit_text(app, "Statistics numeric column", "score", allow_unreadable=True)
         if not activate(app, "Run descriptive statistics"):
             raise RuntimeError("Native descriptive analysis is not actionable")
         time.sleep(0.6)
@@ -543,7 +672,7 @@ def main() -> int:
             raise RuntimeError("Cannot return to previous project's manuscript")
         time.sleep(0.2)
         restored_manuscript = wait_field(app, "Manuscript section body")
-        if "Synthetic manuscript for isolated project recovery." not in restored_manuscript:
+        if "Verified manuscript for isolated project recovery." not in restored_manuscript:
             raise RuntimeError("Previously autosaved manuscript is not available after reopening")
         print("NOTES_AND_MANUSCRIPT_REOPEN_PERSISTENCE_OK")
         audit(app, "reopened-project-writing", output)

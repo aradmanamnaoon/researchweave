@@ -11,7 +11,7 @@ Source: original dirty root `c84cdf1`, published local-only `origin/main` `97665
 | F05 | Dataset import, immutable variable/dataset revisions | PARTIAL UX | unassigned | Import → inspect → transform → analyze with safe preview and source provenance |
 | F06 | Native statistical kernels, results, plots and persistence | PARTIAL UX | unassigned | Accurate method guidance, clear estimates/assumptions/uncertainty, accessible plots |
 | F07 | Notebook and evidence note tools | PARTIAL UX, improved in PRIME branch | prime | Verified project-scoped quick cards, create/edit, pin/archive/restore, colors, Unicode/tag search, Markdown export, reopen; grid/list, quick-note autosave and checklists remain |
-| F08 | Manuscript editing, autosave and DOCX/PDF export | PARTIAL UX | worker-2 attempted | Robust save/recovery/exports then spacious page-oriented editor and import/export fidelity |
+| F08 | Manuscript editing, autosave and DOCX/PDF export | PARTIAL UX; source-built Linux GUI now verifies exact section Find/Replace preview, version recording, zoom, counts and reopen | prime | Robust save/recovery/exports then spacious page-oriented editor and import/export fidelity; true document outline/rich styles/print pages and native installed-platform verification pending; see `docs/qa/manuscript-preview-revision-2026-10-31.md` |
 | F09 | PDF reader, source linking and anchored evidence | PARTIAL UX | unassigned | Preserve location/selection and verified source hash |
 | F10 | Qualitative/mixed-method results | PARTIAL UX | unassigned | Populated-state displays consistent with stored provenance |
 | F11 | Constrained AI provider + proposal system | PARTIAL UX | unassigned | Optional contextual assist, explicit egress, review before modification |

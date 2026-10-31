@@ -59,10 +59,10 @@ Exactly 100 local ResearchWeave skill folders were detected, each with SKILL.md 
 | library-in-context-search | Competitor UX | e2ec183875fcfa212725a1cdb80da65683c03c0f32c8afa9174127a9ce6750cb | Installed; use unverified | Future task-specific probe / evidence pending |
 | live-status-announcement | Engineering/support | 0365b9ec5d75b66f3ec7a20a7a46eb36e9c673e74ddc68e0501d30e019a77221 | Installed; use unverified | Future task-specific probe / evidence pending |
 | local-privacy-explanation | Engineering/support | 8dd3b04a897f3edccc6e81fc54b75ea58792f1c07a84b632e11ca85d3453e34e | Installed; use unverified | Future task-specific probe / evidence pending |
-| long-form-editor-flow | Competitor UX | 8e42056ca7576d4e3d8acfcd2750dd5a1524afea91c53518d9dbc38b7258cebc | Installed; use unverified | Future task-specific probe / evidence pending |
+| long-form-editor-flow | Competitor UX | 8e42056ca7576d4e3d8acfcd2750dd5a1524afea91c53518d9dbc38b7258cebc | Applied; acceptance partial | Manuscript revision-bound edit/save/reopen GUI r30; long-document focus and undo pending |
 | long-job-control | Engineering/support | a23423495519b4d0a89a1b96b4a47b4362269efe3eb4779d0841aa618bc9bc2e | Installed; use unverified | Future task-specific probe / evidence pending |
 | managed-project-default | Engineering/support | 3d0f635e55953b30e759972c5704e30988ab6752b5c8d651176473be4eee3029 | Applied; acceptance partial | See skills-application-evidence-2026-10-31.md and qa/mission-xvfb-20261031-r19 |
-| manuscript-document-outline | Engineering/support | 40f1c5ba87850b804a4bc806ae13039d7cf702bf75ecbc8267b51a9d6e5dd669 | Installed; use unverified | Future task-specific probe / evidence pending |
+| manuscript-document-outline | Engineering/support | 40f1c5ba87850b804a4bc806ae13039d7cf702bf75ecbc8267b51a9d6e5dd669 | Applied; acceptance partial | Audited section identity and inspect GUI r30; navigable headings and cursor-preserving jumps absent |
 | manuscript-export-preview | Engineering/support | f8c7a8ad7885d3c564ad543c6d4d1e53ccb0c2a6737c0dcdc7e8d04f458ec393 | Installed; use unverified | Future task-specific probe / evidence pending |
 | manuscript-formatting-controls | Engineering/support | dafce609aece6c43b6042578bae7f2ff9f2c37a6b1948689647296782df7cb8c | Installed; use unverified | Future task-specific probe / evidence pending |
 | mixed-methods-joint-display | Engineering/support | 6cde45154c2e1ac8276a8143e08070a8134751d4710502ac7bde04c9e7ced61d | Installed; use unverified | Future task-specific probe / evidence pending |

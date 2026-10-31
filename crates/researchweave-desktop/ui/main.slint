@@ -262,10 +262,20 @@ export component MainWindow inherits Window {
     in-out property <string> manuscript-draft-section: "";
     in-out property <string> manuscript-draft-citations: "";
     in-out property <string> manuscript-draft-body: "";
+    in-out property <int> manuscript-word-count: 0;
+    in-out property <int> manuscript-character-count: 0;
+    in-out property <int> manuscript-editor-zoom: 100;
+    in-out property <bool> manuscript-find-panel-open: false;
+    in-out property <bool> manuscript-operation-details-open: false;
+    in-out property <string> manuscript-find-term: "";
+    in-out property <string> manuscript-replace-term: "";
+    in-out property <string> manuscript-replace-status: "Find and replace operates on this section only. Review before applying.";
     callback notebook-draft-edited(string);
     callback refresh-quick-notes(string, string);
     callback save-quick-note(string, int, string, string, string, string, bool, bool);
     callback manuscript-draft-edited(string, string, string, string);
+    callback preview-manuscript-replace(string, string);
+    callback apply-manuscript-replace();
     in-out property <string> qualitative-results: "Inspect the codebook before editing; writes require the current content hash.";
     in-out property <string> backup-results: "Open a project, then choose an absolute archive path.";
     in-out property <string> recovery-results: "Restore always creates a new project directory.";
@@ -2182,12 +2192,12 @@ export component MainWindow inherits Window {
                             Text { text: "Write a research section on the spacious paper canvas. Draft edits autosave; recording a version and exporting require an explicit action."; color: Theme.muted-ink; wrap: word-wrap; }
                             HorizontalLayout {
                                 spacing: 8px;
-                                manuscript-id := LineEdit { accessible-label: "Manuscript ID"; placeholder-text: "Manuscript ID"; text: root.manuscript-draft-id; edited(text) => { root.manuscript-draft-id = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
-                                manuscript-section := LineEdit { accessible-label: "Manuscript section"; placeholder-text: "Section, e.g. Results"; text: root.manuscript-draft-section; edited(text) => { root.manuscript-draft-section = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                                manuscript-id := LineEdit { accessible-label: "Manuscript ID"; placeholder-text: "Manuscript ID"; text <=> root.manuscript-draft-id; edited(text) => { root.manuscript-draft-id = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                                manuscript-section := LineEdit { accessible-label: "Manuscript section"; placeholder-text: "Section, e.g. Results"; text <=> root.manuscript-draft-section; edited(text) => { root.manuscript-draft-section = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
                             }
                             HorizontalLayout {
                                 spacing: 8px;
-                                manuscript-citations := LineEdit { accessible-label: "Manuscript citations"; placeholder-text: "Citation IDs separated by commas"; text: root.manuscript-draft-citations; edited(text) => { root.manuscript-draft-citations = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                                manuscript-citations := LineEdit { accessible-label: "Manuscript citations"; placeholder-text: "Citation IDs separated by commas"; text <=> root.manuscript-draft-citations; edited(text) => { root.manuscript-draft-citations = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
                             }
                             HorizontalLayout {
                                 min-height: 36px;
@@ -2197,6 +2207,93 @@ export component MainWindow inherits Window {
                                 Button { text: "Preview section"; accessible-label: "Preview manuscript section"; clicked => { root.preview-writing-section(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
                                 Button { text: "Record previewed section"; accessible-label: "Record previewed manuscript section"; clicked => { root.apply-evidence-preview(); } }
                                 Button { text: "Inspect manuscript"; accessible-label: "Inspect manuscript"; clicked => { root.inspect-manuscript(manuscript-id.text); } }
+                                Button {
+                                    text: root.manuscript-operation-details-open ? "Hide details" : "Show details";
+                                    accessible-label: "Toggle manuscript operation details";
+                                    clicked => { root.manuscript-operation-details-open = !root.manuscript-operation-details-open; }
+                                }
+                            }
+                            if root.manuscript-operation-details-open: Rectangle {
+                                min-height: 100px;
+                                preferred-height: 145px;
+                                max-height: 180px;
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                ScrollView {
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        Text {
+                                            text: root.writing-results == "" ? "No manuscript operation has been performed yet." : root.writing-results;
+                                            accessible-label: "Writing operation result " + root.writing-results;
+                                            wrap: word-wrap;
+                                            color: Theme.ink;
+                                        }
+                                    }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: root.manuscript-word-count + " words · " + root.manuscript-character-count + " characters"; color: Theme.muted-ink; vertical-alignment: center; }
+                                Button {
+                                    text: root.manuscript-find-panel-open ? "Hide Find" : "Find / Replace";
+                                    accessible-label: "Toggle manuscript find and replace";
+                                    clicked => { root.manuscript-find-panel-open = !root.manuscript-find-panel-open; }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                Button {
+                                    text: "−";
+                                    accessible-label: "Decrease manuscript editor display zoom";
+                                    enabled: root.manuscript-editor-zoom > 75;
+                                    clicked => { root.manuscript-editor-zoom = max(75,root.manuscript-editor-zoom - 25); }
+                                }
+                                Text { text: root.manuscript-editor-zoom + "% editor zoom"; color: Theme.muted-ink; vertical-alignment: center; }
+                                Button {
+                                    text: "+";
+                                    accessible-label: "Increase manuscript editor display zoom";
+                                    enabled: root.manuscript-editor-zoom < 175;
+                                    clicked => { root.manuscript-editor-zoom = min(175,root.manuscript-editor-zoom + 25); }
+                                }
+                            }
+                            if root.manuscript-find-panel-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 7px;
+                                    Text { text: "Find and replace in this section"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: root.manuscript-replace-status; color: Theme.muted-ink; wrap: word-wrap; accessible-label: "Manuscript replacement status " + root.manuscript-replace-status; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        LineEdit {
+                                            text <=> root.manuscript-find-term;
+                                            placeholder-text: "Find exact text";
+                                            accessible-label: "Manuscript find text";
+                                        }
+                                        LineEdit {
+                                            text <=> root.manuscript-replace-term;
+                                            placeholder-text: "Replacement";
+                                            accessible-label: "Manuscript replace with";
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Preview replace all";
+                                            accessible-label: "Preview manuscript replace all";
+                                            clicked => { root.preview-manuscript-replace(root.manuscript-find-term,root.manuscript-replace-term); }
+                                        }
+                                        Button {
+                                            text: "Apply previewed replacement";
+                                            accessible-label: "Apply previewed manuscript replacement";
+                                            clicked => { root.apply-manuscript-replace(); }
+                                        }
+                                    }
+                                    Text { text: "Exact, case-sensitive matching. Review before applying; editor zoom never alters export formatting."; color: Theme.muted-ink; wrap: word-wrap; }
+                                }
                             }
                             Rectangle {
                                 min-height: root.height < 700px ? 275px : 370px;
@@ -2210,8 +2307,9 @@ export component MainWindow inherits Window {
                                     manuscript-body := TextEdit {
                                         min-height: root.height < 700px ? 220px : 320px;
                                         vertical-stretch: 1;
+                                        font-size: 15px * root.manuscript-editor-zoom / 100;
                                         accessible-label: "Manuscript section body";
-                                        text: root.manuscript-draft-body;
+                                        text <=> root.manuscript-draft-body;
                                         edited(text) => { root.manuscript-draft-body = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, text); }
                                     }
                                 }
@@ -2252,26 +2350,6 @@ export component MainWindow inherits Window {
                                 text: "Prepare the format first, then confirm a file path. Saves locally; will never replace an existing file or submit online.";
                                 color: Theme.muted-ink;
                                 wrap: word-wrap;
-                            }
-                            Rectangle {
-                                min-height: 110px;
-                                preferred-height: 160px;
-                                max-height: 180px;
-                                background: Theme.surface;
-                                border-color: Theme.divider;
-                                border-width: 1px;
-                                border-radius: Theme.panel-radius;
-                                ScrollView {
-                                    VerticalLayout {
-                                        padding: 10px;
-                                        Text {
-                                            text: root.writing-results == "" ? "Manuscript results and export receipts appear here." : root.writing-results;
-                                            accessible-label: "Writing operation result " + root.writing-results;
-                                            wrap: word-wrap;
-                                            color: Theme.ink;
-                                        }
-                                    }
-                                }
                             }
                             Rectangle { vertical-stretch: 1; }
                         }
