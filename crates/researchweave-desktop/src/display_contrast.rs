@@ -31,10 +31,10 @@ mod tests {
         // Canvas, surface, body, muted, accent, primary-on-accent.
         for (name, canvas, surface, body, muted, accent, primary) in [
             (
-                "light", "#f6f5f1", "#ffffff", "#172438", "#5b677a", "#147a75", "#ffffff",
+                "light", "#f5f4ef", "#ffffff", "#202b37", "#566574", "#3b5b88", "#ffffff",
             ),
             (
-                "dark", "#101923", "#172438", "#f4f6f8", "#b9c5d3", "#55c7bd", "#101923",
+                "dark", "#111b26", "#1c2a36", "#f5f7fa", "#c2cfdc", "#98bcd5", "#14202c",
             ),
             (
                 "contrast", "#000000", "#111111", "#ffffff", "#ffffff", "#ffff00", "#000000",
@@ -53,13 +53,51 @@ mod tests {
             }
         }
         for (name, foreground, background) in [
-            ("light-evidence-violet", "#7564b5", "#ffffff"),
-            ("light-discovery-copper", "#9a5b3a", "#f6f5f1"),
-            ("dark-evidence-violet", "#a997e8", "#172438"),
-            ("dark-discovery-copper", "#e0a17b", "#172438"),
+            ("light-evidence-violet", "#6957a6", "#ffffff"),
+            ("light-discovery-copper", "#9b6042", "#f5f4ef"),
+            ("dark-evidence-violet", "#b4a0e4", "#1c2a36"),
+            ("dark-discovery-copper", "#e4a880", "#1c2a36"),
         ] {
             let ratio = contrast(foreground, background);
             assert!(ratio >= 4.5, "{name} {ratio:.2}:1 is below 4.5:1");
+        }
+        for (name, foreground, background) in [
+            ("light-rail", "#c7d6e1", "#263245"),
+            ("dark-rail", "#c7d6e1", "#172638"),
+            ("high-contrast-rail", "#ffffff", "#000000"),
+        ] {
+            let ratio = contrast(foreground, background);
+            assert!(
+                ratio >= 4.5,
+                "{name} rail contrast {ratio:.2}:1 is below 4.5:1"
+            );
+        }
+    }
+
+    #[test]
+    fn audited_colors_match_the_actual_slint_theme() {
+        let ui = include_str!("../ui/main.slint");
+        for (role, dark, light) in [
+            ("canvas", "#111b26", "#f5f4ef"),
+            ("surface", "#1c2a36", "#ffffff"),
+            ("ink", "#f5f7fa", "#202b37"),
+            ("muted-ink", "#c2cfdc", "#566574"),
+            ("accent", "#98bcd5", "#3b5b88"),
+            ("accent-ink", "#14202c", "#ffffff"),
+            ("evidence-violet", "#b4a0e4", "#6957a6"),
+            ("discovery-copper", "#e4a880", "#9b6042"),
+            ("rail-background", "#172638", "#263245"),
+            ("rail-muted", "#c7d6e1", "#c7d6e1"),
+        ] {
+            let prefix = format!("    in-out property <color> {role}:");
+            let declaration = ui
+                .lines()
+                .find(|line| line.starts_with(&prefix))
+                .unwrap_or_else(|| panic!("missing Slint theme role: {role}"));
+            assert!(
+                declaration.contains(&format!("dark-mode ? {dark} : {light}")),
+                "theme role {role} drifted from its audited contrast values"
+            );
         }
     }
 }

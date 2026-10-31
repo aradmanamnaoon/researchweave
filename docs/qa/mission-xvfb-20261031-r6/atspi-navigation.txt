@@ -1,0 +1,30 @@
+AT_SPI_APP=researchweave-desktop
+AT_SPI_PHASE=welcome NAMED_NODES=55
+SCREENSHOT=welcome.png bytes=102870
+AT_SPI_ACTIVATED=Create default project
+AT_SPI_PHASE=project-created NAMED_NODES=65
+SCREENSHOT=project-created.png bytes=98336
+AT_SPI_ACTIVATED=Synthesize activity
+AT_SPI_PHASE=synthesize NAMED_NODES=42
+SCREENSHOT=synthesize.png bytes=77670
+AT_SPI_ACTIVATED=Notebook
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Project notebook text NotImplementedError
+XVFB_TYPED_TEXT=Project notebook text chars=61
+AT_SPI_TEXT_READBACK_OK=Project notebook text
+AT_SPI_PHASE=notebook NAMED_NODES=42
+SCREENSHOT=notebook.png bytes=83945
+NOTEBOOK_AUTOSAVE_STATUS_PRESENT
+XVFB_WINDOW_GEOMETRY=850x600
+AT_SPI_PHASE=notebook-narrow NAMED_NODES=33
+SCREENSHOT=notebook-narrow.png bytes=70440
+XVFB_WINDOW_GEOMETRY=1280x800
+AT_SPI_ACTIVATED=Load notebook history
+AT_SPI_ACTION_NOT_AVAILABLE=Return to PDF
+AT_SPI_ACTIVATED=Synthesize activity
+AT_SPI_ACTIVATED=Manuscript
+AT_SPI_PHASE=manuscript NAMED_NODES=48
+SCREENSHOT=manuscript.png bytes=78262
+XVFB_WINDOW_GEOMETRY=850x600
+AT_SPI_PHASE=manuscript-narrow NAMED_NODES=34
+SCREENSHOT=manuscript-narrow.png bytes=66190
+AT_SPI_NAVIGATION_PROBE_OK

@@ -17,6 +17,7 @@ mod highlights;
 mod publishing;
 mod publishing_formats;
 mod qualitative;
+mod quick_notes;
 mod review;
 
 enum EvidenceLocation {
@@ -81,6 +82,7 @@ impl EvidenceHandler {
                 &["project_id", "highlight_id"][..],
             ),
             ("evidence.notebook_history", &["project_id"][..]),
+            ("ui.note_card.list", &["project_id"][..]),
             (
                 "writing.section_history",
                 &["project_id", "manuscript_id", "section"][..],
@@ -273,6 +275,7 @@ impl EvidenceHandler {
                 &["project_id", "statement", "interpretation"][..],
             ),
             ("ui.notebook.save", &["project_id", "notebook"][..]),
+            ("ui.note_card.save", &["project_id"][..]),
             (
                 "qualitative.add_code",
                 &[
@@ -465,8 +468,14 @@ impl EvidenceHandler {
         if operation == "evidence.notebook_history" {
             return notebook_history(&store);
         }
+        if operation == "ui.note_card.list" {
+            return quick_notes::list(&store, args);
+        }
         if operation == "ui.notebook.save" {
             return notebook_save(&mut store, args, ctx);
+        }
+        if operation == "ui.note_card.save" {
+            return quick_notes::save(&mut store, args, ctx);
         }
         if operation == "evidence.anchor" {
             return anchor_mutate(&mut store, args, ctx);
@@ -654,6 +663,7 @@ impl EvidenceHandler {
                 note_mutate(&mut shadow, operation, args, ctx)?
             }
             "ui.notebook.save" => notebook_save(&mut shadow, args, ctx)?,
+            "ui.note_card.save" => quick_notes::save(&mut shadow, args, ctx)?,
             "evidence.anchor" => anchor_mutate(&mut shadow, args, ctx)?,
             "evidence.highlight_create" | "evidence.highlight_relocate" => {
                 highlights::write(&mut shadow, operation, args, ctx)?
@@ -1005,6 +1015,36 @@ fn notebook_export(store: &ProjectStore) -> Result<Value, String> {
             body,
             String::new(),
         ]);
+    }
+    let quick = quick_notes::list(store, &json!({"filter":"all"}))?;
+    if let Some(cards) = quick["cards"].as_array() {
+        if !cards.is_empty() {
+            lines.extend([
+                "---".to_owned(),
+                String::new(),
+                "## Quick notes".to_owned(),
+                String::new(),
+            ]);
+            for card in cards {
+                let title = card["title"].as_str().unwrap_or("Untitled");
+                let body = card["body"].as_str().unwrap_or("");
+                let archived = card["archived"].as_bool().unwrap_or(false);
+                let labels = card["tags"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(Value::as_str)
+                    .collect::<Vec<_>>()
+                    .join(", ");
+                lines.extend([
+                    format!("### {}", title.replace(['\r', '\n', '#'], " ")),
+                    format!("Labels: {labels}; archived: {archived}"),
+                    String::new(),
+                    body.to_owned(),
+                    String::new(),
+                ]);
+            }
+        }
     }
     Ok(json!({"text":lines.join("\n")}))
 }
@@ -1950,6 +1990,7 @@ impl OperationHandler for EvidenceHandler {
                 | "evidence.note_revise"
                 | "evidence.note_delete"
                 | "ui.notebook.save"
+                | "ui.note_card.save"
                 | "evidence.anchor"
                 | "evidence.highlight_create"
                 | "evidence.highlight_relocate"

@@ -1,0 +1,45 @@
+0:application:researchweave-desktop
+1:frame:ResearchWeave · Research workbench
+2:landmark:Activity rail
+3:label:WORKBENCH
+3:button:Home activity
+3:button:Sources activity
+3:button:Analyze activity
+3:button:Synthesize activity
+3:button:Automate activity
+3:button:Manage activity
+2:landmark:Synthesize navigation
+3:label:Synthesize
+3:button:Synthesize navigation start
+3:label:My Research
+3:button:Notebook workspace screen
+3:button:Manuscript workspace screen
+3:button:Publishing workspace screen
+3:button:Exports workspace screen
+2:landmark:Notebook work area
+3:label:Synthesize  /  Notebook
+3:label:Notebook
+3:entry:Command palette
+3:label:Ctrl+K
+3:label:My Research · r7
+3:label:Document
+3:label:Notebook · Document
+3:label:Notebook
+3:label:Capture research ideas here. Drafts autosave locally; project saves are revisioned and auditable.
+3:button:Show quick note cards
+3:button:Show long form project notebook
+3:label:Project notebook · long-form notes
+3:entry:Project notebook text
+3:button:Preview notebook save
+3:button:Record previewed notebook save
+3:button:Load notebook history
+3:button:Export notebook Markdown
+3:label:Notebook operation result Save a revisioned project notebook, inspect history, or export Markdown.
+2:landmark:Bottom job tray
+3:button:Open jobs
+3:label:No active local jobs
+3:button:Open notifications
+2:landmark:Workbench status
+3:label:Status: Notebook autosaved to project revisions
+3:label:LOCAL FIRST
+3:label:Synthesize · Notebook

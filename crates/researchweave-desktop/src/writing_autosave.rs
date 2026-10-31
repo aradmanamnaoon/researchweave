@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 
 const MAX_DRAFT_BYTES: usize = 256 * 1024;
@@ -43,12 +44,30 @@ pub fn save(path: &Path, drafts: &Drafts) -> Result<(), String> {
     let parent = path.parent().ok_or("Invalid recovery path")?;
     std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     let temporary = path.with_extension(format!("{}.tmp", uuid::Uuid::new_v4()));
-    std::fs::write(&temporary, &data).map_err(|error| error.to_string())?;
+    let mut file = std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&temporary)
+        .map_err(|error| error.to_string())?;
+    // A successful draft acknowledgement must not depend on dirty pages only
+    // held in the process/OS page cache. Keep the old revision intact until
+    // the replacement bytes have been flushed to stable storage.
+    if let Err(error) = file.write_all(&data).and_then(|_| file.sync_all()) {
+        drop(file);
+        let _ = std::fs::remove_file(&temporary);
+        return Err(format!("Cannot durably write recovery draft: {error}"));
+    }
+    drop(file);
     let result = replace_file(&temporary, path).map_err(|error| error.to_string());
     if result.is_err() {
         let _ = std::fs::remove_file(&temporary);
     }
-    result
+    result?;
+    #[cfg(unix)]
+    std::fs::File::open(parent)
+        .and_then(|directory| directory.sync_all())
+        .map_err(|error| format!("Cannot sync recovery draft directory: {error}"))?;
+    Ok(())
 }
 
 #[cfg(windows)]
@@ -131,6 +150,26 @@ mod tests {
         };
         assert!(save(&a, &oversized).is_err());
         assert_eq!(load(&a).unwrap(), changed);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn failed_new_write_does_not_replace_existing_valid_recovery() {
+        let root = std::env::temp_dir().join(format!("rw-drafts-{}", uuid::Uuid::new_v4()));
+        let path = path(&root, "stable-project");
+        let first = Drafts {
+            notebook: "نسخه اول".into(),
+            notebook_dirty: true,
+            ..Drafts::default()
+        };
+        save(&path, &first).unwrap();
+        let invalid = Drafts {
+            body: "x".repeat(MAX_DRAFT_BYTES),
+            manuscript_dirty: true,
+            ..Drafts::default()
+        };
+        assert!(save(&path, &invalid).is_err());
+        assert_eq!(load(&path).unwrap(), first);
         std::fs::remove_dir_all(root).unwrap();
     }
 }

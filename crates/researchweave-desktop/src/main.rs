@@ -32,8 +32,11 @@ use uuid::Uuid;
 #[cfg(test)]
 mod display_contrast;
 mod durable_activity;
+mod manuscript_outline;
+mod manuscript_search;
 mod pdf_engine;
 mod physical_export;
+mod quick_note_checklist;
 mod writing_autosave;
 
 fn flush_writing_drafts(
@@ -109,6 +112,9 @@ fn restore_writing_drafts(
     ui.set_manuscript_draft_section(recovered.section.clone().into());
     ui.set_manuscript_draft_citations(recovered.citations.clone().into());
     ui.set_manuscript_draft_body(recovered.body.clone().into());
+    let (words, characters) = manuscript_search::counts(&recovered.body);
+    ui.set_manuscript_word_count(i32::try_from(words).unwrap_or(i32::MAX));
+    ui.set_manuscript_character_count(i32::try_from(characters).unwrap_or(i32::MAX));
     if recovered.notebook_dirty {
         ui.set_notebook_results("Recovered notebook edits awaiting project autosave".into());
     }
@@ -117,6 +123,123 @@ fn restore_writing_drafts(
     }
     *drafts.borrow_mut() = recovered;
     Ok(())
+}
+
+/// Clear every displayed value whose scientific or privacy context belongs to
+/// the previously active project.  Switching projects must never leave results
+/// from one project looking like they were computed for another.
+fn reset_project_visible_state(ui: &MainWindow) {
+    ui.set_data_local_path("".into());
+    ui.set_recent_dataset_id("".into());
+    ui.set_recent_dataset_revision("".into());
+    ui.set_analysis_results(
+        "Import an immutable dataset revision or inspect saved analysis data.".into(),
+    );
+    ui.set_statistics_result_title("No analysis run yet".into());
+    ui.set_statistics_result_primary(
+        "Choose a method and run it against an immutable dataset revision.".into(),
+    );
+    ui.set_statistics_result_secondary("".into());
+    ui.set_statistics_result_provenance("".into());
+    ui.set_show_statistics_technical_details(false);
+    ui.set_variable_results(
+        "Inspect variable metadata, missingness and quality before creating a revised immutable dataset."
+            .into(),
+    );
+    ui.set_analysis_report_results(
+        "Persist verified statistical outputs, reload them by digest, and compose deterministic provenance reports."
+            .into(),
+    );
+    ui.set_mixed_methods_results(
+        "Combine an immutable dataset revision with persisted qualitative case mappings. Caller-supplied coding provenance is not accepted."
+            .into(),
+    );
+    ui.set_qualitative_results(
+        "Inspect the codebook before editing; writes require the current content hash.".into(),
+    );
+    ui.set_library_results("Open a project, then refresh its sources.".into());
+    ui.set_research_summary(
+        "Open a project to inspect its recorded research question and design.".into(),
+    );
+    ui.set_project_metadata_results(
+        "Open a project, enter only fields you want to change, and preview before recording."
+            .into(),
+    );
+    ui.set_question_results("Preview a structured question before recording it.".into());
+    ui.set_protocol_results("Preview a protocol before recording it.".into());
+    ui.set_protocol_export_receipt("".into());
+    ui.set_protocol_export_id("".into());
+    ui.set_reference_results("Register or inspect project references.".into());
+    ui.set_review_results("Use persisted references to build and screen a review.".into());
+    ui.set_extraction_results(
+        "Create a versioned extraction schema, then record validated values for a review record."
+            .into(),
+    );
+    ui.set_writing_results("Preview and save a versioned manuscript section.".into());
+    ui.set_notebook_results(
+        "Save a revisioned project notebook, inspect history, or export Markdown.".into(),
+    );
+    ui.set_notebook_draft("".into());
+    ui.set_quick_notes(Rc::new(slint::VecModel::from(Vec::<QuickNote>::new())).into());
+    ui.set_quick_note_view(true);
+    ui.set_quick_note_results(
+        "Quick notes are stored in this project, with searchable history.".into(),
+    );
+    ui.set_quick_note_query("".into());
+    ui.set_quick_note_filter("active".into());
+    ui.set_quick_note_selected_id("".into());
+    ui.set_quick_note_selected_revision(0);
+    ui.set_quick_note_title("".into());
+    ui.set_quick_note_body("".into());
+    ui.set_quick_note_tags("".into());
+    ui.set_quick_note_color("paper".into());
+    ui.set_quick_note_pinned(false);
+    ui.set_quick_note_archived(false);
+    ui.set_manuscript_draft_id("".into());
+    ui.set_manuscript_draft_section("".into());
+    ui.set_manuscript_draft_citations("".into());
+    ui.set_manuscript_draft_body("".into());
+    ui.set_manuscript_sections(
+        Rc::new(slint::VecModel::from(Vec::<ManuscriptSection>::new())).into(),
+    );
+    ui.set_manuscript_outline_open(false);
+    ui.set_manuscript_outline_status("Load saved sections to navigate this manuscript.".into());
+    ui.set_manuscript_word_count(0);
+    ui.set_manuscript_character_count(0);
+    ui.set_manuscript_find_panel_open(false);
+    ui.set_manuscript_operation_details_open(false);
+    ui.set_manuscript_find_term("".into());
+    ui.set_manuscript_replace_term("".into());
+    ui.set_manuscript_replace_status(
+        "Find and replace operates on this section only. Review before applying.".into(),
+    );
+    ui.set_agent_results(
+        "Durable project-scoped assistant conversations and prompt templates are available offline."
+            .into(),
+    );
+    ui.set_agent_action_results(
+        "Stage an offline retrieval tool proposal to review its exact operation, effect and fingerprint before approval."
+            .into(),
+    );
+    ui.set_provider_results(
+        "Provider validation is offline-only; remote egress is disabled until explicitly configured."
+            .into(),
+    );
+    ui.set_diagnostics_results("Run structural diagnostics for the open project.".into());
+    ui.set_project_activity_results(
+        "Local project event provenance is not authenticated identity evidence.".into(),
+    );
+    ui.set_backup_results("Open a project, then choose an absolute archive path.".into());
+    ui.set_recovery_results("Restore always creates a new project directory.".into());
+    ui.set_pdf_image(Image::default());
+    ui.set_pdf_local_path("".into());
+    ui.set_pdf_status("Choose a local PDF file".into());
+    ui.set_pdf_matches(0);
+    ui.set_pdf_page_number(1);
+    ui.set_pdf_page_count(0);
+    ui.set_pdf_highlight_visible(false);
+    ui.set_pdf_render_width(0.);
+    ui.set_pdf_render_height(0.);
 }
 
 fn resume_recovered_writing(
@@ -232,6 +355,74 @@ fn show_activity(ui: &MainWindow, state: &durable_activity::Activity) {
 }
 
 slint::include_modules!();
+
+fn refresh_quick_note_cards(
+    ui: &MainWindow,
+    project: &Path,
+    query: &str,
+    filter: &str,
+    data_root: &Path,
+) -> Result<usize, String> {
+    let result = evidence_read_at(
+        project,
+        "ui.note_card.list",
+        serde_json::json!({"query":query,"filter":filter}),
+        data_root,
+    )?;
+    let rows = result
+        .pointer("/data/cards")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("Quick note list response is incomplete")?;
+    let notes = rows
+        .iter()
+        .map(|row| {
+            let labels = row["tags"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            let body = row["body"].as_str().unwrap_or("");
+            let checklist_items = quick_note_checklist::parse_items(body)
+                .unwrap_or_default()
+                .into_iter()
+                .take(12)
+                .map(|item| QuickNoteChecklistItem {
+                    line_index: i32::try_from(item.line_index).unwrap_or(i32::MAX),
+                    label: item.text.into(),
+                    checked: item.checked,
+                })
+                .collect::<Vec<_>>();
+            QuickNote {
+                id: row["id"].as_str().unwrap_or("").into(),
+                title: row["title"].as_str().unwrap_or("").into(),
+                body: row["body"].as_str().unwrap_or("").into(),
+                has_unchecked_item: quick_note_checklist::has_unchecked(
+                    row["body"].as_str().unwrap_or(""),
+                ),
+                checklist_items: Rc::new(slint::VecModel::from(checklist_items)).into(),
+                tags: labels.into(),
+                color: row["color"].as_str().unwrap_or("paper").into(),
+                revision: row["revision"].as_i64().unwrap_or(0) as i32,
+                pinned: row["pinned"].as_bool().unwrap_or(false),
+                archived: row["archived"].as_bool().unwrap_or(false),
+            }
+        })
+        .collect::<Vec<_>>();
+    let count = notes.len();
+    ui.set_quick_notes(Rc::new(slint::VecModel::from(notes)).into());
+    ui.set_quick_note_results(format!("{count} notes match the current filter").into());
+    Ok(count)
+}
+
+fn load_project_quick_notes(ui: &MainWindow, project: &Path) {
+    let result = host_data_root()
+        .and_then(|data_root| refresh_quick_note_cards(ui, project, "", "active", &data_root));
+    if let Err(error) = result {
+        ui.set_quick_note_results(format!("Quick notes unavailable: {error}").into());
+    }
+}
 
 const PAGES: [&str; 40] = [
     "Welcome",
@@ -1848,6 +2039,29 @@ fn analysis_execute_pending(
     Ok(result)
 }
 
+/// A recent dataset shortcut must come from a successful, persisted import,
+/// never from a preview, attempted import, or an arbitrary JSON message.
+fn imported_dataset_context(result: &serde_json::Value) -> Option<(String, String)> {
+    if result.get("status").and_then(serde_json::Value::as_str) != Some("ok") {
+        return None;
+    }
+    let id_raw = result
+        .pointer("/data/dataset_id")
+        .and_then(serde_json::Value::as_str)?;
+    let revision_raw = result
+        .pointer("/data/revision")
+        .and_then(serde_json::Value::as_str)?;
+    if id_raw.chars().any(char::is_control) || revision_raw.chars().any(char::is_control) {
+        return None;
+    }
+    let id = id_raw.trim();
+    let revision = revision_raw.trim();
+    if id.is_empty() || revision.is_empty() {
+        return None;
+    }
+    Some((id.to_owned(), revision.to_owned()))
+}
+
 fn analysis_read_at(
     project_path: &Path,
     operation: &str,
@@ -3207,10 +3421,414 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let active_project: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    app.on_refresh_quick_notes({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |query, filter| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|path| {
+                        refresh_quick_note_cards(
+                            &ui,
+                            path,
+                            query.as_str(),
+                            filter.as_str(),
+                            &host_data_root()?,
+                        )
+                        .map(|_| ())
+                    });
+                if let Err(error) = result {
+                    ui.set_quick_note_results(error.into());
+                }
+            }
+        }
+    });
+    app.on_save_quick_note({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |selected, revision, title, body, tags, color, pinned, archived| {
+            if let Some(ui) = weak.upgrade() {
+                let result = (|| -> Result<(String, i64), String> {
+                    let path = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let root = host_data_root()?;
+                    let stable_id = if selected.is_empty() {
+                        format!("card:{}", Uuid::new_v4())
+                    } else {
+                        selected.to_string()
+                    };
+                    let (pending, _) = evidence_preview_at(
+                        &path,
+                        "ui.note_card.save",
+                        "quick-note",
+                        serde_json::json!({
+                            "card_id":stable_id,
+                            "expected_card_revision":revision,
+                            "title":title.as_str(),
+                            "body":body.as_str(),
+                            "tags":tags.as_str(),
+                            "color":color.as_str(),
+                            "pinned":pinned,
+                            "archived":archived
+                        }),
+                        &root,
+                    )?;
+                    let (stored, project_revision) =
+                        evidence_execute_pending(&pending, &path, &root)?;
+                    let card_id = stored
+                        .pointer("/data/card_id")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or("Quick note save result missing card identifier")?
+                        .to_owned();
+                    refresh_quick_note_cards(
+                        &ui,
+                        &path,
+                        ui.get_quick_note_query().as_str(),
+                        ui.get_quick_note_filter().as_str(),
+                        &root,
+                    )?;
+                    Ok((card_id, project_revision))
+                })();
+                match result {
+                    Ok((card_id, revision)) => {
+                        ui.set_project_revision(revision as i32);
+                        // Row-level pin/archive/checklist actions can complete
+                        // while this same card has unsaved edits in the composer.
+                        // Never erase a draft merely because its card ID was
+                        // updated by a different UI control.
+                        let editor_is_source =
+                            (selected.is_empty() && ui.get_quick_note_selected_id().is_empty()
+                                || !selected.is_empty()
+                                    && selected.as_str() == card_id
+                                    && ui.get_quick_note_selected_id() == selected)
+                                && ui.get_quick_note_title() == title
+                                && ui.get_quick_note_body() == body
+                                && ui.get_quick_note_tags() == tags
+                                && ui.get_quick_note_color() == color
+                                && ui.get_quick_note_pinned() == pinned
+                                && ui.get_quick_note_archived() == archived;
+                        if editor_is_source {
+                            ui.set_quick_note_selected_id("".into());
+                            ui.set_quick_note_selected_revision(0);
+                            ui.set_quick_note_title("".into());
+                            ui.set_quick_note_body("".into());
+                            ui.set_quick_note_tags("".into());
+                            ui.set_quick_note_color("paper".into());
+                            ui.set_quick_note_pinned(false);
+                            ui.set_quick_note_archived(false);
+                        }
+                        ui.set_status(if !editor_is_source
+                            && !selected.is_empty()
+                            && ui.get_quick_note_selected_id() == selected
+                        {
+                            "Card updated; unsaved editor content retained. Reload the card before saving more edits."
+                        } else {
+                            "Quick note recorded in project history"
+                        }.into());
+                    }
+                    Err(error) => {
+                        ui.set_quick_note_results(format!("Quick note not saved: {error}").into());
+                        ui.set_status("Quick note not saved; edit remains available".into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_prepare_quick_note_checklist({
+        let weak = app.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                match quick_note_checklist::prepare(ui.get_quick_note_body().as_str()) {
+                    Ok(body) => {
+                        ui.set_quick_note_body(body.into());
+                        ui.set_quick_note_results(
+                            "Checklist prepared. Review and save to record it in the project."
+                                .into(),
+                        );
+                    }
+                    Err(error) => ui.set_quick_note_results(error.into()),
+                }
+            }
+        }
+    });
+    app.on_complete_next_quick_note({
+        let weak = app.as_weak();
+        move |id, revision, title, body, tags, color, pinned, archived| {
+            if let Some(ui) = weak.upgrade() {
+                match quick_note_checklist::complete_next(body.as_str()) {
+                    Ok(completed) => ui.invoke_save_quick_note(
+                        id,
+                        revision,
+                        title,
+                        completed.into(),
+                        tags,
+                        color,
+                        pinned,
+                        archived,
+                    ),
+                    Err(error) => ui.set_quick_note_results(error.into()),
+                }
+            }
+        }
+    });
+    app.on_toggle_quick_note_checklist_item({
+        let weak = app.as_weak();
+        move |id, revision, title, body, tags, color, pinned, archived, line_index| {
+            if let Some(ui) = weak.upgrade() {
+                let updated = usize::try_from(line_index)
+                    .map_err(|_| "Invalid checklist item index".to_owned())
+                    .and_then(|line| quick_note_checklist::toggle_at_line(body.as_str(), line));
+                match updated {
+                    Ok(text) => ui.invoke_save_quick_note(
+                        id,
+                        revision,
+                        title,
+                        text.into(),
+                        tags,
+                        color,
+                        pinned,
+                        archived,
+                    ),
+                    Err(error) => ui.set_quick_note_results(error.into()),
+                }
+            }
+        }
+    });
     let pending_project_metadata: Rc<RefCell<Option<PendingProjectMetadata>>> =
         Rc::new(RefCell::new(None));
     let writing_drafts = Rc::new(RefCell::new(writing_autosave::Drafts::default()));
     let writing_timer = Rc::new(slint::Timer::default());
+    let stored_manuscript_outline: Rc<RefCell<Option<manuscript_outline::ManuscriptOutline>>> =
+        Rc::new(RefCell::new(None));
+    app.on_load_manuscript_sections({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
+        let outline = stored_manuscript_outline.clone();
+        move |manuscript_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            outline.borrow_mut().take();
+            ui.set_manuscript_sections(Rc::new(slint::VecModel::from(Vec::<ManuscriptSection>::new())).into());
+            let result = (|| -> Result<(manuscript_outline::ManuscriptOutline, Vec<ManuscriptSection>), String> {
+                let path = active_project.borrow().clone().ok_or("Open a project first")?;
+                let root = host_data_root()?;
+                // Loading an outline must never discard an in-flight section.
+                // Finish the same autosave transaction before capturing the
+                // revision set to be presented for navigation.
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    let revision = flush_writing_drafts(&path, &mut drafts.borrow_mut(), &root)?;
+                    ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                }
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    return Err("A manuscript or notebook draft is still unsaved; resolve the autosave error first".into());
+                }
+                timer.stop();
+                let receipt = evidence_read_at(
+                    &path,
+                    "writing.inspect",
+                    serde_json::json!({"manuscript_id":manuscript_id.as_str()}),
+                    &root,
+                )?;
+                let record = manuscript_outline::ManuscriptOutline::from_inspect(
+                    &path,
+                    manuscript_id.as_str(),
+                    &receipt,
+                )?;
+                let rows = record.rows().into_iter().map(|row| ManuscriptSection {
+                    name: row.section.into(),
+                    label: row.label.into(),
+                    revision: i32::try_from(row.revision).unwrap_or(i32::MAX),
+                }).collect::<Vec<_>>();
+                Ok((record, rows))
+            })();
+            match result {
+                Ok((record, rows)) => {
+                    let count = rows.len();
+                    *outline.borrow_mut() = Some(record);
+                    ui.set_manuscript_sections(Rc::new(slint::VecModel::from(rows)).into());
+                    ui.set_manuscript_outline_status(format!("{count} saved sections. Choose a heading to load its verified revision.").into());
+                }
+                Err(error) => ui.set_manuscript_outline_status(format!("Saved sections unavailable: {error}").into()),
+            }
+        }
+    });
+    app.on_select_manuscript_section({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
+        let outline = stored_manuscript_outline.clone();
+        move |section, revision| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<manuscript_outline::SectionSelection, String> {
+                let path = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a project first")?;
+                let root = host_data_root()?;
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    let revision = flush_writing_drafts(&path, &mut drafts.borrow_mut(), &root)?;
+                    ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                }
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    return Err(
+                        "Unsaved writing changes must be resolved before selecting another section"
+                            .into(),
+                    );
+                }
+                timer.stop();
+                let manuscript_id = ui.get_manuscript_draft_id().to_string();
+                let fresh = evidence_read_at(
+                    &path,
+                    "writing.inspect",
+                    serde_json::json!({"manuscript_id":manuscript_id}),
+                    &root,
+                )?;
+                let selected = outline
+                    .borrow()
+                    .as_ref()
+                    .ok_or("Reload saved sections before selecting one")?
+                    .activate(
+                        &path,
+                        &manuscript_id,
+                        section.as_str(),
+                        i64::from(revision),
+                        &fresh,
+                        false,
+                    )?;
+                let project_id = ProjectStore::open(&path)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?
+                    .id;
+                let mut updated = drafts.borrow().clone();
+                updated.manuscript_id = selected.manuscript_id.clone();
+                updated.section = selected.section.clone();
+                updated.citations = selected.citations_editor_text();
+                updated.body = selected.body.clone();
+                updated.manuscript_dirty = false;
+                writing_autosave::save(&writing_autosave::path(&root, &project_id), &updated)?;
+                *drafts.borrow_mut() = updated;
+                Ok(selected)
+            })();
+            match result {
+                Ok(selected) => {
+                    ui.set_manuscript_draft_section(selected.section.clone().into());
+                    ui.set_manuscript_draft_citations(selected.citations_editor_text().into());
+                    ui.set_manuscript_draft_body(selected.body.clone().into());
+                    let (words, chars) = manuscript_search::counts(&selected.body);
+                    ui.set_manuscript_word_count(i32::try_from(words).unwrap_or(i32::MAX));
+                    ui.set_manuscript_character_count(i32::try_from(chars).unwrap_or(i32::MAX));
+                    ui.set_manuscript_outline_status(
+                        format!(
+                            "Loaded saved section {} (revision {}).",
+                            selected.section, selected.revision
+                        )
+                        .into(),
+                    );
+                    ui.set_manuscript_outline_open(false);
+                    ui.set_manuscript_find_panel_open(false);
+                }
+                Err(error) => {
+                    ui.set_manuscript_outline_status(format!("Section not changed: {error}").into())
+                }
+            }
+        }
+    });
+    let pending_manuscript_replace: Rc<RefCell<Option<manuscript_search::PendingReplace>>> =
+        Rc::new(RefCell::new(None));
+    app.on_preview_manuscript_replace({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_replace = pending_manuscript_replace.clone();
+        move |search, replacement| {
+            if let Some(ui) = weak.upgrade() {
+                pending_replace.borrow_mut().take();
+                let result = (|| -> Result<manuscript_search::PendingReplace, String> {
+                    let project = active_project
+                        .borrow()
+                        .as_ref()
+                        .cloned()
+                        .ok_or("Open a project before editing the manuscript")?;
+                    let original = ui.get_manuscript_draft_body().to_string();
+                    let (replacement_body, occurrences) =
+                        manuscript_search::prepare_replace(&original, search.as_str(), replacement.as_str())?;
+                    Ok(manuscript_search::PendingReplace {
+                        project,
+                        manuscript_id: ui.get_manuscript_draft_id().to_string(),
+                        section: ui.get_manuscript_draft_section().to_string(),
+                        search_term: search.to_string(),
+                        replace_term: replacement.to_string(),
+                        expected_draft_hash: manuscript_search::hash(&original),
+                        replacement_body,
+                        occurrences,
+                    })
+                })();
+                match result {
+                    Ok(pending) => {
+                        let count = pending.occurrences;
+                        *pending_replace.borrow_mut() = Some(pending);
+                        ui.set_manuscript_replace_status(
+                            format!("{count} exact occurrences found. No changes made. Review and choose Apply previewed replacement.").into()
+                        );
+                    }
+                    Err(error) => ui.set_manuscript_replace_status(error.into()),
+                }
+            }
+        }
+    });
+    app.on_apply_manuscript_replace({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_replace = pending_manuscript_replace.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let result = (|| -> Result<(String, usize), String> {
+                    let pending = pending_replace.borrow_mut().take()
+                        .ok_or("Preview a replacement before applying it")?;
+                    let active = active_project.borrow().clone()
+                        .ok_or("Open a project before editing the manuscript")?;
+                    if active.canonicalize().ok() != pending.project.canonicalize().ok()
+                        || active.canonicalize().is_err()
+                    {
+                        return Err("Project changed after preview; preview again".into());
+                    }
+                    if !pending.matches_draft(
+                        ui.get_manuscript_draft_id().as_str(),
+                        ui.get_manuscript_draft_section().as_str(),
+                        ui.get_manuscript_draft_body().as_str(),
+                        ui.get_manuscript_find_term().as_str(),
+                        ui.get_manuscript_replace_term().as_str(),
+                    )
+                    {
+                        return Err("Manuscript or replacement inputs changed after preview; preview again".into());
+                    }
+                    Ok((pending.replacement_body, pending.occurrences))
+                })();
+                match result {
+                    Ok((replacement_body, count)) => {
+                        ui.set_manuscript_draft_body(replacement_body.clone().into());
+                        ui.invoke_manuscript_draft_edited(
+                            ui.get_manuscript_draft_id(),
+                            ui.get_manuscript_draft_section(),
+                            ui.get_manuscript_draft_citations(),
+                            replacement_body.into(),
+                        );
+                        ui.set_manuscript_replace_status(
+                            format!("Applied {count} replacements to this draft. Autosave is pending; exported document is unchanged until saved.").into()
+                        );
+                    }
+                    Err(error) => ui.set_manuscript_replace_status(error.into()),
+                }
+            }
+        }
+    });
     app.on_notebook_draft_edited({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -3274,6 +3892,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |id, section, citations, body| {
+            if let Some(ui) = weak.upgrade() {
+                let (words, chars) = manuscript_search::counts(body.as_str());
+                ui.set_manuscript_word_count(i32::try_from(words).unwrap_or(i32::MAX));
+                ui.set_manuscript_character_count(i32::try_from(chars).unwrap_or(i32::MAX));
+            }
             let Some(project) = active_project.borrow().clone() else {
                 return;
             };
@@ -3338,6 +3961,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pending_ai: Rc<RefCell<Option<PendingAiAction>>> = Rc::new(RefCell::new(None));
     let selected_agent_action: Rc<RefCell<Option<SelectedAgentAction>>> =
         Rc::new(RefCell::new(None));
+    // A staged operation belongs to the project where it was previewed.
+    // Invalidating all pending actions on project switch prevents a stale
+    // confirmation from being inadvertently applied to another project.
+    let invalidate_project_previews = Rc::new({
+        let pending_project_metadata = pending_project_metadata.clone();
+        let pending_evidence = pending_evidence.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        let pending_library = pending_library.clone();
+        let pending_analysis = pending_analysis.clone();
+        let pending_analysis_command = pending_analysis_command.clone();
+        let pending_ai = pending_ai.clone();
+        let selected_agent_action = selected_agent_action.clone();
+        let pending_manuscript_replace = pending_manuscript_replace.clone();
+        move || {
+            pending_project_metadata.borrow_mut().take();
+            pending_evidence.borrow_mut().take();
+            pending_physical_export.borrow_mut().take();
+            pending_library.borrow_mut().take();
+            pending_analysis.borrow_mut().take();
+            pending_analysis_command.borrow_mut().take();
+            pending_ai.borrow_mut().take();
+            selected_agent_action.borrow_mut().take();
+            pending_manuscript_replace.borrow_mut().take();
+        }
+    });
     app.on_preview_question({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -3547,6 +4195,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             }
                         } else if surface == "writing" {
                             ui.set_writing_results(message.into());
+                            ui.set_manuscript_operation_details_open(true);
                         } else if surface == "extraction" {
                             ui.set_extraction_results(message.into());
                         } else if surface == "notebook" {
@@ -4261,6 +4910,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 match result {
                     Ok(executed) => {
+                        if let Some((id, revision)) = imported_dataset_context(&executed) {
+                            ui.set_recent_dataset_id(id.into());
+                            ui.set_recent_dataset_revision(revision.into());
+                        }
                         ui.set_analysis_results(
                             format!(
                                 "Immutable dataset revision imported through approved local-write command:\n{}",
@@ -6241,8 +6894,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let weak = app.as_weak();
         let active_project = active_project.clone();
         let pending_evidence = pending_evidence.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
         move |manuscript_id, section, citations, body| {
             if let Some(ui) = weak.upgrade() {
+                pending_evidence.borrow_mut().take();
                 let citations: Vec<_> = citations
                     .as_str()
                     .split(',')
@@ -6250,25 +6906,37 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .filter(|citation| !citation.is_empty())
                     .map(str::to_owned)
                     .collect();
-                let result = active_project
-                    .borrow()
-                    .as_ref()
-                    .ok_or_else(|| "Open a project first".to_string())
-                    .and_then(|path| {
-                        let root = host_data_root()?;
-                        evidence_preview_at(
-                            path,
-                            "writing.section_save",
-                            "writing",
-                            serde_json::json!({
-                                "manuscript_id":manuscript_id.as_str().trim(),
-                                "section":section.as_str().trim(),
-                                "body":body.as_str(),
-                                "citations":citations
-                            }),
-                            &root,
-                        )
-                    });
+                let result = (|| {
+                    let project = active_project
+                        .borrow()
+                        .as_ref()
+                        .cloned()
+                        .ok_or_else(|| "Open a project first".to_string())?;
+                    let root = host_data_root()?;
+                    // A pending debounce must not advance the project revision
+                    // after the explicit preview has bound its approval token.
+                    // Flush first, then stop only a fully satisfied autosave.
+                    if recovered_writing_requires_flush(&drafts.borrow()) {
+                        let revision =
+                            flush_writing_drafts(&project, &mut drafts.borrow_mut(), &root)?;
+                        ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                    }
+                    if !recovered_writing_requires_flush(&drafts.borrow()) {
+                        timer.stop();
+                    }
+                    evidence_preview_at(
+                        &project,
+                        "writing.section_save",
+                        "writing",
+                        serde_json::json!({
+                            "manuscript_id":manuscript_id.as_str().trim(),
+                            "section":section.as_str().trim(),
+                            "body":body.as_str(),
+                            "citations":citations
+                        }),
+                        &root,
+                    )
+                })();
                 match result {
                     Ok((pending, preview)) => {
                         *pending_evidence.borrow_mut() = Some(pending);
@@ -6279,11 +6947,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             )
                             .into(),
                         );
+                        ui.set_manuscript_operation_details_open(true);
                         ui.set_status("Manuscript section preview ready; project unchanged".into());
                     }
                     Err(error) => {
                         pending_evidence.borrow_mut().take();
                         ui.set_writing_results(error.clone().into());
+                        ui.set_manuscript_operation_details_open(true);
                         ui.set_status(error.into());
                     }
                 }
@@ -6311,10 +6981,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(result) => {
                         ui.set_writing_results(pretty_result_data(&result).into());
+                        ui.set_manuscript_operation_details_open(true);
                         ui.set_status("Persisted manuscript revisions loaded".into());
                     }
                     Err(error) => {
                         ui.set_writing_results(error.clone().into());
+                        ui.set_manuscript_operation_details_open(true);
                         ui.set_status(error.into());
                     }
                 }
@@ -6566,15 +7238,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_restore_backup({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let invalidate_project_previews = invalidate_project_previews.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
         move |encrypted, archive, destination, password| {
             if let Some(ui) = weak.upgrade() {
                 match restore_backup(encrypted, &archive, &destination, &password) {
                     Ok((info, path, message)) => {
-                        *active_project.borrow_mut() = Some(path);
+                        timer.stop();
+                        invalidate_project_previews();
+                        *active_project.borrow_mut() = Some(path.clone());
+                        reset_project_visible_state(&ui);
+                        load_project_quick_notes(&ui, &path);
+                        let draft_warning = restore_writing_drafts(&ui, &path, &drafts).err();
+                        if draft_warning.is_none() {
+                            resume_recovered_writing(&timer, &path, drafts.clone(), weak.clone());
+                        }
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_recovery_results(message.clone().into());
-                        ui.set_status(message.into());
+                        ui.set_status(
+                            match draft_warning {
+                                Some(error) => {
+                                    format!("{message}; draft recovery warning: {error}")
+                                }
+                                None => message,
+                            }
+                            .into(),
+                        );
                         ui.set_page(1);
                     }
                     Err(error) => {
@@ -6813,7 +7504,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
-        let pending_physical_export = pending_physical_export.clone();
+        let invalidate_project_previews = invalidate_project_previews.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |path, title| {
@@ -6822,15 +7513,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(info) => {
                         timer.stop();
-                        pending_physical_export.borrow_mut().take();
-                        ui.set_protocol_export_id("".into());
-                        ui.set_protocol_export_receipt("".into());
+                        invalidate_project_previews();
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
-                        if let Err(error) =
-                            restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
-                        {
-                            ui.set_status(error.into());
-                        } else {
+                        reset_project_visible_state(&ui);
+                        load_project_quick_notes(&ui, Path::new(path.as_str()));
+                        let draft_warning =
+                            restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts).err();
+                        if draft_warning.is_none() {
                             resume_recovered_writing(
                                 &timer,
                                 Path::new(path.as_str()),
@@ -6840,7 +7529,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project created".into());
+                        ui.set_status(
+                            match draft_warning {
+                                Some(error) => {
+                                    format!("Project created; draft recovery warning: {error}")
+                                }
+                                None => "Project created".into(),
+                            }
+                            .into(),
+                        );
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -6851,7 +7548,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_default_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
-        let pending_physical_export = pending_physical_export.clone();
+        let invalidate_project_previews = invalidate_project_previews.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |title| {
@@ -6859,26 +7556,36 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ui) = weak.upgrade() {
                 match result {
                     Ok(info) => {
-                        timer.stop();
-                        pending_physical_export.borrow_mut().take();
-                        ui.set_protocol_export_id("".into());
-                        ui.set_protocol_export_receipt("".into());
-                        *active_project.borrow_mut() = find_managed_project(&info.id).ok();
-                        if let Some(project) = active_project.borrow().as_ref() {
-                            if let Err(error) = restore_writing_drafts(&ui, project, &drafts) {
-                                ui.set_status(error.into());
-                            } else {
-                                resume_recovered_writing(
-                                    &timer,
-                                    project,
-                                    drafts.clone(),
-                                    weak.clone(),
+                        let project = match find_managed_project(&info.id) {
+                            Ok(path) => path,
+                            Err(error) => {
+                                ui.set_status(
+                                    format!("Project created but its managed folder could not be reopened: {error}").into(),
                                 );
+                                return;
                             }
+                        };
+                        timer.stop();
+                        invalidate_project_previews();
+                        *active_project.borrow_mut() = Some(project.clone());
+                        reset_project_visible_state(&ui);
+                        load_project_quick_notes(&ui, &project);
+                        let draft_warning =
+                            restore_writing_drafts(&ui, &project, &drafts).err();
+                        if draft_warning.is_none() {
+                            resume_recovered_writing(
+                                &timer,
+                                &project,
+                                drafts.clone(),
+                                weak.clone(),
+                            );
                         }
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project created in managed local storage".into());
+                        ui.set_status(match draft_warning {
+                            Some(error) => format!("Project created; draft recovery warning: {error}"),
+                            None => "Project created in managed local storage".into(),
+                        }.into());
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -6889,7 +7596,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_open_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
-        let pending_physical_export = pending_physical_export.clone();
+        let invalidate_project_previews = invalidate_project_previews.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |path| {
@@ -6898,15 +7605,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(info) => {
                         timer.stop();
-                        pending_physical_export.borrow_mut().take();
-                        ui.set_protocol_export_id("".into());
-                        ui.set_protocol_export_receipt("".into());
+                        invalidate_project_previews();
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
-                        if let Err(error) =
-                            restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
-                        {
-                            ui.set_status(error.into());
-                        } else {
+                        reset_project_visible_state(&ui);
+                        load_project_quick_notes(&ui, Path::new(path.as_str()));
+                        let draft_warning =
+                            restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts).err();
+                        if draft_warning.is_none() {
                             resume_recovered_writing(
                                 &timer,
                                 Path::new(path.as_str()),
@@ -6916,7 +7621,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project opened".into());
+                        ui.set_status(
+                            match draft_warning {
+                                Some(error) => {
+                                    format!("Project opened; draft recovery warning: {error}")
+                                }
+                                None => "Project opened".into(),
+                            }
+                            .into(),
+                        );
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -6970,6 +7683,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_dataset_shortcut_requires_a_successfully_persisted_import() {
+        let imported = serde_json::json!({
+            "status":"ok",
+            "data":{"dataset_id":"dataset-128","revision":"abcdef012345"}
+        });
+        assert_eq!(
+            imported_dataset_context(&imported),
+            Some(("dataset-128".into(), "abcdef012345".into()))
+        );
+        for result in [
+            serde_json::json!({"status":"error","data":{"dataset_id":"wrong","revision":"x"}}),
+            serde_json::json!({"status":"ok","data":{"preview":true,"would_import":{"dataset_id":"preview","revision":"x"}}}),
+            serde_json::json!({"status":"ok","data":{"dataset_id":"dataset-128"}}),
+            serde_json::json!({"status":"ok","data":{"dataset_id":"   ","revision":"x"}}),
+            serde_json::json!({"status":"ok","data":{"dataset_id":"dataset-128","revision":"\ncontrol"}}),
+        ] {
+            assert_eq!(imported_dataset_context(&result), None, "{result}");
+        }
+    }
 
     #[test]
     fn native_file_dialogs_are_explicitly_scoped_to_supported_read_imports() {

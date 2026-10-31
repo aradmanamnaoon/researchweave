@@ -930,18 +930,53 @@ pub fn archive_project(
     }
     let db = NamedTempFile::new_in(store.root())?;
     store.backup_database(db.path())?;
+    archive_project_from_snapshot(store.root(), db.path(), destination)
+}
+
+// Every item in the archive, including its identity and revision, must be
+// selected from the same frozen database image. The live project can continue
+// accepting edits while an archive is being written.
+fn archive_project_from_snapshot(
+    root: &Path,
+    snapshot_db: &Path,
+    destination: &Path,
+) -> Result<ArchiveVerification, ProjectError> {
+    let snapshot = Connection::open_with_flags(snapshot_db, OpenFlags::SQLITE_OPEN_READ_ONLY)?;
+    verify_connection(&snapshot)?;
+    let info: ProjectInfo = snapshot.query_row(
+        "SELECT id,title,question,design,locale,privacy,revision,created_at FROM project",
+        [],
+        |row| {
+            Ok(ProjectInfo {
+                id: row.get(0)?,
+                title: row.get(1)?,
+                question: row.get(2)?,
+                design: row.get(3)?,
+                locale: row.get(4)?,
+                privacy: row.get(5)?,
+                revision: row.get(6)?,
+                created_at: row.get(7)?,
+            })
+        },
+    )?;
+    validate_info(&info)?;
     let mut files: Vec<(String, PathBuf)> =
-        vec![("data/project.sqlite".into(), db.path().to_path_buf())];
-    let mut stmt = store
-        .conn
-        .prepare("SELECT digest FROM objects ORDER BY digest")?;
+        vec![("data/project.sqlite".into(), snapshot_db.to_path_buf())];
+    let mut stmt = snapshot.prepare("SELECT digest FROM objects ORDER BY digest")?;
     let digests = stmt
         .query_map([], |r| r.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
     for digest in digests {
+        if digest.len() != 64
+            || !digest
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err(ProjectError::Integrity("invalid object digest".into()));
+        }
         files.push((
             format!("objects/{}/{}", &digest[..2], digest),
-            store.root.join("objects").join(&digest[..2]).join(&digest),
+            root.join("objects").join(&digest[..2]).join(&digest),
         ));
     }
     if files.len() > MAX_ENTRIES - 3 {
@@ -981,7 +1016,6 @@ pub fn archive_project(
         sha256: sha256(&schema_bytes),
         size: schema_bytes.len() as u64,
     });
-    let info = store.info()?;
     let manifest = ArchiveManifest {
         format: "researchweave-rwproj".into(),
         version: ARCHIVE_VERSION.into(),
@@ -1426,6 +1460,95 @@ mod tests {
         assert_eq!(restored.manifest_sha256, verified.manifest_sha256);
         let reopened = ProjectStore::open(&destination).unwrap();
         assert_eq!(reopened.info().unwrap().title, "Neuroscience α فارسی");
+    }
+
+    #[test]
+    fn archive_keeps_frozen_revision_and_inventory_when_live_project_changes() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("project");
+        let store = ProjectStore::create(&root, &info()).unwrap();
+        let original = store.put_object(b"original research evidence").unwrap();
+
+        // Take a consistent SQLite backup, then deterministically interleave
+        // a live edit before the archive inventory and manifest are assembled.
+        let database_backup = NamedTempFile::new_in(&root).unwrap();
+        store.backup_database(database_backup.path()).unwrap();
+        store
+            .connection()
+            .execute(
+                "UPDATE project SET revision=1, title='newer unsnapshotted revision'",
+                [],
+            )
+            .unwrap();
+        let newer = store
+            .put_object(b"evidence written after snapshot")
+            .unwrap();
+        let archive = base.path().join("frozen.rwproj");
+        let verification =
+            archive_project_from_snapshot(&root, database_backup.path(), &archive).unwrap();
+        assert_eq!(verification.project_revision, 0);
+        assert_eq!(verification.files, 3); // Database, original object and schema.
+        assert_eq!(verify_archive(&archive).unwrap(), verification);
+
+        let restored = base.path().join("restored");
+        restore_archive(&archive, &restored).unwrap();
+        let recovered = ProjectStore::open(&restored).unwrap();
+        assert_eq!(recovered.info().unwrap().revision, 0);
+        assert_ne!(
+            recovered.info().unwrap().title,
+            "newer unsnapshotted revision"
+        );
+        let object_count: i64 = recovered
+            .connection()
+            .query_row("SELECT COUNT(*) FROM objects", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(object_count, 1);
+        assert!(restored
+            .join("objects")
+            .join(&original[..2])
+            .join(&original)
+            .is_file());
+        assert!(!restored
+            .join("objects")
+            .join(&newer[..2])
+            .join(&newer)
+            .exists());
+        assert_eq!(store.info().unwrap().revision, 1);
+    }
+
+    #[test]
+    fn archive_rejects_malformed_digest_and_missing_object_without_publishing() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("project");
+        let store = ProjectStore::create(&root, &info()).unwrap();
+        store
+            .connection()
+            .execute("INSERT INTO objects(digest,size) VALUES ('q',1)", [])
+            .unwrap();
+        let archive = base.path().join("invalid.rwproj");
+        assert!(matches!(
+            archive_project(&store, &archive),
+            Err(ProjectError::Integrity(ref message)) if message == "invalid object digest"
+        ));
+        assert!(!archive.exists());
+
+        store
+            .connection()
+            .execute("DELETE FROM objects WHERE digest='q'", [])
+            .unwrap();
+        let absent_digest = "a".repeat(64);
+        store
+            .connection()
+            .execute(
+                "INSERT INTO objects(digest,size) VALUES (?1,1)",
+                params![absent_digest],
+            )
+            .unwrap();
+        assert!(matches!(
+            archive_project(&store, &archive),
+            Err(ProjectError::Integrity(ref message)) if message.starts_with("unsafe payload")
+        ));
+        assert!(!archive.exists());
     }
 
     #[test]

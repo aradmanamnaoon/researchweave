@@ -1,0 +1,102 @@
+AT_SPI_APP=researchweave-desktop
+AT_SPI_PHASE=welcome NAMED_NODES=55
+SCREENSHOT=welcome.png bytes=102870
+AT_SPI_ACTIVATED=Create default project
+AT_SPI_PHASE=project-created NAMED_NODES=66
+SCREENSHOT=project-created.png bytes=101745
+AT_SPI_ACTIVATED=Synthesize activity
+AT_SPI_PHASE=synthesize NAMED_NODES=42
+SCREENSHOT=synthesize.png bytes=77670
+AT_SPI_ACTIVATED=Notebook
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Project notebook text NotImplementedError
+XVFB_TYPED_TEXT=Project notebook text chars=61
+AT_SPI_TEXT_READBACK_OK=Project notebook text
+AT_SPI_PHASE=notebook NAMED_NODES=42
+SCREENSHOT=notebook.png bytes=83945
+NOTEBOOK_AUTOSAVE_STATUS_PRESENT
+XVFB_WINDOW_GEOMETRY=850x600
+AT_SPI_PHASE=notebook-narrow NAMED_NODES=33
+SCREENSHOT=notebook-narrow.png bytes=70440
+XVFB_WINDOW_GEOMETRY=1280x800
+AT_SPI_ACTIVATED=Load notebook history
+AT_SPI_ACTION_NOT_AVAILABLE=Return to PDF
+AT_SPI_ACTIVATED=Synthesize activity
+AT_SPI_ACTIVATED=Manuscript
+AT_SPI_PHASE=manuscript NAMED_NODES=48
+SCREENSHOT=manuscript.png bytes=78262
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript ID NotImplementedError
+XVFB_TYPED_TEXT=Manuscript ID chars=18
+AT_SPI_TEXT_READBACK_OK=Manuscript ID
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript section NotImplementedError
+XVFB_TYPED_TEXT=Manuscript section chars=8
+AT_SPI_TEXT_READBACK_OK=Manuscript section
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript section body NotImplementedError
+XVFB_TYPED_TEXT=Manuscript section body chars=51
+AT_SPI_TEXT_READBACK_OK=Manuscript section body
+MANUSCRIPT_AUTOSAVE_STATUS_PRESENT
+XVFB_WINDOW_GEOMETRY=850x600
+AT_SPI_PHASE=manuscript-narrow NAMED_NODES=33
+SCREENSHOT=manuscript-narrow.png bytes=68554
+XVFB_WINDOW_GEOMETRY=1280x800
+AT_SPI_ACTIVATED=Analyze activity
+AT_SPI_ACTIVATED=Data View
+AT_SPI_PHASE=data-before-import NAMED_NODES=50
+SCREENSHOT=data-before-import.png bytes=91819
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Analysis import path NotImplementedError
+XVFB_TYPED_TEXT=Analysis import path chars=36
+AT_SPI_TEXT_READBACK_OK=Analysis import path
+AT_SPI_ACTIVATED=Preview analysis import
+DATA_IMPORT_PREVIEW_CONFIRMED
+AT_SPI_ACTIVATED=Import previewed analysis data
+AT_SPI_PHASE=data-after-import NAMED_NODES=54
+SCREENSHOT=data-after-import.png bytes=150725
+AT_SPI_ACTIVATED=Inspect variables in recently imported dataset
+DATA_TO_VARIABLES_CONTEXT_OK id_chars=24 revision_chars=64
+AT_SPI_ACTIVATED=Data View
+AT_SPI_ACTIVATED=Analyze recently imported dataset
+DATA_TO_STATISTICS_CONTEXT_OK
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Statistics numeric column NotImplementedError
+XVFB_TYPED_TEXT=Statistics numeric column chars=5
+AT_SPI_TEXT_READBACK_OK=Statistics numeric column
+AT_SPI_ACTIVATED=Run descriptive statistics
+AT_SPI_PHASE=statistics-result NAMED_NODES=59
+SCREENSHOT=statistics-result.png bytes=132340
+DATA_TO_NATIVE_DESCRIPTIVES_MEAN_2_OK
+AT_SPI_ACTIVATED=Show statistical raw data and provenance details
+AT_SPI_PHASE=statistics-technical-details NAMED_NODES=60
+SCREENSHOT=statistics-technical-details.png bytes=133165
+AT_SPI_ACTIVATED=Hide statistical raw data and provenance details
+STATISTICS_PROGRESSIVE_DISCLOSURE_OK
+AT_SPI_ACTIVATED=Data View
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Analysis import path NotImplementedError
+XVFB_TYPED_TEXT=Analysis import path chars=36
+AT_SPI_TEXT_READBACK_OK=Analysis import path
+AT_SPI_ACTIVATED=Preview analysis import
+STALE_IMPORT_PREVIEW_STAGED_IN_ORIGINAL_PROJECT
+AT_SPI_ACTIVATED=Home activity
+AT_SPI_PHASE=home-after-staged-preview NAMED_NODES=66
+SCREENSHOT=home-after-staged-preview.png bytes=102644
+XVFB_ACCESSIBLE_BUTTON_CLICK_FALLBACK=Open Start Center to switch projects
+AT_SPI_ACTIVATED=Create default project
+AT_SPI_ACTIVATED=Analyze activity
+AT_SPI_ACTIVATED=Import previewed analysis data
+STALE_IMPORT_PREVIEW_REJECTED_AFTER_PROJECT_SWITCH
+DATASET_CONTEXT_CLEARED_AFTER_PROJECT_SWITCH_OK
+PROJECT_RESULT_ISOLATION_OK
+AT_SPI_PHASE=data-after-project-switch NAMED_NODES=50
+SCREENSHOT=data-after-project-switch.png bytes=89541
+AT_SPI_ACTIVATED=Synthesize activity
+AT_SPI_ACTIVATED=Manuscript
+NOTEBOOK_AND_MANUSCRIPT_PROJECT_ISOLATION_OK
+AT_SPI_ACTIVATED=Home activity
+AT_SPI_ACTIVATED=Open Start Center to switch projects
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Project path NotImplementedError
+XVFB_TYPED_TEXT=Project path chars=65
+AT_SPI_TEXT_READBACK_OK=Project path
+AT_SPI_ACTIVATED=Open project
+AT_SPI_ACTIVATED=Synthesize activity
+AT_SPI_ACTIVATED=Manuscript
+NOTES_AND_MANUSCRIPT_REOPEN_PERSISTENCE_OK
+AT_SPI_PHASE=reopened-project-writing NAMED_NODES=48
+SCREENSHOT=reopened-project-writing.png bytes=82047
+AT_SPI_NAVIGATION_PROBE_OK

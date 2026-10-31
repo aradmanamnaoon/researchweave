@@ -1,0 +1,54 @@
+0:application:researchweave-desktop
+1:frame:ResearchWeave · Research workbench
+2:landmark:Activity rail
+3:label:WORKBENCH
+3:button:Home activity
+3:button:Sources activity
+3:button:Analyze activity
+3:button:Synthesize activity
+3:button:Automate activity
+3:button:Manage activity
+2:landmark:Analyze navigation
+3:label:Analyze
+3:button:Analyze navigation start
+3:label:My Research
+3:label:DATA
+3:button:Data View workspace screen
+3:button:Variable View workspace screen
+3:label:ANALYSIS
+3:button:Statistics workspace screen
+3:button:Analysis Results workspace screen
+3:button:Qualitative workspace screen
+3:button:Codebook workspace screen
+3:button:Mixed Methods workspace screen
+2:landmark:Data View work area
+3:label:Analyze  /  Data View
+3:label:Data View
+3:entry:Command palette
+3:label:Ctrl+K
+3:label:My Research · r11
+3:label:Dataset
+3:label:Data View · Dataset
+3:label:Data view
+3:label:Import → inspect → prepare variables → analyze. Each dataset is an immutable project revision; importing is bound to the previewed file hash.
+3:entry:Analysis import path
+3:button:Choose scientific dataset with native file picker
+3:button:Preview analysis import
+3:button:Import previewed analysis data
+3:label:Recently imported dataset
+3:label:Recently imported dataset identifier and immutable revision
+3:button:Inspect variables in recently imported dataset
+3:button:Analyze recently imported dataset
+3:entry:Analysis dataset ID
+3:entry:Analysis dataset revision
+3:button:Inspect analysis dataset
+3:label:Import and inspection details
+3:label:Analysis operation result Immutable dataset revision imported through approved local-write command: {   "columns": [     "case_id",     "score",     "group"   ]
+2:landmark:Bottom job tray
+3:button:Open jobs
+3:label:No active local jobs
+3:button:Open notifications
+2:landmark:Workbench status
+3:label:Status: Analysis dataset imported and audited
+3:label:LOCAL FIRST
+3:label:Analyze · Data View

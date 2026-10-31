@@ -1,0 +1,23 @@
+# ResearchWeave competitor UX patterns — verified documentation review
+
+Reviewed 2026-10-31. This research uses each product's official documentation. It is **documentation-based comparative analysis**, not an installed hands-on competitor usability study. Screenshots, performance benchmarks and user interviews have not been collected for these applications. Reuse familiar interaction principles, never proprietary designs, assets, code or trade dress.
+
+| Product | Documented interaction and official source | ResearchWeave decision | Implementation / acceptance status |
+| --- | --- | --- | --- |
+| jamovi | Data is presented in a spreadsheet, editable variable definitions have a direct shortcut (F3), and analysis options sit beside results that update as settings change. [Getting started](https://www.jamovi.org/getting-started.html), [Keyboard and screen-reader guide](https://www.jamovi.org/accessibility-guide.html) | Group Data/Variables/Statistics into a visible **Import → Inspect → Clean → Analyze** sequence; let users select variables from valid columns; show estimates and warnings prominently. Keyboard regions must be predictable. | The native statistics methods and summaries exist. Linked variable picker and side-by-side full analysis editor **pending**. |
+| Google Keep | Fast note creation, direct edit, pin/label/color organization, archive/unarchive, with trash recovery. [Create note](https://support.google.com/keep/answer/2888240?hl=en), [Organize](https://support.google.com/keep/answer/6191044?hl=en-NL), [Archive](https://support.google.com/keep/answer/6262765?co=GENIE.Platform%3DDesktop&hl=en) | Give the notebook an uncluttered capture surface, simple return path from a source, and clear durable save feedback. Later introduce per-note cards and non-destructive organization with tested persistence. | PDF → Notebook and Return to PDF, a taller editor and separate controls implemented in source. Actual per-note cards/pin/archive/tag **pending**. |
+| Microsoft Word | Navigation supports headings, page thumbnails, text search, and jumping among document sections. [Navigation Pane](https://support.microsoft.com/en-us/word/use-the-navigation-pane-in-word) | Writing should dominate the screen, have scrollable page space and eventually real headings, navigation, zoom and editable page/document structures. | More space, paper backdrop and a scrollable manuscript workspace implemented in source; page model/ribbon/fidelity beyond existing DOCX export **pending**. |
+| Zotero | Three-column library browsing and source metadata; searchable collections/tags; editable notes associated with a source; citations stay linked to metadata. [Quick start](https://www.zotero.org/support/quick_start_guide), [Notes](https://www.zotero.org/support/notes) | Preserve project/source identity across reading, evidence capture and writing. Avoid requiring users to retype the same source metadata into every panel. | Native source/reference persistence and evidence link model exist. End-to-end source → note → quote → manuscript UI audit **pending**. |
+| RStudio | Panes for source, console, environment and output can be minimized/maximized, allowing users to prioritize the active work. [Pane layout](https://docs.posit.co/ide/user/ide/guide/ui/ui-panes.html) | Treat a main task work surface as primary, with subordinate information appearing on demand. Let expert workspaces expand without filling the first-run experience with tools. | Activity rail/optional inspector already present; responsive and focus behavior still need new GUI evidence. |
+
+## Comparative research gaps
+
+JASP, SPSS, NVivo, ATLAS.ti, Notion, and Obsidian remain in the full mission's competitor investigation queue. This early official-documentation review does not assert those products were personally tested. Complete competitive benchmarking should record installed versions, synthetic task fixtures, keyboard paths, cognitive-load observations, task steps, error rates, and accessibility results. No comparative performance claims are currently justified.
+
+## Immediate implementation implications
+
+1. Keep the single clear primary action for each page; send advanced options to context panels or progressive sections.
+2. Make the source/dataset/document identity visible and stable between activities.
+3. Keep scientific calculations authoritative and expose provenance and warnings beside readable outputs.
+4. Test the note-taking and manuscript **real persisted round trip**, in addition to layout and keyboard behavior.
+5. Test all changes on an isolated virtual display before labeling a UX improvement verified.

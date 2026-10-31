@@ -1,0 +1,60 @@
+0:application:researchweave-desktop
+1:frame:ResearchWeave · Research workbench
+2:landmark:Activity rail
+3:label:WORKBENCH
+3:button:Home activity
+3:button:Sources activity
+3:button:Analyze activity
+3:button:Synthesize activity
+3:button:Automate activity
+3:button:Manage activity
+2:landmark:Analyze navigation
+3:label:Analyze
+3:button:Analyze navigation start
+3:label:My Research
+3:label:DATA
+3:button:Data View workspace screen
+3:button:Variable View workspace screen
+3:label:ANALYSIS
+3:button:Statistics workspace screen
+3:button:Analysis Results workspace screen
+3:button:Qualitative workspace screen
+3:button:Codebook workspace screen
+3:button:Mixed Methods workspace screen
+2:landmark:Statistics work area
+3:label:Analyze  /  Statistics
+3:label:Statistics
+3:entry:Command palette
+3:label:Ctrl+K
+3:label:My Research · r11
+3:label:Analysis
+3:label:Statistics · Analysis
+3:label:Statistics
+3:label:Run tested native analyses against an immutable dataset revision. Results disclose complete-case counts, assumptions and warnings; ResearchWeave does not infer
+3:entry:Statistics dataset ID
+3:entry:Statistics dataset revision
+3:label:Choose analysis
+3:button:Show descriptive statistics form
+3:button:Show frequency table form
+3:button:Show correlation form
+3:button:Show Welch t test form
+3:button:Show linear model form
+3:label:Descriptive statistics
+3:label:Numeric summaries preserve immutable revision provenance and explicit missing-value accounting.
+3:entry:Statistics numeric column
+3:button:Run descriptive statistics
+3:label:Result
+3:label:Statistics result title Descriptives · score
+3:label:Statistics result primary Mean 2.0000 · Median 2.0000 · SD 1.0000
+3:label:Statistics result secondary n=3 valid · 0 missing · range 1.0000 to 3.0000
+3:label:Statistics result provenance Immutable dataset revision 4c02eb8bf7df… · native deterministic analysis
+3:button:Hide statistical raw data and provenance details
+3:label:Statistics operation result {   "column": "score",   "dataset_revision": "4c02eb8bf7df4435e82321b02d7dc6554389c00603e5ce2511414391dca847e2",   "ddof": 1,   "exc
+2:landmark:Bottom job tray
+3:button:Open jobs
+3:label:No active local jobs
+3:button:Open notifications
+2:landmark:Workbench status
+3:label:Status: Descriptive statistics computed from immutable revision
+3:label:LOCAL FIRST
+3:label:Analyze · Statistics

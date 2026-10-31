@@ -1,0 +1,65 @@
+0:application:researchweave-desktop
+1:frame:ResearchWeave · Research workbench
+2:landmark:Activity rail
+3:label:WORKBENCH
+3:button:Home activity
+3:button:Sources activity
+3:button:Analyze activity
+3:button:Synthesize activity
+3:button:Automate activity
+3:button:Manage activity
+2:landmark:Home navigation
+3:label:Home
+3:button:Home navigation start
+3:label:My Research
+3:button:Welcome workspace screen
+3:button:Dashboard workspace screen
+3:button:Question workspace screen
+3:button:Protocol workspace screen
+2:landmark:Dashboard work area
+3:label:Home  /  Dashboard
+3:label:Dashboard
+3:entry:Command palette
+3:label:Ctrl+K
+3:label:My Research · r0
+3:label:Project
+3:label:Dashboard · Project
+3:label:Project home
+3:label:Current project
+3:label:My Research
+3:label:Revision 0 · local workspace
+3:button:Open project metadata editor
+3:label:Continue research
+3:button:Open research question
+3:button:Open protocol
+3:button:Open library
+3:button:Open data view
+3:label:REVISION
+3:label:0
+3:label:immutable project state
+3:label:STORAGE
+3:label:Local first
+3:label:project-scoped data
+3:label:WRITES
+3:label:Approval bound
+3:label:preview before mutation
+3:label:Responsiveness
+3:button:Run local responsiveness check
+3:progress bar:Background operation progress
+3:label:No sample research data is fabricated in the production workspace. Open or import real project data from Analyze.
+3:landmark:Project context inspector
+4:label:Context
+4:label:Project revision
+4:label:0
+4:label:Storage
+4:label:Local first
+4:label:Network
+4:label:Explicit approval required
+2:landmark:Bottom job tray
+3:button:Open jobs
+3:label:No active local jobs
+3:button:Open notifications
+2:landmark:Workbench status
+3:label:Status: Project created in managed local storage
+3:label:LOCAL FIRST
+3:label:Home · Dashboard

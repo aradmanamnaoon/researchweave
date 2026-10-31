@@ -1,5 +1,30 @@
-import { Button, LineEdit, TextEdit, ListView, ScrollView, Palette } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, TextEdit, ListView, ScrollView, Palette } from "std-widgets.slint";
 export { Palette } from "std-widgets.slint";
+
+export struct QuickNoteChecklistItem {
+    line-index: int,
+    label: string,
+    checked: bool,
+}
+
+export struct QuickNote {
+    id: string,
+    title: string,
+    body: string,
+    has-unchecked-item: bool,
+    checklist-items: [QuickNoteChecklistItem],
+    tags: string,
+    color: string,
+    revision: int,
+    pinned: bool,
+    archived: bool,
+}
+
+export struct ManuscriptSection {
+    name: string,
+    label: string,
+    revision: int,
+}
 
 export global Theme {
     in-out property <bool> dark-mode: false;
@@ -7,34 +32,39 @@ export global Theme {
     in-out property <bool> compact-density: false;
     in-out property <int> ui-scale: 100;
     in-out property <bool> reduced-motion: false;
-    in-out property <color> canvas: high-contrast ? #000000 : (dark-mode ? #101923 : #f6f5f1);
-    in-out property <color> surface: high-contrast ? #111111 : (dark-mode ? #172438 : #ffffff);
-    in-out property <color> raised: high-contrast ? #1b1b1b : (dark-mode ? #1d2e3a : #edf1f0);
-    in-out property <color> ink: high-contrast ? #ffffff : (dark-mode ? #f4f6f8 : #172438);
-    in-out property <color> muted-ink: high-contrast ? #ffffff : (dark-mode ? #b9c5d3 : #5b677a);
-    in-out property <color> divider: high-contrast ? #ffffff : (dark-mode ? #81919f : #87989a);
-    // Brand accent deliberately uses a darker teal in light mode so white
-    // primary-button text remains WCAG-AA readable.
-    in-out property <color> accent: high-contrast ? #ffff00 : (dark-mode ? #55c7bd : #147a75);
-    in-out property <color> accent-subtle: high-contrast ? #262600 : (dark-mode ? #173d3b : #ddeDEA);
-    in-out property <color> accent-ink: high-contrast ? #000000 : (dark-mode ? #101923 : #ffffff);
-    in-out property <color> focus: high-contrast ? #00ffff : (dark-mode ? #a997e8 : #7564b5);
-    in-out property <color> success: high-contrast ? #7cffb2 : (dark-mode ? #7fd4af : #237a57);
-    in-out property <color> warning: high-contrast ? #ffd166 : (dark-mode ? #e0a17b : #8a5a00);
-    in-out property <color> danger: high-contrast ? #ff8899 : (dark-mode ? #ff9fad : #a9243e);
-    in-out property <color> conflict: high-contrast ? #ffffff : (dark-mode ? #a997e8 : #7564b5);
-    in-out property <color> evidence-violet: high-contrast ? #ffffff : (dark-mode ? #a997e8 : #7564b5);
-    in-out property <color> discovery-copper: high-contrast ? #ffd166 : (dark-mode ? #e0a17b : #9a5b3a);
-    in-out property <color> rail-muted: high-contrast ? #ffffff : (dark-mode ? #b9c5d3 : #b8c4d4);
-    in-out property <color> rail-background: high-contrast ? #000000 : (dark-mode ? #101923 : #172438);
-    in-out property <color> reader-canvas: high-contrast ? #000000 : (dark-mode ? #0c141d : #efede7);
-    in-out property <color> tab-strip: high-contrast ? #1b1b1b : (dark-mode ? #13202c : #edf1f0);
+    // Meridian palette: deep ink, mineral blue, amethyst, clay and warm paper.
+    in-out property <color> canvas: high-contrast ? #000000 : (dark-mode ? #111b26 : #f5f4ef);
+    in-out property <color> surface: high-contrast ? #111111 : (dark-mode ? #1c2a36 : #ffffff);
+    in-out property <color> raised: high-contrast ? #1b1b1b : (dark-mode ? #243544 : #eaeff2);
+    in-out property <color> ink: high-contrast ? #ffffff : (dark-mode ? #f5f7fa : #202b37);
+    in-out property <color> muted-ink: high-contrast ? #ffffff : (dark-mode ? #c2cfdc : #566574);
+    in-out property <color> divider: high-contrast ? #ffffff : (dark-mode ? #8798a8 : #899aa5);
+    // Stronger mineral blue on light surfaces preserves readable white CTA text.
+    in-out property <color> accent: high-contrast ? #ffff00 : (dark-mode ? #98bcd5 : #3b5b88);
+    in-out property <color> accent-subtle: high-contrast ? #262600 : (dark-mode ? #263e59 : #e3ecf6);
+    in-out property <color> accent-ink: high-contrast ? #000000 : (dark-mode ? #14202c : #ffffff);
+    in-out property <color> focus: high-contrast ? #00ffff : (dark-mode ? #c4b6ff : #6957a6);
+    in-out property <color> success: high-contrast ? #7cffb2 : (dark-mode ? #80d0ae : #227857);
+    in-out property <color> warning: high-contrast ? #ffd166 : (dark-mode ? #e8b274 : #905b18);
+    in-out property <color> danger: high-contrast ? #ff8899 : (dark-mode ? #ff9bb3 : #a83047);
+    in-out property <color> conflict: high-contrast ? #ffffff : (dark-mode ? #b4a0e4 : #6957a6);
+    in-out property <color> evidence-violet: high-contrast ? #ffffff : (dark-mode ? #b4a0e4 : #6957a6);
+    in-out property <color> discovery-copper: high-contrast ? #ffd166 : (dark-mode ? #e4a880 : #9b6042);
+    in-out property <color> rail-muted: high-contrast ? #ffffff : (dark-mode ? #c7d6e1 : #c7d6e1);
+    in-out property <color> rail-background: high-contrast ? #000000 : (dark-mode ? #172638 : #263245);
+    in-out property <color> rail-hover: high-contrast ? #262600 : (dark-mode ? #32465e : #364d69);
+    in-out property <color> reader-canvas: high-contrast ? #000000 : (dark-mode ? #0f1922 : #eceae4);
+    in-out property <color> note-sage: high-contrast ? #111111 : (dark-mode ? #294238 : #e2efe5);
+    in-out property <color> note-lilac: high-contrast ? #111111 : (dark-mode ? #3a3450 : #efe7f6);
+    in-out property <color> note-sand: high-contrast ? #111111 : (dark-mode ? #463b30 : #f7edda);
+    in-out property <color> note-blue: high-contrast ? #111111 : (dark-mode ? #293e56 : #e2edf9);
+    in-out property <color> tab-strip: high-contrast ? #1b1b1b : (dark-mode ? #182633 : #e8ebef);
     // Scientific-visualization roles. Charts must still expose numeric labels,
     // uncertainty and machine-readable data rather than encoding meaning by color.
-    in-out property <color> data-1: high-contrast ? #00ffff : (dark-mode ? #55c7bd : #147a75);
-    in-out property <color> data-2: high-contrast ? #ff99ff : (dark-mode ? #a997e8 : #7564b5);
-    in-out property <color> data-3: high-contrast ? #ffd166 : (dark-mode ? #e0a17b : #9a5b3a);
-    in-out property <color> data-4: high-contrast ? #ffffff : (dark-mode ? #8fb9e8 : #315f8f);
+    in-out property <color> data-1: high-contrast ? #00ffff : (dark-mode ? #98bcd5 : #3b5b88);
+    in-out property <color> data-2: high-contrast ? #ff99ff : (dark-mode ? #b4a0e4 : #6957a6);
+    in-out property <color> data-3: high-contrast ? #ffd166 : (dark-mode ? #e4a880 : #9b6042);
+    in-out property <color> data-4: high-contrast ? #ffffff : (dark-mode ? #84c5b3 : #2b756d);
     in-out property <length> panel-radius: 8px;
     in-out property <length> control-radius: 5px;
     in-out property <length> space1: 4px;
@@ -81,7 +111,7 @@ component ActivityNavButton inherits Rectangle {
     horizontal-stretch: 1;
     background: root.selected
         ? Theme.accent-subtle
-        : (touch.has-hover ? (Theme.dark-mode ? #213244 : #26384f) : transparent);
+        : (touch.has-hover ? Theme.rail-hover : transparent);
     border-radius: 9px;
     border-width: root.selected ? 1px : 0px;
     border-color: root.selected ? Theme.accent : transparent;
@@ -186,6 +216,10 @@ export component MainWindow inherits Window {
     in-out property <string> pdf-status: "Choose a local PDF file";
     in-out property <string> pdf-local-path: "";
     in-out property <string> data-local-path: "";
+    // A successful import establishes a project-scoped immutable dataset
+    // context for the next variable inspection or statistical analysis.
+    in-out property <string> recent-dataset-id: "";
+    in-out property <string> recent-dataset-revision: "";
     in-out property <bool> local-file-dialog-busy: false;
     in-out property <int> pdf-matches: 0;
     in-out property <int> pdf-page-number: 1;
@@ -213,6 +247,7 @@ export component MainWindow inherits Window {
     in-out property <string> statistics-result-primary: "Choose a method and run it against an immutable dataset revision.";
     in-out property <string> statistics-result-secondary: "";
     in-out property <string> statistics-result-provenance: "";
+    in-out property <bool> show-statistics-technical-details: false;
     in-out property <string> variable-results: "Inspect variable metadata, missingness and quality before creating a revised immutable dataset.";
     in-out property <string> analysis-report-results: "Persist verified statistical outputs, reload them by digest, and compose deterministic provenance reports.";
     in-out property <string> mixed-methods-results: "Combine an immutable dataset revision with persisted qualitative case mappings. Caller-supplied coding provenance is not accepted.";
@@ -224,12 +259,45 @@ export component MainWindow inherits Window {
     in-out property <string> project-activity-results: "Local project event provenance is not authenticated identity evidence.";
     in-out property <string> notebook-results: "Save a revisioned project notebook, inspect history, or export Markdown.";
     in-out property <string> notebook-draft: "";
+    in-out property <[QuickNote]> quick-notes: [];
+    in-out property <bool> quick-note-view: true;
+    in-out property <string> quick-note-results: "Quick notes are stored in this project, with searchable history.";
+    in-out property <string> quick-note-query: "";
+    in-out property <string> quick-note-filter: "active";
+    in-out property <string> quick-note-selected-id: "";
+    in-out property <int> quick-note-selected-revision: 0;
+    in-out property <string> quick-note-title: "";
+    in-out property <string> quick-note-body: "";
+    in-out property <string> quick-note-tags: "";
+    in-out property <string> quick-note-color: "paper";
+    in-out property <bool> quick-note-pinned: false;
+    in-out property <bool> quick-note-archived: false;
     in-out property <string> manuscript-draft-id: "";
     in-out property <string> manuscript-draft-section: "";
     in-out property <string> manuscript-draft-citations: "";
     in-out property <string> manuscript-draft-body: "";
+    in-out property <[ManuscriptSection]> manuscript-sections: [];
+    in-out property <bool> manuscript-outline-open: false;
+    in-out property <string> manuscript-outline-status: "Load saved sections to navigate this manuscript.";
+    in-out property <int> manuscript-word-count: 0;
+    in-out property <int> manuscript-character-count: 0;
+    in-out property <int> manuscript-editor-zoom: 100;
+    in-out property <bool> manuscript-find-panel-open: false;
+    in-out property <bool> manuscript-operation-details-open: false;
+    in-out property <string> manuscript-find-term: "";
+    in-out property <string> manuscript-replace-term: "";
+    in-out property <string> manuscript-replace-status: "Find and replace operates on this section only. Review before applying.";
     callback notebook-draft-edited(string);
+    callback refresh-quick-notes(string, string);
+    callback save-quick-note(string, int, string, string, string, string, bool, bool);
+    callback prepare-quick-note-checklist();
+    callback complete-next-quick-note(string, int, string, string, string, string, bool, bool);
+    callback toggle-quick-note-checklist-item(string, int, string, string, string, string, bool, bool, int);
     callback manuscript-draft-edited(string, string, string, string);
+    callback load-manuscript-sections(string);
+    callback select-manuscript-section(string, int);
+    callback preview-manuscript-replace(string, string);
+    callback apply-manuscript-replace();
     in-out property <string> qualitative-results: "Inspect the codebook before editing; writes require the current content hash.";
     in-out property <string> backup-results: "Open a project, then choose an absolute archive path.";
     in-out property <string> recovery-results: "Restore always creates a new project directory.";
@@ -837,6 +905,11 @@ export component MainWindow inherits Window {
                                 Text { text: root.project-title; color: Theme.ink; font-size: 18px * Theme.ui-scale / 100; font-weight: 600; }
                                 Text { text: "Revision " + root.project-revision + " · local workspace"; color: Theme.muted-ink; }
                                 Button {
+                                    text: "Create or open another project";
+                                    accessible-label: "Open Start Center to switch projects";
+                                    clicked => { root.page = 0; }
+                                }
+                                Button {
                                     text: "Edit project metadata";
                                     accessible-label: "Open project metadata editor";
                                     clicked => { root.page = 39; root.inspect-project-metadata(); }
@@ -1018,6 +1091,11 @@ export component MainWindow inherits Window {
                                             root.pdf-highlight-visible = false;
                                             root.load-pdf(pdf-path.text, pdf-query.text, root.pdf-page-number + 1);
                                         }
+                                    }
+                                    Button {
+                                        text: "Notebook";
+                                        accessible-label: "Open project notebook from PDF reader";
+                                        clicked => { root.page = 21; }
                                     }
                                 }
                                 Text {
@@ -1381,21 +1459,203 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 21: Rectangle {
                         background: Theme.raised;
+                        ScrollView {
                         VerticalLayout {
                             padding: 24px;
                             spacing: 9px;
                             Text { text: "Notebook"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
-                            Text { text: "Project notebook saves are revisioned and event-audited. Preview validates without changing the authoritative project."; color: Theme.muted-ink; wrap: word-wrap; }
-                            notebook-body := TextEdit { accessible-label: "Project notebook text"; text: root.notebook-draft; edited(text) => { root.notebook-draft = text; root.notebook-draft-edited(text); } }
+                            Text { text: "Capture research ideas here. Drafts autosave locally; project saves are revisioned and auditable."; color: Theme.muted-ink; wrap: word-wrap; }
+                            if root.pdf-local-path != "": Button {
+                                text: "Return to PDF";
+                                accessible-label: "Return to the same PDF reader";
+                                clicked => { root.page = 7; }
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
-                                Button { text: "Preview save"; accessible-label: "Preview notebook save"; clicked => { root.preview-notebook-save(notebook-body.text); } }
-                                Button { text: "Record previewed notebook"; accessible-label: "Record previewed notebook save"; clicked => { root.apply-evidence-preview(); } }
-                                Button { text: "History"; accessible-label: "Load notebook history"; clicked => { root.load-notebook-history(); } }
-                                Button { text: "Export Markdown"; accessible-label: "Export notebook Markdown"; clicked => { root.export-notebook(); } }
+                                Button { text: "Quick cards"; accessible-label: "Show quick note cards"; clicked => { root.quick-note-view = true; root.refresh-quick-notes(root.quick-note-query,root.quick-note-filter); } }
+                                Button { text: "Project notebook"; accessible-label: "Show long form project notebook"; clicked => { root.quick-note-view = false; } }
                             }
-                            Text { text: root.notebook-results; accessible-label: "Notebook operation result " + root.notebook-results; wrap: word-wrap; color: Theme.ink; }
+                            if root.quick-note-view: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text { text: "Quick notes"; color: Theme.ink; font-weight: 700; font-size: 17px * Theme.ui-scale / 100; }
+                                    Text { text: "Individual cards stay in this project. Save edits, pin priorities, or archive without deleting."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    Text { text: root.quick-note-selected-id == "" ? "Capture a quick note" : "Edit selected note"; font-weight: 700; color: Theme.ink; }
+                                    LineEdit {
+                                        text <=> root.quick-note-title;
+                                        placeholder-text: "Title or subject";
+                                        accessible-label: "Quick note title";
+                                    }
+                                    TextEdit {
+                                        text <=> root.quick-note-body;
+                                        min-height: 80px;
+                                        preferred-height: 110px;
+                                        accessible-label: "Quick note body";
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        LineEdit {
+                                            text <=> root.quick-note-tags;
+                                            horizontal-stretch: 1;
+                                            placeholder-text: "Tags, comma separated";
+                                            accessible-label: "Quick note tags";
+                                        }
+                                        ComboBox {
+                                            model: ["paper", "sage", "lilac", "sand", "blue"];
+                                            current-value <=> root.quick-note-color;
+                                            accessible-label: "Quick note color";
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: root.quick-note-selected-id == "" ? "Add quick note" : "Save quick note";
+                                            accessible-label: root.quick-note-selected-id == "" ? "Add quick note to project" : "Save selected quick note";
+                                            clicked => { root.save-quick-note(root.quick-note-selected-id,root.quick-note-selected-revision,root.quick-note-title,root.quick-note-body,root.quick-note-tags,root.quick-note-color,root.quick-note-pinned,root.quick-note-archived); }
+                                        }
+                                        Button {
+                                            text: "New note";
+                                            accessible-label: "Clear quick note editor to create another";
+                                            clicked => {
+                                                root.quick-note-selected-id = "";
+                                                root.quick-note-selected-revision = 0;
+                                                root.quick-note-title = "";
+                                                root.quick-note-body = "";
+                                                root.quick-note-tags = "";
+                                                root.quick-note-color = "paper";
+                                                root.quick-note-pinned = false;
+                                                root.quick-note-archived = false;
+                                            }
+                                        }
+                                        Button {
+                                            text: "Checklist";
+                                            accessible-label: "Convert quick note draft to checklist";
+                                            clicked => { root.prepare-quick-note-checklist(); }
+                                        }
+                                    }
+                                    Text { text: root.quick-note-results; accessible-label: "Quick note operation result " + root.quick-note-results; color: Theme.muted-ink; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        LineEdit {
+                                            horizontal-stretch: 1;
+                                            text <=> root.quick-note-query;
+                                            placeholder-text: "Search title, text, or tags";
+                                            accessible-label: "Search quick notes";
+                                            edited(value) => {
+                                                root.quick-note-query = value;
+                                                root.refresh-quick-notes(value, root.quick-note-filter);
+                                            }
+                                        }
+                                        Button { text: "Active"; accessible-label: "Show active quick notes"; clicked => { root.quick-note-filter = "active"; root.refresh-quick-notes(root.quick-note-query,"active"); } }
+                                        Button { text: "Pinned"; accessible-label: "Show pinned quick notes"; clicked => { root.quick-note-filter = "pinned"; root.refresh-quick-notes(root.quick-note-query,"pinned"); } }
+                                        Button { text: "Archive"; accessible-label: "Show archived quick notes"; clicked => { root.quick-note-filter = "archived"; root.refresh-quick-notes(root.quick-note-query,"archived"); } }
+                                    }
+                                    if root.quick-notes.length == 0: Text {
+                                        text: "No matching notes. Capture your first idea below.";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    for note in root.quick-notes: Rectangle {
+                                        background: note.color == "sage" ? Theme.note-sage : note.color == "lilac" ? Theme.note-lilac : note.color == "sand" ? Theme.note-sand : note.color == "blue" ? Theme.note-blue : Theme.surface;
+                                        border-color: note.pinned ? Theme.accent : Theme.divider;
+                                        border-width: note.pinned ? 2px : 1px;
+                                        border-radius: Theme.panel-radius;
+                                        min-height: 100px;
+                                        VerticalLayout {
+                                            padding: 10px;
+                                            spacing: 5px;
+                                            Text { text: note.pinned ? "Pinned · " + note.title : note.title; color: Theme.ink; font-weight: 700; wrap: word-wrap; }
+                                            if note.checklist-items.length == 0: Text { text: note.body; color: Theme.ink; wrap: word-wrap; max-height: 85px; }
+                                            if note.checklist-items.length > 0: VerticalLayout {
+                                                spacing: 4px;
+                                                for item in note.checklist-items: Button {
+                                                    text: (item.checked ? "☑ " : "☐ ") + (item.label == "" ? "Untitled item" : item.label);
+                                                    accessible-label: (item.checked ? "Mark unfinished " : "Complete ") + (item.label == "" ? "Untitled item" : item.label) + " in note " + note.title;
+                                                    clicked => {
+                                                        root.toggle-quick-note-checklist-item(note.id,note.revision,note.title,note.body,note.tags,note.color,note.pinned,note.archived,item.line-index);
+                                                    }
+                                                }
+                                                if note.checklist-items.length >= 12: Text {
+                                                    text: "Open Edit to review all items.";
+                                                    color: Theme.muted-ink;
+                                                    wrap: word-wrap;
+                                                }
+                                            }
+                                            Text { text: note.tags; color: Theme.muted-ink; wrap: word-wrap; }
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Button {
+                                                    text: "Edit";
+                                                    accessible-label: "Edit quick note " + note.title;
+                                                    clicked => {
+                                                        root.quick-note-selected-id = note.id;
+                                                        root.quick-note-selected-revision = note.revision;
+                                                        root.quick-note-title = note.title;
+                                                        root.quick-note-body = note.body;
+                                                        root.quick-note-tags = note.tags;
+                                                        root.quick-note-color = note.color;
+                                                        root.quick-note-pinned = note.pinned;
+                                                        root.quick-note-archived = note.archived;
+                                                    }
+                                                }
+                                                Button {
+                                                    text: note.pinned ? "Unpin" : "Pin";
+                                                    accessible-label: (note.pinned ? "Unpin " : "Pin ") + note.title;
+                                                    clicked => { root.save-quick-note(note.id,note.revision,note.title,note.body,note.tags,note.color,!note.pinned,note.archived); }
+                                                }
+                                                Button {
+                                                    text: note.archived ? "Restore" : "Archive";
+                                                    accessible-label: (note.archived ? "Restore " : "Archive ") + note.title;
+                                                    clicked => { root.save-quick-note(note.id,note.revision,note.title,note.body,note.tags,note.color,note.pinned,!note.archived); }
+                                                }
+                                                if note.has-unchecked-item: Button {
+                                                    text: "Done next";
+                                                    accessible-label: "Complete next item in quick note " + note.title;
+                                                    clicked => {
+                                                        root.complete-next-quick-note(note.id,note.revision,note.title,note.body,note.tags,note.color,note.pinned,note.archived);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
+                            }
+                            if !root.quick-note-view: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text { text: "Project notebook · long-form notes"; color: Theme.ink; font-weight: 700; }
+                                    notebook-body := TextEdit {
+                                        min-height: root.height < 700px ? 170px : 260px;
+                                        preferred-height: root.height < 700px ? 210px : 400px;
+                                        accessible-label: "Project notebook text";
+                                        text: root.notebook-draft;
+                                        edited(text) => { root.notebook-draft = text; root.notebook-draft-edited(text); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { text: "Preview save"; accessible-label: "Preview notebook save"; clicked => { root.preview-notebook-save(notebook-body.text); } }
+                                        Button { text: "Record previewed notebook"; accessible-label: "Record previewed notebook save"; clicked => { root.apply-evidence-preview(); } }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { text: "History"; accessible-label: "Load notebook history"; clicked => { root.load-notebook-history(); } }
+                                        Button { text: "Export Markdown"; accessible-label: "Export notebook Markdown"; clicked => { root.export-notebook(); } }
+                                    }
+                                    Text { text: root.notebook-results; accessible-label: "Notebook operation result " + root.notebook-results; wrap: word-wrap; color: Theme.ink; }
+                                }
+                            }
                             Rectangle { vertical-stretch: 1; }
+                        }
                         }
                     }
                     if root.page == 9: Rectangle {
@@ -1487,11 +1747,12 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 12: Rectangle {
                         background: Theme.raised;
+                        ScrollView {
                         VerticalLayout {
                             padding: 24px;
                             spacing: 10px;
                             Text { text: "Data view"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
-                            Text { text: "Import CSV, TSV, XLSX, ODS, Parquet, SPSS SAV/ZSAV or Stata DTA into an immutable project-local dataset revision. The file hash is bound to Preview → Import."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Text { text: "Import → inspect → prepare variables → analyze. Each dataset is an immutable project revision; importing is bound to the previewed file hash."; color: Theme.muted-ink; wrap: word-wrap; }
                             HorizontalLayout {
                                 spacing: 8px;
                                 analysis-import-path := LineEdit {
@@ -1512,14 +1773,53 @@ export component MainWindow inherits Window {
                                 Button { text: "Preview import"; accessible-label: "Preview analysis import"; clicked => { root.preview-analysis-import(analysis-import-path.text); } }
                                 Button { text: "Import previewed data"; accessible-label: "Import previewed analysis data"; clicked => { root.apply-analysis-preview(); } }
                             }
+                            if root.recent-dataset-id != "" && root.recent-dataset-revision != "": Rectangle {
+                                min-height: 105px;
+                                background: Theme.accent-subtle;
+                                border-color: Theme.accent;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 8px;
+                                    Text { text: "Recently imported dataset"; font-weight: 700; color: Theme.ink; }
+                                    Text {
+                                        text: "ID " + root.recent-dataset-id + " · revision " + root.recent-dataset-revision;
+                                        accessible-label: "Recently imported dataset identifier and immutable revision";
+                                        color: Theme.ink;
+                                        wrap: word-wrap;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { text: "Inspect variables"; accessible-label: "Inspect variables in recently imported dataset"; clicked => { root.page = 13; } }
+                                        Button { text: "Choose analysis"; accessible-label: "Analyze recently imported dataset"; clicked => { root.page = 14; } }
+                                    }
+                                }
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
-                                analysis-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Analysis dataset ID"; }
-                                analysis-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Analysis dataset revision"; }
+                                analysis-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Analysis dataset ID"; text: root.recent-dataset-id; }
+                                analysis-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Analysis dataset revision"; text: root.recent-dataset-revision; }
                                 Button { text: "Inspect dataset"; accessible-label: "Inspect analysis dataset"; clicked => { root.inspect-dataset(analysis-dataset-id.text, analysis-revision.text); } }
                             }
-                            Text { text: root.analysis-results; accessible-label: "Analysis operation result " + root.analysis-results; wrap: word-wrap; color: Theme.ink; }
+                            Text { text: "Import and inspection details"; font-weight: 700; color: Theme.muted-ink; }
+                            Rectangle {
+                                min-height: 125px;
+                                preferred-height: 175px;
+                                max-height: 220px;
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                ScrollView {
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        Text { text: root.analysis-results; accessible-label: "Analysis operation result " + root.analysis-results; wrap: word-wrap; color: Theme.ink; }
+                                    }
+                                }
+                            }
                             Rectangle { vertical-stretch: 1; }
+                        }
                         }
                     }
                     if root.page == 13: Rectangle {
@@ -1536,8 +1836,8 @@ export component MainWindow inherits Window {
                                 }
                                 HorizontalLayout {
                                     spacing: 8px;
-                                    variable-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Variable View dataset ID"; }
-                                    variable-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Variable View dataset revision"; }
+                                    variable-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Variable View dataset ID"; text: root.recent-dataset-id; }
+                                    variable-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Variable View dataset revision"; text: root.recent-dataset-revision; }
                                     Button { text: "Inspect variables"; accessible-label: "Inspect variable metadata and quality"; clicked => { root.inspect-variable-view(variable-dataset-id.text, variable-revision.text); } }
                                 }
                                 Rectangle {
@@ -1588,8 +1888,8 @@ export component MainWindow inherits Window {
                                 }
                                 HorizontalLayout {
                                     spacing: 8px;
-                                    stats-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Statistics dataset ID"; }
-                                    stats-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Statistics dataset revision"; }
+                                    stats-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Statistics dataset ID"; text: root.recent-dataset-id; }
+                                    stats-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Statistics dataset revision"; text: root.recent-dataset-revision; }
                                 }
 
                                 Rectangle { height: 1px; background: Theme.divider; }
@@ -1671,13 +1971,31 @@ export component MainWindow inherits Window {
                                 Text { text: root.statistics-result-primary; accessible-label: "Statistics result primary " + root.statistics-result-primary; color: Theme.accent; font-size: 16px * Theme.ui-scale / 100; font-weight: 700; wrap: word-wrap; }
                                 if root.statistics-result-secondary != "": Text { text: root.statistics-result-secondary; accessible-label: "Statistics result secondary " + root.statistics-result-secondary; color: Theme.ink; wrap: word-wrap; }
                                 if root.statistics-result-provenance != "": Text { text: root.statistics-result-provenance; accessible-label: "Statistics result provenance " + root.statistics-result-provenance; color: Theme.muted-ink; font-size: 12px * Theme.ui-scale / 100; wrap: word-wrap; }
-                                Text { text: "Verified payload"; color: Theme.muted-ink; font-size: 12px * Theme.ui-scale / 100; font-weight: 700; }
-                                Text {
-                                    text: root.analysis-results;
-                                    accessible-label: "Statistics operation result " + root.analysis-results;
-                                    wrap: word-wrap;
-                                    color: Theme.muted-ink;
-                                    font-size: 11px * Theme.ui-scale / 100;
+                                Button {
+                                    text: root.show-statistics-technical-details ? "Hide verified calculation details" : "Show verified calculation details";
+                                    accessible-label: root.show-statistics-technical-details ? "Hide statistical raw data and provenance details" : "Show statistical raw data and provenance details";
+                                    clicked => { root.show-statistics-technical-details = !root.show-statistics-technical-details; }
+                                }
+                                if root.show-statistics-technical-details: Rectangle {
+                                    min-height: 120px;
+                                    preferred-height: 175px;
+                                    max-height: 230px;
+                                    background: Theme.surface;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    border-radius: Theme.panel-radius;
+                                    ScrollView {
+                                        VerticalLayout {
+                                            padding: 10px;
+                                            Text {
+                                                text: root.analysis-results;
+                                                accessible-label: "Statistics operation result " + root.analysis-results;
+                                                wrap: word-wrap;
+                                                color: Theme.muted-ink;
+                                                font-size: 11px * Theme.ui-scale / 100;
+                                            }
+                                        }
+                                    }
                                 }
                                 Rectangle { vertical-stretch: 1; }
                             }
@@ -1915,23 +2233,57 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 19: Rectangle {
                         background: Theme.raised;
+                        ScrollView {
                         VerticalLayout {
                             padding: 24px;
                             spacing: 9px;
                             Text { text: "Manuscript"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
-                            Text { text: "Save versioned manuscript sections through the project approval/audit path. Citations are preserved with each section revision."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Text { text: "Write a research section on the spacious paper canvas. Draft edits autosave; recording a version and exporting require an explicit action."; color: Theme.muted-ink; wrap: word-wrap; }
                             HorizontalLayout {
                                 spacing: 8px;
-                                manuscript-id := LineEdit { accessible-label: "Manuscript ID"; placeholder-text: "Manuscript ID"; text: root.manuscript-draft-id; edited(text) => { root.manuscript-draft-id = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
-                                manuscript-section := LineEdit { accessible-label: "Manuscript section"; placeholder-text: "Section, e.g. Results"; text: root.manuscript-draft-section; edited(text) => { root.manuscript-draft-section = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
-                                manuscript-citations := LineEdit { accessible-label: "Manuscript citations"; placeholder-text: "Citation IDs separated by commas"; text: root.manuscript-draft-citations; edited(text) => { root.manuscript-draft-citations = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                                manuscript-id := LineEdit { accessible-label: "Manuscript ID"; placeholder-text: "Manuscript ID"; text <=> root.manuscript-draft-id; edited(text) => { root.manuscript-draft-id = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                                manuscript-section := LineEdit { accessible-label: "Manuscript section"; placeholder-text: "Section, e.g. Results"; text <=> root.manuscript-draft-section; edited(text) => { root.manuscript-draft-section = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
                             }
-                            manuscript-body := TextEdit {
-                                min-height: 140px;
-                                preferred-height: 220px;
-                                accessible-label: "Manuscript section body";
-                                text: root.manuscript-draft-body;
-                                edited(text) => { root.manuscript-draft-body = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, text); }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                manuscript-citations := LineEdit { accessible-label: "Manuscript citations"; placeholder-text: "Citation IDs separated by commas"; text <=> root.manuscript-draft-citations; edited(text) => { root.manuscript-draft-citations = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: root.manuscript-outline-open ? "Hide sections" : "Saved sections";
+                                    accessible-label: "Toggle saved manuscript sections outline";
+                                    clicked => {
+                                        root.manuscript-outline-open = !root.manuscript-outline-open;
+                                        if root.manuscript-outline-open { root.load-manuscript-sections(root.manuscript-draft-id); }
+                                    }
+                                }
+                                Text {
+                                    text: root.manuscript-outline-status;
+                                    color: Theme.muted-ink;
+                                    wrap: word-wrap;
+                                    vertical-alignment: center;
+                                }
+                            }
+                            if root.manuscript-outline-open: Rectangle {
+                                min-height: 45px;
+                                max-height: 178px;
+                                preferred-height: min(178px, 48px + root.manuscript-sections.length * 38px);
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                ScrollView {
+                                    VerticalLayout {
+                                        padding: 8px;
+                                        spacing: 5px;
+                                        for section in root.manuscript-sections: Button {
+                                            text: section.label;
+                                            accessible-label: "Open saved manuscript section " + section.label;
+                                            clicked => { root.select-manuscript-section(section.name, section.revision); }
+                                        }
+                                    }
+                                }
                             }
                             HorizontalLayout {
                                 min-height: 36px;
@@ -1941,6 +2293,112 @@ export component MainWindow inherits Window {
                                 Button { text: "Preview section"; accessible-label: "Preview manuscript section"; clicked => { root.preview-writing-section(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
                                 Button { text: "Record previewed section"; accessible-label: "Record previewed manuscript section"; clicked => { root.apply-evidence-preview(); } }
                                 Button { text: "Inspect manuscript"; accessible-label: "Inspect manuscript"; clicked => { root.inspect-manuscript(manuscript-id.text); } }
+                                Button {
+                                    text: root.manuscript-operation-details-open ? "Hide details" : "Show details";
+                                    accessible-label: "Toggle manuscript operation details";
+                                    clicked => { root.manuscript-operation-details-open = !root.manuscript-operation-details-open; }
+                                }
+                            }
+                            if root.manuscript-operation-details-open: Rectangle {
+                                min-height: 100px;
+                                preferred-height: 145px;
+                                max-height: 180px;
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                ScrollView {
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        Text {
+                                            text: root.writing-results == "" ? "No manuscript operation has been performed yet." : root.writing-results;
+                                            accessible-label: "Writing operation result " + root.writing-results;
+                                            wrap: word-wrap;
+                                            color: Theme.ink;
+                                        }
+                                    }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Text { text: root.manuscript-word-count + " words · " + root.manuscript-character-count + " characters"; color: Theme.muted-ink; vertical-alignment: center; }
+                                Button {
+                                    text: root.manuscript-find-panel-open ? "Hide Find" : "Find / Replace";
+                                    accessible-label: "Toggle manuscript find and replace";
+                                    clicked => { root.manuscript-find-panel-open = !root.manuscript-find-panel-open; }
+                                }
+                                Rectangle { horizontal-stretch: 1; }
+                                Button {
+                                    text: "−";
+                                    accessible-label: "Decrease manuscript editor display zoom";
+                                    enabled: root.manuscript-editor-zoom > 75;
+                                    clicked => { root.manuscript-editor-zoom = max(75,root.manuscript-editor-zoom - 25); }
+                                }
+                                Text { text: root.manuscript-editor-zoom + "% editor zoom"; color: Theme.muted-ink; vertical-alignment: center; }
+                                Button {
+                                    text: "+";
+                                    accessible-label: "Increase manuscript editor display zoom";
+                                    enabled: root.manuscript-editor-zoom < 175;
+                                    clicked => { root.manuscript-editor-zoom = min(175,root.manuscript-editor-zoom + 25); }
+                                }
+                            }
+                            if root.manuscript-find-panel-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 7px;
+                                    Text { text: "Find and replace in this section"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: root.manuscript-replace-status; color: Theme.muted-ink; wrap: word-wrap; accessible-label: "Manuscript replacement status " + root.manuscript-replace-status; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        LineEdit {
+                                            text <=> root.manuscript-find-term;
+                                            placeholder-text: "Find exact text";
+                                            accessible-label: "Manuscript find text";
+                                        }
+                                        LineEdit {
+                                            text <=> root.manuscript-replace-term;
+                                            placeholder-text: "Replacement";
+                                            accessible-label: "Manuscript replace with";
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Preview replace all";
+                                            accessible-label: "Preview manuscript replace all";
+                                            clicked => { root.preview-manuscript-replace(root.manuscript-find-term,root.manuscript-replace-term); }
+                                        }
+                                        Button {
+                                            text: "Apply previewed replacement";
+                                            accessible-label: "Apply previewed manuscript replacement";
+                                            clicked => { root.apply-manuscript-replace(); }
+                                        }
+                                    }
+                                    Text { text: "Exact, case-sensitive matching. Review before applying; editor zoom never alters export formatting."; color: Theme.muted-ink; wrap: word-wrap; }
+                                }
+                            }
+                            Rectangle {
+                                min-height: root.height < 700px ? 275px : 370px;
+                                preferred-height: root.height < 700px ? 330px : 560px;
+                                background: Theme.reader-canvas;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: Theme.space5;
+                                    manuscript-body := TextEdit {
+                                        min-height: root.height < 700px ? 220px : 320px;
+                                        vertical-stretch: 1;
+                                        font-size: 15px * root.manuscript-editor-zoom / 100;
+                                        accessible-label: "Manuscript section body";
+                                        text <=> root.manuscript-draft-body;
+                                        edited(text) => { root.manuscript-draft-body = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, text); }
+                                    }
+                                }
                             }
                             HorizontalLayout {
                                 min-height: 36px;
@@ -1979,27 +2437,8 @@ export component MainWindow inherits Window {
                                 color: Theme.muted-ink;
                                 wrap: word-wrap;
                             }
-                            Rectangle {
-                                min-height: 110px;
-                                preferred-height: 160px;
-                                max-height: 180px;
-                                background: Theme.surface;
-                                border-color: Theme.divider;
-                                border-width: 1px;
-                                border-radius: Theme.panel-radius;
-                                ScrollView {
-                                    VerticalLayout {
-                                        padding: 10px;
-                                        Text {
-                                            text: root.writing-results == "" ? "Manuscript results and export receipts appear here." : root.writing-results;
-                                            accessible-label: "Writing operation result " + root.writing-results;
-                                            wrap: word-wrap;
-                                            color: Theme.ink;
-                                        }
-                                    }
-                                }
-                            }
                             Rectangle { vertical-stretch: 1; }
+                        }
                         }
                     }
                     if root.page == 22: Rectangle {
@@ -2377,7 +2816,7 @@ export component MainWindow inherits Window {
                     spacing: 14px;
                     Text {
                         text: root.status;
-                        color: Theme.surface;
+                        color: Theme.rail-muted;
                         font-size: 11px * Theme.ui-scale / 100;
                         vertical-alignment: center;
                         accessible-label: "Status: " + root.status;
@@ -2385,7 +2824,7 @@ export component MainWindow inherits Window {
                     }
                     Text {
                         text: "LOCAL FIRST";
-                        color: #9fd0cc;
+                        color: Theme.rail-muted;
                         font-size: 10px * Theme.ui-scale / 100;
                         vertical-alignment: center;
                     }
