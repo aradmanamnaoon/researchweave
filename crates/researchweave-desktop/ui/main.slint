@@ -318,6 +318,7 @@ export component MainWindow inherits Window {
     callback create-default-project(string);
     callback open-project(string);
     callback open-recent-project(int);
+    callback forget-recent-project(int);
     callback choose-project-folder();
     callback start-job();
     callback run-command(string);
@@ -859,6 +860,12 @@ export component MainWindow inherits Window {
                                                 accessible-label: "Reopen selected recent project";
                                                 accessible-description: "Reopen the selected local project and verify its current on-disk metadata";
                                                 clicked => { root.open-recent-project(root.recent-project-index); }
+                                            }
+                                            Button {
+                                                text: "Forget";
+                                                accessible-label: "Forget selected recent project shortcut";
+                                                accessible-description: "Remove only the selected shortcut from this device. Do not change or delete any actual research project folder.";
+                                                clicked => { root.forget-recent-project(root.recent-project-index); }
                                             }
                                         }
                                     }

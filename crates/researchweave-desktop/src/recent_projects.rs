@@ -87,34 +87,16 @@ pub(crate) fn load(root: &Path) -> Result<Vec<RecentProject>, String> {
     Ok(index.entries)
 }
 
-pub(crate) fn remember(
-    root: &Path,
-    opened_project: &Path,
-    title: &str,
-) -> Result<Vec<RecentProject>, String> {
-    let project = opened_project
-        .canonicalize()
-        .map_err(|_| "Cannot remember a missing project directory")?;
-    if !project.is_dir() {
-        return Err("Recent project is not a directory".into());
+fn save_entries(root: &Path, entries: &[RecentProject]) -> Result<(), String> {
+    if entries.len() > MAX_RECENTS {
+        return Err("Recent project list is too long".into());
     }
-    let entry = RecentProject {
-        title: title.to_owned(),
-        path: project
-            .to_str()
-            .ok_or("Recent project path is not valid Unicode")?
-            .to_owned(),
-    };
-    validate(&entry)?;
-    // Fail closed on a malformed existing index. Do not silently destroy
-    // previous history or follow a symbolic link to overwrite a user file.
-    let mut entries = load(root)?;
-    entries.retain(|old| old.path != entry.path);
-    entries.insert(0, entry);
-    entries.truncate(MAX_RECENTS);
+    for entry in entries {
+        validate(entry)?;
+    }
     let data = serde_json::to_vec(&RecentIndex {
         version: 1,
-        entries: entries.clone(),
+        entries: entries.to_vec(),
     })
     .map_err(|_| "Recent-project serialization failed")?;
     if data.len() > MAX_BYTES {
@@ -144,6 +126,47 @@ pub(crate) fn remember(
     fs::File::open(root)
         .and_then(|dir| dir.sync_all())
         .map_err(|error| format!("Cannot sync recent-project directory: {error}"))?;
+    Ok(())
+}
+
+pub(crate) fn remember(
+    root: &Path,
+    opened_project: &Path,
+    title: &str,
+) -> Result<Vec<RecentProject>, String> {
+    let project = opened_project
+        .canonicalize()
+        .map_err(|_| "Cannot remember a missing project directory")?;
+    if !project.is_dir() {
+        return Err("Recent project is not a directory".into());
+    }
+    let entry = RecentProject {
+        title: title.to_owned(),
+        path: project
+            .to_str()
+            .ok_or("Recent project path is not valid Unicode")?
+            .to_owned(),
+    };
+    validate(&entry)?;
+    // Fail closed on malformed history and symlinks, never overwrite without
+    // first reading all previous user shortcuts.
+    let mut entries = load(root)?;
+    entries.retain(|old| old.path != entry.path);
+    entries.insert(0, entry);
+    entries.truncate(MAX_RECENTS);
+    save_entries(root, &entries)?;
+    Ok(entries)
+}
+
+/// Forget only the selected local *shortcut*. This must never open, move,
+/// delete, or even require access to the associated research project folder.
+pub(crate) fn forget(root: &Path, selected: usize) -> Result<Vec<RecentProject>, String> {
+    let mut entries = load(root)?;
+    if selected >= entries.len() {
+        return Err("Select an existing recent project shortcut".into());
+    }
+    entries.remove(selected);
+    save_entries(root, &entries)?;
     Ok(entries)
 }
 
@@ -211,6 +234,51 @@ mod tests {
         assert!(remember(&root, &a, "bad\0title").is_err());
         assert!(remember(&root, &a, &"x".repeat(MAX_TITLE_CHARS + 1)).is_err());
         assert_eq!(fs::read(root.join("recent-projects.json")).unwrap(), saved);
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn forgets_only_selected_shortcut_without_deleting_missing_or_existing_project_data() {
+        let root = temp_root();
+        let first = root.join("first");
+        let second = root.join("second");
+        fs::create_dir(&first).unwrap();
+        fs::create_dir(&second).unwrap();
+        fs::write(first.join("research.txt"), b"preserve original study").unwrap();
+        fs::write(second.join("research.txt"), b"preserve second study").unwrap();
+        remember(&root, &first, "Local study").unwrap();
+        remember(&root, &second, "Another study").unwrap();
+        assert!(forget(&root, 2).is_err());
+        assert_eq!(load(&root).unwrap().len(), 2);
+        let remaining = forget(&root, 0).unwrap();
+        assert_eq!(remaining.len(), 1);
+        assert_eq!(remaining[0].title, "Local study");
+        assert_eq!(
+            fs::read(second.join("research.txt")).unwrap(),
+            b"preserve second study"
+        );
+        assert_eq!(
+            fs::read(first.join("research.txt")).unwrap(),
+            b"preserve original study"
+        );
+        fs::remove_dir_all(&first).unwrap();
+        let remaining = forget(&root, 0).unwrap();
+        assert!(
+            remaining.is_empty(),
+            "a missing project shortcut must remain removable"
+        );
+        assert!(load(&root).unwrap().is_empty());
+        assert!(second.join("research.txt").is_file());
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn invalid_index_or_corrupt_history_cannot_be_overwritten_by_forget() {
+        let root = temp_root();
+        let history = root.join("recent-projects.json");
+        fs::write(&history, b"not-json").unwrap();
+        assert!(forget(&root, 0).is_err());
+        assert_eq!(fs::read(&history).unwrap(), b"not-json");
         fs::remove_dir_all(root).unwrap();
     }
 

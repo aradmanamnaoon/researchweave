@@ -8098,6 +8098,34 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_forget_recent_project({
+        let weak = app.as_weak();
+        move |selected| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            let result = usize::try_from(selected)
+                .map_err(|_| "Select a recent project shortcut".to_owned())
+                .and_then(|index| {
+                    let root = host_data_root()?;
+                    let previous = recent_projects::load(&root)?;
+                    let title = previous
+                        .get(index)
+                        .map(|entry| entry.title.clone())
+                        .ok_or_else(|| "Selected shortcut is no longer in the list".to_owned())?;
+                    recent_projects::forget(&root, index)?;
+                    refresh_recent_project_shortcuts(&ui)?;
+                    Ok(title)
+                });
+            match result {
+                Ok(title) => ui.set_status(
+                    format!("Forgot recent shortcut for {title}. No project files were deleted.")
+                        .into(),
+                ),
+                Err(error) => ui.set_status(format!("Shortcut unchanged: {error}").into()),
+            }
+        }
+    });
     app.on_start_job({
         let weak = app.as_weak();
         move || {

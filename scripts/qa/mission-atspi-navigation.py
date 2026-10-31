@@ -1195,9 +1195,34 @@ def main() -> int:
     audit(app, "recent-projects-narrow", output)
     if not nodes_named(app, "Recent local projects") or not nodes_named(app, "Reopen selected recent project"):
         raise RuntimeError("Recent project controls are unreachable at 850x600")
+    if not nodes_named(app, "Forget selected recent project shortcut"):
+        raise RuntimeError("Forget-shortcut action is inaccessible at 850x600")
     if not nodes_named(app, "Choose project folder with native dialog"):
         raise RuntimeError("Native project folder picker is unreachable at 850x600")
     print("RECENT_PROJECT_NARROW_ACCESSIBLE_OK")
+
+    if fixture is None:
+        raise RuntimeError("Recent project forgetting requires the disposable host fixture")
+    history_path = fixture.parent / "recent-projects.json"
+    entries_before = json.loads(history_path.read_text(encoding="utf-8"))["entries"]
+    if len(entries_before) < 2:
+        raise RuntimeError("Recent-project forget must be tested with at least two saved shortcuts")
+    first_path = pathlib.Path(entries_before[0]["path"])
+    if not first_path.is_dir() or not (first_path / "data/project.sqlite").is_file():
+        raise RuntimeError("First recent project must have durable data before shortcut removal")
+    if not activate(app, "Forget selected recent project shortcut"):
+        raise RuntimeError("Native Forget shortcut action cannot be invoked")
+    time.sleep(0.25)
+    entries_after = json.loads(history_path.read_text(encoding="utf-8"))["entries"]
+    if entries_after != entries_before[1:]:
+        raise RuntimeError("Forget shortcut did not remove only the chosen first recent entry")
+    if not first_path.is_dir() or not (first_path / "data/project.sqlite").is_file():
+        raise RuntimeError("Forgetting shortcut removed or altered a real research project")
+    status_after = "\n".join((node.name or "") for node, _ in walk(app))
+    if "No project files were deleted" not in status_after:
+        raise RuntimeError("Forget shortcut failed to communicate its non-destructive effect")
+    audit(app, "recent-projects-forgot-shortcut", output)
+    print("RECENT_PROJECT_FORGET_SHORTCUT_ONLY_SQLITE_PRESERVED_OK")
 
     print("AT_SPI_NAVIGATION_PROBE_OK")
     return 0
