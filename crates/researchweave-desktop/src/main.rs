@@ -174,6 +174,21 @@ fn reset_project_visible_state(ui: &MainWindow) {
         "Save a revisioned project notebook, inspect history, or export Markdown.".into(),
     );
     ui.set_notebook_draft("".into());
+    ui.set_quick_notes(Rc::new(slint::VecModel::from(Vec::<QuickNote>::new())).into());
+    ui.set_quick_note_view(true);
+    ui.set_quick_note_results(
+        "Quick notes are stored in this project, with searchable history.".into(),
+    );
+    ui.set_quick_note_query("".into());
+    ui.set_quick_note_filter("active".into());
+    ui.set_quick_note_selected_id("".into());
+    ui.set_quick_note_selected_revision(0);
+    ui.set_quick_note_title("".into());
+    ui.set_quick_note_body("".into());
+    ui.set_quick_note_tags("".into());
+    ui.set_quick_note_color("paper".into());
+    ui.set_quick_note_pinned(false);
+    ui.set_quick_note_archived(false);
     ui.set_manuscript_draft_id("".into());
     ui.set_manuscript_draft_section("".into());
     ui.set_manuscript_draft_citations("".into());
@@ -320,6 +335,59 @@ fn show_activity(ui: &MainWindow, state: &durable_activity::Activity) {
 }
 
 slint::include_modules!();
+
+fn refresh_quick_note_cards(
+    ui: &MainWindow,
+    project: &Path,
+    query: &str,
+    filter: &str,
+    data_root: &Path,
+) -> Result<usize, String> {
+    let result = evidence_read_at(
+        project,
+        "ui.note_card.list",
+        serde_json::json!({"query":query,"filter":filter}),
+        data_root,
+    )?;
+    let rows = result
+        .pointer("/data/cards")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("Quick note list response is incomplete")?;
+    let notes = rows
+        .iter()
+        .map(|row| {
+            let labels = row["tags"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .filter_map(serde_json::Value::as_str)
+                .collect::<Vec<_>>()
+                .join(", ");
+            QuickNote {
+                id: row["id"].as_str().unwrap_or("").into(),
+                title: row["title"].as_str().unwrap_or("").into(),
+                body: row["body"].as_str().unwrap_or("").into(),
+                tags: labels.into(),
+                color: row["color"].as_str().unwrap_or("paper").into(),
+                revision: row["revision"].as_i64().unwrap_or(0) as i32,
+                pinned: row["pinned"].as_bool().unwrap_or(false),
+                archived: row["archived"].as_bool().unwrap_or(false),
+            }
+        })
+        .collect::<Vec<_>>();
+    let count = notes.len();
+    ui.set_quick_notes(Rc::new(slint::VecModel::from(notes)).into());
+    ui.set_quick_note_results(format!("{count} notes match the current filter").into());
+    Ok(count)
+}
+
+fn load_project_quick_notes(ui: &MainWindow, project: &Path) {
+    let result = host_data_root()
+        .and_then(|data_root| refresh_quick_note_cards(ui, project, "", "active", &data_root));
+    if let Err(error) = result {
+        ui.set_quick_note_results(format!("Quick notes unavailable: {error}").into());
+    }
+}
 
 const PAGES: [&str; 40] = [
     "Welcome",
@@ -3318,6 +3386,102 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let active_project: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    app.on_refresh_quick_notes({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |query, filter| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|path| {
+                        refresh_quick_note_cards(
+                            &ui,
+                            path,
+                            query.as_str(),
+                            filter.as_str(),
+                            &host_data_root()?,
+                        )
+                        .map(|_| ())
+                    });
+                if let Err(error) = result {
+                    ui.set_quick_note_results(error.into());
+                }
+            }
+        }
+    });
+    app.on_save_quick_note({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |selected, revision, title, body, tags, color, pinned, archived| {
+            if let Some(ui) = weak.upgrade() {
+                let result = (|| -> Result<(String, i64), String> {
+                    let path = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let root = host_data_root()?;
+                    let stable_id = if selected.is_empty() {
+                        format!("card:{}", Uuid::new_v4())
+                    } else {
+                        selected.to_string()
+                    };
+                    let (pending, _) = evidence_preview_at(
+                        &path,
+                        "ui.note_card.save",
+                        "quick-note",
+                        serde_json::json!({
+                            "card_id":stable_id,
+                            "expected_card_revision":revision,
+                            "title":title.as_str(),
+                            "body":body.as_str(),
+                            "tags":tags.as_str(),
+                            "color":color.as_str(),
+                            "pinned":pinned,
+                            "archived":archived
+                        }),
+                        &root,
+                    )?;
+                    let (stored, project_revision) =
+                        evidence_execute_pending(&pending, &path, &root)?;
+                    let card_id = stored
+                        .pointer("/data/card_id")
+                        .and_then(serde_json::Value::as_str)
+                        .ok_or("Quick note save result missing card identifier")?
+                        .to_owned();
+                    refresh_quick_note_cards(
+                        &ui,
+                        &path,
+                        ui.get_quick_note_query().as_str(),
+                        ui.get_quick_note_filter().as_str(),
+                        &root,
+                    )?;
+                    Ok((card_id, project_revision))
+                })();
+                match result {
+                    Ok((card_id, revision)) => {
+                        ui.set_project_revision(revision as i32);
+                        if selected.is_empty() || selected.as_str() == card_id {
+                            ui.set_quick_note_selected_id("".into());
+                            ui.set_quick_note_selected_revision(0);
+                            ui.set_quick_note_title("".into());
+                            ui.set_quick_note_body("".into());
+                            ui.set_quick_note_tags("".into());
+                            ui.set_quick_note_color("paper".into());
+                            ui.set_quick_note_pinned(false);
+                            ui.set_quick_note_archived(false);
+                        }
+                        ui.set_status("Quick note recorded in project history".into());
+                    }
+                    Err(error) => {
+                        ui.set_quick_note_results(format!("Quick note not saved: {error}").into());
+                        ui.set_status("Quick note not saved; edit remains available".into());
+                    }
+                }
+            }
+        }
+    });
     let pending_project_metadata: Rc<RefCell<Option<PendingProjectMetadata>>> =
         Rc::new(RefCell::new(None));
     let writing_drafts = Rc::new(RefCell::new(writing_autosave::Drafts::default()));
@@ -6715,6 +6879,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         invalidate_project_previews();
                         *active_project.borrow_mut() = Some(path.clone());
                         reset_project_visible_state(&ui);
+                        load_project_quick_notes(&ui, &path);
                         let draft_warning = restore_writing_drafts(&ui, &path, &drafts).err();
                         if draft_warning.is_none() {
                             resume_recovered_writing(&timer, &path, drafts.clone(), weak.clone());
@@ -6981,6 +7146,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         invalidate_project_previews();
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
                         reset_project_visible_state(&ui);
+                        load_project_quick_notes(&ui, Path::new(path.as_str()));
                         let draft_warning =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts).err();
                         if draft_warning.is_none() {
@@ -7033,6 +7199,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         invalidate_project_previews();
                         *active_project.borrow_mut() = Some(project.clone());
                         reset_project_visible_state(&ui);
+                        load_project_quick_notes(&ui, &project);
                         let draft_warning =
                             restore_writing_drafts(&ui, &project, &drafts).err();
                         if draft_warning.is_none() {
@@ -7071,6 +7238,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         invalidate_project_previews();
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
                         reset_project_visible_state(&ui);
+                        load_project_quick_notes(&ui, Path::new(path.as_str()));
                         let draft_warning =
                             restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts).err();
                         if draft_warning.is_none() {

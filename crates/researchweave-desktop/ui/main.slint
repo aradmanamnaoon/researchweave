@@ -1,5 +1,16 @@
-import { Button, LineEdit, TextEdit, ListView, ScrollView, Palette } from "std-widgets.slint";
+import { Button, ComboBox, LineEdit, TextEdit, ListView, ScrollView, Palette } from "std-widgets.slint";
 export { Palette } from "std-widgets.slint";
+
+export struct QuickNote {
+    id: string,
+    title: string,
+    body: string,
+    tags: string,
+    color: string,
+    revision: int,
+    pinned: bool,
+    archived: bool,
+}
 
 export global Theme {
     in-out property <bool> dark-mode: false;
@@ -29,6 +40,10 @@ export global Theme {
     in-out property <color> rail-background: high-contrast ? #000000 : (dark-mode ? #172638 : #263245);
     in-out property <color> rail-hover: high-contrast ? #262600 : (dark-mode ? #32465e : #364d69);
     in-out property <color> reader-canvas: high-contrast ? #000000 : (dark-mode ? #0f1922 : #eceae4);
+    in-out property <color> note-sage: high-contrast ? #111111 : (dark-mode ? #294238 : #e2efe5);
+    in-out property <color> note-lilac: high-contrast ? #111111 : (dark-mode ? #3a3450 : #efe7f6);
+    in-out property <color> note-sand: high-contrast ? #111111 : (dark-mode ? #463b30 : #f7edda);
+    in-out property <color> note-blue: high-contrast ? #111111 : (dark-mode ? #293e56 : #e2edf9);
     in-out property <color> tab-strip: high-contrast ? #1b1b1b : (dark-mode ? #182633 : #e8ebef);
     // Scientific-visualization roles. Charts must still expose numeric labels,
     // uncertainty and machine-readable data rather than encoding meaning by color.
@@ -230,11 +245,26 @@ export component MainWindow inherits Window {
     in-out property <string> project-activity-results: "Local project event provenance is not authenticated identity evidence.";
     in-out property <string> notebook-results: "Save a revisioned project notebook, inspect history, or export Markdown.";
     in-out property <string> notebook-draft: "";
+    in-out property <[QuickNote]> quick-notes: [];
+    in-out property <bool> quick-note-view: true;
+    in-out property <string> quick-note-results: "Quick notes are stored in this project, with searchable history.";
+    in-out property <string> quick-note-query: "";
+    in-out property <string> quick-note-filter: "active";
+    in-out property <string> quick-note-selected-id: "";
+    in-out property <int> quick-note-selected-revision: 0;
+    in-out property <string> quick-note-title: "";
+    in-out property <string> quick-note-body: "";
+    in-out property <string> quick-note-tags: "";
+    in-out property <string> quick-note-color: "paper";
+    in-out property <bool> quick-note-pinned: false;
+    in-out property <bool> quick-note-archived: false;
     in-out property <string> manuscript-draft-id: "";
     in-out property <string> manuscript-draft-section: "";
     in-out property <string> manuscript-draft-citations: "";
     in-out property <string> manuscript-draft-body: "";
     callback notebook-draft-edited(string);
+    callback refresh-quick-notes(string, string);
+    callback save-quick-note(string, int, string, string, string, string, bool, bool);
     callback manuscript-draft-edited(string, string, string, string);
     in-out property <string> qualitative-results: "Inspect the codebook before editing; writes require the current content hash.";
     in-out property <string> backup-results: "Open a project, then choose an absolute archive path.";
@@ -1408,24 +1438,163 @@ export component MainWindow inherits Window {
                                 accessible-label: "Return to the same PDF reader";
                                 clicked => { root.page = 7; }
                             }
-                            notebook-body := TextEdit {
-                                min-height: root.height < 700px ? 170px : 260px;
-                                preferred-height: root.height < 700px ? 210px : 400px;
-                                accessible-label: "Project notebook text";
-                                text: root.notebook-draft;
-                                edited(text) => { root.notebook-draft = text; root.notebook-draft-edited(text); }
-                            }
                             HorizontalLayout {
                                 spacing: 8px;
-                                Button { text: "Preview save"; accessible-label: "Preview notebook save"; clicked => { root.preview-notebook-save(notebook-body.text); } }
-                                Button { text: "Record previewed notebook"; accessible-label: "Record previewed notebook save"; clicked => { root.apply-evidence-preview(); } }
+                                Button { text: "Quick cards"; accessible-label: "Show quick note cards"; clicked => { root.quick-note-view = true; root.refresh-quick-notes(root.quick-note-query,root.quick-note-filter); } }
+                                Button { text: "Project notebook"; accessible-label: "Show long form project notebook"; clicked => { root.quick-note-view = false; } }
                             }
-                            HorizontalLayout {
-                                spacing: 8px;
-                                Button { text: "History"; accessible-label: "Load notebook history"; clicked => { root.load-notebook-history(); } }
-                                Button { text: "Export Markdown"; accessible-label: "Export notebook Markdown"; clicked => { root.export-notebook(); } }
+                            if root.quick-note-view: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text { text: "Quick notes"; color: Theme.ink; font-weight: 700; font-size: 17px * Theme.ui-scale / 100; }
+                                    Text { text: "Individual cards stay in this project. Save edits, pin priorities, or archive without deleting."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    Text { text: root.quick-note-selected-id == "" ? "Capture a quick note" : "Edit selected note"; font-weight: 700; color: Theme.ink; }
+                                    LineEdit {
+                                        text <=> root.quick-note-title;
+                                        placeholder-text: "Title or subject";
+                                        accessible-label: "Quick note title";
+                                    }
+                                    TextEdit {
+                                        text <=> root.quick-note-body;
+                                        min-height: 80px;
+                                        preferred-height: 110px;
+                                        accessible-label: "Quick note body";
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        LineEdit {
+                                            text <=> root.quick-note-tags;
+                                            horizontal-stretch: 1;
+                                            placeholder-text: "Tags, comma separated";
+                                            accessible-label: "Quick note tags";
+                                        }
+                                        ComboBox {
+                                            model: ["paper", "sage", "lilac", "sand", "blue"];
+                                            current-value <=> root.quick-note-color;
+                                            accessible-label: "Quick note color";
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: root.quick-note-selected-id == "" ? "Add quick note" : "Save quick note";
+                                            accessible-label: root.quick-note-selected-id == "" ? "Add quick note to project" : "Save selected quick note";
+                                            clicked => { root.save-quick-note(root.quick-note-selected-id,root.quick-note-selected-revision,root.quick-note-title,root.quick-note-body,root.quick-note-tags,root.quick-note-color,root.quick-note-pinned,root.quick-note-archived); }
+                                        }
+                                        Button {
+                                            text: "New note";
+                                            accessible-label: "Clear quick note editor to create another";
+                                            clicked => {
+                                                root.quick-note-selected-id = "";
+                                                root.quick-note-selected-revision = 0;
+                                                root.quick-note-title = "";
+                                                root.quick-note-body = "";
+                                                root.quick-note-tags = "";
+                                                root.quick-note-color = "paper";
+                                                root.quick-note-pinned = false;
+                                                root.quick-note-archived = false;
+                                            }
+                                        }
+                                    }
+                                    Text { text: root.quick-note-results; accessible-label: "Quick note operation result " + root.quick-note-results; color: Theme.muted-ink; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        LineEdit {
+                                            horizontal-stretch: 1;
+                                            text <=> root.quick-note-query;
+                                            placeholder-text: "Search title, text, or tags";
+                                            accessible-label: "Search quick notes";
+                                            edited(value) => {
+                                                root.quick-note-query = value;
+                                                root.refresh-quick-notes(value, root.quick-note-filter);
+                                            }
+                                        }
+                                        Button { text: "Active"; accessible-label: "Show active quick notes"; clicked => { root.quick-note-filter = "active"; root.refresh-quick-notes(root.quick-note-query,"active"); } }
+                                        Button { text: "Pinned"; accessible-label: "Show pinned quick notes"; clicked => { root.quick-note-filter = "pinned"; root.refresh-quick-notes(root.quick-note-query,"pinned"); } }
+                                        Button { text: "Archive"; accessible-label: "Show archived quick notes"; clicked => { root.quick-note-filter = "archived"; root.refresh-quick-notes(root.quick-note-query,"archived"); } }
+                                    }
+                                    if root.quick-notes.length == 0: Text {
+                                        text: "No matching notes. Capture your first idea below.";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    for note in root.quick-notes: Rectangle {
+                                        background: note.color == "sage" ? Theme.note-sage : note.color == "lilac" ? Theme.note-lilac : note.color == "sand" ? Theme.note-sand : note.color == "blue" ? Theme.note-blue : Theme.surface;
+                                        border-color: note.pinned ? Theme.accent : Theme.divider;
+                                        border-width: note.pinned ? 2px : 1px;
+                                        border-radius: Theme.panel-radius;
+                                        min-height: 100px;
+                                        VerticalLayout {
+                                            padding: 10px;
+                                            spacing: 5px;
+                                            Text { text: note.pinned ? "Pinned · " + note.title : note.title; color: Theme.ink; font-weight: 700; wrap: word-wrap; }
+                                            Text { text: note.body; color: Theme.ink; wrap: word-wrap; max-height: 85px; }
+                                            Text { text: note.tags; color: Theme.muted-ink; wrap: word-wrap; }
+                                            HorizontalLayout {
+                                                spacing: 6px;
+                                                Button {
+                                                    text: "Edit";
+                                                    accessible-label: "Edit quick note " + note.title;
+                                                    clicked => {
+                                                        root.quick-note-selected-id = note.id;
+                                                        root.quick-note-selected-revision = note.revision;
+                                                        root.quick-note-title = note.title;
+                                                        root.quick-note-body = note.body;
+                                                        root.quick-note-tags = note.tags;
+                                                        root.quick-note-color = note.color;
+                                                        root.quick-note-pinned = note.pinned;
+                                                        root.quick-note-archived = note.archived;
+                                                    }
+                                                }
+                                                Button {
+                                                    text: note.pinned ? "Unpin" : "Pin";
+                                                    accessible-label: (note.pinned ? "Unpin " : "Pin ") + note.title;
+                                                    clicked => { root.save-quick-note(note.id,note.revision,note.title,note.body,note.tags,note.color,!note.pinned,note.archived); }
+                                                }
+                                                Button {
+                                                    text: note.archived ? "Restore" : "Archive";
+                                                    accessible-label: (note.archived ? "Restore " : "Archive ") + note.title;
+                                                    clicked => { root.save-quick-note(note.id,note.revision,note.title,note.body,note.tags,note.color,note.pinned,!note.archived); }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                             }
-                            Text { text: root.notebook-results; accessible-label: "Notebook operation result " + root.notebook-results; wrap: word-wrap; color: Theme.ink; }
+                            if !root.quick-note-view: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text { text: "Project notebook · long-form notes"; color: Theme.ink; font-weight: 700; }
+                                    notebook-body := TextEdit {
+                                        min-height: root.height < 700px ? 170px : 260px;
+                                        preferred-height: root.height < 700px ? 210px : 400px;
+                                        accessible-label: "Project notebook text";
+                                        text: root.notebook-draft;
+                                        edited(text) => { root.notebook-draft = text; root.notebook-draft-edited(text); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { text: "Preview save"; accessible-label: "Preview notebook save"; clicked => { root.preview-notebook-save(notebook-body.text); } }
+                                        Button { text: "Record previewed notebook"; accessible-label: "Record previewed notebook save"; clicked => { root.apply-evidence-preview(); } }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { text: "History"; accessible-label: "Load notebook history"; clicked => { root.load-notebook-history(); } }
+                                        Button { text: "Export Markdown"; accessible-label: "Export notebook Markdown"; clicked => { root.export-notebook(); } }
+                                    }
+                                    Text { text: root.notebook-results; accessible-label: "Notebook operation result " + root.notebook-results; wrap: word-wrap; color: Theme.ink; }
+                                }
+                            }
                             Rectangle { vertical-stretch: 1; }
                         }
                         }
