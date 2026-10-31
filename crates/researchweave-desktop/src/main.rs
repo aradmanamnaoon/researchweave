@@ -5617,6 +5617,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_prepare_analysis_report_file({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        move |title, result_ids| {
+            let ids = result_ids
+                .as_str()
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a project first".to_owned())
+                    .and_then(|path| {
+                        physical_export::prepare(
+                            path,
+                            "analysis.report.render",
+                            serde_json::json!({
+                                "title":title.as_str().trim(),
+                                "result_ids":ids
+                            }),
+                            &host_data_root()?,
+                        )
+                    });
+                match result {
+                    Ok((pending, result)) => {
+                        *pending_physical_export.borrow_mut() = Some(pending);
+                        ui.set_analysis_report_results(
+                            format!(
+                                "Verified analysis report Markdown prepared, NOT saved. Enter an absolute .md path and choose Save prepared report. Existing files will never be overwritten.\nReport provenance: {}\nMarkdown SHA-256: {}\nResult count: {}",
+                                result["data"]["report_sha256"].as_str().unwrap_or_default(),
+                                result["data"]["sha256"].as_str().unwrap_or_default(),
+                                result["data"]["manifest"]["result_ids"].as_array().map_or(0, Vec::len)
+                            )
+                            .into(),
+                        );
+                        ui.set_status(
+                            "Verified analysis report prepared; no file saved yet".into(),
+                        );
+                    }
+                    Err(error) => {
+                        pending_physical_export.borrow_mut().take();
+                        ui.set_analysis_report_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
     app.on_export_analysis_script({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -7266,6 +7319,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         )
                     }),
                     (None, _) => Err("Open a project first".into()),
+                    (_, None) if screen_operation.as_str() == "analysis.report.render" => {
+                        Err("Prepare a verified analysis report before saving".into())
+                    }
                     (_, None) => Err("Prepare a manuscript or draft ZIP before saving".into()),
                 };
                 match result {
@@ -7281,6 +7337,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 format!("Protocol saved SHA-256: {digest}").into(),
                             );
                             ui.set_protocol_results(message.into());
+                        } else if screen_operation.as_str() == "analysis.report.render" {
+                            ui.set_analysis_report_results(message.into());
                         } else {
                             ui.set_writing_results(message.into());
                         }
@@ -7290,6 +7348,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if screen_operation.as_str() == "protocol.export" {
                             ui.set_protocol_export_receipt("".into());
                             ui.set_protocol_results(error.clone().into());
+                        } else if screen_operation.as_str() == "analysis.report.render" {
+                            ui.set_analysis_report_results(error.clone().into());
                         } else {
                             ui.set_writing_results(error.clone().into());
                         }

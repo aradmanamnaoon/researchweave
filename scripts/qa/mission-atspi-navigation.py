@@ -6,8 +6,10 @@ session. Never uses the user's visible desktop. All evidence is synthetic.
 
 from __future__ import annotations
 
+import hashlib
 import json
 import pathlib
+import re
 import subprocess
 import sys
 import time
@@ -654,6 +656,63 @@ def main() -> int:
         if nodes_named(app, "Statistics operation result"):
             raise RuntimeError("Verified statistical details remained visible after hiding")
         print("STATISTICS_PROGRESSIVE_DISCLOSURE_OK")
+
+        if not activate(app, "Analysis Results"):
+            raise RuntimeError("Verified Analysis Results workspace cannot be opened")
+        time.sleep(0.25)
+        edit_text(app, "Analysis Results dataset ID", variable_id)
+        edit_text(app, "Analysis Results dataset revision", variable_revision)
+        edit_text(app, "Analysis Results numeric column", "score")
+        if not activate(app, "Preview immutable analysis result"):
+            raise RuntimeError("Cannot preview the immutable source-bound result")
+        time.sleep(0.25)
+        if not activate(app, "Record previewed immutable analysis result"):
+            raise RuntimeError("Cannot record previewed immutable result")
+        time.sleep(0.35)
+        result_text = "\n".join(
+            (node.name or "") for node in nodes_named(app, "Analysis Results operation result")
+        )
+        match = re.search(r'"result_id":\s*"([a-f0-9]{64})"', result_text)
+        if match is None:
+            raise RuntimeError("Recorded immutable analysis result ID was not exposed")
+        result_id = match.group(1)
+        edit_text(app, "Analysis report result IDs", result_id)
+        if not activate(app, "Prepare verified analysis report Markdown file"):
+            raise RuntimeError("Native analysis report preparation is not actionable")
+        time.sleep(0.3)
+        prepared = "\n".join((node.name or "") for node, _ in walk(app))
+        if "Verified analysis report prepared; no file saved yet" not in prepared:
+            raise RuntimeError("Report was not prepared from verified persisted output")
+        report_path = fixture.parent / "qa-verified-analysis-report.md"
+        if report_path.exists():
+            raise RuntimeError("Synthetic report file already exists before consent")
+        edit_text(
+            app, "Analysis report export destination path",
+            str(report_path), allow_unreadable=True,
+        )
+        if not activate(app, "Save prepared analysis report without overwrite"):
+            raise RuntimeError("Physical report Save control is unavailable")
+        time.sleep(0.3)
+        if not report_path.is_file():
+            raise RuntimeError("Approved report was not written to the selected local file")
+        physical_report = report_path.read_text(encoding="utf-8")
+        if (
+            "# Analysis report" not in physical_report
+            or result_id not in physical_report
+            or variable_revision not in physical_report
+            or "statistics.describe" not in physical_report
+        ):
+            raise RuntimeError("Physical report omitted verified immutable analysis provenance")
+        receipt_hash = hashlib.sha256(report_path.read_bytes()).hexdigest()
+        if not any(receipt_hash in (node.name or "") for node, _ in walk(app)):
+            raise RuntimeError("Physical report SHA-256 does not appear in accessible save receipt")
+        if not activate(app, "Save prepared analysis report without overwrite"):
+            raise RuntimeError("Repeated Save control is unavailable")
+        time.sleep(0.15)
+        if hashlib.sha256(report_path.read_bytes()).hexdigest() != receipt_hash:
+            raise RuntimeError("Repeated report Save modified a previously exported file")
+        print("ANALYSIS_REPORT_PHYSICAL_MARKDOWN_PROVENANCE_AND_NO_OVERWRITE_OK")
+        audit(app, "analysis-report-physical-export", output)
 
         # Leave a new import merely staged in project A, then switch projects.
         # Its approval must be invalidated before project B can perform writes.

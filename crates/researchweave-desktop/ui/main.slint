@@ -358,6 +358,7 @@ export component MainWindow inherits Window {
     callback apply-analysis-command-preview();
     callback load-analysis-result(string);
     callback render-analysis-report(string, string);
+    callback prepare-analysis-report-file(string, string);
     callback export-analysis-script(string);
     callback run-mixed-joint-display(string, string, string, string, string, string);
     callback preview-writing-section(string, string, string, string);
@@ -2099,7 +2100,25 @@ export component MainWindow inherits Window {
                                                 report-result-ids := LineEdit { placeholder-text: "Comma-separated result IDs"; accessible-label: "Analysis report result IDs"; }
                                                 Button { text: "Render report"; accessible-label: "Render verified analysis report"; clicked => { root.render-analysis-report(report-title.text, report-result-ids.text); } }
                                             }
+                                            Button {
+                                                text: "Prepare report Markdown";
+                                                accessible-label: "Prepare verified analysis report Markdown file";
+                                                clicked => { root.prepare-analysis-report-file(report-title.text, report-result-ids.text); }
+                                            }
                                         }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    report-save-path := LineEdit {
+                                        horizontal-stretch: 1;
+                                        accessible-label: "Analysis report export destination path";
+                                        placeholder-text: "Absolute filename ending in .md";
+                                    }
+                                    Button {
+                                        text: "Save prepared report";
+                                        accessible-label: "Save prepared analysis report without overwrite";
+                                        clicked => { root.save-prepared-export(report-save-path.text, "analysis.report.render"); }
                                     }
                                 }
                                 Rectangle {

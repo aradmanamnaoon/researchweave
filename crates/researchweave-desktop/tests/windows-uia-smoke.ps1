@@ -1189,6 +1189,44 @@ try {
     if (-not ($reportNames | Where-Object { $_ -match '"report_sha256": "[0-9a-f]{64}"' })) {
         throw 'Analysis report did not expose a deterministic report digest'
     }
+    Invoke-AccessibleButton $window 'Prepare verified analysis report Markdown file'
+    Start-Sleep -Milliseconds 200
+    $preparedReportNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($preparedReportNames | Where-Object { $_ -like '*Verified analysis report prepared; no file saved yet*' })) {
+        throw 'Analysis report Markdown preparation did not present a distinct pending export state'
+    }
+    $reportDestination = Join-Path $hostData ('uia-analysis-report-' + [guid]::NewGuid().ToString('N') + '.md')
+    $reportPathEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis report export destination path'
+    ([System.Windows.Automation.ValuePattern]$reportPathEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($reportDestination)
+    Invoke-AccessibleButton $window 'Save prepared analysis report without overwrite'
+    Start-Sleep -Milliseconds 220
+    if (-not (Test-Path -LiteralPath $reportDestination -PathType Leaf)) {
+        throw 'Physical analysis report Markdown was not created by the explicit Save control'
+    }
+    $reportBody = [System.IO.File]::ReadAllText($reportDestination)
+    if (-not $reportBody.Contains('# Analysis report') -or
+        -not $reportBody.Contains('statistics.describe') -or
+        -not $reportBody.Contains($resultId) -or
+        -not $reportBody.Contains($datasetRevision)) {
+        throw 'Physically exported analysis report omitted verified result or revision provenance'
+    }
+    $reportSha256 = (Get-FileHash -LiteralPath $reportDestination -Algorithm SHA256).Hash.ToLowerInvariant()
+    $reportSaveNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($reportSaveNames | Where-Object { $_ -like "*$reportSha256*" })) {
+        throw 'Physical analysis report checksum is absent from the verified save receipt'
+    }
+    Invoke-AccessibleButton $window 'Save prepared analysis report without overwrite'
+    Start-Sleep -Milliseconds 140
+    if ([System.IO.File]::ReadAllText($reportDestination) -cne $reportBody) {
+        throw 'Repeated analysis report Save mutated the existing file'
+    }
+    Write-Output 'PASS: verified analysis report saves physical Markdown with immutable result provenance and SHA-256 receipt'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export analysis replay script').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $scriptNames = @($window.FindAll(
