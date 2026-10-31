@@ -1239,7 +1239,16 @@ try {
     if (-not ($writingInspectNames | Where-Object { $_ -like "*$referenceId*" })) {
         throw 'Persisted manuscript citation ID was not visible through manuscript inspect'
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    # Inspection expands a 145px details pane. On the installed Windows Slint
+    # UIA provider, off-viewport export controls are not always materialized
+    # in the accessibility tree. Collapse the read-only result after verifying
+    # its full persisted body/citation, then reach Export through native keyboard
+    # focus traversal; never interpret an offscreen control as absent.
+    Invoke-AccessibleButton $window 'Toggle manuscript operation details'
+    Start-Sleep -Milliseconds 120
+    $manuscriptEditor = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
+    $markdownExport = FocusByTab $manuscriptEditor ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown' 8
+    $markdownExport.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $writingExportNames = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
