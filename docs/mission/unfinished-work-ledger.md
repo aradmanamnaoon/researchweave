@@ -10,7 +10,7 @@ Source: original dirty root `c84cdf1`, published local-only `origin/main` `97665
 | F04 | Semantic palette/theme/icon foundation | PARTIAL | unassigned | New original palette; no inconsistent default native accents; light/dark/high contrast |
 | F05 | Dataset import, immutable variable/dataset revisions | PARTIAL UX | unassigned | Import → inspect → transform → analyze with safe preview and source provenance |
 | F06 | Native statistical kernels, results, plots and persistence | PARTIAL UX | unassigned | Accurate method guidance, clear estimates/assumptions/uncertainty, accessible plots |
-| F07 | Notebook and evidence note tools | PARTIAL UX | worker-1 attempted | Persistent quick cards/search/pin/archive; reopening matches storage |
+| F07 | Notebook and evidence note tools | PARTIAL UX, improved in PRIME branch | prime | Verified project-scoped quick cards, create/edit, pin/archive/restore, colors, Unicode/tag search, Markdown export, reopen; grid/list, quick-note autosave and checklists remain |
 | F08 | Manuscript editing, autosave and DOCX/PDF export | PARTIAL UX | worker-2 attempted | Robust save/recovery/exports then spacious page-oriented editor and import/export fidelity |
 | F09 | PDF reader, source linking and anchored evidence | PARTIAL UX | unassigned | Preserve location/selection and verified source hash |
 | F10 | Qualitative/mixed-method results | PARTIAL UX | unassigned | Populated-state displays consistent with stored provenance |
@@ -21,7 +21,7 @@ Source: original dirty root `c84cdf1`, published local-only `origin/main` `97665
 
 ## 35 additional UX opportunities identified for implementation
 
-These are **backlog proposals**, not claims of implemented features or observed new user tests. Priority H/M is based on severity and the existing source/UX audits.
+These are 35 UX opportunities originally identified from source/research. Items U07–U09 now have tested partial implementations (see `docs/qa/mission-xvfb-20261031-r21/`); the remaining requirements and platform validation are still outstanding. Priority H/M is based on severity and existing source/UX audits.
 
 | # | Priority | Improvement opportunity | Required proof |
 | --- | --- | --- | --- |

@@ -1,10 +1,10 @@
-# ResearchWeave skills manifest â€” 2026-10-31
+# ResearchWeave skills manifest Ã¢â‚¬â€ 2026-10-31
 
 Exactly 100 local ResearchWeave skill folders were detected, each with SKILL.md and the SHA-256 below. Original third-party publisher identities, dependencies and licenses are not verified from the local folder names. No duplicate skills were downloaded.
 
 **Task allocation:** 10 domain UX, 5 competitor-pattern UX, 15 general UX and 70 engineering/reliability support. Allocation is a prospective task assignment, not use evidence. Four attempted worker chats failed initialization.
 
-**Actual usage:** 14 distinct skills were read and applied to audited source, implemented UI/backend changes or reproducible native-GUI probes. See `docs/mission/skills-application-evidence-2026-10-31.md` for the exact task/output/acceptance status of each. **86 of 100 receive no use credit.** An applied skill is not automatically fully accepted: platform and scenario gaps remain and are stated per row. No worker-delivered usage credit is claimed.
+**Actual usage:** 17 distinct skills were read and applied to audited source, implemented UI/backend changes or reproducible native-GUI probes. See `docs/mission/skills-application-evidence-2026-10-31.md` for exact task/output/acceptance. **83 of 100 receive no use credit.** An applied skill is not automatically fully accepted: platform and scenario gaps remain and are stated per row. No worker-delivered usage credit is claimed.
 
 | Name | Primary allocation | SKILL.md SHA-256 | Status | Assigned task / evidence |
 | --- | --- | --- | --- | --- |
@@ -69,8 +69,8 @@ Exactly 100 local ResearchWeave skill folders were detected, each with SKILL.md 
 | noncolor-errors-and-selection | General UX | c6341997bb9620d45a3dc06fa7a86e587f586d53ace3b217ae97bd8bdc986e95 | Installed; use unverified | Future task-specific probe / evidence pending |
 | non-destructive-exploration | Engineering/support | cc8f08a9f7ced63eb31ff9858f2a581d65bfeab1cc1c5c1f9f4db7d6a06f0225 | Installed; use unverified | Future task-specific probe / evidence pending |
 | notebook-autosave-recovery | Engineering/support | dcf41b7b9f4bc2f5b726418df7391a47f29dcf1eebecbbfbb1dd9718ffdcb68b | Applied; acceptance partial | See skills-application-evidence-2026-10-31.md and qa/mission-xvfb-20261031-r19 |
-| note-pin-archive-semantics | Engineering/support | 42aecafe26a0aea04e8341caff12d23debdfef0c0b7c23d499db30291ed1074d | Installed; use unverified | Future task-specific probe / evidence pending |
-| note-tags-and-retrieval | Engineering/support | c4da4351b2ac653baca3eb5a9a9f23fdf47f24695c1091b3bc14edcb08fb3b6c | Installed; use unverified | Future task-specific probe / evidence pending |
+| note-pin-archive-semantics | Engineering/support | 42aecafe26a0aea04e8341caff12d23debdfef0c0b7c23d499db30291ed1074d | Applied; acceptance partial | See skills-application-evidence-2026-10-31.md and QA r21 |
+| note-tags-and-retrieval | Engineering/support | c4da4351b2ac653baca3eb5a9a9f23fdf47f24695c1091b3bc14edcb08fb3b6c | Applied; acceptance partial | See skills-application-evidence-2026-10-31.md and QA r21 |
 | novice-expert-disclosure | Engineering/support | da97d41d212bd14a13fc90222fb7d8b13cfaf43098b4618c4fa8d6bae5804208 | Applied; acceptance partial | See skills-application-evidence-2026-10-31.md and qa/mission-xvfb-20261031-r19 |
 | open-import-migrate-distinction | Engineering/support | 2b3c982b19877e23c596658c4401cfae5f6d17f518adb4231560ef8bde1b8561 | Installed; use unverified | Future task-specific probe / evidence pending |
 | pdf-browse-and-open | Engineering/support | ca7b1e0a6c2ff8b006af5637326a7219bc102cfa2b39b184de1f1c271e1b9494 | Installed; use unverified | Future task-specific probe / evidence pending |
@@ -81,7 +81,7 @@ Exactly 100 local ResearchWeave skill folders were detected, each with SKILL.md 
 | prisma-event-accounting | Engineering/support | d28d350d100018f86bdbdcf5a27d6ba136f2edfdb10e0836ea4507b59b9d961c | Installed; use unverified | Future task-specific probe / evidence pending |
 | provider-egress-consent | Engineering/support | 5493116e61b0ba9b1d337368fa6168e4d5780a9444ffd95c009773f4b9cdfa74 | Installed; use unverified | Future task-specific probe / evidence pending |
 | publishing-readiness-checks | Engineering/support | 7b0c20a081ab65afd4fcb49f48003df2558b8098d333777708e818998b049847 | Installed; use unverified | Future task-specific probe / evidence pending |
-| rapid-note-capture | Competitor UX | 054dba2b23999e9f61d9c0d6b4c5df476aa45ed4983f665ad882ec8560424e64 | Installed; use unverified | Future task-specific probe / evidence pending |
+| rapid-note-capture | Competitor UX | 054dba2b23999e9f61d9c0d6b4c5df476aa45ed4983f665ad882ec8560424e64 | Applied; acceptance partial | See skills-application-evidence-2026-10-31.md and QA r21 |
 | reader-visual-comfort | Engineering/support | a9b62170424e49da8ae2bb129aeb8656a13f9ac87e20c03c42fe859c35f43db2 | Installed; use unverified | Future task-specific probe / evidence pending |
 | recent-document-history | Engineering/support | cfd592b90166f5e92b28b8c273d99eabf5f50784821d5a4c59a29e48545a61dc | Installed; use unverified | Future task-specific probe / evidence pending |
 | reduced-motion-support | Engineering/support | 1ba87aa953192b64ee84309b673a24bdc3b3e72ab80b6feba8e4b788467bd143 | Installed; use unverified | Future task-specific probe / evidence pending |

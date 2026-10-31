@@ -1,6 +1,6 @@
 # ResearchWeave skill application evidence — 2026-10-31
 
-All 100 ResearchWeave-specific local skill folders have `SKILL.md` and a SHA-256 fingerprint in `skills-manifest.md`. This record only counts an *applied* skill after its instructions were read and it guided a concrete audit, source change or observed probe. It distinguishes partial acceptance from full QA, especially for accessible GUI and recovery claims. There were **14 credited applied skills** and **86 with no applied credit** at this checkpoint.
+All 100 ResearchWeave-specific local skill folders have `SKILL.md` and a SHA-256 fingerprint in `skills-manifest.md`. This record only counts an *applied* skill after its instructions were read and it guided a concrete audit, source change or observed probe. It distinguishes partial acceptance from full QA, especially for accessible GUI and recovery claims. There are **17 credited applied skills** and **83 with no applied credit** at this checkpoint.
 
 | Skill | Evidence-backed task/output | Observed evidence / remaining gate |
 | --- | --- | --- |
@@ -18,5 +18,8 @@ All 100 ResearchWeave-specific local skill folders have `SKILL.md` and a SHA-256
 | `novice-expert-disclosure` | Preserve scientific estimate/uncertainty in default Statistics card, disclose full verified JSON on demand | Native AT-SPI toggle initially hidden → expanded → hidden PASS |
 | `managed-project-default` | Verify quick-create, project switch through Start Center and path-based reopen of original managed project | Native `Create default project` + `Open project` PASS; invalid/custom path recovery pending |
 | `window-minimum-layout` | Correct notebook and manuscript button placement, height-adaptive editor and scroll view | Native 850×600 GUI screenshots and visible controls PASS; 760×560 plus 150/200% scaling pending |
+| `rapid-note-capture` | Implement real, individually saved quick notes with a clear editor, one-click create and a separate long-form notebook | Isolated GUI `r21/quick-note-created.png`, `QUICK_NOTE_EDITOR_CLEARED_AFTER_SAVE`, and persisted reopen PASS; PDF-context quick capture pending |
+| `note-pin-archive-semantics` | Implement audited, revisioned Pin/Unpin, Archive/Restore and active/pinned/archived filters | `QUICK_NOTE_PIN_ARCHIVE_RESTORE_AND_TAG_SEARCH_OK` PASS; source-level CAS revision guard and audit event tests PASS |
+| `note-tags-and-retrieval` | Implement project-scoped Unicode note title/body/tags search with constrained labels and sortable pinned cards | GUI searched tag `anatomy` after restoring note, and Unicode `قشر` backend retrieval PASS; grid layout and full-text index performance pending |
 
 No competitor product performance was benchmarked on these tasks. Five official documentation comparisons are separately in `docs/ux/COMPETITOR_UX_EVIDENCE_2026-10-31.md`. Do not award full `applied` acceptance or 100/100 simply for listed/installed skills. Runtime actions and artifacts are source-identified, and the screenshot/data files contain only synthetic test content.

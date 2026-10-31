@@ -253,6 +253,57 @@ def main() -> int:
 
     if activate(app, "Notebook"):
         time.sleep(0.4)
+        if not nodes_named(app, "Quick note title"):
+            raise RuntimeError("Quick note editor missing from Notebook")
+        edit_text(app, "Quick note title", "Synthetic MRI memo")
+        edit_text(app, "Quick note body", "Research MRI note about a synthetic brain.")
+        edit_text(app, "Quick note tags", "imaging, anatomy")
+        if not activate(app, "Add quick note to project"):
+            raise RuntimeError("Quick note save button not actionable")
+        time.sleep(0.45)
+        if (
+            read_field(app, "Quick note title")
+            or read_field(app, "Quick note body")
+            or read_field(app, "Quick note tags")
+        ):
+            raise RuntimeError("Quick note composer failed to clear acknowledged saved content")
+        print("QUICK_NOTE_EDITOR_CLEARED_AFTER_SAVE")
+        if not nodes_named(app, "Edit quick note Synthetic MRI memo"):
+            raise RuntimeError("Real saved quick-note card did not appear in project")
+        print("QUICK_NOTE_SAVED_AS_CARD")
+        audit(app, "quick-note-created", output)
+        if not activate(app, "Pin Synthetic MRI memo"):
+            raise RuntimeError("Cannot pin saved quick note")
+        time.sleep(0.3)
+        if not activate(app, "Show pinned quick notes"):
+            raise RuntimeError("Cannot filter pinned quick notes")
+        time.sleep(0.2)
+        if not nodes_named(app, "Unpin Synthetic MRI memo"):
+            raise RuntimeError("Pinned quick note absent from pinned filter")
+        if not activate(app, "Archive Synthetic MRI memo"):
+            raise RuntimeError("Cannot archive saved quick note")
+        time.sleep(0.25)
+        if nodes_named(app, "Edit quick note Synthetic MRI memo"):
+            raise RuntimeError("Archived note still visible in pinned/active view")
+        if not activate(app, "Show archived quick notes"):
+            raise RuntimeError("Cannot open archived notes")
+        time.sleep(0.2)
+        if not nodes_named(app, "Restore Synthetic MRI memo"):
+            raise RuntimeError("Archived quick note did not persist")
+        if not activate(app, "Restore Synthetic MRI memo"):
+            raise RuntimeError("Cannot restore archived quick note")
+        if not activate(app, "Show active quick notes"):
+            raise RuntimeError("Cannot return to active note view")
+        time.sleep(0.2)
+        edit_text(app, "Search quick notes", "anatomy")
+        time.sleep(0.2)
+        if not nodes_named(app, "Edit quick note Synthetic MRI memo"):
+            raise RuntimeError("Search by note tag did not retrieve the persisted card")
+        print("QUICK_NOTE_PIN_ARCHIVE_RESTORE_AND_TAG_SEARCH_OK")
+        audit(app, "quick-note-filtered", output)
+        if not activate(app, "Show long form project notebook"):
+            raise RuntimeError("Long form project notebook view cannot be opened")
+        time.sleep(0.25)
         edit_text(app, "Project notebook text", "ResearchWeave isolated UX note: source-grounded observations.")
         time.sleep(1.5)
         audit(app, "notebook", output)
@@ -435,9 +486,19 @@ def main() -> int:
         if not activate(app, "Synthesize activity"):
             raise RuntimeError("Cannot inspect writing after project switch")
         time.sleep(0.3)
+        if not activate(app, "Show quick note cards"):
+            raise RuntimeError("Quick note view unavailable on second project")
+        time.sleep(0.2)
+        if nodes_named(app, "Edit quick note Synthetic MRI memo"):
+            raise RuntimeError("Quick note card leaked from project A to project B")
+        print("QUICK_NOTE_PROJECT_ISOLATION_OK")
         if not nodes_named(app, "Project notebook text"):
             if not activate(app, "Notebook"):
                 raise RuntimeError("New project's notebook is unavailable")
+            time.sleep(0.3)
+        if not nodes_named(app, "Project notebook text"):
+            if not activate(app, "Show long form project notebook"):
+                raise RuntimeError("Long form notebook not reachable in second project")
             time.sleep(0.3)
         if read_field(app, "Project notebook text"):
             raise RuntimeError("Previous project notebook text leaked into new project")
@@ -461,9 +522,19 @@ def main() -> int:
         if not activate(app, "Synthesize activity"):
             raise RuntimeError("Cannot return to previous project's notes")
         time.sleep(0.35)
+        if not activate(app, "Show quick note cards"):
+            raise RuntimeError("Original project's quick-note view unavailable")
+        time.sleep(0.3)
+        if not nodes_named(app, "Edit quick note Synthetic MRI memo"):
+            raise RuntimeError("Saved quick-note card missing after reopening project A")
+        print("QUICK_NOTE_PERSISTED_AFTER_REOPEN_OK")
         if not nodes_named(app, "Project notebook text"):
             if not activate(app, "Notebook"):
                 raise RuntimeError("Previously saved notebook is unavailable")
+            time.sleep(0.3)
+        if not nodes_named(app, "Project notebook text"):
+            if not activate(app, "Show long form project notebook"):
+                raise RuntimeError("Previous project's long form notebook inaccessible")
             time.sleep(0.3)
         restored_notebook = wait_field(app, "Project notebook text")
         if "ResearchWeave isolated UX note:" not in restored_notebook:

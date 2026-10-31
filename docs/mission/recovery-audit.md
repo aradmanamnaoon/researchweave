@@ -18,7 +18,7 @@ New independent, clean worktrees were created from `976656d`: `target/mission-pr
 
 ## Initial defects and risk
 
-- **PARTIAL:** Notebook screen exists without verified Google Keep style capture, cards, pin/archive/search and restart UX.
+- **PARTIAL, IMPROVED:** Quick note cards are now independently versioned and searchable, with original colors, pin/archive/restore, real project persistence, and an isolated source-built GUI roundtrip. The legacy long-form notebook remains accessible separately. Checklists, grid mode, card autosave and full cross-platform GUI acceptance are still pending.
 - **PARTIAL:** Manuscript supports structured text and persisted exports, but lacks a verified paginated Word-like rich document model.
 - **PARTIAL, IMPROVED:** Data import now surfaces a verified immutable ID/revision and carries them into Variables and Statistics; real Linux GUI imported synthetic CSV, computed native descriptives and verified output and project isolation. Advanced interactive tables, assumption help, data cleaning and accessible plots need more work.
 - **CONFIRMED DEFECT FIX:** Switching projects previously left a former project's raw statistical results on-screen and retained an imported file path. A project-bound visible-state reset, pending-action invalidation and real two-project GUI regression now prevent these leaks.
