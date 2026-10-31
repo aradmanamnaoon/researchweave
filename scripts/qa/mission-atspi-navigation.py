@@ -163,17 +163,23 @@ def edit_text(app: Any, name: str, value: str, *, allow_unreadable: bool = False
 
     time.sleep(0.3)
     unsupported_readback = False
-    for refreshed in nodes_named(app, name):
-        try:
-            source = refreshed.queryText()
-            rendered = source.getText(0, source.characterCount)
-            if value in rendered:
-                print(f"AT_SPI_TEXT_READBACK_OK={name}")
-                return
-            print(f"AT_SPI_TEXT_READBACK_MISMATCH={name} observed_length={len(rendered)}")
-        except Exception as error:
-            print(f"AT_SPI_TEXT_READBACK_UNAVAILABLE={type(error).__name__}")
-            unsupported_readback = True
+    # Slint can recreate its accessible editor node shortly after native
+    # keyboard input. Reacquire live nodes twice before declaring readback
+    # unavailable; never accept a value solely because input was sent.
+    for readback_attempt in range(3):
+        for refreshed in nodes_named(app, name):
+            try:
+                source = refreshed.queryText()
+                rendered = source.getText(0, source.characterCount)
+                if value in rendered:
+                    print(f"AT_SPI_TEXT_READBACK_OK={name}")
+                    return
+                print(f"AT_SPI_TEXT_READBACK_MISMATCH={name} observed_length={len(rendered)}")
+            except Exception as error:
+                print(f"AT_SPI_TEXT_READBACK_UNAVAILABLE={type(error).__name__}")
+                unsupported_readback = True
+        if readback_attempt < 2:
+            time.sleep(0.2)
     if allow_unreadable and unsupported_readback:
         # This is not a passing accessibility assertion: the next action must
         # independently prove the typed value affected native analysis.
@@ -241,6 +247,8 @@ def main() -> int:
     app = find_app()
     print(f"AT_SPI_APP={app.name}")
     audit(app, "welcome", output)
+    if not nodes_named(app, "Choose project folder with native dialog"):
+        raise RuntimeError("Native project folder picker is missing from the accessible Start Center")
     if not activate(app, "Create default project"):
         return 8
     time.sleep(0.5)
@@ -581,7 +589,11 @@ def main() -> int:
             raise RuntimeError("Data View navigation is not available")
         time.sleep(0.3)
         audit(app, "data-before-import", output)
-        edit_text(app, "Analysis import path", str(fixture))
+        # Slint's AT-SPI Text interface can temporarily report
+        # NotImplementedError for this field. The following preview, persisted
+        # import and native mean=2 checks independently verify the fixture was
+        # used; a typed value alone never counts as acceptance.
+        edit_text(app, "Analysis import path", str(fixture), allow_unreadable=True)
         if not activate(app, "Preview analysis import"):
             raise RuntimeError("Data import preview cannot be activated")
         time.sleep(0.45)
@@ -648,7 +660,7 @@ def main() -> int:
         if not activate(app, "Data View"):
             raise RuntimeError("Cannot return to Data View to stage a pending import")
         time.sleep(0.25)
-        edit_text(app, "Analysis import path", str(fixture))
+        edit_text(app, "Analysis import path", str(fixture), allow_unreadable=True)
         if not activate(app, "Preview analysis import"):
             raise RuntimeError("Could not stage import before project switch")
         time.sleep(0.3)
@@ -805,6 +817,8 @@ def main() -> int:
     audit(app, "recent-projects-narrow", output)
     if not nodes_named(app, "Recent local projects") or not nodes_named(app, "Reopen selected recent project"):
         raise RuntimeError("Recent project controls are unreachable at 850x600")
+    if not nodes_named(app, "Choose project folder with native dialog"):
+        raise RuntimeError("Native project folder picker is unreachable at 850x600")
     print("RECENT_PROJECT_NARROW_ACCESSIBLE_OK")
 
     print("AT_SPI_NAVIGATION_PROBE_OK")

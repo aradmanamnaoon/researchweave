@@ -207,6 +207,7 @@ export component MainWindow inherits Window {
     in-out property <float> progress: 0;
     in-out property <string> project-title: "No project selected";
     in-out property <int> project-revision: 0;
+    in-out property <string> project-local-path: "";
     in-out property <string> status: "Offline ready";
     in-out property <string> durable-jobs: "No completed PDF operations";
     in-out property <string> durable-notifications: "No notifications";
@@ -312,6 +313,7 @@ export component MainWindow inherits Window {
     callback create-default-project(string);
     callback open-project(string);
     callback open-recent-project(int);
+    callback choose-project-folder();
     callback start-job();
     callback run-command(string);
     callback query-command(string) -> string;
@@ -854,9 +856,17 @@ export component MainWindow inherits Window {
                                     Text { text: "PROJECT LOCATION"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     project-path := LineEdit {
                                         placeholder-text: "Absolute project folder path";
+                                        text <=> root.project-local-path;
                                         accessible-id: "project-path";
                                         accessible-label: "Project path";
                                         accessible-description: "Absolute directory path for creating or opening a local project";
+                                    }
+                                    Button {
+                                        text: root.local-file-dialog-busy ? "Choosing a local folder…" : "Browse local folders…";
+                                        accessible-label: "Choose project folder with native dialog";
+                                        accessible-description: "Choose an existing ResearchWeave project to open or a parent folder for a new project subfolder. Review the resulting path before creating; Cancel preserves the typed path.";
+                                        enabled: !root.local-file-dialog-busy;
+                                        clicked => { root.choose-project-folder(); }
                                     }
                                     Text { text: "PROJECT TITLE"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     project-name := LineEdit {

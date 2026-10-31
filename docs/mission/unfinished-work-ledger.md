@@ -27,7 +27,7 @@ These are 35 UX opportunities originally identified from source/research. Items 
 | --- | --- | --- | --- |
 | 01 | H | Task-first first-run entry | Beginner finds research start without 39 view names |
 | 02 | H | Recent project cards | PARTIAL IMPLEMENTED: bounded durable recent-project selector, one-click reopen and private Linux Xvfb/AT-SPI verification at 1280×800 and 850×600; source and digest receipts in `docs/qa/recent-projects-2026-10-31.md`. Rich cards, absent-path recovery controls and new native installed-package QA remain. |
-| 03 | H | Native project folder selection | No absolute-path memorization, accessible typed fallback |
+| 03 | H | Native project folder selection | PARTIAL IMPLEMENTED: portable async native folder picker bound to the Start Center's project path, cancellation retains the typed value, Unicode/directory validation and a shared chooser busy gate. Rust/unit/real GUI and Windows installed package verification tracked in `docs/qa/project-folder-picker-2026-10-31.md`. |
 | 04 | H | Durable selected source/dataset context | Activity change preserves selected research object |
 | 05 | H | Command center action hints | Search explains action and disabled reason |
 | 06 | M | Navigation history with focus return | Back/forward restores object and caret |

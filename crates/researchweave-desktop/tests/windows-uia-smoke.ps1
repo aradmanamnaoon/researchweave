@@ -421,6 +421,49 @@ try {
     $title = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project title'
     ([System.Windows.Automation.ValuePattern]$path.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($temporary)
     ([System.Windows.Automation.ValuePattern]$title.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue("UIA Persian $persianWord")
+    $folderBrowse = Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose project folder with native dialog'
+    if (-not $folderBrowse.Current.IsEnabled) { throw 'Native project folder selection is disabled' }
+    $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+    $beforeFolderDialog = @($desktop.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.NativeWindowHandle })
+    Invoke-AccessibleButton $window 'Choose project folder with native dialog'
+    $folderDialog = $null
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        foreach ($candidate in $desktop.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )) {
+            $candidateInfo = $candidate.Current
+            if ($candidateInfo.ControlType -eq [System.Windows.Automation.ControlType]::Window -and
+                $candidateInfo.NativeWindowHandle -ne 0 -and
+                $beforeFolderDialog -notcontains $candidateInfo.NativeWindowHandle -and
+                ($candidateInfo.ProcessId -eq $p.Id -or $candidateInfo.ClassName -eq '#32770') -and
+                -not $candidateInfo.IsOffscreen) {
+                $folderDialog = $candidate
+                break
+            }
+        }
+        if ($folderDialog) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $folderDialog) { throw 'Native project folder button did not open the real Windows folder chooser' }
+    $folderDialog.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+    $folderCanceledCleanly = $false
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        $path = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project path'
+        $value = ([System.Windows.Automation.ValuePattern]$path.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose project folder with native dialog').Current.IsEnabled
+        if ($ready -and $value -eq $temporary) {
+            $folderCanceledCleanly = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $folderCanceledCleanly) { throw 'Canceling native project folder selection changed the typed path or left the dialog busy' }
+    Write-Output 'PASS: native project folder dialog opens, cancels and preserves the typed path'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Create project').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 600
     if (-not (Test-Path (Join-Path $temporary 'data/project.sqlite'))) { throw 'Create via UIA did not create SQLite project' }

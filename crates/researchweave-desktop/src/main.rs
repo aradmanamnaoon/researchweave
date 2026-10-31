@@ -3297,6 +3297,42 @@ fn chosen_local_file_path(path: &Path) -> Result<String, String> {
         .ok_or_else(|| "Selected file path cannot be represented as Unicode".into())
 }
 
+fn chosen_local_project_folder(path: &Path) -> Result<String, String> {
+    if !path.is_absolute() {
+        return Err("Native project chooser did not return an absolute folder".into());
+    }
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("Selected project folder is unavailable: {error}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err("Choose a real project folder rather than a symbolic link".into());
+    }
+    if !metadata.is_dir() {
+        return Err("Selected project location must be a directory".into());
+    }
+    // ProjectStore::create refuses existing roots to prevent overwriting
+    // unrelated files. Native folder dialogs necessarily return existing
+    // directories, so select that directory only for a real project; when
+    // creating, propose a fresh child beneath the chosen parent.
+    let selected = if path.join("data").join("project.sqlite").is_file() {
+        path.to_path_buf()
+    } else {
+        let mut candidate = None;
+        for _ in 0..8 {
+            let child = path.join(format!("ResearchWeave-{}", Uuid::new_v4().simple()));
+            if !child.exists() {
+                candidate = Some(child);
+                break;
+            }
+        }
+        candidate.ok_or_else(|| "Could not prepare a new project folder".to_owned())?
+    };
+    selected
+        .as_path()
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "Selected project folder path is not valid Unicode".into())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(args) = std::env::args().nth(1) {
         if args == "--smoke-native-workflow" {
@@ -3400,6 +3436,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(error) = slint::spawn_local(task) {
                 ui.set_local_file_dialog_busy(false);
                 ui.set_status(format!("Native file chooser unavailable: {error}").into());
+            }
+        }
+    });
+    app.on_choose_project_folder({
+        let weak = app.as_weak();
+        move || {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            if ui.get_local_file_dialog_busy() {
+                return;
+            }
+            ui.set_local_file_dialog_busy(true);
+            let weak_task = weak.clone();
+            let task = async move {
+                let selected = rfd::AsyncFileDialog::new().pick_folder().await;
+                if let Some(ui) = weak_task.upgrade() {
+                    match selected {
+                        Some(selected) => match chosen_local_project_folder(selected.path()) {
+                            Ok(folder) => {
+                                let existing = selected
+                                    .path()
+                                    .join("data")
+                                    .join("project.sqlite")
+                                    .is_file();
+                                ui.set_project_local_path(folder.into());
+                                ui.set_status(
+                                    if existing {
+                                        "Existing local project selected. Choose Open existing."
+                                    } else {
+                                        "New child project path prepared inside the selected parent folder. Review the path, then choose Create at custom path."
+                                    }.into(),
+                                );
+                            }
+                            Err(error) => ui.set_status(error.into()),
+                        },
+                        None => ui.set_status(
+                            "Folder selection canceled; existing project path preserved".into(),
+                        ),
+                    }
+                    ui.set_local_file_dialog_busy(false);
+                }
+            };
+            if let Err(error) = slint::spawn_local(task) {
+                ui.set_local_file_dialog_busy(false);
+                ui.set_status(format!("Native project folder chooser unavailable: {error}").into());
             }
         }
     });
@@ -7776,6 +7858,47 @@ mod tests {
             chosen_local_file_path(&absolute).unwrap(),
             absolute.to_str().unwrap()
         );
+    }
+
+    #[test]
+    fn native_project_folder_selection_rejects_invalid_locations_without_mutation() {
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let temp = std::env::temp_dir().join(format!(
+            "researchweave-native-project-picker-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&temp).unwrap();
+        let _cleanup = Cleanup(temp.clone());
+        assert!(chosen_local_project_folder(Path::new("relative/folder")).is_err());
+        assert!(chosen_local_project_folder(&temp.join("missing")).is_err());
+        let file = temp.join("regular-file");
+        std::fs::write(&file, b"keep original bytes").unwrap();
+        assert!(chosen_local_project_folder(&file).is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), b"keep original bytes");
+        let unicode = temp.join("پژوهش");
+        std::fs::create_dir(&unicode).unwrap();
+        let prepared = PathBuf::from(chosen_local_project_folder(&unicode).unwrap());
+        assert_eq!(prepared.parent(), Some(unicode.as_path()));
+        assert!(!prepared.exists(), "the chooser must not create a project");
+        let preexisting = unicode.join("data");
+        std::fs::create_dir(&preexisting).unwrap();
+        std::fs::write(preexisting.join("project.sqlite"), b"existing").unwrap();
+        assert_eq!(
+            chosen_local_project_folder(&unicode).unwrap(),
+            unicode.to_str().unwrap(),
+            "an existing project folder must never be silently nested"
+        );
+        #[cfg(unix)]
+        {
+            let symlink = temp.join("linked-folder");
+            std::os::unix::fs::symlink(&unicode, &symlink).unwrap();
+            assert!(chosen_local_project_folder(&symlink).is_err());
+        }
     }
 
     #[test]
