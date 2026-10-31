@@ -5,6 +5,7 @@ export struct QuickNote {
     id: string,
     title: string,
     body: string,
+    has-unchecked-item: bool,
     tags: string,
     color: string,
     revision: int,
@@ -273,6 +274,8 @@ export component MainWindow inherits Window {
     callback notebook-draft-edited(string);
     callback refresh-quick-notes(string, string);
     callback save-quick-note(string, int, string, string, string, string, bool, bool);
+    callback prepare-quick-note-checklist();
+    callback complete-next-quick-note(string, int, string, string, string, string, bool, bool);
     callback manuscript-draft-edited(string, string, string, string);
     callback preview-manuscript-replace(string, string);
     callback apply-manuscript-replace();
@@ -1510,6 +1513,11 @@ export component MainWindow inherits Window {
                                                 root.quick-note-archived = false;
                                             }
                                         }
+                                        Button {
+                                            text: "Checklist";
+                                            accessible-label: "Convert quick note draft to checklist";
+                                            clicked => { root.prepare-quick-note-checklist(); }
+                                        }
                                     }
                                     Text { text: root.quick-note-results; accessible-label: "Quick note operation result " + root.quick-note-results; color: Theme.muted-ink; wrap: word-wrap; }
                                     HorizontalLayout {
@@ -1570,6 +1578,13 @@ export component MainWindow inherits Window {
                                                     text: note.archived ? "Restore" : "Archive";
                                                     accessible-label: (note.archived ? "Restore " : "Archive ") + note.title;
                                                     clicked => { root.save-quick-note(note.id,note.revision,note.title,note.body,note.tags,note.color,note.pinned,!note.archived); }
+                                                }
+                                                if note.has-unchecked-item: Button {
+                                                    text: "Done next";
+                                                    accessible-label: "Complete next item in quick note " + note.title;
+                                                    clicked => {
+                                                        root.complete-next-quick-note(note.id,note.revision,note.title,note.body,note.tags,note.color,note.pinned,note.archived);
+                                                    }
                                                 }
                                             }
                                         }

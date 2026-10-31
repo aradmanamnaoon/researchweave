@@ -308,6 +308,24 @@ def main() -> int:
             raise RuntimeError("Search by note tag did not retrieve the persisted card")
         print("QUICK_NOTE_PIN_ARCHIVE_RESTORE_AND_TAG_SEARCH_OK")
         audit(app, "quick-note-filtered", output)
+        if not activate(app, "Edit quick note Synthetic MRI memo"):
+            raise RuntimeError("Cannot reopen quick note for checklist editing")
+        if not activate(app, "Convert quick note draft to checklist"):
+            raise RuntimeError("Checklist conversion control missing")
+        if "- [ ] Research MRI note" not in read_field(app, "Quick note body"):
+            raise RuntimeError("Checklist conversion did not update the real draft")
+        if not activate(app, "Save selected quick note"):
+            raise RuntimeError("Cannot persist converted checklist note")
+        time.sleep(0.3)
+        if not activate(app, "Complete next item in quick note Synthetic MRI memo"):
+            raise RuntimeError("Persisted checklist lacks interactive completion")
+        time.sleep(0.3)
+        if nodes_named(app, "Complete next item in quick note Synthetic MRI memo"):
+            raise RuntimeError("Checked item was not updated or action was not removed")
+        if not any("- [x] Research MRI note" in (node.name or "") for node, _ in walk(app)):
+            raise RuntimeError("Checklist completion did not persist into displayed card")
+        print("QUICK_NOTE_CHECKLIST_PERSISTED_COMPLETION_OK")
+        audit(app, "quick-note-checklist-completed", output)
         if not activate(app, "Show long form project notebook"):
             raise RuntimeError("Long form project notebook view cannot be opened")
         time.sleep(0.25)
@@ -656,6 +674,11 @@ def main() -> int:
         time.sleep(0.3)
         if not nodes_named(app, "Edit quick note Synthetic MRI memo"):
             raise RuntimeError("Saved quick-note card missing after reopening project A")
+        if not any("- [x] Research MRI note" in (node.name or "") for node, _ in walk(app)):
+            raise RuntimeError("Checklist completion was not restored from project history")
+        if nodes_named(app, "Complete next item in quick note Synthetic MRI memo"):
+            raise RuntimeError("Completed checklist reappeared as an unfinished item after reopen")
+        print("QUICK_NOTE_CHECKLIST_REOPEN_PERSISTENCE_OK")
         print("QUICK_NOTE_PERSISTED_AFTER_REOPEN_OK")
         if not nodes_named(app, "Project notebook text"):
             if not activate(app, "Notebook"):

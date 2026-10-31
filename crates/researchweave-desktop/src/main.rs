@@ -35,6 +35,7 @@ mod durable_activity;
 mod manuscript_search;
 mod pdf_engine;
 mod physical_export;
+mod quick_note_checklist;
 mod writing_autosave;
 
 fn flush_writing_drafts(
@@ -380,6 +381,9 @@ fn refresh_quick_note_cards(
                 id: row["id"].as_str().unwrap_or("").into(),
                 title: row["title"].as_str().unwrap_or("").into(),
                 body: row["body"].as_str().unwrap_or("").into(),
+                has_unchecked_item: quick_note_checklist::has_unchecked(
+                    row["body"].as_str().unwrap_or(""),
+                ),
                 tags: labels.into(),
                 color: row["color"].as_str().unwrap_or("paper").into(),
                 revision: row["revision"].as_i64().unwrap_or(0) as i32,
@@ -3491,6 +3495,43 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_quick_note_results(format!("Quick note not saved: {error}").into());
                         ui.set_status("Quick note not saved; edit remains available".into());
                     }
+                }
+            }
+        }
+    });
+    app.on_prepare_quick_note_checklist({
+        let weak = app.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                match quick_note_checklist::prepare(ui.get_quick_note_body().as_str()) {
+                    Ok(body) => {
+                        ui.set_quick_note_body(body.into());
+                        ui.set_quick_note_results(
+                            "Checklist prepared. Review and save to record it in the project."
+                                .into(),
+                        );
+                    }
+                    Err(error) => ui.set_quick_note_results(error.into()),
+                }
+            }
+        }
+    });
+    app.on_complete_next_quick_note({
+        let weak = app.as_weak();
+        move |id, revision, title, body, tags, color, pinned, archived| {
+            if let Some(ui) = weak.upgrade() {
+                match quick_note_checklist::complete_next(body.as_str()) {
+                    Ok(completed) => ui.invoke_save_quick_note(
+                        id,
+                        revision,
+                        title,
+                        completed.into(),
+                        tags,
+                        color,
+                        pinned,
+                        archived,
+                    ),
+                    Err(error) => ui.set_quick_note_results(error.into()),
                 }
             }
         }
