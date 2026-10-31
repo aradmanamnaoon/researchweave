@@ -119,6 +119,94 @@ fn restore_writing_drafts(
     Ok(())
 }
 
+/// Clear every displayed value whose scientific or privacy context belongs to
+/// the previously active project.  Switching projects must never leave results
+/// from one project looking like they were computed for another.
+fn reset_project_visible_state(ui: &MainWindow) {
+    ui.set_data_local_path("".into());
+    ui.set_recent_dataset_id("".into());
+    ui.set_recent_dataset_revision("".into());
+    ui.set_analysis_results(
+        "Import an immutable dataset revision or inspect saved analysis data.".into(),
+    );
+    ui.set_statistics_result_title("No analysis run yet".into());
+    ui.set_statistics_result_primary(
+        "Choose a method and run it against an immutable dataset revision.".into(),
+    );
+    ui.set_statistics_result_secondary("".into());
+    ui.set_statistics_result_provenance("".into());
+    ui.set_show_statistics_technical_details(false);
+    ui.set_variable_results(
+        "Inspect variable metadata, missingness and quality before creating a revised immutable dataset."
+            .into(),
+    );
+    ui.set_analysis_report_results(
+        "Persist verified statistical outputs, reload them by digest, and compose deterministic provenance reports."
+            .into(),
+    );
+    ui.set_mixed_methods_results(
+        "Combine an immutable dataset revision with persisted qualitative case mappings. Caller-supplied coding provenance is not accepted."
+            .into(),
+    );
+    ui.set_qualitative_results(
+        "Inspect the codebook before editing; writes require the current content hash.".into(),
+    );
+    ui.set_library_results("Open a project, then refresh its sources.".into());
+    ui.set_research_summary(
+        "Open a project to inspect its recorded research question and design.".into(),
+    );
+    ui.set_project_metadata_results(
+        "Open a project, enter only fields you want to change, and preview before recording."
+            .into(),
+    );
+    ui.set_question_results("Preview a structured question before recording it.".into());
+    ui.set_protocol_results("Preview a protocol before recording it.".into());
+    ui.set_protocol_export_receipt("".into());
+    ui.set_protocol_export_id("".into());
+    ui.set_reference_results("Register or inspect project references.".into());
+    ui.set_review_results("Use persisted references to build and screen a review.".into());
+    ui.set_extraction_results(
+        "Create a versioned extraction schema, then record validated values for a review record."
+            .into(),
+    );
+    ui.set_writing_results("Preview and save a versioned manuscript section.".into());
+    ui.set_notebook_results(
+        "Save a revisioned project notebook, inspect history, or export Markdown.".into(),
+    );
+    ui.set_notebook_draft("".into());
+    ui.set_manuscript_draft_id("".into());
+    ui.set_manuscript_draft_section("".into());
+    ui.set_manuscript_draft_citations("".into());
+    ui.set_manuscript_draft_body("".into());
+    ui.set_agent_results(
+        "Durable project-scoped assistant conversations and prompt templates are available offline."
+            .into(),
+    );
+    ui.set_agent_action_results(
+        "Stage an offline retrieval tool proposal to review its exact operation, effect and fingerprint before approval."
+            .into(),
+    );
+    ui.set_provider_results(
+        "Provider validation is offline-only; remote egress is disabled until explicitly configured."
+            .into(),
+    );
+    ui.set_diagnostics_results("Run structural diagnostics for the open project.".into());
+    ui.set_project_activity_results(
+        "Local project event provenance is not authenticated identity evidence.".into(),
+    );
+    ui.set_backup_results("Open a project, then choose an absolute archive path.".into());
+    ui.set_recovery_results("Restore always creates a new project directory.".into());
+    ui.set_pdf_image(Image::default());
+    ui.set_pdf_local_path("".into());
+    ui.set_pdf_status("Choose a local PDF file".into());
+    ui.set_pdf_matches(0);
+    ui.set_pdf_page_number(1);
+    ui.set_pdf_page_count(0);
+    ui.set_pdf_highlight_visible(false);
+    ui.set_pdf_render_width(0.);
+    ui.set_pdf_render_height(0.);
+}
+
 fn resume_recovered_writing(
     timer: &slint::Timer,
     project: &Path,
@@ -1848,6 +1936,29 @@ fn analysis_execute_pending(
     Ok(result)
 }
 
+/// A recent dataset shortcut must come from a successful, persisted import,
+/// never from a preview, attempted import, or an arbitrary JSON message.
+fn imported_dataset_context(result: &serde_json::Value) -> Option<(String, String)> {
+    if result.get("status").and_then(serde_json::Value::as_str) != Some("ok") {
+        return None;
+    }
+    let id_raw = result
+        .pointer("/data/dataset_id")
+        .and_then(serde_json::Value::as_str)?;
+    let revision_raw = result
+        .pointer("/data/revision")
+        .and_then(serde_json::Value::as_str)?;
+    if id_raw.chars().any(char::is_control) || revision_raw.chars().any(char::is_control) {
+        return None;
+    }
+    let id = id_raw.trim();
+    let revision = revision_raw.trim();
+    if id.is_empty() || revision.is_empty() {
+        return None;
+    }
+    Some((id.to_owned(), revision.to_owned()))
+}
+
 fn analysis_read_at(
     project_path: &Path,
     operation: &str,
@@ -3338,6 +3449,29 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pending_ai: Rc<RefCell<Option<PendingAiAction>>> = Rc::new(RefCell::new(None));
     let selected_agent_action: Rc<RefCell<Option<SelectedAgentAction>>> =
         Rc::new(RefCell::new(None));
+    // A staged operation belongs to the project where it was previewed.
+    // Invalidating all pending actions on project switch prevents a stale
+    // confirmation from being inadvertently applied to another project.
+    let invalidate_project_previews = Rc::new({
+        let pending_project_metadata = pending_project_metadata.clone();
+        let pending_evidence = pending_evidence.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        let pending_library = pending_library.clone();
+        let pending_analysis = pending_analysis.clone();
+        let pending_analysis_command = pending_analysis_command.clone();
+        let pending_ai = pending_ai.clone();
+        let selected_agent_action = selected_agent_action.clone();
+        move || {
+            pending_project_metadata.borrow_mut().take();
+            pending_evidence.borrow_mut().take();
+            pending_physical_export.borrow_mut().take();
+            pending_library.borrow_mut().take();
+            pending_analysis.borrow_mut().take();
+            pending_analysis_command.borrow_mut().take();
+            pending_ai.borrow_mut().take();
+            selected_agent_action.borrow_mut().take();
+        }
+    });
     app.on_preview_question({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -4261,6 +4395,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 match result {
                     Ok(executed) => {
+                        if let Some((id, revision)) = imported_dataset_context(&executed) {
+                            ui.set_recent_dataset_id(id.into());
+                            ui.set_recent_dataset_revision(revision.into());
+                        }
                         ui.set_analysis_results(
                             format!(
                                 "Immutable dataset revision imported through approved local-write command:\n{}",
@@ -6566,15 +6704,33 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_restore_backup({
         let weak = app.as_weak();
         let active_project = active_project.clone();
+        let invalidate_project_previews = invalidate_project_previews.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
         move |encrypted, archive, destination, password| {
             if let Some(ui) = weak.upgrade() {
                 match restore_backup(encrypted, &archive, &destination, &password) {
                     Ok((info, path, message)) => {
-                        *active_project.borrow_mut() = Some(path);
+                        timer.stop();
+                        invalidate_project_previews();
+                        *active_project.borrow_mut() = Some(path.clone());
+                        reset_project_visible_state(&ui);
+                        let draft_warning = restore_writing_drafts(&ui, &path, &drafts).err();
+                        if draft_warning.is_none() {
+                            resume_recovered_writing(&timer, &path, drafts.clone(), weak.clone());
+                        }
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_recovery_results(message.clone().into());
-                        ui.set_status(message.into());
+                        ui.set_status(
+                            match draft_warning {
+                                Some(error) => {
+                                    format!("{message}; draft recovery warning: {error}")
+                                }
+                                None => message,
+                            }
+                            .into(),
+                        );
                         ui.set_page(1);
                     }
                     Err(error) => {
@@ -6813,7 +6969,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
-        let pending_physical_export = pending_physical_export.clone();
+        let invalidate_project_previews = invalidate_project_previews.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |path, title| {
@@ -6822,15 +6978,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(info) => {
                         timer.stop();
-                        pending_physical_export.borrow_mut().take();
-                        ui.set_protocol_export_id("".into());
-                        ui.set_protocol_export_receipt("".into());
+                        invalidate_project_previews();
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
-                        if let Err(error) =
-                            restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
-                        {
-                            ui.set_status(error.into());
-                        } else {
+                        reset_project_visible_state(&ui);
+                        let draft_warning =
+                            restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts).err();
+                        if draft_warning.is_none() {
                             resume_recovered_writing(
                                 &timer,
                                 Path::new(path.as_str()),
@@ -6840,7 +6993,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project created".into());
+                        ui.set_status(
+                            match draft_warning {
+                                Some(error) => {
+                                    format!("Project created; draft recovery warning: {error}")
+                                }
+                                None => "Project created".into(),
+                            }
+                            .into(),
+                        );
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -6851,7 +7012,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_create_default_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
-        let pending_physical_export = pending_physical_export.clone();
+        let invalidate_project_previews = invalidate_project_previews.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |title| {
@@ -6859,26 +7020,35 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ui) = weak.upgrade() {
                 match result {
                     Ok(info) => {
-                        timer.stop();
-                        pending_physical_export.borrow_mut().take();
-                        ui.set_protocol_export_id("".into());
-                        ui.set_protocol_export_receipt("".into());
-                        *active_project.borrow_mut() = find_managed_project(&info.id).ok();
-                        if let Some(project) = active_project.borrow().as_ref() {
-                            if let Err(error) = restore_writing_drafts(&ui, project, &drafts) {
-                                ui.set_status(error.into());
-                            } else {
-                                resume_recovered_writing(
-                                    &timer,
-                                    project,
-                                    drafts.clone(),
-                                    weak.clone(),
+                        let project = match find_managed_project(&info.id) {
+                            Ok(path) => path,
+                            Err(error) => {
+                                ui.set_status(
+                                    format!("Project created but its managed folder could not be reopened: {error}").into(),
                                 );
+                                return;
                             }
+                        };
+                        timer.stop();
+                        invalidate_project_previews();
+                        *active_project.borrow_mut() = Some(project.clone());
+                        reset_project_visible_state(&ui);
+                        let draft_warning =
+                            restore_writing_drafts(&ui, &project, &drafts).err();
+                        if draft_warning.is_none() {
+                            resume_recovered_writing(
+                                &timer,
+                                &project,
+                                drafts.clone(),
+                                weak.clone(),
+                            );
                         }
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project created in managed local storage".into());
+                        ui.set_status(match draft_warning {
+                            Some(error) => format!("Project created; draft recovery warning: {error}"),
+                            None => "Project created in managed local storage".into(),
+                        }.into());
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -6889,7 +7059,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_open_project({
         let weak = app.as_weak();
         let active_project = active_project.clone();
-        let pending_physical_export = pending_physical_export.clone();
+        let invalidate_project_previews = invalidate_project_previews.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |path| {
@@ -6898,15 +7068,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match result {
                     Ok(info) => {
                         timer.stop();
-                        pending_physical_export.borrow_mut().take();
-                        ui.set_protocol_export_id("".into());
-                        ui.set_protocol_export_receipt("".into());
+                        invalidate_project_previews();
                         *active_project.borrow_mut() = Some(PathBuf::from(path.as_str()));
-                        if let Err(error) =
-                            restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts)
-                        {
-                            ui.set_status(error.into());
-                        } else {
+                        reset_project_visible_state(&ui);
+                        let draft_warning =
+                            restore_writing_drafts(&ui, Path::new(path.as_str()), &drafts).err();
+                        if draft_warning.is_none() {
                             resume_recovered_writing(
                                 &timer,
                                 Path::new(path.as_str()),
@@ -6916,7 +7083,15 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         ui.set_project_title(info.title.into());
                         ui.set_project_revision(info.revision as i32);
-                        ui.set_status("Project opened".into());
+                        ui.set_status(
+                            match draft_warning {
+                                Some(error) => {
+                                    format!("Project opened; draft recovery warning: {error}")
+                                }
+                                None => "Project opened".into(),
+                            }
+                            .into(),
+                        );
                         ui.set_page(1);
                     }
                     Err(error) => ui.set_status(error.into()),
@@ -6970,6 +7145,27 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn recent_dataset_shortcut_requires_a_successfully_persisted_import() {
+        let imported = serde_json::json!({
+            "status":"ok",
+            "data":{"dataset_id":"dataset-128","revision":"abcdef012345"}
+        });
+        assert_eq!(
+            imported_dataset_context(&imported),
+            Some(("dataset-128".into(), "abcdef012345".into()))
+        );
+        for result in [
+            serde_json::json!({"status":"error","data":{"dataset_id":"wrong","revision":"x"}}),
+            serde_json::json!({"status":"ok","data":{"preview":true,"would_import":{"dataset_id":"preview","revision":"x"}}}),
+            serde_json::json!({"status":"ok","data":{"dataset_id":"dataset-128"}}),
+            serde_json::json!({"status":"ok","data":{"dataset_id":"   ","revision":"x"}}),
+            serde_json::json!({"status":"ok","data":{"dataset_id":"dataset-128","revision":"\ncontrol"}}),
+        ] {
+            assert_eq!(imported_dataset_context(&result), None, "{result}");
+        }
+    }
 
     #[test]
     fn native_file_dialogs_are_explicitly_scoped_to_supported_read_imports() {

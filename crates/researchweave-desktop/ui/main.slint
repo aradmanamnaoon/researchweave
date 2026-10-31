@@ -187,6 +187,10 @@ export component MainWindow inherits Window {
     in-out property <string> pdf-status: "Choose a local PDF file";
     in-out property <string> pdf-local-path: "";
     in-out property <string> data-local-path: "";
+    // A successful import establishes a project-scoped immutable dataset
+    // context for the next variable inspection or statistical analysis.
+    in-out property <string> recent-dataset-id: "";
+    in-out property <string> recent-dataset-revision: "";
     in-out property <bool> local-file-dialog-busy: false;
     in-out property <int> pdf-matches: 0;
     in-out property <int> pdf-page-number: 1;
@@ -214,6 +218,7 @@ export component MainWindow inherits Window {
     in-out property <string> statistics-result-primary: "Choose a method and run it against an immutable dataset revision.";
     in-out property <string> statistics-result-secondary: "";
     in-out property <string> statistics-result-provenance: "";
+    in-out property <bool> show-statistics-technical-details: false;
     in-out property <string> variable-results: "Inspect variable metadata, missingness and quality before creating a revised immutable dataset.";
     in-out property <string> analysis-report-results: "Persist verified statistical outputs, reload them by digest, and compose deterministic provenance reports.";
     in-out property <string> mixed-methods-results: "Combine an immutable dataset revision with persisted qualitative case mappings. Caller-supplied coding provenance is not accepted.";
@@ -837,6 +842,11 @@ export component MainWindow inherits Window {
                                 Text { text: "Current project"; color: Theme.muted-ink; font-size: 11px * Theme.ui-scale / 100; }
                                 Text { text: root.project-title; color: Theme.ink; font-size: 18px * Theme.ui-scale / 100; font-weight: 600; }
                                 Text { text: "Revision " + root.project-revision + " · local workspace"; color: Theme.muted-ink; }
+                                Button {
+                                    text: "Create or open another project";
+                                    accessible-label: "Open Start Center to switch projects";
+                                    clicked => { root.page = 0; }
+                                }
                                 Button {
                                     text: "Edit project metadata";
                                     accessible-label: "Open project metadata editor";
@@ -1509,11 +1519,12 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 12: Rectangle {
                         background: Theme.raised;
+                        ScrollView {
                         VerticalLayout {
                             padding: 24px;
                             spacing: 10px;
                             Text { text: "Data view"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
-                            Text { text: "Import CSV, TSV, XLSX, ODS, Parquet, SPSS SAV/ZSAV or Stata DTA into an immutable project-local dataset revision. The file hash is bound to Preview → Import."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Text { text: "Import → inspect → prepare variables → analyze. Each dataset is an immutable project revision; importing is bound to the previewed file hash."; color: Theme.muted-ink; wrap: word-wrap; }
                             HorizontalLayout {
                                 spacing: 8px;
                                 analysis-import-path := LineEdit {
@@ -1534,14 +1545,53 @@ export component MainWindow inherits Window {
                                 Button { text: "Preview import"; accessible-label: "Preview analysis import"; clicked => { root.preview-analysis-import(analysis-import-path.text); } }
                                 Button { text: "Import previewed data"; accessible-label: "Import previewed analysis data"; clicked => { root.apply-analysis-preview(); } }
                             }
+                            if root.recent-dataset-id != "" && root.recent-dataset-revision != "": Rectangle {
+                                min-height: 105px;
+                                background: Theme.accent-subtle;
+                                border-color: Theme.accent;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 8px;
+                                    Text { text: "Recently imported dataset"; font-weight: 700; color: Theme.ink; }
+                                    Text {
+                                        text: "ID " + root.recent-dataset-id + " · revision " + root.recent-dataset-revision;
+                                        accessible-label: "Recently imported dataset identifier and immutable revision";
+                                        color: Theme.ink;
+                                        wrap: word-wrap;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { text: "Inspect variables"; accessible-label: "Inspect variables in recently imported dataset"; clicked => { root.page = 13; } }
+                                        Button { text: "Choose analysis"; accessible-label: "Analyze recently imported dataset"; clicked => { root.page = 14; } }
+                                    }
+                                }
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
-                                analysis-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Analysis dataset ID"; }
-                                analysis-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Analysis dataset revision"; }
+                                analysis-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Analysis dataset ID"; text: root.recent-dataset-id; }
+                                analysis-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Analysis dataset revision"; text: root.recent-dataset-revision; }
                                 Button { text: "Inspect dataset"; accessible-label: "Inspect analysis dataset"; clicked => { root.inspect-dataset(analysis-dataset-id.text, analysis-revision.text); } }
                             }
-                            Text { text: root.analysis-results; accessible-label: "Analysis operation result " + root.analysis-results; wrap: word-wrap; color: Theme.ink; }
+                            Text { text: "Import and inspection details"; font-weight: 700; color: Theme.muted-ink; }
+                            Rectangle {
+                                min-height: 125px;
+                                preferred-height: 175px;
+                                max-height: 220px;
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                ScrollView {
+                                    VerticalLayout {
+                                        padding: 10px;
+                                        Text { text: root.analysis-results; accessible-label: "Analysis operation result " + root.analysis-results; wrap: word-wrap; color: Theme.ink; }
+                                    }
+                                }
+                            }
                             Rectangle { vertical-stretch: 1; }
+                        }
                         }
                     }
                     if root.page == 13: Rectangle {
@@ -1558,8 +1608,8 @@ export component MainWindow inherits Window {
                                 }
                                 HorizontalLayout {
                                     spacing: 8px;
-                                    variable-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Variable View dataset ID"; }
-                                    variable-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Variable View dataset revision"; }
+                                    variable-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Variable View dataset ID"; text: root.recent-dataset-id; }
+                                    variable-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Variable View dataset revision"; text: root.recent-dataset-revision; }
                                     Button { text: "Inspect variables"; accessible-label: "Inspect variable metadata and quality"; clicked => { root.inspect-variable-view(variable-dataset-id.text, variable-revision.text); } }
                                 }
                                 Rectangle {
@@ -1610,8 +1660,8 @@ export component MainWindow inherits Window {
                                 }
                                 HorizontalLayout {
                                     spacing: 8px;
-                                    stats-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Statistics dataset ID"; }
-                                    stats-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Statistics dataset revision"; }
+                                    stats-dataset-id := LineEdit { placeholder-text: "Dataset ID"; accessible-label: "Statistics dataset ID"; text: root.recent-dataset-id; }
+                                    stats-revision := LineEdit { placeholder-text: "Dataset revision"; accessible-label: "Statistics dataset revision"; text: root.recent-dataset-revision; }
                                 }
 
                                 Rectangle { height: 1px; background: Theme.divider; }
@@ -1693,13 +1743,31 @@ export component MainWindow inherits Window {
                                 Text { text: root.statistics-result-primary; accessible-label: "Statistics result primary " + root.statistics-result-primary; color: Theme.accent; font-size: 16px * Theme.ui-scale / 100; font-weight: 700; wrap: word-wrap; }
                                 if root.statistics-result-secondary != "": Text { text: root.statistics-result-secondary; accessible-label: "Statistics result secondary " + root.statistics-result-secondary; color: Theme.ink; wrap: word-wrap; }
                                 if root.statistics-result-provenance != "": Text { text: root.statistics-result-provenance; accessible-label: "Statistics result provenance " + root.statistics-result-provenance; color: Theme.muted-ink; font-size: 12px * Theme.ui-scale / 100; wrap: word-wrap; }
-                                Text { text: "Verified payload"; color: Theme.muted-ink; font-size: 12px * Theme.ui-scale / 100; font-weight: 700; }
-                                Text {
-                                    text: root.analysis-results;
-                                    accessible-label: "Statistics operation result " + root.analysis-results;
-                                    wrap: word-wrap;
-                                    color: Theme.muted-ink;
-                                    font-size: 11px * Theme.ui-scale / 100;
+                                Button {
+                                    text: root.show-statistics-technical-details ? "Hide verified calculation details" : "Show verified calculation details";
+                                    accessible-label: root.show-statistics-technical-details ? "Hide statistical raw data and provenance details" : "Show statistical raw data and provenance details";
+                                    clicked => { root.show-statistics-technical-details = !root.show-statistics-technical-details; }
+                                }
+                                if root.show-statistics-technical-details: Rectangle {
+                                    min-height: 120px;
+                                    preferred-height: 175px;
+                                    max-height: 230px;
+                                    background: Theme.surface;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    border-radius: Theme.panel-radius;
+                                    ScrollView {
+                                        VerticalLayout {
+                                            padding: 10px;
+                                            Text {
+                                                text: root.analysis-results;
+                                                accessible-label: "Statistics operation result " + root.analysis-results;
+                                                wrap: word-wrap;
+                                                color: Theme.muted-ink;
+                                                font-size: 11px * Theme.ui-scale / 100;
+                                            }
+                                        }
+                                    }
                                 }
                                 Rectangle { vertical-stretch: 1; }
                             }
