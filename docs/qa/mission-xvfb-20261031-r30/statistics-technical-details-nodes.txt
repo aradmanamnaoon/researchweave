@@ -30,7 +30,7 @@
 3:label:Analysis
 3:label:Statistics · Analysis
 3:label:Statistics
-3:label:Run tested native analyses against an immutable dataset revision. Results disclose complete-case counts, assumptions and warnings; ResearchWeave does not infer 
+3:label:Run tested native analyses against an immutable dataset revision. Results disclose complete-case counts, assumptions and warnings; ResearchWeave does not infer
 3:entry:Statistics dataset ID
 3:entry:Statistics dataset revision
 3:label:Choose analysis

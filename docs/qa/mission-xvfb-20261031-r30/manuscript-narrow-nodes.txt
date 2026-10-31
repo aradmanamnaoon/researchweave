@@ -23,7 +23,7 @@
 3:button:Record previewed manuscript section
 3:button:Inspect manuscript
 3:button:Toggle manuscript operation details
-3:label:Writing operation result {   "count": 1,   "manuscript_id": "synthetic-research",   "sections": [     {       "body": "Verified manuscript for isolated project 
+3:label:Writing operation result {   "count": 1,   "manuscript_id": "synthetic-research",   "sections": [     {       "body": "Verified manuscript for isolated project
 3:label:6 words · 50 characters
 3:button:Toggle manuscript find and replace
 3:button:Decrease manuscript editor display zoom

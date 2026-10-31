@@ -33,7 +33,7 @@
 3:button:Record previewed manuscript section
 3:button:Inspect manuscript
 3:button:Toggle manuscript operation details
-3:label:Writing operation result Preview ready. Section save will apply exactly this payload: {   "authoritative_revision": 7,   "preview": true,   "simulated_result": 
+3:label:Writing operation result Preview ready. Section save will apply exactly this payload: {   "authoritative_revision": 7,   "preview": true,   "simulated_result":
 3:label:6 words · 50 characters
 3:button:Toggle manuscript find and replace
 3:button:Decrease manuscript editor display zoom
