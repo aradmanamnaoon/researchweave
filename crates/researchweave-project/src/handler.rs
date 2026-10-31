@@ -1141,8 +1141,11 @@ fn recovery_status(root: &Path, arguments: &Value) -> Result<Value, String> {
         })
         .transpose()?;
     let revision_changed = latest_revision.is_some_and(|revision| revision != info.revision);
+    // A clock correction, copied timestamp or future-dated snapshot must not
+    // suppress the next recovery checkpoint indefinitely.
+    let future_timestamp = age_minutes.is_some_and(|age| age < -5.0);
     let age_due = age_minutes.is_some_and(|age| age >= max_age_minutes as f64);
-    let autosave_due = latest.is_none() || revision_changed || age_due;
+    let autosave_due = latest.is_none() || revision_changed || age_due || future_timestamp;
     let mut reasons = Vec::new();
     if latest.is_none() {
         reasons.push("no_verified_snapshot");
@@ -1152,6 +1155,9 @@ fn recovery_status(root: &Path, arguments: &Value) -> Result<Value, String> {
     }
     if age_due {
         reasons.push("snapshot_age_exceeded");
+    }
+    if future_timestamp {
+        reasons.push("snapshot_timestamp_in_future");
     }
     let journal = recovery_journal(
         root,
@@ -2457,6 +2463,32 @@ mod tests {
             .unwrap()
             .iter()
             .any(|reason| reason == "snapshot_age_exceeded"));
+
+        // Snapshot filesystem timestamps can be ahead of the trusted clock
+        // after a clock correction or copied recovery folder. Force another
+        // checkpoint rather than treating it as permanently fresh.
+        let future = router
+            .dispatch(
+                &Command::new(
+                    project,
+                    "project.recovery_status",
+                    json!({
+                        "project_id":project.to_string(),
+                        "now":"2000-01-01T00:00:00Z",
+                        "max_age_minutes":30
+                    }),
+                ),
+                None,
+                11.0,
+            )
+            .unwrap();
+        assert_eq!(future["data"]["autosave_due"], true);
+        assert_eq!(future["data"]["committed_edits_since_snapshot"], 0);
+        assert!(future["data"]["reasons"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|reason| reason == "snapshot_timestamp_in_future"));
     }
 
     #[test]
