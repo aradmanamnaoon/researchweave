@@ -427,6 +427,18 @@ function FocusByShiftTab(
     }
     throw "UIA element was not reachable by reverse keyboard traversal: $Type '$Name'"
 }
+function Read-F05ManuscriptDraft([System.Windows.Automation.AutomationElement]$Window) {
+    # The new F05 row can push the manuscript editor out of the AccessKit
+    # viewport. Traverse the actual native focus order in both directions.
+    # No fallback to assumed editor values or a simulated/hidden draft.
+    $reference = Named $Window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $citations = FocusByShiftTab $reference ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citations' 3
+    $metadata = $citations.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    $editor = FocusByTab $citations ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body' 35
+    $body = $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    $null = FocusByShiftTab $editor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID' 35
+    return @{ Body = $body; Citations = $metadata }
+}
 function Invoke-ProtocolFreezeButton(
     [System.Windows.Automation.AutomationElement]$Window,
     [string]$Name
@@ -484,6 +496,95 @@ function Invoke-ProtocolFreezeButton(
     }
     $action.SetFocus()
     $action.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+}
+function Read-VisibleProtocolFreezeReceipt(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$ExpectedProtocolId
+) {
+    # Slint's Protocol ScrollView omits off-viewport Text nodes from the
+    # Windows AccessKit tree. The inspected JSON is specifically bound to
+    # protocol-freeze-status in main.slint, *not* the bottom workbench status.
+    # Never infer frozen=true from a missing node or from a success toast.
+    $labelPrefix = 'Protocol local freeze status '
+    $receipt = $null
+    # The exact Inspect control is the focus anchor after the preceding real
+    # UIA InvokePattern action. Walk its actual parent chain to locate the
+    # native ScrollPattern rather than scroll an unrelated shell/sidebar.
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if (-not $focused -or
+        $focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button -or
+        $focused.Current.Name -ne 'Inspect local protocol freeze receipt') {
+        throw 'Protocol receipt inspection did not retain its native Inspect focus anchor'
+    }
+    $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
+    $scroll = $null
+    $ancestor = $focused
+    for ($level = 0; $level -lt 28 -and $ancestor; $level++) {
+        $candidate = $null
+        if ($ancestor.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$candidate)) {
+            $pattern = [System.Windows.Automation.ScrollPattern]$candidate
+            if ($pattern.Current.VerticallyScrollable) {
+                $scroll = $pattern
+                break
+            }
+        }
+        $ancestor = $walker.GetParent($ancestor)
+    }
+    if (-not $scroll) {
+        # Some AccessKit builds expose only keyboard-scrolling, not UIA
+        # ScrollPattern. Follow the documented *real* Protocol control order
+        # to its lower receipt-save row, without invoking a write action;
+        # PageDown is still bounded and the exact JSON remains mandatory.
+        $receiptPath = FocusByTab $focused ([System.Windows.Automation.ControlType]::Edit) 'Local protocol baseline receipt destination path' 12
+        $receiptSave = FocusByTab $receiptPath ([System.Windows.Automation.ControlType]::Button) 'Save verified local baseline receipt without overwrite' 4
+        Write-Host 'UIA_PROTOCOL_FREEZE_VIEWPORT_RECOVERY: native receipt-save focus, keyboard PageDown (no save invoked)'
+    }
+    # Inspect output lies below the local-freeze buttons, receipt save row,
+    # and the summary. Scroll the *same* containing native ScrollView in
+    # bounded increments; each step must prove progress in its own UIA
+    # ScrollPattern, and each read must come from the exact Text label.
+    for ($step = 0; $step -lt 48; $step++) {
+        foreach ($node in (Children $Window ([System.Windows.Automation.ControlType]::Text))) {
+            $name = $node.Current.Name
+            if (-not $name.StartsWith($labelPrefix, [StringComparison]::Ordinal)) { continue }
+            if ($null -ne $receipt) { throw 'More than one native protocol freeze JSON receipt is visible' }
+            $raw = $name.Substring($labelPrefix.Length)
+            try {
+                $receipt = $raw | ConvertFrom-Json -ErrorAction Stop
+            } catch {
+                throw "Native protocol freeze receipt is not valid JSON: $($_.Exception.Message)"
+            }
+        }
+        if ($null -ne $receipt) { break }
+        if (-not $scroll) {
+            if ($step -ge 20) { break }
+            [System.Windows.Forms.SendKeys]::SendWait('{PGDN}')
+            Start-Sleep -Milliseconds 120
+            continue
+        }
+        $before = $scroll.Current.VerticalScrollPercent
+        if ($before -ge 99.9) { break }
+        $scroll.Scroll(
+            [System.Windows.Automation.ScrollAmount]::NoAmount,
+            [System.Windows.Automation.ScrollAmount]::SmallIncrement
+        )
+        Start-Sleep -Milliseconds 100
+        $after = $scroll.Current.VerticalScrollPercent
+        if ($after -le $before) {
+            throw "Native Protocol ScrollView did not advance while locating the freeze JSON (at $before%)"
+        }
+    }
+    if ($null -eq $receipt) {
+        throw 'The actual persisted protocol freeze JSON was not exposed after bounded scrolling of the native Protocol ScrollView'
+    }
+    if ($receipt.protocol_id -cne $ExpectedProtocolId -or
+        $receipt.local_only -cne $true -or
+        $receipt.external_registration_verified -cne $false -or
+        $receipt.frozen -isnot [bool]) {
+        throw 'Persisted protocol freeze JSON failed exact identity, boolean state or local-only provenance validation'
+    }
+    Write-Host "UIA_PROTOCOL_FREEZE_JSON_READ: protocol=$ExpectedProtocolId frozen=$($receipt.frozen) via native Protocol ScrollView"
+    return $receipt
 }
 try {
     $p = Start-Process -FilePath $Exe -PassThru
@@ -740,13 +841,10 @@ try {
 
     Invoke-ProtocolFreezeButton $window 'Inspect local protocol freeze receipt'
     WaitForNameLike $window '*Local protocol baseline status verified against persisted history*' 10000
-    Start-Sleep -Milliseconds 160
-    $unfrozen = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($unfrozen | Where-Object { $_ -match '"frozen": false' })) {
-        throw 'Newly recorded protocol was incorrectly marked frozen before approval'
+    $unfrozen = Read-VisibleProtocolFreezeReceipt $window $protocolId
+    if ($unfrozen.frozen -cne $false -or $unfrozen.current_version -ne 1 -or
+        $null -ne $unfrozen.frozen_version -or $null -ne $unfrozen.snapshot_sha256) {
+        throw 'Persisted protocol freeze JSON reported a frozen or inconsistent baseline before approval'
     }
     Invoke-ProtocolFreezeButton $window 'Preview local protocol baseline freeze'
     Start-Sleep -Milliseconds 180
@@ -761,17 +859,13 @@ try {
     Start-Sleep -Milliseconds 260
     Invoke-ProtocolFreezeButton $window 'Inspect local protocol freeze receipt'
     WaitForNameLike $window '*Local protocol baseline status verified against persisted history*' 10000
-    Start-Sleep -Milliseconds 180
-    $frozenNames = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($frozenNames | Where-Object { $_ -match '"frozen": true' }) -or
-        -not ($frozenNames | Where-Object { $_ -match '"frozen_version": 1' }) -or
-        -not ($frozenNames | Where-Object { $_ -match '"external_registration_verified": false' }) -or
-        -not ($frozenNames | Where-Object { $_ -match '"snapshot_sha256": "[0-9a-f]{64}"' }) -or
-        -not ($frozenNames | Where-Object { $_ -match '"event_hash": "[0-9a-f]{64}"' })) {
-        throw 'Persisted local protocol freeze lacked immutable event/snapshot digests, exact baseline version or external-registry disclaimer'
+    $frozen = Read-VisibleProtocolFreezeReceipt $window $protocolId
+    if ($frozen.frozen -cne $true -or $frozen.frozen_version -ne 1 -or
+        $frozen.current_version -ne 1 -or $frozen.post_freeze_amendment_versions -ne 0 -or
+        $frozen.event_sequence -le 0 -or
+        $frozen.snapshot_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        $frozen.event_hash -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'Persisted protocol freeze JSON lacks exact immutable baseline version, event/snapshot digests or audit sequence'
     }
     Invoke-ProtocolFreezeButton $window 'Preview local protocol baseline freeze'
     Start-Sleep -Milliseconds 180
@@ -1512,7 +1606,7 @@ try {
     # debounce to complete BEFORE taking a baseline for preview-only behavior.
     Start-Sleep -Milliseconds 1100
     $titlePageRevisionBefore = Get-VisibleProjectRevision $window
-    $titlePageToggle = FocusByTab $manuscriptIdForTitle ([System.Windows.Automation.ControlType]::Button) 'Toggle offline manuscript title page builder' 5
+    $titlePageToggle = FocusByTab $manuscriptIdForTitle ([System.Windows.Automation.ControlType]::Button) 'Toggle offline manuscript title page builder' 12
     $collapsedTitleInputs = @((Children $window ([System.Windows.Automation.ControlType]::Edit)) | ForEach-Object { $_.Current.Name })
     if ($collapsedTitleInputs -contains 'Title page manuscript title') {
         throw 'F04 title page builder was unexpectedly open before the user expanded it'
@@ -1579,7 +1673,15 @@ try {
         @('Manuscript citations',$referenceId),
         @('Manuscript section body','Persisted UIA result supported by the registered reference.')
     )) {
-        $element = Named $window ([System.Windows.Automation.ControlType]::Edit) $pair[0]
+        $element = if ($pair[0] -eq 'Manuscript section body') {
+            # The newly inserted F05 controls shift the editor below the
+            # Slint/AccessKit viewport. Preserve the preexisting manuscript
+            # save assertion while reaching its REAL editor via keyboard.
+            $citationAnchor = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+            FocusByTab $citationAnchor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body' 35
+        } else {
+            Named $window ([System.Windows.Automation.ControlType]::Edit) $pair[0]
+        }
         ([System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($pair[1])
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview manuscript section').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -1821,6 +1923,129 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 220
+
+    # F05: run after the original F04, exports and Publishing gates so the
+    # approved stored manuscript used by those earlier checks is untouched.
+    # Reuse the same disposable project and persisted $referenceId registered
+    # through the real References native UI. Only UIA controls may mutate it.
+    $f05ManuscriptId = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID'
+    $f05Section = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section'
+    $f05Value = [System.Windows.Automation.ValuePattern]::Pattern
+    if ($f05ManuscriptId.GetCurrentPattern($f05Value).Current.Value -ne 'uia-paper' -or
+        $f05Section.GetCurrentPattern($f05Value).Current.Value -ne 'Results') {
+        throw 'F05 does not have the expected active manuscript and Results section'
+    }
+    # Deliberately seed duplicate metadata through the existing native editor
+    # and wait for its ordinary autosave BEFORE preview baseline. This proves
+    # Apply actually deduplicates; it is not just preserving one existing ID.
+    $f05CitationEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citations'
+    $f05CitationEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("$referenceId, $referenceId")
+    WaitForNameLike $window '*Manuscript autosaved to project revisions*' 15000
+    $f05InitialDraft = Read-F05ManuscriptDraft $window
+    $f05BodyBefore = $f05InitialDraft.Body
+    $f05CitationsBefore = $f05InitialDraft.Citations
+    if ($f05BodyBefore -notlike '*Persisted UIA result supported by the registered reference.*' -or
+        $f05CitationsBefore -cne "$referenceId, $referenceId") {
+        throw 'F05 existing manuscript draft and registered citation fixture do not match'
+    }
+    $f05RevisionBefore = Get-VisibleProjectRevision $window
+    $f05Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05UnknownId = '00000000-0000-4000-8000-000000000000'
+    if ($f05UnknownId -eq $referenceId) { throw 'F05 missing-reference fixture collided with the real registered ID' }
+    $f05Reference.GetCurrentPattern($f05Value).SetValue($f05UnknownId)
+    $f05Preview = FocusByTab $f05Reference ([System.Windows.Automation.ControlType]::Button) 'Preview verified project citation insertion' 3
+    $f05Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status Citation preview refused:*reference not found*' 10000
+    $f05InvalidDraft = Read-F05ManuscriptDraft $window
+    if ((Get-VisibleProjectRevision $window) -ne $f05RevisionBefore -or
+        $f05InvalidDraft.Body -cne $f05BodyBefore -or $f05InvalidDraft.Citations -cne $f05CitationsBefore) {
+        throw 'F05 missing reference preview mutated the manuscript or project revision'
+    }
+    $f05Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05Reference.GetCurrentPattern($f05Value).SetValue($referenceId)
+    $f05Preview = FocusByTab $f05Reference ([System.Windows.Automation.ControlType]::Button) 'Preview verified project citation insertion' 3
+    $f05Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status PREVIEW ONLY*Locally registered reference: UIA memory evidence (status: unverified)*' 10000
+    $f05Marker = "[@$referenceId]"
+    $f05SourceReceipt = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
+        Where-Object { $_.StartsWith('Manuscript citation insertion status PREVIEW ONLY') -and $_.Contains($f05Marker) })
+    if ($f05SourceReceipt.Count -eq 0) {
+        throw 'F05 preview did not disclose the exact marker of the trusted project reference'
+    }
+    $f05PreviewDraft = Read-F05ManuscriptDraft $window
+    if ($f05PreviewDraft.Body -cne $f05BodyBefore -or
+        $f05PreviewDraft.Citations -cne $f05CitationsBefore -or
+        (Get-VisibleProjectRevision $window) -ne $f05RevisionBefore) {
+        throw 'F05 source-bound preview silently modified body, citation IDs or project revision'
+    }
+
+    # Change the exact UUID after preview, then click the REAL Apply action.
+    # The old pending reference must not be transferable to the new selection.
+    $f05Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05Reference.GetCurrentPattern($f05Value).SetValue($f05UnknownId)
+    $f05Apply = FocusByTab $f05Reference ([System.Windows.Automation.ControlType]::Button) 'Apply previewed project citation insertion' 4
+    $f05Apply.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status Citation not applied:*Reference identity or source record changed*' 10000
+    $f05StaleDraft = Read-F05ManuscriptDraft $window
+    if ($f05StaleDraft.Body -cne $f05BodyBefore -or
+        $f05StaleDraft.Citations -cne $f05CitationsBefore -or
+        (Get-VisibleProjectRevision $window) -ne $f05RevisionBefore) {
+        throw 'F05 stale reference selection Apply modified the draft or project revision'
+    }
+
+    $f05Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05Reference.GetCurrentPattern($f05Value).SetValue($referenceId)
+    $f05Preview = FocusByTab $f05Reference ([System.Windows.Automation.ControlType]::Button) 'Preview verified project citation insertion' 3
+    $f05Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status PREVIEW ONLY*UIA memory evidence*' 10000
+    $f05Apply = FocusByTab $f05Preview ([System.Windows.Automation.ControlType]::Button) 'Apply previewed project citation insertion' 3
+    $f05Apply.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status Applied the locally registered citation*Autosave is pending*' 10000
+    $f05AppliedDraft = Read-F05ManuscriptDraft $window
+    $f05BodyApplied = $f05AppliedDraft.Body
+    $f05CitationsApplied = $f05AppliedDraft.Citations
+    $f05Lf = [string][char]10
+    $f05BodyNormalized = $f05BodyApplied.Replace(([string][char]13 + $f05Lf), $f05Lf)
+    $f05BeforeNormalized = $f05BodyBefore.Replace(([string][char]13 + $f05Lf), $f05Lf)
+    if ($f05BodyNormalized -cne ($f05BeforeNormalized + ($f05Lf * 2) + $f05Marker) -or
+        $f05CitationsApplied -cne $referenceId) {
+        throw 'F05 explicit Apply did not append exactly one source marker or deduplicate existing citation metadata'
+    }
+    # The same marker cannot be appended twice, even though its metadata ID is
+    # already present; no second pending action is permitted.
+    $f05Preview = Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview verified project citation insertion'
+    $f05Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status Citation preview refused:*already present in the draft body*' 10000
+    if ((Read-F05ManuscriptDraft $window).Body -cne $f05BodyApplied) {
+        throw 'F05 duplicate citation preview changed the just-applied draft'
+    }
+    # A previous setup autosave also emitted the same success status. Require
+    # the actual project header revision to advance *after* F05's explicit
+    # Apply, so a stale status alone cannot satisfy durable-save acceptance.
+    $f05Persisted = $false
+    for ($f05Attempt = 0; $f05Attempt -lt 60; $f05Attempt++) {
+        if ((Get-VisibleProjectRevision $window) -gt $f05RevisionBefore) {
+            $f05Persisted = $true
+            break
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    if (-not $f05Persisted) {
+        throw 'F05 applied citation did not advance the persisted project revision'
+    }
+    WaitForNameLike $window '*Manuscript autosaved to project revisions*' 10000
+    $f05InspectAnchor = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05InspectButton = FocusByTab $f05InspectAnchor ([System.Windows.Automation.ControlType]::Button) 'Inspect manuscript' 35
+    $f05InspectButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Persisted manuscript revisions loaded*' 10000
+    $f05InspectNames = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name })
+    if (-not ($f05InspectNames | Where-Object { $_.Contains($f05Marker) })) {
+        throw 'F05 autosaved citation marker was not found in persisted manuscript inspect'
+    }
+    Invoke-AccessibleButton $window 'Toggle manuscript operation details'
+    Write-Output 'PASS: F05 trusted source preview, no pre-apply writes, stale/missing ID refusal, exact explicit appended marker and deduplicated citations, persisted autosave'
 
     # Exercise the real edit-driven debounce path. UI Automation SetValue is
     # surfaced by Slint as an edit, which journals synchronously and restarts

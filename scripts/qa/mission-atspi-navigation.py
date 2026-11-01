@@ -14,6 +14,7 @@ import sqlite3
 import subprocess
 import sys
 import time
+import uuid
 from collections.abc import Iterator
 from typing import Any
 
@@ -154,6 +155,273 @@ def project_event_snapshot(project: pathlib.Path) -> tuple[int, tuple[tuple[Any,
     if revision_row[0] != len(events):
         raise RuntimeError("Disposable project event chain/revision diverged before UI proof")
     return revision_row[0], events
+
+
+def f05_saved_abstract(project: pathlib.Path) -> list[tuple[int, str, str]]:
+    """Read persisted revisions without bypassing any native write contract."""
+    with sqlite3.connect(project / "data/project.sqlite") as db:
+        return db.execute(
+            "SELECT revision,body,citations_json FROM manuscripts "
+            "WHERE id=? AND section=? ORDER BY revision",
+            ("synthetic-research", "Abstract"),
+        ).fetchall()
+
+
+def exercise_f05_project_citation(app: Any, project: pathlib.Path, output: pathlib.Path) -> None:
+    """After F14, register synthetic bibliography via GUI and insert by consent.
+
+    All writes go through original audited References and manuscript UI actions.
+    The previous F14 intentionally empty-library scenario must run first.
+    """
+    ref_title = "Synthetic offline citation for native F05 QA"
+    ref_raw = (
+        "@article{syntheticF05,author={Fixture Researcher},"
+        "title={Synthetic offline citation for native F05 QA},year={2026}}"
+    )
+    before_register = project_event_snapshot(project)
+    with sqlite3.connect(project / "data/project.sqlite") as db:
+        if db.execute("SELECT count(*) FROM reference").fetchone()[0] != 0:
+            raise RuntimeError("F05 requires the F14 empty-library fixture before registration")
+
+    # The F14 duplicate review panel has scrolled the References form down.
+    # Reacquire every exact input after bounded upward scrolling, not by
+    # clicking guessed coordinates or creating rows directly in SQLite.
+    for name, value, down in (
+        ("Reference title", ref_title, False),
+        ("Reference authors", "Fixture Researcher", True),
+        ("Reference year", "2026", True),
+        ("Reference kind", "article", True),
+        ("Reference format", "bibtex", True),
+        ("Raw reference record", ref_raw, True),
+    ):
+        reveal_bounded_control(app, name, down=down)
+        edit_text(app, name, value, allow_unreadable=True)
+    activate_bounded_control(app, "Preview reference registration", down=True)
+    time.sleep(0.25)
+    if not any(
+        "Reference preview ready; no project data changed" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F05 synthetic reference registration preview not acknowledged")
+    if project_event_snapshot(project) != before_register:
+        raise RuntimeError("F05 reference registration preview unexpectedly wrote an event")
+    with sqlite3.connect(project / "data/project.sqlite") as db:
+        if db.execute("SELECT count(*) FROM reference").fetchone()[0] != 0:
+            raise RuntimeError("Reference was saved without explicit Register approval")
+
+    activate_bounded_control(app, "Register previewed reference", down=True)
+    time.sleep(0.3)
+    if not any(
+        "Previewed library operation recorded and audited" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("Reference approval did not report an audited native write")
+    with sqlite3.connect(project / "data/project.sqlite") as db:
+        registered = db.execute(
+            "SELECT id,title,authors_json,year,doi,kind,format,raw,status FROM reference"
+        ).fetchall()
+        last_event = db.execute(
+            "SELECT operation,payload_json FROM events ORDER BY sequence DESC LIMIT 1"
+        ).fetchone()
+    if len(registered) != 1:
+        raise RuntimeError("Expected one audited UI-registered local reference")
+    ref_id, title, authors, year, doi, kind, fmt, raw, status = registered[0]
+    if (
+        re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}", ref_id) is None
+        or title != ref_title or json.loads(authors) != ["Fixture Researcher"]
+        or year != 2026 or doi is not None or kind != "article" or fmt != "bibtex"
+        or raw != ref_raw or status != "unverified"
+    ):
+        raise RuntimeError("Persisted synthetic reference metadata differs from native GUI inputs")
+    after_register = project_event_snapshot(project)
+    if (
+        after_register[0] != before_register[0] + 1
+        or after_register[1][:-1] != before_register[1]
+        or last_event is None or last_event[0] != "library.reference_add"
+    ):
+        raise RuntimeError("Reference registration bypassed or changed the audited event chain")
+    payload = json.loads(last_event[1])
+    if (
+        payload.get("reference_id") != ref_id
+        or payload.get("title") != ref_title
+        or payload.get("raw_sha256") != hashlib.sha256(ref_raw.encode("utf-8")).hexdigest()
+    ):
+        raise RuntimeError("Audited local reference event does not bind the exact raw fixture")
+    print("F05_REFERENCE_REGISTERED_VIA_AUDITED_NATIVE_PREVIEW_AND_APPROVAL_OK")
+    audit(app, "f05-reference-registered", output)
+
+    if not activate(app, "Synthesize activity"):
+        raise RuntimeError("F05 cannot navigate from References to manuscript editing")
+    time.sleep(0.25)
+    activate_bounded_control(app, "Manuscript workspace screen", down=False)
+    time.sleep(0.25)
+    reveal_bounded_control(app, "Manuscript section body", down=True)
+    original_body = read_field(app, "Manuscript section body")
+    persisted_before = f05_saved_abstract(project)
+    if (
+        not persisted_before
+        or persisted_before[-1][1] != original_body
+        or "Verified manuscript for isolated project recovery." not in original_body
+        or f"[@{ref_id}]" in original_body
+    ):
+        raise RuntimeError("F05 original project manuscript is not the expected saved Abstract")
+    reveal_bounded_control(app, "Manuscript ID", down=False)
+    if read_field(app, "Manuscript ID") != "synthetic-research":
+        raise RuntimeError("F05 citation editor is not bound to original manuscript ID")
+    if read_field(app, "Manuscript section") != "Abstract":
+        raise RuntimeError("F05 citation editor is not bound to persisted Abstract section")
+    existing_citations = json.loads(persisted_before[-1][2])
+    if not isinstance(existing_citations, list):
+        raise RuntimeError("F05 persisted citation metadata must be a JSON list")
+    reveal_bounded_control(app, "Manuscript citations", down=False)
+    visible_citations_before = [
+        part.strip() for part in read_field(app, "Manuscript citations").split(",")
+        if part.strip()
+    ]
+    if visible_citations_before != existing_citations:
+        raise RuntimeError("F05 editor citations differ from persisted project-scoped metadata")
+    # Mirror the Rust helper's UUID normalization and first-occurrence order:
+    # no hidden foreign citation may be added during explicit Apply.
+    expected_citation_ids: list[str] = []
+    for prior in existing_citations:
+        if not isinstance(prior, str):
+            raise RuntimeError("F05 persisted citation ID is not a string")
+        try:
+            normalized = str(uuid.UUID(prior.strip()))
+        except ValueError:
+            normalized = prior.strip()
+        if normalized and normalized not in expected_citation_ids:
+            expected_citation_ids.append(normalized)
+    if ref_id not in expected_citation_ids:
+        expected_citation_ids.append(ref_id)
+    before_citation = project_event_snapshot(project)
+
+    # An otherwise valid UUID that has never been registered in this project's
+    # library must be refused; no library/OS/network fallback may invent it.
+    foreign_uuid = "00000000-0000-4000-8000-000000000001"
+    reveal_bounded_control(app, "Manuscript citation reference ID", down=True)
+    edit_text(app, "Manuscript citation reference ID", foreign_uuid, allow_unreadable=True)
+    activate_bounded_control(app, "Preview verified project citation insertion", down=True)
+    time.sleep(0.2)
+    if not any(
+        "Manuscript citation insertion status Citation preview refused:" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("Unregistered project citation UUID did not yield native refusal")
+    if project_event_snapshot(project) != before_citation or f05_saved_abstract(project) != persisted_before:
+        raise RuntimeError("Invalid F05 citation preview wrote manuscript/event state")
+    reveal_bounded_control(app, "Manuscript section body", down=True)
+    if read_field(app, "Manuscript section body") != original_body:
+        raise RuntimeError("Invalid F05 citation preview modified live manuscript text")
+    print("F05_MISSING_PROJECT_REFERENCE_PREVIEW_REFUSED_NO_MUTATION_OK")
+
+    reveal_bounded_control(app, "Manuscript citation reference ID", down=False)
+    edit_text(app, "Manuscript citation reference ID", ref_id, allow_unreadable=True)
+    activate_bounded_control(app, "Preview verified project citation insertion", down=True)
+    time.sleep(0.2)
+    marker = f"[@{ref_id}]"
+    if not any(
+        "Manuscript citation insertion status PREVIEW ONLY" in (node.name or "")
+        and ref_title in (node.name or "") and marker in (node.name or "")
+        and "No claim or external metadata verification" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("Native F05 preview omitted exact project reference, marker or caveat")
+    reveal_bounded_control(app, "Manuscript section body", down=True)
+    if read_field(app, "Manuscript section body") != original_body:
+        raise RuntimeError("F05 citation preview silently modified manuscript draft")
+    if f05_saved_abstract(project) != persisted_before or project_event_snapshot(project) != before_citation:
+        raise RuntimeError("F05 citation preview silently wrote a revision or event")
+    audit(app, "f05-citation-read-only-preview", output)
+    print("F05_PROJECT_REFERENCE_CITATION_PREVIEW_NO_WRITE_OK")
+
+    activate_bounded_control(app, "Apply previewed project citation insertion", down=False)
+    time.sleep(0.25)
+    if not any(
+        "Manuscript citation insertion status Applied the locally registered citation" in (node.name or "")
+        and "Autosave is pending, not yet confirmed" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("Explicit F05 Apply did not report pending autosave")
+    expected_body = original_body + ("\n" if original_body.endswith("\n") else "\n\n") + marker
+    reveal_bounded_control(app, "Manuscript section body", down=True)
+    if read_field(app, "Manuscript section body") != expected_body:
+        raise RuntimeError("F05 Apply inserted a wrong marker or changed existing Unicode/body content")
+    reveal_bounded_control(app, "Manuscript citations", down=False)
+    applied_ids = [
+        part.strip() for part in read_field(app, "Manuscript citations").split(",")
+        if part.strip()
+    ]
+    if applied_ids != expected_citation_ids:
+        raise RuntimeError("F05 Apply introduced, lost or duplicated a live citation ID")
+
+    # Existing manuscript autosave is debounced/asynchronous. A GUI toast is
+    # insufficient: require a NEW persisted immutable revision and its exact
+    # citation metadata before proceeding, with a finite deadline.
+    for _ in range(30):
+        versions = f05_saved_abstract(project)
+        if len(versions) > len(persisted_before) and versions[-1][1] == expected_body:
+            break
+        time.sleep(0.3)
+    else:
+        raise RuntimeError("Applied F05 citation did not autosave the expected manuscript revision")
+    if versions[:len(persisted_before)] != persisted_before:
+        raise RuntimeError("F05 autosave destructively modified an earlier manuscript revision")
+    saved_ids = json.loads(versions[-1][2])
+    if (
+        not isinstance(saved_ids, list)
+        or saved_ids != expected_citation_ids
+        or versions[-1][0] <= persisted_before[-1][0]
+    ):
+        raise RuntimeError("F05 autosave citation IDs missing, duplicated or prior history changed")
+    after_citation = project_event_snapshot(project)
+    if (
+        after_citation[0] != before_citation[0] + 1
+        or after_citation[1][:-1] != before_citation[1]
+        or after_citation[1][-1][1] != "writing.section_save"
+    ):
+        raise RuntimeError("F05 Apply did not create exactly one append-only manuscript-save event")
+    audit(app, "f05-citation-applied-autosaved", output)
+    print("F05_EXPLICIT_APPLY_EXACT_MARKER_AND_PERSISTED_CITATION_METADATA_OK")
+
+    # Reopening tests actual project-disk recovery, not a cached text field.
+    if not activate(app, "Home activity"):
+        raise RuntimeError("Cannot leave manuscript to verify F05 restart persistence")
+    time.sleep(0.3)
+    if not activate(app, "Open Start Center to switch projects"):
+        raise RuntimeError("Cannot reach Start Center for F05 project reopen")
+    time.sleep(0.25)
+    edit_text(app, "Project path", str(project))
+    if not activate(app, "Open project"):
+        raise RuntimeError("Cannot reopen F05 project from disk")
+    time.sleep(0.35)
+    if not activate(app, "Synthesize activity"):
+        raise RuntimeError("Cannot return to F05 manuscript after project reopen")
+    time.sleep(0.25)
+    activate_bounded_control(app, "Manuscript workspace screen", down=False)
+    time.sleep(0.2)
+    # Opening the same project can restore a sidecar draft, which by itself
+    # does NOT prove the persisted immutable manuscript was loaded into the
+    # editor. Explicitly select the version actually held in project SQLite.
+    reopened_before_select = project_event_snapshot(project)
+    activate_bounded_control(app, "Toggle saved manuscript sections outline", down=True)
+    time.sleep(0.3)
+    saved_abstract_label = f"Open saved manuscript section Abstract · r{versions[-1][0]}"
+    activate_bounded_control(app, saved_abstract_label, down=True)
+    time.sleep(0.2)
+    if not any(
+        f"Loaded saved section Abstract (revision {versions[-1][0]})" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F05 reopen did not select the latest immutable SQLite Abstract revision")
+    reveal_bounded_control(app, "Manuscript section body", down=True)
+    if read_field(app, "Manuscript section body") != expected_body:
+        raise RuntimeError("F05 citation body did not load from latest persisted Abstract revision")
+    if f05_saved_abstract(project)[-1] != versions[-1]:
+        raise RuntimeError("F05 citation persistent revision differs after project reopen")
+    if project_event_snapshot(project) != reopened_before_select:
+        raise RuntimeError("Selecting the verified manuscript revision unexpectedly wrote project events")
+    print("F05_CITATION_APPLY_AUTOSAVE_REOPEN_SQLITE_SECTION_SELECTION_OK")
 
 
 def activate(app: Any, name: str) -> bool:
@@ -969,13 +1237,16 @@ def main() -> int:
             time.sleep(0.15)
         else:
             raise RuntimeError("Cannot access manuscript revision history toggle")
-        if not activate(app, "Load manuscript section revision history"):
-            raise RuntimeError("Cannot retrieve persisted manuscript history through native GUI")
+        audit(app, "manuscript-revision-history-expanded", output)
+        # Expanding the conditional revision panel need not materialize its
+        # offscreen children in Slint's current AT-SPI tree. Navigate using
+        # exact names and bounded private-Xvfb scrolling, not a single probe.
+        activate_bounded_control(app, "Load manuscript section revision history", down=True)
         if not any("immutable revisions" in (node.name or "") for node, _ in walk(app)):
             raise RuntimeError("Manuscript revision inspector did not display persisted hashes")
+        reveal_bounded_control(app, "Manuscript restore source revision", down=True)
         edit_text(app, "Manuscript restore source revision", str(source_row[0]), allow_unreadable=True)
-        if not activate(app, "Preview saved manuscript revision restore"):
-            raise RuntimeError("Cannot preview immutable manuscript version restore")
+        activate_bounded_control(app, "Preview saved manuscript revision restore", down=True)
         time.sleep(0.15)
         if not any("RESTORE PREVIEW ONLY" in (node.name or "") for node, _ in walk(app)):
             raise RuntimeError("Restore preview did not expose its source digest and no-write boundary")
@@ -987,8 +1258,7 @@ def main() -> int:
         if before_commit != before_restore:
             raise RuntimeError("Previewing manuscript restore modified persisted source revisions")
         audit(app, "manuscript-restore-preview", output)
-        if not activate(app, "Record approved manuscript revision restore"):
-            raise RuntimeError("Cannot explicitly commit reviewed manuscript restoration")
+        activate_bounded_control(app, "Record approved manuscript revision restore", down=True)
         time.sleep(0.35)
         with sqlite3.connect(original_project / "data/project.sqlite") as db:
             after_restore = db.execute(
@@ -1465,6 +1735,7 @@ def main() -> int:
             if db.execute("SELECT count(*) FROM reference_alias").fetchone()[0] != aliases_before:
                 raise RuntimeError("Invalid F14 alias preview persisted a reference mapping")
         print("F14_INVALID_ALIAS_PREVIEW_REFUSED_NO_PROJECT_EVENTS_OK")
+        exercise_f05_project_citation(app, original_project, output)
     if not activate(app, "Home activity"):
         raise RuntimeError("Cannot return Home to verify recent-project recovery")
     time.sleep(0.25)
