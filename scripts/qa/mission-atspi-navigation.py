@@ -2010,6 +2010,80 @@ def main() -> int:
         ):
             raise RuntimeError("Notebook editor did not report autosave status")
         print("NOTEBOOK_AUTOSAVE_STATUS_PRESENT")
+        # F32: real native arithmetic-cell preview, explicit project write,
+        # persisted immutable receipt and unsupported-expression refusal.
+        # The source notebook/autosave has already settled before snapshot.
+        if original_project is None:
+            raise RuntimeError("F32 native cell acceptance needs disposable project")
+        before_cell = project_event_snapshot(original_project)
+        activate_bounded_control(app, "Toggle safe arithmetic notebook cells", down=True)
+        reveal_bounded_control(
+            app, "Executable arithmetic notebook cell expression", down=True
+        )
+        edit_text(
+            app,
+            "Executable arithmetic notebook cell expression",
+            "(12 + sqrt(9)) / 3",
+            allow_unreadable=True,
+        )
+        activate_bounded_control(
+            app, "Preview arithmetic notebook cell without writes", down=True
+        )
+        time.sleep(0.2)
+        if not nodes_named(
+            app, "Arithmetic notebook execution status READ-ONLY PREVIEW:"
+        ):
+            raise RuntimeError("F32 preview did not expose its read-only result")
+        if project_event_snapshot(original_project) != before_cell:
+            raise RuntimeError("F32 arithmetic preview mutated project event history")
+        print("F32_NATIVE_ARITHMETIC_PREVIEW_NO_WRITE_OK")
+        activate_bounded_control(
+            app,
+            "Approve previewed arithmetic notebook cell and append immutable execution",
+            down=True,
+        )
+        time.sleep(0.2)
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            cells = db.execute(
+                "SELECT id,revision,body FROM notebook_entries WHERE id LIKE 'cell:%' "
+                "ORDER BY revision"
+            ).fetchall()
+            final_cell_event = db.execute(
+                "SELECT operation FROM events ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()
+        if (
+            len(cells) != 1
+            or cells[0][1] != 1
+            or final_cell_event != ("notebook.cell_execute",)
+            or project_event_snapshot(original_project)[0] != before_cell[0] + 1
+        ):
+            raise RuntimeError("F32 real native execution did not append exact audit receipt")
+        saved_cell = json.loads(cells[0][2])
+        if (
+            saved_cell.get("code") != "(12 + sqrt(9)) / 3"
+            or saved_cell.get("result", {}).get("value") != 5.0
+            or saved_cell.get("external_execution") is not False
+            or saved_cell.get("language") != "researchweave-arithmetic-v1"
+        ):
+            raise RuntimeError("F32 native source expression or result was not persisted")
+        print("F32_NATIVE_ARITHMETIC_EXECUTION_APPEND_SOURCE_PROVENANCE_OK")
+        after_cell = project_event_snapshot(original_project)
+        edit_text(
+            app,
+            "Executable arithmetic notebook cell expression",
+            "1 / 0",
+            allow_unreadable=True,
+        )
+        activate_bounded_control(
+            app, "Preview arithmetic notebook cell without writes", down=True
+        )
+        if not nodes_named(
+            app, "Arithmetic notebook execution status Arithmetic preview refused:"
+        ):
+            raise RuntimeError("F32 invalid expression was not visibly rejected")
+        if project_event_snapshot(original_project) != after_cell:
+            raise RuntimeError("F32 invalid arithmetic expression mutated project history")
+        print("F32_NATIVE_INVALID_EXPRESSION_REFUSED_NO_WRITE_OK")
         resize_xvfb_window(850, 600)
         time.sleep(0.35)
         audit(app, "notebook-narrow", output)
@@ -2019,6 +2093,8 @@ def main() -> int:
         time.sleep(0.3)
         if activate(app, "Return to PDF"):
             raise RuntimeError("A new project with no PDF should not offer Return to PDF")
+    else:
+        raise RuntimeError("Notebook activity is mandatory for F32/F41 native acceptance")
 
     if not activate(app, "Synthesize activity"):
         return 11

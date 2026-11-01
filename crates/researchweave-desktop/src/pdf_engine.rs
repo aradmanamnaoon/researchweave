@@ -1,4 +1,10 @@
 //! Native, dynamically loaded PDFium render + positioned text proof.
+// The F37 review-only caption anchor model is intentionally not wired to the
+// UI until it can display the source-page image and require human confirmation.
+#[allow(dead_code)]
+#[path = "pdf_figure_candidates.rs"]
+pub mod figure_candidates;
+
 use firecrawl_pdfium::{PageRect, Pdfium, PixelFormat, RenderConfig};
 use std::io::Read;
 use std::path::{Path, PathBuf};

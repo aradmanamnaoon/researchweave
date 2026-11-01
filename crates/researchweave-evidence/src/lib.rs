@@ -18,6 +18,7 @@ mod highlights;
 mod manuscript_comments;
 pub mod manuscript_document;
 mod media_timeline;
+mod notebook_cells;
 mod obsidian_roundtrip;
 mod protocol_freeze;
 mod publishing;
@@ -97,6 +98,11 @@ impl EvidenceHandler {
             ),
             ("evidence.notebook_history", &["project_id"][..]),
             ("ui.note_card.list", &["project_id"][..]),
+            ("notebook.cell_list", &["project_id"][..]),
+            (
+                "notebook.cell_preview",
+                &["project_id", "cell_id", "language", "code"][..],
+            ),
             (
                 "knowledge.obsidian_export_note",
                 &["project_id", "card_id"][..],
@@ -375,6 +381,17 @@ impl EvidenceHandler {
             ("ui.notebook.save", &["project_id", "notebook"][..]),
             ("ui.note_card.save", &["project_id"][..]),
             (
+                "notebook.cell_execute",
+                &[
+                    "project_id",
+                    "cell_id",
+                    "expected_cell_revision",
+                    "language",
+                    "code",
+                    "approved_preview_sha256",
+                ][..],
+            ),
+            (
                 "knowledge.obsidian_import",
                 &["project_id", "markdown", "approved_preview_sha256"][..],
             ),
@@ -646,6 +663,15 @@ impl EvidenceHandler {
         if operation == "ui.note_card.list" {
             return quick_notes::list(&store, args);
         }
+        if operation == "notebook.cell_list" {
+            return notebook_cells::list(&store, args);
+        }
+        if operation == "notebook.cell_preview" {
+            return notebook_cells::preview(args, ctx, &store);
+        }
+        if operation == "notebook.cell_execute" {
+            return notebook_cells::execute(&mut store, args, ctx);
+        }
         if operation == "knowledge.obsidian_export_note" {
             return obsidian_roundtrip::export(&store, args, ctx);
         }
@@ -850,6 +876,7 @@ impl EvidenceHandler {
             }
             "ui.notebook.save" => notebook_save(&mut shadow, args, ctx)?,
             "ui.note_card.save" => quick_notes::save(&mut shadow, args, ctx)?,
+            "notebook.cell_execute" => notebook_cells::execute(&mut shadow, args, ctx)?,
             "knowledge.obsidian_import" => obsidian_roundtrip::apply(&mut shadow, args, ctx)?,
             "evidence.anchor" => anchor_mutate(&mut shadow, args, ctx)?,
             "evidence.highlight_create" | "evidence.highlight_relocate" => {
@@ -2181,6 +2208,7 @@ impl OperationHandler for EvidenceHandler {
                 | "evidence.note_delete"
                 | "ui.notebook.save"
                 | "ui.note_card.save"
+                | "notebook.cell_execute"
                 | "knowledge.obsidian_import"
                 | "evidence.anchor"
                 | "evidence.highlight_create"

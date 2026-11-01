@@ -20,6 +20,19 @@ export struct QuickNote {
     archived: bool,
 }
 
+export struct NotebookCell {
+    id: string,
+    revision: int,
+    code: string,
+    result: string,
+}
+
+export struct PdfCaptionCandidate {
+    label: string,
+    page-number: int,
+    provenance: string,
+}
+
 export struct ManuscriptSection {
     name: string,
     label: string,
@@ -294,6 +307,17 @@ export component MainWindow inherits Window {
     in-out property <string> project-activity-results: "Local project event provenance is not authenticated identity evidence.";
     in-out property <string> notebook-results: "Save a revisioned project notebook, inspect history, or export Markdown.";
     in-out property <string> notebook-draft: "";
+    in-out property <bool> notebook-cell-open: false;
+    in-out property <string> notebook-cell-id: "";
+    in-out property <int> notebook-cell-revision: 0;
+    in-out property <string> notebook-cell-code: "";
+    in-out property <string> notebook-cell-approval: "";
+    in-out property <string> notebook-cell-status: "Arithmetic cells run an offline restricted expression language; no Python kernel, file, or network access.";
+    in-out property <[NotebookCell]> notebook-cells: [];
+    in-out property <[PdfCaptionCandidate]> pdf-caption-candidates: [];
+    in-out property <string> pdf-caption-status: "Figure/table caption candidates are unverified text anchors; image pixels and table cells are not extracted.";
+    in-out property <int> pdf-caption-request-id: 0;
+    in-out property <bool> pdf-caption-busy: false;
     in-out property <[QuickNote]> quick-notes: [];
     in-out property <bool> quick-note-view: true;
     in-out property <string> quick-note-results: "Quick notes are stored in this project, with searchable history.";
@@ -339,6 +363,10 @@ export component MainWindow inherits Window {
     in-out property <string> manuscript-replace-term: "";
     in-out property <string> manuscript-replace-status: "Find and replace operates on this section only. Review before applying.";
     callback notebook-draft-edited(string);
+    callback preview-arithmetic-cell();
+    callback run-arithmetic-cell();
+    callback load-arithmetic-cells();
+    callback scan-pdf-caption-candidates(string, int);
     callback refresh-quick-notes(string, string);
     callback save-quick-note(string, int, string, string, string, string, bool, bool);
     callback export-quick-note-obsidian(string);
@@ -1237,6 +1265,42 @@ export component MainWindow inherits Window {
                                     text: root.pdf-status + " · matches: " + root.pdf-matches;
                                     color: Theme.muted-ink;
                                     accessible-label: "PDF search status: " + root.pdf-status + " matches: " + root.pdf-matches;
+                                }
+                                Button {
+                                    text: root.pdf-caption-busy ? "Scanning caption anchors…" : "Find figure/table captions";
+                                    accessible-label: "Preview unverified local PDF figure and table caption anchors";
+                                    enabled: !root.pdf-caption-busy && pdf-path.text != "";
+                                    clicked => {
+                                        root.pdf-caption-request-id += 1;
+                                        root.pdf-caption-busy = true;
+                                        root.pdf-caption-status = "Reading bounded local PDF text layer. No extracted figure or table contents.";
+                                        root.pdf-caption-candidates = [];
+                                        root.scan-pdf-caption-candidates(pdf-path.text, root.pdf-caption-request-id);
+                                    }
+                                }
+                                Text {
+                                    text: root.pdf-caption-status;
+                                    accessible-label: "PDF caption anchor preview status " + root.pdf-caption-status;
+                                    wrap: word-wrap;
+                                    color: Theme.muted-ink;
+                                }
+                                if root.pdf-caption-candidates.length > 0: ScrollView {
+                                    preferred-height: 135px;
+                                    min-height: 80px;
+                                    max-height: 160px;
+                                    VerticalLayout {
+                                        spacing: 4px;
+                                        for caption in root.pdf-caption-candidates: Button {
+                                            text: caption.label + " · page " + caption.page-number;
+                                            accessible-label: "Inspect unverified PDF caption " + caption.label + " page " + caption.page-number;
+                                            clicked => {
+                                                root.pdf-job += 1;
+                                                root.pdf-highlight-visible = false;
+                                                root.load-pdf(pdf-path.text, pdf-query.text, caption.page-number);
+                                                root.pdf-caption-status = caption.provenance;
+                                            }
+                                        }
+                                    }
                                 }
                                 Rectangle {
                                     background: Theme.reader-canvas;
@@ -2167,6 +2231,88 @@ export component MainWindow inherits Window {
                                         Button { text: "Export Markdown"; accessible-label: "Export notebook Markdown"; clicked => { root.export-notebook(); } }
                                     }
                                     Text { text: root.notebook-results; accessible-label: "Notebook operation result " + root.notebook-results; wrap: word-wrap; color: Theme.ink; }
+                                    Button {
+                                        text: root.notebook-cell-open ? "Hide arithmetic cells" : "Executable arithmetic cells";
+                                        accessible-label: "Toggle safe arithmetic notebook cells";
+                                        clicked => { root.notebook-cell-open = !root.notebook-cell-open; }
+                                    }
+                                    if root.notebook-cell-open: Rectangle {
+                                        background: Theme.surface;
+                                        border-width: 1px;
+                                        border-color: Theme.divider;
+                                        border-radius: Theme.panel-radius;
+                                        VerticalLayout {
+                                            padding: 9px;
+                                            spacing: 8px;
+                                            Text {
+                                                text: "Safe offline arithmetic runtime. Supports finite numbers, + - * /, parentheses, sqrt(), ln() and abs(). NOT Python/Jupyter; no filesystem, shell or network.";
+                                                color: Theme.muted-ink;
+                                                wrap: word-wrap;
+                                            }
+                                            Text {
+                                                text: root.notebook-cell-id == "" ? "New arithmetic cell" : "Selected immutable cell revision " + root.notebook-cell-revision;
+                                                color: Theme.ink;
+                                                font-weight: 700;
+                                            }
+                                            notebook-expression := LineEdit {
+                                                text <=> root.notebook-cell-code;
+                                                placeholder-text: "Example: (12 + sqrt(9)) / 3";
+                                                accessible-label: "Executable arithmetic notebook cell expression";
+                                                edited(value) => {
+                                                    root.notebook-cell-code = value;
+                                                    root.notebook-cell-approval = "";
+                                                    root.notebook-cell-status = "Expression changed. Preview the revised calculation before recording.";
+                                                }
+                                            }
+                                            HorizontalLayout {
+                                                spacing: 8px;
+                                                Button {
+                                                    text: "Preview calculation";
+                                                    accessible-label: "Preview arithmetic notebook cell without writes";
+                                                    clicked => { root.preview-arithmetic-cell(); }
+                                                }
+                                                Button {
+                                                    text: "Record calculation";
+                                                    enabled: root.notebook-cell-approval != "";
+                                                    accessible-label: "Approve previewed arithmetic notebook cell and append immutable execution";
+                                                    clicked => { root.run-arithmetic-cell(); }
+                                                }
+                                                Button {
+                                                    text: "New cell";
+                                                    accessible-label: "Clear arithmetic notebook cell for a new computation";
+                                                    clicked => {
+                                                        root.notebook-cell-id = "";
+                                                        root.notebook-cell-revision = 0;
+                                                        root.notebook-cell-code = "";
+                                                        root.notebook-cell-approval = "";
+                                                        root.notebook-cell-status = "New arithmetic cell; preview before saving.";
+                                                    }
+                                                }
+                                            }
+                                            Text {
+                                                text: root.notebook-cell-status;
+                                                accessible-label: "Arithmetic notebook execution status " + root.notebook-cell-status;
+                                                color: Theme.muted-ink;
+                                                wrap: word-wrap;
+                                            }
+                                            Button {
+                                                text: "Refresh saved cells";
+                                                accessible-label: "Refresh immutable arithmetic notebook cells";
+                                                clicked => { root.load-arithmetic-cells(); }
+                                            }
+                                            for cell in root.notebook-cells: Button {
+                                                text: "v" + cell.revision + ": " + cell.code + " = " + cell.result;
+                                                accessible-label: "Load saved arithmetic notebook cell " + cell.id;
+                                                clicked => {
+                                                    root.notebook-cell-id = cell.id;
+                                                    root.notebook-cell-revision = cell.revision;
+                                                    root.notebook-cell-code = cell.code;
+                                                    root.notebook-cell-approval = "";
+                                                    root.notebook-cell-status = "Loaded a saved cell. Review and preview before recording a new revision.";
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             Rectangle { vertical-stretch: 1; }

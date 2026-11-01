@@ -289,6 +289,12 @@ jobs:
           grep -F 'F26_UNKNOWN_REVIEW_RECORD_REFUSED_WITH_NO_PROJECT_EVENTS_OK' target/qa/mission-full-native/atspi-navigation.txt
           grep -F 'F26_INVALID_PICO_REFUSED_AND_BLINDED_VOTE_UNCHANGED_OK' target/qa/mission-full-native/atspi-navigation.txt
           grep -F 'F07_NATIVE_INVALID_AND_VALID_DOI_PREVIEW_NO_NETWORK_NO_PROJECT_EVENTS_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F41_NATIVE_MARKDOWN_SOURCE_SHA_READBACK_AND_EXPORT_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F41_NATIVE_MARKDOWN_IMPORT_PREVIEW_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F41_NATIVE_OBSIDIAN_APPROVED_APPEND_PRESERVES_HISTORY_AND_METADATA_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F32_NATIVE_ARITHMETIC_PREVIEW_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F32_NATIVE_ARITHMETIC_EXECUTION_APPEND_SOURCE_PROVENANCE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F32_NATIVE_INVALID_EXPRESSION_REFUSED_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
       - name: Archive full Linux GUI source and accessibility receipts
         if: ${{ always() && matrix.platform == 'linux-x64' }}
         uses: actions/upload-artifact@v4

@@ -134,6 +134,23 @@ fn restore_writing_drafts(
 /// the previously active project.  Switching projects must never leave results
 /// from one project looking like they were computed for another.
 fn reset_project_visible_state(ui: &MainWindow) {
+    ui.set_pdf_caption_request_id(ui.get_pdf_caption_request_id().wrapping_add(1));
+    ui.set_pdf_caption_busy(false);
+    ui.set_pdf_caption_candidates(
+        Rc::new(slint::VecModel::from(Vec::<PdfCaptionCandidate>::new())).into(),
+    );
+    ui.set_pdf_caption_status(
+        "Figure/table caption suggestions are unverified. Open a local PDF and inspect its source pages.".into(),
+    );
+    ui.set_notebook_cell_open(false);
+    ui.set_notebook_cell_id("".into());
+    ui.set_notebook_cell_revision(0);
+    ui.set_notebook_cell_code("".into());
+    ui.set_notebook_cell_approval("".into());
+    ui.set_notebook_cell_status(
+        "Arithmetic cells are project-scoped and run only a restricted offline expression language.".into(),
+    );
+    ui.set_notebook_cells(Rc::new(slint::VecModel::from(Vec::<NotebookCell>::new())).into());
     ui.set_quick_note_obsidian_open(false);
     ui.set_quick_note_obsidian_markdown("".into());
     ui.set_quick_note_obsidian_approval("".into());
@@ -429,6 +446,52 @@ fn show_activity(ui: &MainWindow, state: &durable_activity::Activity) {
 }
 
 slint::include_modules!();
+
+fn refresh_arithmetic_cells(ui: &MainWindow, project: &Path, root: &Path) -> Result<usize, String> {
+    let result = evidence_read_at(
+        project,
+        "notebook.cell_list",
+        serde_json::json!({"limit":100}),
+        root,
+    )?;
+    let rows = result
+        .pointer("/data/cells")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("Persisted arithmetic cell list unavailable")?;
+    let mut cells = Vec::with_capacity(rows.len());
+    for row in rows {
+        let record = &row["document"];
+        if record["language"] != "researchweave-arithmetic-v1"
+            || record["external_execution"] != false
+        {
+            return Err("Unverified arithmetic notebook result refused".into());
+        }
+        let code = record["code"]
+            .as_str()
+            .ok_or("Missing stored arithmetic expression")?;
+        let value = record["result"]["value"]
+            .as_f64()
+            .filter(|value| value.is_finite())
+            .ok_or("Missing finite stored arithmetic result")?;
+        let id = row["cell_id"]
+            .as_str()
+            .ok_or("Missing stored cell identifier")?;
+        let revision = row["cell_revision"]
+            .as_i64()
+            .and_then(|value| i32::try_from(value).ok())
+            .filter(|rev| *rev > 0)
+            .ok_or("Invalid saved cell revision")?;
+        cells.push(NotebookCell {
+            id: id.into(),
+            revision,
+            code: code.into(),
+            result: value.to_string().into(),
+        });
+    }
+    let count = cells.len();
+    ui.set_notebook_cells(Rc::new(slint::VecModel::from(cells)).into());
+    Ok(count)
+}
 
 fn refresh_quick_note_cards(
     ui: &MainWindow,
@@ -3711,6 +3774,168 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let active_project: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    app.on_preview_arithmetic_cell({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_notebook_cell_approval("".into());
+                let result = (|| -> Result<(String, String, String), String> {
+                    let project = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let id = if ui.get_notebook_cell_id().is_empty() {
+                        format!("cell:{}", Uuid::new_v4())
+                    } else {
+                        ui.get_notebook_cell_id().to_string()
+                    };
+                    let code = ui.get_notebook_cell_code();
+                    let revision = ui.get_notebook_cell_revision();
+                    if revision < 0 {
+                        return Err("Invalid arithmetic cell revision".into());
+                    }
+                    let result = evidence_read_at(
+                        &project,
+                        "notebook.cell_preview",
+                        serde_json::json!({
+                            "cell_id":id,
+                            "expected_cell_revision":revision,
+                            "language":"researchweave-arithmetic-v1",
+                            "code":code.as_str()
+                        }),
+                        &host_data_root()?,
+                    )?;
+                    let data = &result["data"];
+                    if data["preview_only"] != true
+                        || data["writes"] != 0
+                        || data["cell_id"] != id
+                    {
+                        return Err("Unsafe or inconsistent cell preview refused".into());
+                    }
+                    let approval = data["approved_preview_sha256"]
+                        .as_str()
+                        .filter(|value| value.len() == 64
+                            && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                        .ok_or("Arithmetic preview receipt unavailable")?;
+                    let value = data["result"]
+                        .as_f64()
+                        .filter(|value| value.is_finite())
+                        .ok_or("Arithmetic preview result not finite")?;
+                    Ok((
+                        id,
+                        approval.to_owned(),
+                        format!("READ-ONLY PREVIEW: {value}. No project writes. Review expression and press Record calculation to append one project-scoped immutable cell revision."),
+                    ))
+                })();
+                match result {
+                    Ok((id, approval, message)) => {
+                        ui.set_notebook_cell_id(id.into());
+                        ui.set_notebook_cell_approval(approval.into());
+                        ui.set_notebook_cell_status(message.into());
+                    }
+                    Err(error) => ui.set_notebook_cell_status(
+                        format!("Arithmetic preview refused: {error}").into()
+                    ),
+                }
+            }
+        }
+    });
+    app.on_run_arithmetic_cell({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let token = ui.get_notebook_cell_approval().to_string();
+                ui.set_notebook_cell_approval("".into());
+                let result = (|| -> Result<(i64, i64, f64), String> {
+                    if token.is_empty() {
+                        return Err("Preview a calculation before recording it".into());
+                    }
+                    let project = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let cell = ui.get_notebook_cell_id().to_string();
+                    let code = ui.get_notebook_cell_code();
+                    let expected = ui.get_notebook_cell_revision();
+                    if cell.is_empty() || expected < 0 {
+                        return Err("Select or preview a valid arithmetic cell first".into());
+                    }
+                    let root = host_data_root()?;
+                    let (pending, preview) = evidence_preview_at(
+                        &project,
+                        "notebook.cell_execute",
+                        "notebook-arithmetic",
+                        serde_json::json!({
+                            "cell_id":cell,
+                            "expected_cell_revision":expected,
+                            "language":"researchweave-arithmetic-v1",
+                            "code":code.as_str(),
+                            "approved_preview_sha256":token
+                        }),
+                        &root,
+                    )?;
+                    if preview["data"]["writes"] != 1
+                        || preview["data"]["simulated_result"]["cell_id"] != cell
+                    {
+                        return Err("Notebook preview did not validate one immutable revision".into());
+                    }
+                    let (saved, project_revision) =
+                        evidence_execute_pending(&pending, &project, &root)?;
+                    if saved["data"]["cell_id"] != cell
+                        || saved["data"]["external_execution"] != false
+                    {
+                        return Err("Unexpected recorded arithmetic cell receipt; inspect history before retrying".into());
+                    }
+                    let cell_revision = saved["data"]["cell_revision"]
+                        .as_i64()
+                        .filter(|value| *value > expected as i64)
+                        .ok_or("Recorded arithmetic cell revision unavailable")?;
+                    let number = saved["data"]["result"]
+                        .as_f64()
+                        .filter(|value| value.is_finite())
+                        .ok_or("Recorded arithmetic result unavailable")?;
+                    refresh_arithmetic_cells(&ui, &project, &root)?;
+                    Ok((cell_revision, project_revision, number))
+                })();
+                match result {
+                    Ok((revision, project_revision, number)) => {
+                        ui.set_notebook_cell_revision(revision as i32);
+                        ui.set_project_revision(project_revision as i32);
+                        ui.set_notebook_cell_status(format!(
+                            "Recorded arithmetic result {number} as immutable cell revision {revision}. Source and result receipts are in the project event chain."
+                        ).into());
+                    }
+                    Err(error) => ui.set_notebook_cell_status(
+                        format!("Arithmetic cell not recorded: {error}. No automatic retry. Inspect saved history if an execution receipt was interrupted.").into(),
+                    ),
+                }
+            }
+        }
+    });
+    app.on_load_arithmetic_cells({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_notebook_cell_approval("".into());
+                let result = active_project.borrow().as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|project| {
+                        refresh_arithmetic_cells(&ui, project, &host_data_root()?)
+                    });
+                match result {
+                    Ok(count) => ui.set_notebook_cell_status(
+                        format!("Loaded {count} latest arithmetic cells from this project. Select a saved cell to review or append another revision.").into()
+                    ),
+                    Err(error) => ui.set_notebook_cell_status(
+                        format!("Arithmetic cell history unavailable: {error}").into()
+                    )
+                }
+            }
+        }
+    });
     app.on_refresh_quick_notes({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -9104,6 +9329,83 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(error) => ui.set_status(error.into()),
                 }
             }
+        }
+    });
+    app.on_scan_pdf_caption_candidates({
+        let weak = app.as_weak();
+        move |path, request_id| {
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                let result =
+                    pdf_engine::figure_candidates::preview_pdf_figure_table_candidates(
+                        Path::new(path.as_str()),
+                    );
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        if ui.get_pdf_caption_request_id() != request_id
+                            || ui.get_pdf_local_path() != path
+                        {
+                            return;
+                        }
+                        ui.set_pdf_caption_busy(false);
+                        match result {
+                            Ok(preview) => {
+                                let source = preview.source_sha256;
+                                let scanned = preview.pages_inspected;
+                                let all = preview.candidates.len();
+                                let mut visible = Vec::new();
+                                for candidate in preview.candidates.iter().take(32) {
+                                    if candidate.content_extracted
+                                        || !candidate.human_confirmation_required
+                                        || candidate.page_number == 0
+                                    {
+                                        ui.set_pdf_caption_status(
+                                            "Unsafe PDF caption result refused: missing human-confirmation provenance.".into(),
+                                        );
+                                        return;
+                                    }
+                                    let first_line: String =
+                                        candidate.caption_first_line.chars().take(110).collect();
+                                    let label = format!(
+                                        "{:?}: {}", candidate.kind, first_line
+                                    );
+                                    let rect = candidate.caption_bounds_points;
+                                    let provenance = format!(
+                                        "UNVERIFIED caption anchor on page {}. Source SHA-256: {}. Caption text bounds in PDF points (not figure/table bounds): {:.1},{:.1}–{:.1},{:.1}. Heuristic score {:.2} is NOT scientific confidence. Verify the original page; no content was extracted or saved.",
+                                        candidate.page_number, source,
+                                        rect.left, rect.bottom, rect.right, rect.top,
+                                        candidate.anchor_heuristic_confidence
+                                    );
+                                    visible.push(PdfCaptionCandidate {
+                                        label: label.into(),
+                                        page_number: i32::try_from(candidate.page_number)
+                                            .unwrap_or(i32::MAX),
+                                        provenance: provenance.into(),
+                                    });
+                                }
+                                ui.set_pdf_caption_candidates(
+                                    Rc::new(slint::VecModel::from(visible)).into(),
+                                );
+                                ui.set_pdf_caption_status(format!(
+                                    "Read-only PDF caption scan: {} candidates, {} pages inspected, source SHA-256 {}. Showing first {} candidates. {} {}",
+                                    all, scanned, source, all.min(32),
+                                    if preview.scan_truncated { "Scan truncated by safety limits." } else { "Scan within configured bounds." },
+                                    preview.warning,
+                                ).into());
+                            }
+                            Err(error) => {
+                                ui.set_pdf_caption_candidates(
+                                    Rc::new(slint::VecModel::from(
+                                        Vec::<PdfCaptionCandidate>::new()
+                                    )).into());
+                                ui.set_pdf_caption_status(
+                                    format!("Local caption-anchor scan refused: {error}").into()
+                                );
+                            }
+                        }
+                    }
+                });
+            });
         }
     });
     app.on_load_pdf({
