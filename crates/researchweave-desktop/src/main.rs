@@ -3911,6 +3911,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if data["preview_only"] != true || data["writes"] != 0 {
                         return Err("Markdown preview unexpectedly permits writes".into());
                     }
+                    if data["card_id"] != ui.get_quick_note_selected_id().as_str() {
+                        return Err(
+                            "Markdown source does not match the currently selected saved card"
+                                .into(),
+                        );
+                    }
                     let approval = data["approved_preview_sha256"]
                         .as_str()
                         .filter(|hash| hash.len() == 64

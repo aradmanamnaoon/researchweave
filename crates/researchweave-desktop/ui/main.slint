@@ -1981,6 +1981,9 @@ export component MainWindow inherits Window {
                                                 root.quick-note-color = "paper";
                                                 root.quick-note-pinned = false;
                                                 root.quick-note-archived = false;
+                                                root.quick-note-obsidian-approval = "";
+                                                root.quick-note-obsidian-markdown = "";
+                                                root.quick-note-obsidian-status = "Quick note selection cleared. Select and export a saved card before another import.";
                                             }
                                         }
                                         Button {
@@ -2110,6 +2113,9 @@ export component MainWindow inherits Window {
                                                         root.quick-note-color = note.color;
                                                         root.quick-note-pinned = note.pinned;
                                                         root.quick-note-archived = note.archived;
+                                                        root.quick-note-obsidian-approval = "";
+                                                        root.quick-note-obsidian-markdown = "";
+                                                        root.quick-note-obsidian-status = "Selected quick note changed. Export this exact saved card before previewing an import.";
                                                     }
                                                 }
                                                 Button {

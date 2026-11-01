@@ -33,6 +33,8 @@ class NativeObsidianContract(unittest.TestCase):
             self.assertIn(name, self.ui)
         self.assertIn("root.quick-note-obsidian-approval = \"\";", self.ui)
         self.assertIn("enabled: root.quick-note-obsidian-approval != \"\";", self.ui)
+        self.assertIn('root.quick-note-obsidian-status = "Selected quick note changed.', self.ui)
+        self.assertIn('root.quick-note-obsidian-status = "Quick note selection cleared.', self.ui)
 
     def test_real_project_boundary_and_no_automatic_remote_or_database_fallback(self) -> None:
         for operation in (
@@ -43,6 +45,7 @@ class NativeObsidianContract(unittest.TestCase):
             self.assertIn(operation, self.main)
             self.assertIn(operation, self.evidence)
         self.assertIn('"quick-note-obsidian"', self.main)
+        self.assertIn('data["card_id"] != ui.get_quick_note_selected_id().as_str()', self.main)
         self.assertIn("evidence_preview_at(", self.main)
         self.assertIn("evidence_execute_pending(&pending, &project, &root)", self.main)
         self.assertIn("preview[\"data\"][\"writes\"] != 1", self.main)
