@@ -97,7 +97,7 @@ pub(super) fn manuscript_id_from_document(document: &Value) -> Result<&str, Stri
         .ok_or("Source-bound Quarto document title is missing")?;
     title
         .strip_prefix("Manuscript draft ")
-        .filter(|id| !id.is_empty() && id == id.trim() && id.len() <= 128)
+        .filter(|id| !id.is_empty() && *id == id.trim() && id.len() <= 128)
         .ok_or_else(|| "Source-bound Quarto document must identify a persisted manuscript".into())
 }
 
