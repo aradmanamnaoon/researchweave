@@ -625,6 +625,14 @@ mod tests {
             "10.1234/fixture.2026.1"
         );
         assert_eq!(executed["data"]["automatic_reference_update"], false);
+        assert_eq!(
+            executed["data"]["indexed_source_object_sha256_verified"],
+            true
+        );
+        assert_eq!(
+            executed["data"]["source_pdf_object_bytes_reverified"],
+            false
+        );
         assert_eq!(executed["data"]["extracted_text_sha256"], body_hash);
         assert_eq!(executed["data"]["truncated"], false);
         assert_eq!(
@@ -657,6 +665,22 @@ mod tests {
         assert_eq!(
             handler.execute("reference.pdf_metadata_preview", &args, &stale)["status"],
             "failed"
+        );
+        let object_path = store
+            .root()
+            .join("objects")
+            .join(&pdf_sha[..2])
+            .join(&pdf_sha);
+        let original_object_bytes = std::fs::read(&object_path).unwrap();
+        std::fs::write(&object_path, b"tampered synthetic PDF object").unwrap();
+        assert_eq!(
+            handler.execute("reference.pdf_metadata_preview", &args, &ctx)["status"],
+            "failed"
+        );
+        std::fs::write(&object_path, original_object_bytes).unwrap();
+        assert_eq!(
+            handler.execute("reference.pdf_metadata_preview", &args, &ctx)["status"],
+            "ok"
         );
         store
             .connection()

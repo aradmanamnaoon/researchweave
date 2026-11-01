@@ -6,11 +6,13 @@ use rusqlite::OptionalExtension;
 use serde_json::{json, Value};
 use sha2::{Digest, Sha256};
 use std::collections::BTreeSet;
+use std::fs;
 use uuid::Uuid;
 
 const MAX_BODY_BYTES: usize = 4 * 1024 * 1024;
 const MAX_SCAN_BYTES: usize = 32_768;
 const MAX_DOI_CANDIDATES: usize = 12;
+const MAX_STORED_OBJECT_BYTES: u64 = 32 * 1024 * 1024;
 
 fn hash(bytes: &[u8]) -> String {
     hex::encode(Sha256::digest(bytes))
@@ -88,6 +90,34 @@ fn title_hint(text: &str) -> Option<Value> {
     None
 }
 
+fn check_stored_object(store: &ProjectStore, object_sha256: &str) -> Result<(), String> {
+    // A source's SQLite digest is only an assertion until checked against
+    // the actual project object. Check intermediate dirs too, so an attacker
+    // cannot replace a hash-named shard with a filesystem symlink.
+    let objects = store.root().join("objects");
+    let shard = objects.join(&object_sha256[..2]);
+    for directory in [&objects, &shard] {
+        let metadata = fs::symlink_metadata(directory)
+            .map_err(|_| "indexed source object directory missing")?;
+        if metadata.file_type().is_symlink() || !metadata.is_dir() {
+            return Err("indexed source object directory is not a safe directory".into());
+        }
+    }
+    let path = shard.join(object_sha256);
+    let metadata = fs::symlink_metadata(&path).map_err(|_| "indexed source object missing")?;
+    if metadata.file_type().is_symlink()
+        || !metadata.is_file()
+        || metadata.len() > MAX_STORED_OBJECT_BYTES
+    {
+        return Err("indexed source object is not a bounded regular file".into());
+    }
+    let bytes = fs::read(path).map_err(|_| "indexed source object could not be read")?;
+    if bytes.len() as u64 != metadata.len() || hash(&bytes) != object_sha256 {
+        return Err("indexed source object SHA-256 mismatch".into());
+    }
+    Ok(())
+}
+
 pub(crate) fn preview(
     store: &ProjectStore,
     args: &Value,
@@ -124,6 +154,7 @@ pub(crate) fn preview(
     if source_sha256.len() != 64 || !source_sha256.bytes().all(|b| b.is_ascii_hexdigit()) {
         return Err("PDF source digest invalid".into());
     }
+    check_stored_object(store, &source_sha256.to_ascii_lowercase())?;
     let mut boundary = body.len().min(MAX_SCAN_BYTES);
     while !body.is_char_boundary(boundary) {
         boundary -= 1;
@@ -146,6 +177,7 @@ pub(crate) fn preview(
         "truncated":scan.len()<body.len(),"title_candidate":title,
         "doi_candidates":dois,"doi_ambiguous_or_missing":ambiguous_doi,
         "automatic_reference_update":false,"external_doi_verified":false,
+        "indexed_source_object_sha256_verified":true,
         "source_pdf_object_bytes_reverified":false,
         "warnings":[
             "Text-extraction heuristics only. DOI syntax is not resolved or verified against Crossref or the publisher.",
