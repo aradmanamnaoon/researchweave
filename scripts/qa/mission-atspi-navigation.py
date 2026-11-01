@@ -2506,7 +2506,16 @@ def main() -> int:
             if not activate(app, "Show long form project notebook"):
                 raise RuntimeError("Previous project's long form notebook inaccessible")
             time.sleep(0.3)
-        restored_notebook = wait_field(app, "Project notebook text")
+        # The exact TextEdit failed AT-SPI queryText during the preceding
+        # project-B empty-state probe on installed Linux. Re-open the saved
+        # project-A notebook, explicitly reveal/focus the real native editor,
+        # and copy its actual nonempty content with a fresh sentinel. This
+        # must prove the saved text came back; a SQLite-derived substitute or
+        # an inaccessible offscreen node would invalidate the recovery check.
+        reveal_bounded_control(app, "Project notebook text", down=True)
+        restored_notebook = read_visible_field_keyboard(
+            app, "Project notebook text", allow_empty=False, force_clipboard=True
+        )
         if "ResearchWeave isolated UX note:" not in restored_notebook:
             raise RuntimeError("Previously autosaved notebook is not available after reopening")
         if not activate(app, "Manuscript"):
