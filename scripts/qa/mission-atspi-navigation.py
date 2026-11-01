@@ -846,6 +846,84 @@ def exercise_f14_positive_dedup(app: Any, project: pathlib.Path, output: pathlib
     audit(app, "f14-positive-alias-undone", output)
     print("F14_POSITIVE_EXPLICIT_UNDO_BOTH_REFERENCES_UNCHANGED_OK")
 
+    # F14 v7: repeat the literal persisted-pair scan at the *new* project
+    # revision, then require actual native preview/Record of a durable
+    # keep-separate decision. A SHA from the earlier alias scan is stale.
+    before_keep = project_event_snapshot(project)
+    activate_bounded_control(
+        app, "Scan local reference duplicate candidates without changing data", down=False
+    )
+    activate_bounded_control(app, expected_accessible_row, down=True)
+    revised_source = dict(fingerprint_source)
+    revised_source["revision"] = before_keep[0]
+    current_fingerprint = hashlib.sha256(
+        json.dumps(revised_source, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        .encode("utf-8")
+    ).hexdigest()
+    for field, expected in (
+        ("Duplicate review canonical reference ID", left[0]),
+        ("Duplicate review duplicate reference ID", right[0]),
+        ("Duplicate review candidate SHA256", current_fingerprint),
+    ):
+        reveal_bounded_control(app, field, down=True)
+        if read_field(app, field) != expected:
+            raise RuntimeError(f"F14 keep-separate fresh candidate selection mismatch: {field}")
+    keep_reason = "Independent original sources explicitly kept separate after review"
+    reveal_bounded_control(app, "Duplicate review rationale", down=True)
+    edit_text(app, "Duplicate review rationale", keep_reason, allow_unreadable=True)
+    activate_bounded_control(app, "Preview immutable keep separate reference decision", down=True)
+    if not any(
+        "Reference dedup decision previewed; no changes recorded" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F14 native keep-separate preview did not display explicit no-write consent")
+    if (
+        project_event_snapshot(project) != before_keep
+        or rows() != references
+        or aliases()
+    ):
+        raise RuntimeError("F14 keep-separate preview wrote to the project or altered source records")
+    with sqlite3.connect(database) as db:
+        if db.execute("SELECT count(*) FROM reference_dedup_decisions").fetchone()[0] != 0:
+            raise RuntimeError("F14 preview created a durable decision before human Record")
+    activate_bounded_control(app, "Record explicitly approved reference dedup decision", down=True)
+    if not any(
+        "Reviewed reference identity decision recorded locally" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F14 native keep-separate Record did not produce approval receipt")
+    assert_one_event(before_keep, "reference.dedup_keep_separate")
+    if rows() != references or aliases():
+        raise RuntimeError("F14 keep-separate decision changed original sources or created alias")
+    with sqlite3.connect(database) as db:
+        decisions = db.execute(
+            "SELECT left_id,right_id,decision,reviewed_candidate_sha256,"
+            "review_revision,project_revision,rationale,actor "
+            "FROM reference_dedup_decisions ORDER BY project_revision"
+        ).fetchall()
+    if (
+        len(decisions) != 1
+        or decisions[0][:4] != (left[0], right[0], "keep_separate", current_fingerprint)
+        or decisions[0][4] != before_keep[0]
+        or decisions[0][5] != before_keep[0] + 1
+        or decisions[0][6] != keep_reason
+        or not decisions[0][7]
+    ):
+        raise RuntimeError("F14 source-bound keep-separate decision was not durably persisted")
+    before_history = project_event_snapshot(project)
+    activate_bounded_control(
+        app, "Load immutable reference pair decision history without changing project", down=True
+    )
+    if not any(
+        "Immutable reference decision history loaded locally" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F14 native immutable pair decision history could not be loaded")
+    if project_event_snapshot(project) != before_history or rows() != references or aliases():
+        raise RuntimeError("F14 read-only immutable decision history modified persisted project")
+    audit(app, "f14-keep-separate-durable-history", output)
+    print("F14_NATIVE_KEEP_SEPARATE_PREVIEW_RECORD_PERSISTED_HISTORY_NO_WRITE_OK")
+
 
 def exercise_f26_sourcebound_screening(
     app: Any, project: pathlib.Path, output: pathlib.Path

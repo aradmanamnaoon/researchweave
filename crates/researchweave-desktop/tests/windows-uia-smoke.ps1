@@ -682,11 +682,12 @@ function Get-F14ProjectSnapshot([string]$ProjectPath) {
     $revision = [long][RwUiaReadOnlySqlite]::Scalar($database, 'SELECT revision FROM project')
     $references = @([RwUiaReadOnlySqlite]::Rows($database, 'SELECT id,title,authors_json,year,doi,kind,format,raw,metadata_json,status,imported_at FROM reference ORDER BY id'))
     $aliases = @([RwUiaReadOnlySqlite]::Rows($database, 'SELECT original_id,canonical_id,reason FROM reference_alias ORDER BY original_id'))
+    $decisions = @([RwUiaReadOnlySqlite]::Rows($database, 'SELECT id,left_id,right_id,decision,reviewed_candidate_sha256,stable_pair_sha256,review_revision,project_revision,rationale,actor,recorded_at,request_id FROM reference_dedup_decisions ORDER BY project_revision'))
     $events = @([RwUiaReadOnlySqlite]::Rows($database, 'SELECT sequence,operation,payload_hash,event_hash FROM events ORDER BY sequence'))
     if ($revision -ne $events.Count) {
         throw "F14 persisted revision/event count mismatch: revision=$revision events=$($events.Count)"
     }
-    return [pscustomobject]@{ Revision = $revision; References = $references; Aliases = $aliases; Events = $events }
+    return [pscustomobject]@{ Revision = $revision; References = $references; Aliases = $aliases; Decisions = $decisions; Events = $events }
 }
 function Assert-F14RowsEqual([string[]]$Before, [string[]]$After, [string]$Label) {
     if ($Before.Count -ne $After.Count -or
@@ -705,6 +706,7 @@ function Assert-F14Unchanged(
     }
     Assert-F14RowsEqual $Before.References $After.References "$Stage source reference rows"
     Assert-F14RowsEqual $Before.Aliases $After.Aliases "$Stage alias rows"
+    Assert-F14RowsEqual $Before.Decisions $After.Decisions "$Stage immutable reviewer decision rows"
     Assert-F14RowsEqual $Before.Events $After.Events "$Stage append-only event chain"
 }
 function Assert-F14SingleEvent(
@@ -3139,6 +3141,96 @@ try {
         throw 'F14 explicit undo failed to restore two intact independent source identities'
     }
     Write-Output 'PASS: F14 installed Windows UIA registers two distinct original records; selects a real score-80 candidate; rejects invented fingerprint and stale approval without writes; separately previews/records exactly one alias event and one undo event; read-only independent SQLite snapshots preserve both source records and prior events'
+
+    # F14 schema-v7 positive: a new project revision invalidates the earlier
+    # candidate SHA. Re-scan the *actual persisted* unchanged pair through the
+    # native UI, then preview/record immutable keep separate with no alias.
+    $f14KeepScan = FocusByShiftTab $f14UndoRecord ([System.Windows.Automation.ControlType]::Button) 'Scan local reference duplicate candidates without changing data' 22
+    $f14KeepScan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference candidates scanned locally; no changes recorded*' 10000
+    $f14KeepScanEditor = FocusByTab $f14KeepScan ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 20
+    $f14KeepScanText = [string]$f14KeepScanEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    $f14KeepScanStart = $f14KeepScanText.IndexOf('{')
+    if (-not $f14KeepScanText.StartsWith('READ-ONLY CANDIDATE SCAN.') -or $f14KeepScanStart -lt 0) {
+        throw 'F14 keep-separate fresh native source scan is not inspectable'
+    }
+    $f14KeepScanJson = $f14KeepScanText.Substring($f14KeepScanStart) | ConvertFrom-Json -ErrorAction Stop
+    $f14KeepCandidate = @($f14KeepScanJson.candidates)
+    if ($f14KeepScanJson.project_revision -ne $f14Restored.Revision -or
+        $f14KeepCandidate.Count -ne 1 -or
+        $f14KeepCandidate[0].decision_state -cne 'unreviewed' -or
+        $f14KeepCandidate[0].stable_pair_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        $f14KeepCandidate[0].candidate_sha256 -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'F14 fresh source scan is incomplete, stale or already decided'
+    }
+    Assert-F14Unchanged $f14Restored (Get-F14ProjectSnapshot $temporary) $window 'keep-separate rescan'
+    $f14KeepRow = FocusByShiftTab $f14KeepScanEditor ([System.Windows.Automation.ControlType]::Button) $f14CandidateLabel 20
+    $f14KeepRow.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f14KeepCanonical = FocusByTab $f14KeepRow ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review canonical reference ID' 4
+    $f14KeepDuplicate = FocusByTab $f14KeepCanonical ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review duplicate reference ID' 3
+    $f14KeepFingerprint = FocusByTab $f14KeepDuplicate ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review candidate SHA256' 3
+    $f14KeepRationale = FocusByTab $f14KeepFingerprint ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review rationale' 3
+    if ($f14KeepCanonical.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14Ids[0] -or
+        $f14KeepDuplicate.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14Ids[1] -or
+        $f14KeepFingerprint.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14KeepCandidate[0].candidate_sha256) {
+        throw 'F14 keep-separate row selection did not preserve current source-bound identity'
+    }
+    $f14KeepReason = 'UIA synthetic reviewer kept independent sources separate'
+    $f14KeepRationale.GetCurrentPattern($f14ReferenceValue).SetValue($f14KeepReason)
+    $f14KeepPreview = FocusByTab $f14KeepRationale ([System.Windows.Automation.ControlType]::Button) 'Preview immutable keep separate reference decision' 5
+    $f14KeepPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
+    Assert-F14Unchanged $f14Restored (Get-F14ProjectSnapshot $temporary) $window 'native keep-separate preview'
+    $f14KeepPreviewEditor = FocusByTab $f14KeepPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 6
+    $f14KeepPreviewText = [string]$f14KeepPreviewEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    $f14KeepPreviewStart = $f14KeepPreviewText.IndexOf('{')
+    if (-not $f14KeepPreviewText.StartsWith('PREVIEW ONLY. Nothing recorded.') -or $f14KeepPreviewStart -lt 0) {
+        throw 'F14 keep-separate native decision preview did not expose a real review receipt'
+    }
+    $f14KeepPreviewJson = $f14KeepPreviewText.Substring($f14KeepPreviewStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($f14KeepPreviewJson.decision -cne 'keep_separate' -or
+        $f14KeepPreviewJson.preview_only -ne $true -or $f14KeepPreviewJson.writes -ne 0 -or
+        $f14KeepPreviewJson.candidate_sha256 -cne $f14KeepCandidate[0].candidate_sha256 -or
+        $f14KeepPreviewJson.stable_pair_sha256 -cne $f14KeepCandidate[0].stable_pair_sha256) {
+        throw 'F14 keep-separate native preview invented a write or lost source-bound provenance'
+    }
+    $f14KeepRecord = FocusByShiftTab $f14KeepPreviewEditor ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved reference dedup decision' 3
+    $f14KeepRecord.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reviewed reference identity decision recorded locally*' 10000
+    $f14Kept = Get-F14ProjectSnapshot $temporary
+    Assert-F14SingleEvent $f14Restored $f14Kept $window 'reference.dedup_keep_separate'
+    Assert-F14RowsEqual $f14Restored.References $f14Kept.References 'kept source bytes'
+    Assert-F14RowsEqual $f14Restored.Aliases $f14Kept.Aliases 'kept alias map'
+    if ($f14Kept.Decisions.Count -ne 1 -or $f14Kept.Aliases.Count -ne 0) {
+        throw 'F14 keep-separate Record was not exactly one immutable decision without alias'
+    }
+    $f14KeptParts = $f14Kept.Decisions[0].Split('|')
+    if ($f14KeptParts.Count -ne 12 -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[1])) -cne $f14Ids[0] -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[2])) -cne $f14Ids[1] -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[3])) -cne 'keep_separate' -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[4])) -cne $f14KeepCandidate[0].candidate_sha256 -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[5])) -cne $f14KeepCandidate[0].stable_pair_sha256 -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[8])) -cne $f14KeepReason) {
+        throw 'F14 immutable decision lacks exact approved source pair, rationale or digests'
+    }
+    $f14HistoryButton = FocusByShiftTab $f14KeepRecord ([System.Windows.Automation.ControlType]::Button) 'Load immutable reference pair decision history without changing project' 4
+    $f14HistoryButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Immutable reference decision history loaded locally*' 10000
+    Assert-F14Unchanged $f14Kept (Get-F14ProjectSnapshot $temporary) $window 'read-only decision history load'
+    $f14HistoryEditor = FocusByTab $f14HistoryButton ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 4
+    $f14HistoryText = [string]$f14HistoryEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    $f14HistoryStart = $f14HistoryText.IndexOf('{')
+    if (-not $f14HistoryText.StartsWith('READ-ONLY IMMUTABLE REFERENCE DECISION HISTORY.') -or $f14HistoryStart -lt 0) {
+        throw 'F14 read-only native history did not expose actual persisted decision details'
+    }
+    $f14History = $f14HistoryText.Substring($f14HistoryStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($f14History.decision_state -cne 'kept_separate' -or @($f14History.rows).Count -ne 1 -or
+        $f14History.rows[0].decision -cne 'keep_separate' -or
+        $f14History.rows[0].stable_pair_sha256 -cne $f14KeepCandidate[0].stable_pair_sha256) {
+        throw 'F14 native history was not source-consistent with immutable reviewed decision'
+    }
+    Write-Output 'UIA_F14_KEEP_SEPARATE_NATIVE_PREVIEW_RECORD_PERSISTED_HISTORY_NO_ALIAS_OK'
 } catch {
     # CI archives the requested screenshot even on failures before the last
     # test assertion. Keep the original failure authoritative if capture fails.

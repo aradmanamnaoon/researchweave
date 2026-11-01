@@ -66,3 +66,17 @@ CSL/DOI verification is claimed. A changed source must be re-reviewed.
 restart/reopen and independent project-event assertions across Windows,
 Ubuntu and both macOS architectures. The expansion ledger therefore retains
 **F14 PARTIAL**. Historical release v0.2.0 does not contain these features.
+
+## Pending stronger native test scripts (not yet hosted-verified)
+
+The next source candidate adds an opt-in private Linux AT-SPI scenario that
+re-scans after an alias undo, recomputes the revision-bound source fingerprint,
+selects the actual candidate, previews keep-separate without writing, records
+exactly one `reference.dedup_keep_separate` event/decision row, and loads the
+native read-only persisted pair history. A matching Windows installed UIA
+scenario extends the WinSQLite **read-only** snapshot to include decision rows
+and verifies the actual native preview JSON, one approved revision/event,
+unchanged reference and alias rows and source-matching history. Both platforms
+fail closed if native accessibility/readback, provenance or persistence is
+missing. Their source test scripts are not evidence that the installed GUI has
+already passed; retain F14 PARTIAL until exact hosted run markers succeed.

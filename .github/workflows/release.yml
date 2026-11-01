@@ -235,6 +235,7 @@ jobs:
           grep -F 'AT_SPI_NAVIGATION_PROBE_OK' target/qa/mission-full-native/atspi-navigation.txt
           grep -F 'F03_REVIEWER_COMMENT_STALE_AND_INVALID_QUOTE_REFUSED_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
           grep -F 'F14_POSITIVE_EXPLICIT_UNDO_BOTH_REFERENCES_UNCHANGED_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F14_NATIVE_KEEP_SEPARATE_PREVIEW_RECORD_PERSISTED_HISTORY_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
           grep -F 'F26_NATIVE_SOURCEBOUND_PICO_SUGGESTION_PEER_BLIND_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
           grep -F 'F26_UNKNOWN_REVIEW_RECORD_REFUSED_WITH_NO_PROJECT_EVENTS_OK' target/qa/mission-full-native/atspi-navigation.txt
           grep -F 'F26_INVALID_PICO_REFUSED_AND_BLINDED_VOTE_UNCHANGED_OK' target/qa/mission-full-native/atspi-navigation.txt
