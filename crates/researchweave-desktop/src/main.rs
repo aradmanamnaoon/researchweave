@@ -249,6 +249,17 @@ fn reset_project_visible_state(ui: &MainWindow) {
     );
     ui.set_manuscript_outline_open(false);
     ui.set_manuscript_outline_status("Load saved sections to navigate this manuscript.".into());
+    // The revision-history panel contains an uncontrolled source-revision
+    // LineEdit. Unlike project-bound stored manuscript revisions, this UI
+    // draft formerly survived opening another project (observed in private
+    // Xvfb acceptance with the previous project's source revision still
+    // visible). Collapse it and clear the stale source before the new project
+    // can preview or record a restore.
+    ui.set_manuscript_history_panel_open(false);
+    ui.set_manuscript_restore_source("".into());
+    ui.set_manuscript_revision_summary(
+        "Select a saved manuscript section and load its revision history.".into(),
+    );
     ui.set_manuscript_word_count(0);
     ui.set_manuscript_character_count(0);
     ui.set_manuscript_find_panel_open(false);

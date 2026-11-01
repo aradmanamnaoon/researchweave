@@ -75,6 +75,71 @@ def read_field(app: Any, accessible_name: str) -> str:
     raise RuntimeError(f"Cannot read actual accessible field: {accessible_name}")
 
 
+def read_visible_field_keyboard(
+    app: Any, accessible_name: str, *, allow_empty: bool = False
+) -> str:
+    """Read exact visible LineEdit text using native X11 keyboard+clipboard.
+
+    Slint's AT-SPI Text interface occasionally raises NotImplementedError
+    for visibly populated read-only context fields. Clipboard readback must
+    prove the actual rendered editor value; a project-DB-derived substitute
+    is forbidden. Only the private 1280x800 Xvfb session is used.
+    """
+    try:
+        value = read_field(app, accessible_name)
+        if value or allow_empty:
+            return value
+    except RuntimeError:
+        pass
+    for node in nodes_named(app, accessible_name):
+        if (node.name or "").casefold() != accessible_name.casefold():
+            continue
+        try:
+            rect = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+            x = rect.x + rect.width // 2
+            y = rect.y + rect.height // 2
+            if not (rect.width >= 8 and rect.height >= 8 and 50 <= x < 1280 and 130 <= y < 715):
+                continue
+            windows = subprocess.run(
+                ["xdotool", "search", "--name", "ResearchWeave"],
+                capture_output=True, text=True, check=True, timeout=10,
+            ).stdout.splitlines()
+            if not windows:
+                raise RuntimeError("No native X11 window to focus")
+            subprocess.run(
+                ["xdotool", "windowfocus", "--sync", windows[0]],
+                check=True, timeout=10,
+            )
+            if not node.queryComponent().grabFocus():
+                continue
+            sentinel = "RW-QA-NOT-COPIED-" + uuid.uuid4().hex
+            subprocess.run(
+                ["xclip", "-selection", "clipboard", "-i"],
+                input=sentinel, text=True, check=True, timeout=10,
+            )
+            subprocess.run(
+                ["xdotool", "key", "--clearmodifiers", "ctrl+a", "ctrl+c"],
+                check=True, timeout=10,
+            )
+            text = subprocess.run(
+                ["xclip", "-selection", "clipboard", "-o"],
+                capture_output=True, text=True, check=True, timeout=10,
+            ).stdout.strip()
+            if text and text != sentinel:
+                print(f"XVFB_NATIVE_CLIPBOARD_READBACK_OK={accessible_name} chars={len(text)}")
+                return text
+            if allow_empty and text == sentinel:
+                # Only the explicit empty-draft project-isolation check may
+                # regard a clipboard selection with no characters as empty.
+                # The exact visible editor was focused immediately above;
+                # non-empty dataset identity assertions never use this path.
+                print(f"XVFB_NATIVE_EMPTY_EDITOR_CHECK={accessible_name}")
+                return ""
+        except Exception as error:
+            print(f"XVFB_NATIVE_CLIPBOARD_UNAVAILABLE={accessible_name} {type(error).__name__}")
+    raise RuntimeError(f"Native accessible and keyboard readback both failed: {accessible_name}")
+
+
 def read_native_protocol_inspector(app: Any, protocol_id: str, *, frozen: bool) -> dict[str, Any]:
     """Read the actual read-only Protocol JSON editor, not a generated receipt.
 
@@ -1539,32 +1604,31 @@ def main() -> int:
         audit(app, "protocol-physical-preview-diagnostic", output)
         raise RuntimeError("Protocol baseline physical receipt preview omitted persisted provenance")
     physical_receipt_path = output / "verified-local-protocol-baseline.md"
-    scroll_protocol(False, 16)
-    for _ in range(25):
-        try:
-            edit_text(
-                app,
-                "Local protocol baseline receipt destination path",
-                str(physical_receipt_path),
-                allow_unreadable=True,
-                # Known zero-length AT-SPI Text response on the hosted
-                # installed Linux reader. The next assertions require the
-                # exact saved file path, contents and SHA-256; nowhere else
-                # may zero-length text be tolerated merely for convenience.
-                allow_zero_readback=True,
-            )
-            break
-        except RuntimeError as error:
-            if "Missing editable field" not in str(error):
-                raise
-            scroll_protocol(True, 1)
-    else:
-        audit(app, "protocol-physical-path-missing", output)
-        raise RuntimeError("Local protocol baseline path field not reachable through scrolling")
+    # A Slint LineEdit may remain in the AT-SPI descendants tree while its
+    # actual widget is outside the viewport. grabFocus() on that offscreen
+    # node can report success without delivering Xvfb keystrokes to the edit.
+    # Both hosted and local installed runs typed the exact path yet the file
+    # was absent after Save. Require the *real input rect* to be visible and
+    # keyboard-targetable rather than trusting a logically focused hidden node.
+    reveal_bounded_control(
+        app, "Local protocol baseline receipt destination path", down=True
+    )
+    audit(app, "protocol-physical-destination-revealed", output)
+    edit_text(
+        app,
+        "Local protocol baseline receipt destination path",
+        str(physical_receipt_path),
+        allow_unreadable=True,
+        # Even a visible Slint edit may return empty AT-SPI Text. Do NOT
+        # equate that with success; the exact subsequent saved-file/digest
+        # assertions are the independent proof of actual typed value.
+        allow_zero_readback=True,
+    )
     if physical_receipt_path.exists():
         raise RuntimeError("Local baseline preview unexpectedly wrote a physical file")
-    if not activate(app, "Save verified local baseline receipt without overwrite"):
-        raise RuntimeError("Local protocol baseline save requires an explicit native action")
+    activate_bounded_control(
+        app, "Save verified local baseline receipt without overwrite", down=True
+    )
     time.sleep(0.3)
     if not physical_receipt_path.is_file():
         raise RuntimeError("Approved local baseline Save did not create a physical Markdown file")
@@ -2123,11 +2187,26 @@ def main() -> int:
         audit(app, "data-after-import", output)
         if not nodes_named(app, "Recently imported dataset identifier and immutable revision"):
             raise RuntimeError("Recently imported dataset context is missing after successful import")
-        if not activate(app, "Inspect variables in recently imported dataset"):
-            raise RuntimeError("Dataset-to-Variables shortcut is broken")
-        time.sleep(0.3)
-        variable_id = read_field(app, "Variable View dataset ID")
-        variable_revision = read_field(app, "Variable View dataset revision")
+        # The Data View shortcut may be below the visible scroll extent. A
+        # successful AT-SPI click dispatch alone does not establish that the
+        # new page actually rendered (observed in private WSL native QA).
+        # Reveal and activate the exact live control, then require BOTH real
+        # context fields on the Variables page; no fabricated dataset IDs.
+        activate_bounded_control(
+            app, "Inspect variables in recently imported dataset", down=True
+        )
+        for _ in range(16):
+            try:
+                variable_id = read_visible_field_keyboard(app, "Variable View dataset ID")
+                variable_revision = read_visible_field_keyboard(app, "Variable View dataset revision")
+                if variable_id and variable_revision:
+                    break
+            except RuntimeError:
+                pass
+            time.sleep(0.18)
+        else:
+            audit(app, "data-to-variable-navigation-failed", output)
+            raise RuntimeError("Dataset-to-Variables shortcut did not reveal actual dataset identity and revision")
         if not variable_id or not variable_revision:
             raise RuntimeError("Imported dataset identity did not propagate into Variables")
         print(f"DATA_TO_VARIABLES_CONTEXT_OK id_chars={len(variable_id)} revision_chars={len(variable_revision)}")
@@ -2138,8 +2217,8 @@ def main() -> int:
             raise RuntimeError("Dataset-to-Statistics shortcut is broken")
         time.sleep(0.3)
         if (
-            read_field(app, "Statistics dataset ID") != variable_id
-            or read_field(app, "Statistics dataset revision") != variable_revision
+            read_visible_field_keyboard(app, "Statistics dataset ID") != variable_id
+            or read_visible_field_keyboard(app, "Statistics dataset revision") != variable_revision
         ):
             raise RuntimeError("Statistics did not receive the exact imported immutable context")
         print("DATA_TO_STATISTICS_CONTEXT_OK")
@@ -2330,7 +2409,15 @@ def main() -> int:
             raise RuntimeError("Previous project notebook text leaked into new project")
         if not activate(app, "Manuscript"):
             raise RuntimeError("Cannot open manuscript on new project")
-        if wait_field(app, "Manuscript section body"):
+        time.sleep(0.25)
+        audit(app, "new-project-manuscript-isolation", output)
+        if nodes_named(app, "Manuscript restore source revision") or nodes_named(
+            app, "Load manuscript section revision history"
+        ):
+            raise RuntimeError(
+                "Previous project's revision history editor remained expanded after project switch"
+            )
+        if read_visible_field_keyboard(app, "Manuscript section body", allow_empty=True):
             raise RuntimeError("Previous project manuscript draft leaked across projects")
         print("NOTEBOOK_AND_MANUSCRIPT_PROJECT_ISOLATION_OK")
         if original_project is None:
