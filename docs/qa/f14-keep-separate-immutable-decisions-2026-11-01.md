@@ -57,6 +57,13 @@ CSL/DOI verification is claimed. A changed source must be re-reviewed.
 - Historical v6→v7 synthetic schema migration test checks physical verified
   backup, preservation of Unicode/reference raw bytes and absence of invented
   decisions; trigger stripping fails project open and schema inspection.
+- A separate real **legacy v6 `.rwproj` ZIP fixture** is generated in tests
+  with both original `manifest.reader_schema=6` and
+  `schema.sqlite_schema_version=6`, verified with its member SHA-256 inventory,
+  restored through the staging-and-migrate path, and reopened twice as v7.
+  Original Persian/Unicode reference bytes, project identity/revision and
+  non-overwrite refusal all hold. This proves plaintext portable-archive
+  upgrade for the synthetic fixture, not real-world recovery of every archive.
 - Existing v0–v5 migrations and F03 immutable comments retain their tests.
 - Full workspace `cargo test --offline --locked --workspace --all-features`
   completed locally with zero failures after integration; local strict Clippy

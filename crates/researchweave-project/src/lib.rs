@@ -2145,6 +2145,114 @@ mod tests {
     }
 
     #[test]
+    fn historic_v6_portable_archive_restores_into_v7_without_source_loss() {
+        // Construct a real legacy-schema archive with the exact historical
+        // reader_schema=6 in both descriptors. A current-schema archive with
+        // merely a renamed ZIP is not a meaningful compatibility fixture.
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("source-v6");
+        let identity = downgrade_for_migration(&root, 6);
+        let original_raw = "@article{future-proof, title={حافظه / memory 🧠}, year={2026}}";
+        let database = root.join("data/project.sqlite");
+        let connection = Connection::open(&database).unwrap();
+        connection
+            .execute(
+                "INSERT INTO reference
+             (id,title,authors_json,year,doi,kind,format,raw,metadata_json,status,imported_at)
+             VALUES (?1,?2,?3,2026,NULL,'article','bibtex',?4,'{}','unverified','2026-01-01')",
+                params![
+                    "12345678-1234-4123-8123-123456789abc",
+                    "حافظه / memory 🧠",
+                    "[\"Independent Reviewer\"]",
+                    original_raw,
+                ],
+            )
+            .unwrap();
+        assert_eq!(
+            connection
+                .pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))
+                .unwrap(),
+            6
+        );
+        drop(connection);
+
+        let db_inventory = InventoryItem {
+            path: "data/project.sqlite".into(),
+            sha256: sha256_file(&database).unwrap(),
+            size: fs::metadata(&database).unwrap().len(),
+        };
+        let schema = SchemaDescriptor {
+            format: "researchweave-sqlite-schema".into(),
+            version: 1,
+            sqlite_schema_version: 6,
+            archive_version: ARCHIVE_VERSION.into(),
+            objects: Vec::new(),
+        };
+        let schema_bytes = json_line(&schema).unwrap();
+        let schema_inventory = InventoryItem {
+            path: "schema.json".into(),
+            sha256: sha256(&schema_bytes),
+            size: schema_bytes.len() as u64,
+        };
+        let manifest = ArchiveManifest {
+            format: "researchweave-rwproj".into(),
+            version: ARCHIVE_VERSION.into(),
+            reader_schema: 6,
+            project_id: identity.clone(),
+            project_revision: 0,
+            objects: vec![db_inventory, schema_inventory],
+            encryption: "none".into(),
+            privacy: "private".into(),
+        };
+        let archive = temp.path().join("historic-v6.rwproj");
+        write_archive(
+            File::create(&archive).unwrap(),
+            &json_line(&manifest).unwrap(),
+            &schema_bytes,
+            &[("data/project.sqlite".into(), database.clone())],
+        )
+        .unwrap();
+        let archived = verify_archive(&archive).unwrap();
+        assert_eq!(archived.project_id, identity);
+        let restored = temp.path().join("v7-restored");
+        let receipt = restore_archive(&archive, &restored).unwrap();
+        assert_eq!(receipt, archived);
+        assert_eq!(
+            inspect_schema(&restored).unwrap().compatibility,
+            SchemaCompatibility::Current
+        );
+        for _ in 0..2 {
+            let store = ProjectStore::open(&restored).unwrap();
+            assert_eq!(store.info().unwrap().id, identity);
+            assert_eq!(store.info().unwrap().revision, 0);
+            let raw: String = store
+                .connection()
+                .query_row(
+                    "SELECT raw FROM reference WHERE id='12345678-1234-4123-8123-123456789abc'",
+                    [],
+                    |r| r.get(0),
+                )
+                .unwrap();
+            assert_eq!(raw, original_raw);
+            assert_eq!(
+                store
+                    .connection()
+                    .query_row::<i64, _, _>(
+                        "SELECT count(*) FROM reference_dedup_decisions",
+                        [],
+                        |r| r.get(0)
+                    )
+                    .unwrap(),
+                0
+            );
+        }
+        assert!(matches!(
+            restore_archive(&archive, &restored),
+            Err(ProjectError::Conflict)
+        ));
+    }
+
+    #[test]
     fn v7_reference_decision_immutability_triggers_cannot_be_silently_removed() {
         let base = tempfile::tempdir().unwrap();
         let root = base.path().join("tampered-v7-project");
