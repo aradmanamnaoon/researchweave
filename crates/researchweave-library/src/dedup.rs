@@ -126,7 +126,17 @@ fn candidate(left: &Reference, right: &Reference, revision: i64) -> Option<Value
     let left_doi = normalize_doi(left.doi.as_deref());
     let right_doi = normalize_doi(right.doi.as_deref());
     let doi_equal = left_doi.is_some() && left_doi == right_doi;
-    let doi_conflict = left_doi.is_some() && right_doi.is_some() && left_doi != right_doi;
+    // Malformed, nonempty identifiers are contradictory evidence, not absent
+    // evidence. Never silently downgrade them to "missing DOI" and permit a
+    // title/author/year-only alias that may conflate distinct publications.
+    let doi_unparseable = [left, right].iter().any(|reference| {
+        reference
+            .doi
+            .as_deref()
+            .is_some_and(|raw| !raw.trim().is_empty() && normalize_doi(Some(raw)).is_none())
+    });
+    let doi_conflict =
+        doi_unparseable || (left_doi.is_some() && right_doi.is_some() && left_doi != right_doi);
     let title_equal = !normalize_text(&left.title).is_empty()
         && normalize_text(&left.title) == normalize_text(&right.title);
     let author_left = first_author(&left.authors);
@@ -161,6 +171,7 @@ fn candidate(left: &Reference, right: &Reference, revision: i64) -> Option<Value
         "left_title":left.title,"right_title":right.title,
         "score":score,"candidate_sha256":hash(fingerprint_source.to_string().as_bytes()),
         "signals":{"doi_equal":doi_equal,"doi_conflict":doi_conflict,
+            "doi_unparseable":doi_unparseable,
             "title_equal":title_equal,"first_author_equal":author_equal,"year_equal":year_equal},
         "review_status":if conflict {"conflicting_metadata"} else {"review_required"},
         "eligible_for_approval":safe_to_review,
@@ -310,6 +321,37 @@ mod tests {
     use researchweave_core::{Effect, OperationHandler};
     use researchweave_project::ProjectInfo;
     use uuid::Uuid;
+
+    #[test]
+    fn malformed_doi_must_not_be_treated_as_an_absent_identifier() {
+        let first = Reference {
+            id: "reference-a".into(),
+            title: "The same paper".into(),
+            authors: vec!["A. Researcher".into()],
+            year: Some(2025),
+            doi: Some("invalid-identifier".into()),
+            raw_sha256: "a".repeat(64),
+        };
+        let second = Reference {
+            id: "reference-b".into(),
+            title: first.title.clone(),
+            authors: first.authors.clone(),
+            year: first.year,
+            doi: None,
+            raw_sha256: "b".repeat(64),
+        };
+        let caution = candidate(&first, &second, 3).unwrap();
+        assert_eq!(caution["signals"]["doi_unparseable"], true);
+        assert_eq!(caution["signals"]["doi_conflict"], true);
+        assert_eq!(caution["eligible_for_approval"], false);
+        assert_eq!(caution["review_status"], "conflicting_metadata");
+        assert_eq!(caution["score"], 0);
+        let mut valid_missing = first;
+        valid_missing.doi = None;
+        let review = candidate(&valid_missing, &second, 3).unwrap();
+        assert_eq!(review["signals"]["doi_unparseable"], false);
+        assert_eq!(review["eligible_for_approval"], true);
+    }
 
     fn fixture() -> (tempfile::TempDir, LibraryHandler, DispatchContext) {
         let folder = tempfile::tempdir().unwrap();

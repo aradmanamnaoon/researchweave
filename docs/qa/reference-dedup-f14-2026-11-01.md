@@ -18,6 +18,7 @@ The project already implements `reference.merge` and `reference.unmerge` using `
 | Title, first-author surname and year equal; one or both DOI missing | Score 80, review required, approval permitted |
 | DOI identical but title/first author/year conflicts | Show conflicting metadata, block F14 approval |
 | Title/first author/year match, valid DOI differs | Show conflict, block F14 approval |
+| Title/first author/year match, but a nonempty DOI is malformed | Show `doi_unparseable` conflict and block F14 approval; never equate malformed with missing |
 | Unrelated references | No candidate |
 
 `reference.dedup_approve` is a local-write operation requiring `canonical_id`, `duplicate_id`, the exact `candidate_sha256` from preview, `rationale` and a valid `ctx.expected_revision`. It recomputes the matching candidate, refuses ineligible conflicts, a stale fingerprint, an existing alias, an incomplete scan or missing references, then delegates to `reference.merge` (project CAS/event/alias transaction). Preview does not write. The output records an approved alias operation and zero reference/source deletions.
