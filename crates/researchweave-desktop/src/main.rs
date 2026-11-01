@@ -35,6 +35,7 @@ mod durable_activity;
 mod f44_synthetic_evaluation;
 mod manuscript_citation_insert;
 mod manuscript_outline;
+mod manuscript_quarto_source;
 mod manuscript_review_anchor;
 mod manuscript_search;
 mod pdf_engine;
@@ -9363,6 +9364,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_writing_results(error.clone().into());
                         ui.set_status(error.into());
                     }
+                }
+            }
+        }
+    });
+    app.on_prepare_quarto_source({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        move |manuscript_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let id = manuscript_id.as_str().trim();
+            let result = (|| -> Result<(physical_export::PreparedPhysicalExport, serde_json::Value, manuscript_quarto_source::SourceProjection), String> {
+                let project = active_project.borrow().clone().ok_or("Open a project first")?;
+                let root = host_data_root()?;
+                let before = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info().map_err(|error| error.to_string())?;
+                let source = evidence_read_at(
+                    &project, "writing.inspect", serde_json::json!({"manuscript_id":id}), &root
+                )?;
+                let after = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info().map_err(|error| error.to_string())?;
+                if before.id != after.id || before.revision != after.revision {
+                    return Err("Manuscript project changed during Quarto source inspection".into());
+                }
+                let projection = manuscript_quarto_source::from_inspect(&source, id)?;
+                let (prepared, receipt) = physical_export::prepare(
+                    &project,
+                    "writing.quarto_source_preview",
+                    serde_json::json!({
+                        "document":projection.document,
+                        "source_project_revision":before.revision
+                    }),
+                    &root,
+                )?;
+                Ok((prepared, receipt, projection))
+            })();
+            match result {
+                Ok((prepared, mut receipt, projection)) => {
+                    *pending_physical_export.borrow_mut() = Some(prepared);
+                    if let Some(data) = receipt.get_mut("data").and_then(serde_json::Value::as_object_mut) {
+                        data.remove("base64");
+                        data.remove("qmd");
+                        data.insert("source_text_and_binary_payload_redacted_from_ui".into(), serde_json::json!(true));
+                    }
+                    ui.set_writing_results(format!(
+                        "Inert, plain-section Quarto .qmd source prepared; NOT SAVED. {} source sections; losses: {:?}. Citation positions and original title pages are NOT preserved. Execution is disabled, no renderer or shell was invoked. Set an absolute .qmd output path, then click the separate explicit Save Quarto source button; existing files can never be overwritten.\n{}",
+                        projection.section_count, projection.source_loss_codes,
+                        pretty_result_data(&receipt)
+                    ).into());
+                    ui.set_manuscript_operation_details_open(true);
+                    ui.set_status("Quarto source prepared offline. Explicit non-overwriting file save still required.".into());
+                }
+                Err(error) => {
+                    pending_physical_export.borrow_mut().take();
+                    ui.set_writing_results(format!("Quarto source not prepared: {error}").into());
+                    ui.set_status("Quarto source preparation refused; no file saved".into());
                 }
             }
         }

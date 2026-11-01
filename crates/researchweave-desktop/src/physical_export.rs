@@ -51,7 +51,8 @@ fn export_extension(operation: &str, arguments: &Value) -> Result<&'static str, 
         "protocol.export" => Ok("md"),
         "protocol.freeze_receipt" => Ok("md"),
         "analysis.report.render" => Ok("md"),
-        _ => Err("Only verified protocol, protocol baseline, analysis report, manuscript and draft submission artifacts can be saved".into()),
+        "writing.quarto_source_preview" => Ok("qmd"),
+        _ => Err("Only verified protocol, protocol baseline, analysis report, manuscript, Quarto source and draft submission artifacts can be saved".into()),
     }
 }
 
@@ -62,10 +63,62 @@ fn render_artifact(
     root: &Path,
 ) -> Result<Value, String> {
     let mut result = if operation == "analysis.report.render" {
-        analysis_read_at(project, operation, arguments, root)?
+        analysis_read_at(project, operation, arguments.clone(), root)?
     } else {
-        evidence_read_at(project, operation, arguments, root)?
+        evidence_read_at(project, operation, arguments.clone(), root)?
     };
+    if operation == "writing.quarto_source_preview" {
+        let expected_revision = arguments["source_project_revision"]
+            .as_i64()
+            .filter(|revision| *revision >= 0)
+            .ok_or("Quarto physical export requires a nonnegative inspected project revision")?;
+        let current = ProjectStore::open(project)
+            .map_err(|error| error.to_string())?
+            .info()
+            .map_err(|error| error.to_string())?;
+        if current.revision != expected_revision {
+            return Err("Inspected manuscript changed before Quarto source preparation".into());
+        }
+        let data = result
+            .get("data")
+            .ok_or("Quarto source receipt unavailable")?;
+        if result["status"] != "ok"
+            || data["format"] != "quarto-markdown-source-preview-v1"
+            || data["filename_suffix"] != ".qmd"
+            || data["renderer_invoked"] != false
+            || data["executable_cells_present"] != false
+            || data["citations_resolved"] != false
+            || data["persisted"] != false
+            || data["project_revision"] != expected_revision
+        {
+            return Err("Quarto source lacks inert, current-project provenance".into());
+        }
+        let qmd = data["qmd"]
+            .as_str()
+            .filter(|body| !body.is_empty() && body.len() <= 1_048_576)
+            .ok_or("Quarto source is empty or exceeds 1 MiB")?;
+        let digest = hex::encode(Sha256::digest(qmd.as_bytes()));
+        if data["qmd_sha256"].as_str() != Some(digest.as_str())
+            || !data["source_document_sha256"].as_str().is_some_and(|sha| {
+                sha.len() == 64 && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
+            })
+        {
+            return Err("Quarto projection failed its source or output SHA-256 receipt".into());
+        }
+        let qmd_bytes = qmd.as_bytes();
+        let payload = STANDARD.encode(qmd_bytes);
+        let len = qmd_bytes.len();
+        let object = result
+            .get_mut("data")
+            .and_then(Value::as_object_mut)
+            .ok_or("Quarto source receipt is malformed")?;
+        object.insert("base64".into(), Value::String(payload));
+        object.insert("sha256".into(), Value::String(digest));
+        object.insert("byte_length".into(), json!(len));
+        object.insert("written_to_disk".into(), Value::Bool(false));
+        object.insert("submission_performed".into(), Value::Bool(false));
+        return Ok(result);
+    }
     if matches!(
         operation,
         "protocol.export" | "protocol.freeze_receipt" | "analysis.report.render"
@@ -447,6 +500,134 @@ mod tests {
         load_project_with_audit,
     };
     use uuid::Uuid;
+
+    #[test]
+    fn persisted_plain_manuscript_quarto_source_requires_one_use_no_overwrite_and_current_revision()
+    {
+        let root = std::env::temp_dir().join(format!("rw-inert-quarto-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let project = root.join("study");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Quarto source export",
+            true,
+            &root.join("create-audit.sqlite"),
+        )
+        .unwrap();
+        let host = root.join("host");
+        let (section, _) = evidence_preview_at(
+            &project,
+            "writing.section_save",
+            "writing",
+            json!({"manuscript_id":"synthetic-qmd","section":"Abstract",
+                "body":"Synthetic effect <script> = 12", "citations":[]}),
+            &host,
+        )
+        .unwrap();
+        evidence_execute_pending(&section, &project, &host).unwrap();
+        let inspected = evidence_read_at(
+            &project,
+            "writing.inspect",
+            json!({"manuscript_id":"synthetic-qmd"}),
+            &host,
+        )
+        .unwrap();
+        let source =
+            crate::manuscript_quarto_source::from_inspect(&inspected, "synthetic-qmd").unwrap();
+        let revision = ProjectStore::open(&project)
+            .unwrap()
+            .info()
+            .unwrap()
+            .revision;
+        let arguments = json!({"document":source.document,
+            "source_project_revision":revision});
+        assert!(prepare(
+            &project,
+            "writing.quarto_source_preview",
+            json!({"document":arguments["document"],"source_project_revision":revision + 1}),
+            &host
+        )
+        .is_err());
+        let (prepared, receipt) = prepare(
+            &project,
+            "writing.quarto_source_preview",
+            arguments.clone(),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(
+            receipt["data"]["format"],
+            "quarto-markdown-source-preview-v1"
+        );
+        assert_eq!(receipt["data"]["renderer_invoked"], false);
+        assert_eq!(receipt["data"]["executable_cells_present"], false);
+        assert_eq!(receipt["data"]["written_to_disk"], false);
+        assert_eq!(receipt["data"]["qmd_sha256"], receipt["data"]["sha256"]);
+        let filename = root.join("synthetic-qmd.qmd");
+        assert!(!filename.exists());
+        assert!(save_for_screen(
+            &prepared,
+            &project,
+            filename.to_str().unwrap(),
+            &host,
+            "writing.manuscript_export"
+        )
+        .is_err());
+        assert!(!filename.exists());
+        let outcome = save_for_screen(
+            &prepared,
+            &project,
+            filename.to_str().unwrap(),
+            &host,
+            "writing.quarto_source_preview",
+        )
+        .unwrap();
+        assert_eq!(outcome["written_to_disk"], true);
+        assert_eq!(outcome["no_overwrite"], true);
+        assert_eq!(outcome["submission_performed"], false);
+        let content = fs::read_to_string(&filename).unwrap();
+        assert!(content.contains("execute:\n  enabled: false"));
+        assert!(content.contains("&lt;script&gt;"));
+        assert!(!content.contains("<script>"));
+        assert_eq!(
+            outcome["sha256"],
+            hex::encode(Sha256::digest(content.as_bytes()))
+        );
+        assert!(save(&prepared, &project, filename.to_str().unwrap(), &host).is_err());
+
+        let (colliding, _) = prepare(
+            &project,
+            "writing.quarto_source_preview",
+            arguments.clone(),
+            &host,
+        )
+        .unwrap();
+        assert!(save(&colliding, &project, filename.to_str().unwrap(), &host).is_err());
+        assert_eq!(fs::read_to_string(&filename).unwrap(), content);
+
+        let (stale, _) = prepare(
+            &project,
+            "writing.quarto_source_preview",
+            arguments.clone(),
+            &host,
+        )
+        .unwrap();
+        let (edit, _) = evidence_preview_at(
+            &project,
+            "writing.section_save",
+            "writing",
+            json!({"manuscript_id":"synthetic-qmd","section":"Abstract",
+                "body":"New revision", "citations":[]}),
+            &host,
+        )
+        .unwrap();
+        evidence_execute_pending(&edit, &project, &host).unwrap();
+        let stale_path = root.join("stale.qmd");
+        assert!(save(&stale, &project, stale_path.to_str().unwrap(), &host).is_err());
+        assert!(!stale_path.exists());
+        assert!(prepare(&project, "writing.quarto_source_preview", arguments, &host).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn explicit_file_delivery_verifies_all_manuscript_formats_and_draft_zip() {

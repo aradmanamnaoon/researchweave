@@ -498,6 +498,7 @@ export component MainWindow inherits Window {
     callback preview-manuscript-restore(string, string, string);
     callback record-manuscript-restore();
     callback export-manuscript(string, string);
+    callback prepare-quarto-source(string);
     callback save-prepared-export(string, string);
     callback publishing-action(string, string, string);
     callback preview-conversation-create(string, string);
@@ -3477,6 +3478,19 @@ export component MainWindow inherits Window {
                                     text: "Save prepared artifact";
                                     accessible-label: "Save prepared manuscript artifact without overwrite";
                                     clicked => { root.save-prepared-export(manuscript-save-path.text, "writing.manuscript_export"); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: "Prepare inert Quarto .qmd";
+                                    accessible-label: "Prepare source bound inert Quarto document from persisted manuscript sections";
+                                    clicked => { root.prepare-quarto-source(manuscript-id.text); }
+                                }
+                                Button {
+                                    text: "Save prepared .qmd";
+                                    accessible-label: "Explicitly save verified Quarto source without overwriting files";
+                                    clicked => { root.save-prepared-export(manuscript-save-path.text, "writing.quarto_source_preview"); }
                                 }
                             }
                             Text {
