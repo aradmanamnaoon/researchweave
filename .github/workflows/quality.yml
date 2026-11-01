@@ -42,3 +42,7 @@ jobs:
       - run: cargo check --workspace --locked --all-targets
       - run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --locked --all-features
+      - name: Windows UI Automation preview pipeline return contract
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/qa/test-windows-uia-return-contract.ps1

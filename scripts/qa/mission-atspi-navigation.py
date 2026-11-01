@@ -1207,7 +1207,14 @@ def activate(app: Any, name: str) -> bool:
     return False
 
 
-def edit_text(app: Any, name: str, value: str, *, allow_unreadable: bool = False) -> None:
+def edit_text(
+    app: Any,
+    name: str,
+    value: str,
+    *,
+    allow_unreadable: bool = False,
+    allow_zero_readback: bool = False,
+) -> None:
     # `nodes_named` is deliberately substring-based for diagnostic discovery.
     # Never use its fuzzy matches as editable targets: e.g. an offscreen
     # "Manuscript section" must not redirect typing into the visible
@@ -1263,6 +1270,8 @@ def edit_text(app: Any, name: str, value: str, *, allow_unreadable: bool = False
 
     time.sleep(0.3)
     unsupported_readback = False
+    empty_readback = False
+    nonempty_mismatch = False
     # Slint can recreate its accessible editor node shortly after native
     # keyboard input. Reacquire live nodes twice before declaring readback
     # unavailable; never accept a value solely because input was sent.
@@ -1278,14 +1287,24 @@ def edit_text(app: Any, name: str, value: str, *, allow_unreadable: bool = False
                     print(f"AT_SPI_TEXT_READBACK_OK={name}")
                     return
                 print(f"AT_SPI_TEXT_READBACK_MISMATCH={name} observed_length={len(rendered)}")
+                if rendered:
+                    nonempty_mismatch = True
+                else:
+                    empty_readback = True
             except Exception as error:
                 print(f"AT_SPI_TEXT_READBACK_UNAVAILABLE={type(error).__name__}")
                 unsupported_readback = True
         if readback_attempt < 2:
             time.sleep(0.2)
-    if allow_unreadable and unsupported_readback:
-        # This is not a passing accessibility assertion: the next action must
-        # independently prove the typed value affected native analysis.
+    if allow_unreadable and not nonempty_mismatch and (
+        unsupported_readback or (allow_zero_readback and empty_readback)
+    ):
+        # Some Slint/AT-SPI Text interfaces claim support but always return a
+        # zero-length buffer (observed for the real baseline receipt path on
+        # hosted Ubuntu). Do not accept a *wrong nonempty* accessible value.
+        # This is NOT an accessible text pass: the next action MUST establish
+        # the exact input independently (e.g. the real no-overwrite Markdown
+        # output at the requested path with matching persisted SHA-256).
         print(f"AT_SPI_READBACK_DEFERRED_TO_NATIVE_RESULT={name}")
         return
     raise RuntimeError(f"Text never appeared in the real app's accessible editor: {name}")
@@ -1528,6 +1547,11 @@ def main() -> int:
                 "Local protocol baseline receipt destination path",
                 str(physical_receipt_path),
                 allow_unreadable=True,
+                # Known zero-length AT-SPI Text response on the hosted
+                # installed Linux reader. The next assertions require the
+                # exact saved file path, contents and SHA-256; nowhere else
+                # may zero-length text be tolerated merely for convenience.
+                allow_zero_readback=True,
             )
             break
         except RuntimeError as error:

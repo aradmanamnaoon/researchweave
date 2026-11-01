@@ -587,7 +587,13 @@ function Read-VisibleProtocolFreezePreviewOutcome(
     if ([string]::IsNullOrWhiteSpace($value)) {
         throw 'Native Protocol freeze preview outcome is empty'
     }
-    Write-Output ('UIA_NATIVE_PROTOCOL_FREEZE_OUTCOME_READ_CHARS=' + $value.Length)
+    # The caller assigns this function's return value to $freezePreview.
+    # Write-Output here polluted that return with a *second* diagnostic string:
+    # PowerShell's array -notlike then selected the nonmatching diagnostic,
+    # falsely failing even when the actual UIA ValuePattern displayed the
+    # correct LOCAL FREEZE PREVIEW ONLY text (hosted screenshot confirms it).
+    # Write-Host records the diagnostic without changing the data pipeline.
+    Write-Host ('UIA_NATIVE_PROTOCOL_FREEZE_OUTCOME_READ_CHARS=' + $value.Length)
     return $value
 }
 # F14's independent persistence oracle opens only the disposable project's
