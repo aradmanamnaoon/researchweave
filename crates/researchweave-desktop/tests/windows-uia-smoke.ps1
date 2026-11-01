@@ -3231,6 +3231,45 @@ try {
         throw 'F14 native history was not source-consistent with immutable reviewed decision'
     }
     Write-Output 'UIA_F14_KEEP_SEPARATE_NATIVE_PREVIEW_RECORD_PERSISTED_HISTORY_NO_ALIAS_OK'
+
+    # Cold-process re-open of the *actual* installed app at the same isolated
+    # project. Neither reimport nor direct SQL seeding may stand in for the
+    # persisted human decision; the native candidate state must survive.
+    Stop-Process -Id $p.Id -Force
+    $p.WaitForExit()
+    $p = Start-Process -FilePath $Exe -PassThru
+    $window = WindowFor $p 'F14 retained-decision native window absent after restart'
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    $command.GetCurrentPattern($f14ReferenceValue).SetValue('Welcome')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 180
+    $projectPathInput = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project path'
+    $projectPathInput.GetCurrentPattern($f14ReferenceValue).SetValue($temporary)
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open project').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 220
+    $f14Reopened = Get-F14ProjectSnapshot $temporary
+    Assert-F14Unchanged $f14Kept $f14Reopened $window 'restart and reopen immutable reference decision'
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    $command.GetCurrentPattern($f14ReferenceValue).SetValue('References')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 180
+    $firstReferenceField = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Reference title'
+    $reviewToggle = FocusByTab $firstReferenceField ([System.Windows.Automation.ControlType]::Button) 'Toggle reviewable reference duplicate finder' 16
+    $reviewToggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $reviewScan = FocusByTab $reviewToggle ([System.Windows.Automation.ControlType]::Button) 'Scan local reference duplicate candidates without changing data' 4
+    $reviewScan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference candidates scanned locally; no changes recorded*' 10000
+    $f14KeptLabel = 'Select unapproved reference candidate Score 80/100 ' + [char]0x00b7 +
+        ' Needs human source review ' + [char]0x00b7 + ' Previously kept separate (binding) ' + [char]0x00b7 +
+        ' UIA memory evidence / UIA memory evidence'
+    $keptRow = FocusByTab $reviewScan ([System.Windows.Automation.ControlType]::Button) $f14KeptLabel 4
+    if (-not $keptRow.Current.IsEnabled) {
+        throw 'F14 immutable keep-separate native review row unavailable after cold restart'
+    }
+    Assert-F14Unchanged $f14Kept (Get-F14ProjectSnapshot $temporary) $window 'restart native kept-separate candidate scan'
+    Write-Output 'UIA_F14_KEEP_SEPARATE_COLD_RESTART_SOURCEBOUND_ROW_WITH_NO_WRITE_OK'
 } catch {
     # CI archives the requested screenshot even on failures before the last
     # test assertion. Keep the original failure authoritative if capture fails.

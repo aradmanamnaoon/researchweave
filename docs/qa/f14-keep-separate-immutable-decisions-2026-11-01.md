@@ -76,7 +76,10 @@ exactly one `reference.dedup_keep_separate` event/decision row, and loads the
 native read-only persisted pair history. A matching Windows installed UIA
 scenario extends the WinSQLite **read-only** snapshot to include decision rows
 and verifies the actual native preview JSON, one approved revision/event,
-unchanged reference and alias rows and source-matching history. Both platforms
+unchanged reference and alias rows and source-matching history. The Windows
+script additionally forces a process restart, reopens the isolated project,
+and requires a real candidate row to display the same **Previously kept
+separate (binding)** source decision without adding an event. Both platforms
 fail closed if native accessibility/readback, provenance or persistence is
 missing. Their source test scripts are not evidence that the installed GUI has
 already passed; retain F14 PARTIAL until exact hosted run markers succeed.
