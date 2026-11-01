@@ -210,6 +210,9 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_manuscript_draft_section("".into());
     ui.set_manuscript_draft_citations("".into());
     ui.set_manuscript_draft_body("".into());
+    ui.set_manuscript_title_page_preview(
+        "Preview a title page from verified input; this does not save or submit anything.".into(),
+    );
     ui.set_manuscript_sections(
         Rc::new(slint::VecModel::from(Vec::<ManuscriptSection>::new())).into(),
     );
@@ -7424,6 +7427,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_project_metadata_results(error.clone().into());
                         ui.set_status(error.into());
                     }
+                }
+            }
+        }
+    });
+    app.on_preview_manuscript_title_page({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |manuscript_id, title, authors, corresponding_email, target_journal| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<String, String> {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a project first")?;
+                let response = evidence_read_at(
+                    &project,
+                    "writing.title_page_preview",
+                    serde_json::json!({
+                        "manuscript_id":manuscript_id.as_str().trim(),
+                        "title":title.as_str(),
+                        "authors":authors.as_str(),
+                        "corresponding_email":corresponding_email.as_str(),
+                        "target_journal":target_journal.as_str(),
+                    }),
+                    &host_data_root()?,
+                )?;
+                let data = &response["data"];
+                let body = data["body"].as_str().ok_or("title-page body missing")?;
+                let hash = data["body_sha256"]
+                    .as_str()
+                    .ok_or("title-page digest missing")?;
+                let computed = format!("{:x}", Sha256::digest(body.as_bytes()));
+                if data["draft_only"] != true
+                    || data["persisted"] != false
+                    || data["journal_requirements_verified"] != false
+                    || data["section"] != "Title Page"
+                    || data["manuscript_id"] != manuscript_id.as_str().trim()
+                    || hash != computed
+                {
+                    return Err("title-page provenance validation failed".into());
+                }
+                let notice = data["notice"].as_str().ok_or("title-page notice missing")?;
+                Ok(format!(
+                    "UNSAVED TITLE PAGE · SHA-256 {hash}\n{notice}\n\n{body}"
+                ))
+            })();
+            match result {
+                Ok(preview) => {
+                    ui.set_manuscript_title_page_preview(preview.into());
+                    ui.set_status(
+                        "Title page previewed offline; nothing saved or submitted".into(),
+                    );
+                }
+                Err(error) => {
+                    ui.set_manuscript_title_page_preview(
+                        format!("No title page produced: {error}").into(),
+                    );
+                    ui.set_status("Title page preview rejected".into());
                 }
             }
         }

@@ -21,6 +21,7 @@ mod qualitative;
 mod quick_notes;
 mod review;
 mod review_search_strategy;
+mod title_page;
 
 enum EvidenceLocation {
     WorkspaceRoot(PathBuf),
@@ -97,6 +98,17 @@ impl EvidenceHandler {
             ("writing.inspect", &["project_id", "manuscript_id"][..]),
             ("writing.bibliography", &["project_id", "manuscript_id"][..]),
             ("writing.check", &["project_id", "manuscript_id"][..]),
+            (
+                "writing.title_page_preview",
+                &[
+                    "project_id",
+                    "manuscript_id",
+                    "title",
+                    "authors",
+                    "corresponding_email",
+                    "target_journal",
+                ][..],
+            ),
             (
                 "writing.submission_packet",
                 &["project_id", "manuscript_id", "journal"][..],
@@ -457,6 +469,9 @@ impl EvidenceHandler {
         let mut store = self.store(args, ctx)?;
         if operation == "review.search_strategy_build" {
             return review_search_strategy::build(args, &ctx.project_id.to_string());
+        }
+        if operation == "writing.title_page_preview" {
+            return title_page::preview(args, &ctx.project_id.to_string());
         }
         if operation == "project.open" {
             return serde_json::to_value(store.info().map_err(|_| "invalid project")?)
@@ -2068,6 +2083,77 @@ mod tests {
     use super::*;
     use researchweave_project::ProjectInfo;
     use uuid::Uuid;
+
+    #[test]
+    fn title_page_is_read_only_project_scoped_and_does_not_claim_journal_compliance() {
+        let folder = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = folder.path().join("Draft title page project");
+        ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Study title".into(),
+                question: "Study question".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        let handler = EvidenceHandler::bound(project_id, &path).unwrap();
+        let context = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "author".into(),
+            expected_revision: Some(0),
+        };
+        let args = json!({
+            "project_id":project_id.to_string(),
+            "manuscript_id":"manuscript-1",
+            "title":"Neuron — connectivity",
+            "authors":"李明 | Institute A; Dr. Marie | Institute B",
+            "corresponding_email":"marie@example.org",
+            "target_journal":"Example (unverified)"
+        });
+        let preview = handler.preview("writing.title_page_preview", &args, &context);
+        assert_eq!(preview["status"], "ok", "{preview}");
+        assert_eq!(preview["data"]["draft_only"], true);
+        assert_eq!(preview["data"]["journal_requirements_verified"], false);
+        assert_eq!(preview["data"]["persisted"], false);
+        assert_eq!(
+            preview,
+            handler.execute("writing.title_page_preview", &args, &context)
+        );
+        assert_eq!(
+            preview,
+            EvidenceHandler::bound(project_id, &path).unwrap().execute(
+                "writing.title_page_preview",
+                &args,
+                &context
+            )
+        );
+        let other_id = Uuid::new_v4();
+        let mut invalid_scope = args.clone();
+        invalid_scope["project_id"] = json!(other_id.to_string());
+        assert_eq!(
+            handler.execute("writing.title_page_preview", &invalid_scope, &context)["status"],
+            "error"
+        );
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        let events: i64 = store
+            .connection()
+            .query_row("SELECT count(*) FROM events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(events, 0);
+        assert!(EvidenceHandler::capabilities().iter().any(|capability| {
+            capability.operation == "writing.title_page_preview"
+                && capability.effect == Effect::Read
+        }));
+    }
 
     #[test]
     fn review_search_builder_is_scoped_read_only_and_restart_deterministic() {
