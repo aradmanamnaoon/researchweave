@@ -305,7 +305,11 @@ def exercise_f05_project_citation(app: Any, project: pathlib.Path, output: pathl
     activate_bounded_control(
         app, "Toggle reviewable reference duplicate finder", down=False
     )
-    if nodes_named(app, "Scan local reference duplicate candidates without changing data"):
+    for _ in range(10):
+        if not nodes_named(app, "Scan local reference duplicate candidates without changing data"):
+            break
+        time.sleep(0.1)
+    else:
         raise RuntimeError("F14 review panel did not collapse before native F05 registration")
     if project_event_snapshot(project) != before_register:
         raise RuntimeError("Collapsing local duplicate reviewer unexpectedly mutated project")
