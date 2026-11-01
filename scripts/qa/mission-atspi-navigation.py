@@ -2446,7 +2446,13 @@ def main() -> int:
             if not activate(app, "Show long form project notebook"):
                 raise RuntimeError("Long form notebook not reachable in second project")
             time.sleep(0.3)
-        if read_field(app, "Project notebook text"):
+        # A populated offscreen TextEdit can exist in AT-SPI while its Text
+        # interface is missing. Prove the *actual visible* new-project editor
+        # is empty using the same fresh-sentinel native X11 check as Data View.
+        reveal_bounded_control(app, "Project notebook text", down=True)
+        if read_visible_field_keyboard(
+            app, "Project notebook text", allow_empty=True, force_clipboard=True
+        ):
             raise RuntimeError("Previous project notebook text leaked into new project")
         if not activate(app, "Manuscript"):
             raise RuntimeError("Cannot open manuscript on new project")

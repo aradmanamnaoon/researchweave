@@ -48,3 +48,7 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: ./scripts/qa/test-windows-uia-return-contract.ps1
+      - name: Windows UIA project revision Unicode contract
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/qa/test-windows-uia-project-revision-contract.ps1

@@ -307,6 +307,15 @@ function WaitForNameLike(
     }
     throw "UIA result missing: $Pattern"
 }
+function Parse-NativeProjectRevision([string]$Label) {
+    # PowerShell 5.1 reads UTF-8 without BOM with legacy ANSI decoding in
+    # some hosted environments: U+00B7 may become the two chars U+00C2 U+00B7.
+    # Use an ASCII-only, strictly scoped pattern for the exact native sidebar
+    # prefix, a 1-2 scalar separator, then `r` and decimal revision.
+    $match = [regex]::Match($Label, '^Project\s+\S{1,2}\s+r([0-9]+)$')
+    if (-not $match.Success) { return $null }
+    return [long]::Parse($match.Groups[1].Value)
+}
 function Get-VisibleProjectRevision([System.Windows.Automation.AutomationElement]$Window) {
     # The workbench header exposes the actual revision from the native project
     # store, not the last operation's self-reported writes=0 field. Require a
@@ -315,20 +324,20 @@ function Get-VisibleProjectRevision([System.Windows.Automation.AutomationElement
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
         $windowBounds = $Window.Current.BoundingRectangle
         foreach ($item in (Children $Window ([System.Windows.Automation.ControlType]::Text))) {
-            $match = [regex]::Match($item.Current.Name, ' · r([0-9]+)$')
-            if (-not $match.Success) { continue }
+            $revision = Parse-NativeProjectRevision ([string]$item.Current.Name)
+            if ($null -eq $revision) { continue }
             $bounds = $item.Current.BoundingRectangle
             if ($bounds.Width -ge 5 -and $bounds.Height -ge 5 -and
                 $bounds.Left -ge $windowBounds.Left -and $bounds.Top -ge $windowBounds.Top -and
                 $bounds.Right -le $windowBounds.Right -and $bounds.Bottom -le $windowBounds.Bottom) {
-                return [long]::Parse($match.Groups[1].Value)
+                return [long]$revision
             }
         }
         Start-Sleep -Milliseconds 50
     }
     $revisionCandidates = @(
         Children $Window ([System.Windows.Automation.ControlType]::Text) | Where-Object {
-            $_.Current.Name -match '(Project|Revision| · r[0-9]+)'
+            $_.Current.Name -match '(Project|Revision|r[0-9]+)'
         } | Select-Object -First 12 | ForEach-Object {
             $box = $_.Current.BoundingRectangle
             $_.Current.Name + ' [x=' + [int]$box.X + ',y=' + [int]$box.Y +
