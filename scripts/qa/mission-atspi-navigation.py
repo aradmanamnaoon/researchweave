@@ -1409,6 +1409,23 @@ def edit_text(
                 unsupported_readback = True
         if readback_attempt < 2:
             time.sleep(0.2)
+    if not allow_unreadable and value and not nonempty_mismatch and (
+        unsupported_readback or empty_readback
+    ):
+        # Several installed Slint controls accept genuine native keyboard
+        # input but do not implement the AT-SPI Text range interface. Before
+        # failing a strict readback, focus that SAME exact, on-screen native
+        # editor and independently verify the resulting text with Ctrl+A/C
+        # and the private Xvfb clipboard. Never infer success from typing.
+        try:
+            reveal_bounded_control(app, name, down=False, max_scrolls=12)
+            actual = read_visible_field_keyboard(app, name, force_clipboard=True)
+            if actual == value:
+                print(f"XVFB_NATIVE_CLIPBOARD_TEXT_READBACK_OK={name} chars={len(actual)}")
+                return
+            raise RuntimeError(f"actual clipboard editor value mismatch: {name}")
+        except RuntimeError as error:
+            print(f"XVFB_NATIVE_CLIPBOARD_TEXT_READBACK_UNAVAILABLE={name} {error}")
     if allow_unreadable and not nonempty_mismatch and (
         unsupported_readback or (allow_zero_readback and empty_readback)
     ):
