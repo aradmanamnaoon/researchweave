@@ -12,3 +12,11 @@ The Ubuntu 22.04 native run `41310067806` at `74f799825bbe5c1525ec4a1b76d5a856de
 - If `reveal_bounded_control` still fails after 24 Xvfb-native scroll iterations, it now logs the *actual* AT-SPI component rectangles (or interface errors) for up to four exact named controls. It does not fabricate visibility, weaken the 130..715 usable viewport rule, write SQL or bypass the source field.
 
 These changes require exact-source installed Ubuntu Xvfb verification. The GUI must genuinely register a source through the Preview/Record buttons, preserve original raw bytes, and progress through the F03/F05/F14/F26/F43 negative and positive scenarios. A local source-format or Python syntax pass alone is not acceptance.
+
+## Independent screenshot and F05 viewport recovery
+
+The actual `rust-linux-full-native-gui-evidence` ZIP from run `41310067806` was successfully downloaded and inspected under `target/qa/archived-74f7998-linux/mission-full-native/`. `references-read-only-dedup-scan.png` shows the expanded, functioning native F14 reviewer form occupying essentially the entire 1280×800 content viewport with its reviewer controls and read-only candidate scan. This independently confirms a **large expanded conditional panel as the active registration-layout obstruction** at the start of the subsequent F05 fixture. It does **not** prove the raw editor itself had zero height.
+
+The native F05 test now performs a strictly bounded **real accessibility activation** of `Toggle reviewable reference duplicate finder`, verifies `Scan local reference duplicate candidates without changing data` disappears, and confirms the project event/revision snapshot is unchanged before reentering the six reference fields. This returns screen space to the actual registration form instead of increasing blind scroll counts. The later F14 positive test explicitly reopens its reviewer panel when needed; its identity/revision/no-write/approved-record checks remain intact.
+
+The new F05 panel-collapse path and explicit raw-editor height need a subsequent exact-source installed Linux run. No pass is inferred from the archived screenshot or syntax checks.

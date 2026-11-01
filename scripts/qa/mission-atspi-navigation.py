@@ -297,9 +297,21 @@ def exercise_f05_project_citation(app: Any, project: pathlib.Path, output: pathl
         if db.execute("SELECT count(*) FROM reference").fetchone()[0] != 0:
             raise RuntimeError("F05 requires the F14 empty-library fixture before registration")
 
-    # The F14 duplicate review panel has scrolled the References form down.
-    # Reacquire every exact input after bounded upward scrolling, not by
-    # clicking guessed coordinates or creating rows directly in SQLite.
+    # F14 intentionally left its expanded reviewer panel visible. Collapse it
+    # through the real native accessible Toggle before entering raw BibTeX;
+    # this restores the reference-registration viewport and prevents the
+    # large conditional review panel from trapping the raw source editor
+    # offscreen. Never bypass the UI, seed SQL or skip the later positive F14.
+    activate_bounded_control(
+        app, "Toggle reviewable reference duplicate finder", down=False
+    )
+    if nodes_named(app, "Scan local reference duplicate candidates without changing data"):
+        raise RuntimeError("F14 review panel did not collapse before native F05 registration")
+    if project_event_snapshot(project) != before_register:
+        raise RuntimeError("Collapsing local duplicate reviewer unexpectedly mutated project")
+    print("F05_NATIVE_REFERENCE_FORM_RECOVERED_BY_ACCESSIBLE_F14_PANEL_COLLAPSE_OK")
+    # Reacquire every exact input after bounded scrolling, not by clicking
+    # guessed coordinates or creating rows directly in SQLite.
     for name, value, down in (
         ("Reference title", ref_title, False),
         ("Reference authors", "Fixture Researcher", True),
