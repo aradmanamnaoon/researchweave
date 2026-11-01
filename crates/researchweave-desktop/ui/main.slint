@@ -27,6 +27,14 @@ export struct NotebookCell {
     result: string,
 }
 
+export struct ResearchLifecycleStage {
+    key: string,
+    title: string,
+    records: int,
+    state: string,
+    target-page: int,
+}
+
 export struct PdfCaptionCandidate {
     label: string,
     page-number: int,
@@ -307,6 +315,11 @@ export component MainWindow inherits Window {
     in-out property <string> open-science-preview-results: "Research-object inventory is local and read-only. It cannot authorize redistribution, publish files, or verify consent.";
     in-out property <int> open-science-request-id: 0;
     in-out property <bool> open-science-busy: false;
+    in-out property <bool> lifecycle-open: false;
+    in-out property <bool> lifecycle-busy: false;
+    in-out property <int> lifecycle-request-id: 0;
+    in-out property <[ResearchLifecycleStage]> lifecycle-stages: [];
+    in-out property <string> lifecycle-status: "The research lifecycle summarizes saved local records; it cannot determine scientific completeness.";
     in-out property <string> project-activity-results: "Local project event provenance is not authenticated identity evidence.";
     in-out property <string> notebook-results: "Save a revisioned project notebook, inspect history, or export Markdown.";
     in-out property <string> notebook-draft: "";
@@ -370,6 +383,7 @@ export component MainWindow inherits Window {
     callback run-arithmetic-cell();
     callback load-arithmetic-cells();
     callback preview-open-science-manifest();
+    callback load-research-lifecycle();
     callback scan-pdf-caption-candidates(string, int);
     callback refresh-quick-notes(string, string);
     callback save-quick-note(string, int, string, string, string, string, bool, bool);
@@ -1088,6 +1102,49 @@ export component MainWindow inherits Window {
                                     Button { text: "Protocol"; icon: @image-url("../../../assets/icons/protocol.svg"); icon-size: 18px; colorize-icon: true; accessible-label: "Open protocol"; clicked => { root.page = 4; } }
                                     Button { text: "Library"; icon: @image-url("../../../assets/icons/sources.svg"); icon-size: 18px; colorize-icon: true; accessible-label: "Open library"; clicked => { root.page = 5; } }
                                     Button { text: "Data"; icon: @image-url("../../../assets/icons/data.svg"); icon-size: 18px; colorize-icon: true; accessible-label: "Open data view"; clicked => { root.page = 12; } }
+                                }
+                                Button {
+                                    text: root.lifecycle-open ? "Hide recorded research stages" : "Guided research lifecycle";
+                                    accessible-label: "Toggle source-verified research lifecycle navigator";
+                                    clicked => {
+                                        root.lifecycle-open = !root.lifecycle-open;
+                                        if root.lifecycle-open { root.load-research-lifecycle(); }
+                                    }
+                                }
+                                if root.lifecycle-open: Rectangle {
+                                    background: Theme.surface;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    border-radius: Theme.panel-radius;
+                                    VerticalLayout {
+                                        padding: 8px;
+                                        spacing: 6px;
+                                        Text {
+                                            text: root.lifecycle-status;
+                                            accessible-label: "Research lifecycle record status " + root.lifecycle-status;
+                                            color: Theme.muted-ink;
+                                            wrap: word-wrap;
+                                        }
+                                        Button {
+                                            text: root.lifecycle-busy ? "Checking local record history…" : "Refresh recorded research stages";
+                                            enabled: !root.lifecycle-busy;
+                                            accessible-label: "Refresh research lifecycle from actual persisted project";
+                                            clicked => { root.load-research-lifecycle(); }
+                                        }
+                                        ScrollView {
+                                            preferred-height: 168px;
+                                            min-height: 100px;
+                                            max-height: 210px;
+                                            VerticalLayout {
+                                                spacing: 4px;
+                                                for stage in root.lifecycle-stages: Button {
+                                                    text: stage.title + " · " + stage.records + " records";
+                                                    accessible-label: "Open research lifecycle stage " + stage.title;
+                                                    clicked => { root.page = stage.target-page; }
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                                 Rectangle {
                                     height: 76px;

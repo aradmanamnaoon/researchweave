@@ -134,6 +134,15 @@ fn restore_writing_drafts(
 /// the previously active project.  Switching projects must never leave results
 /// from one project looking like they were computed for another.
 fn reset_project_visible_state(ui: &MainWindow) {
+    ui.set_lifecycle_open(false);
+    ui.set_lifecycle_busy(false);
+    ui.set_lifecycle_request_id(ui.get_lifecycle_request_id().wrapping_add(1));
+    ui.set_lifecycle_stages(
+        Rc::new(slint::VecModel::from(Vec::<ResearchLifecycleStage>::new())).into(),
+    );
+    ui.set_lifecycle_status(
+        "Recorded lifecycle items are project-specific; there is no scientific-completion certification.".into(),
+    );
     ui.set_open_science_request_id(ui.get_open_science_request_id().wrapping_add(1));
     ui.set_open_science_busy(false);
     ui.set_open_science_preview_results(
@@ -8109,6 +8118,132 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                     ),
                                 }.into(),
                             );
+                        }
+                    });
+                });
+            }
+        }
+    });
+    app.on_load_research_lifecycle({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let Some(project) = active_project.borrow().clone() else {
+                    ui.set_lifecycle_status(
+                        "Open a research project to inspect real local lifecycle records.".into(),
+                    );
+                    return;
+                };
+                let request = ui.get_lifecycle_request_id().wrapping_add(1);
+                ui.set_lifecycle_request_id(request);
+                ui.set_lifecycle_busy(true);
+                ui.set_lifecycle_status(
+                    "Checking actual project revisions and recorded research objects. This does not judge scientific readiness.".into(),
+                );
+                let weak = weak.clone();
+                // Only PathBuf and the Sendable Slint weak handle cross this
+                // worker boundary; the active_project Rc remains on the UI
+                // thread, with request IDs reset on project changes.
+                std::thread::spawn(move || {
+                    let result = host_data_root().and_then(|root|
+                        project_read_safe(
+                            &project,
+                            "project.lifecycle_overview",
+                            serde_json::json!({}),
+                            &root,
+                        )
+                    );
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = weak.upgrade() {
+                            if ui.get_lifecycle_request_id() != request {
+                                return;
+                            }
+                            ui.set_lifecycle_busy(false);
+                            let checked = (|| -> Result<(Vec<ResearchLifecycleStage>, String), String> {
+                                let data = result?;
+                                let overview = &data["overview"];
+                                if data["preview_only"] != true
+                                    || data["writes"] != 0
+                                    || data["external_network_contacted"] != false
+                                    || data["research_records_changed"] != false
+                                    || overview["stage_presence_only"] != true
+                                    || overview["scientific_completion_verified"] != false
+                                    || overview["analysis_results_examined"] != false
+                                    || overview["publishing_status_examined"] != false
+                                    || overview["format"] != "researchweave-local-lifecycle-presence-v1"
+                                {
+                                    return Err("unverified or mutable research lifecycle response refused".into());
+                                }
+                                let canonical = data["overview_json"].as_str()
+                                    .ok_or("lifecycle source receipt unavailable")?;
+                                let hash = data["overview_sha256"].as_str()
+                                    .ok_or("lifecycle source checksum missing")?;
+                                if hash.len() != 64
+                                    || hex::encode(Sha256::digest(canonical.as_bytes())) != hash
+                                {
+                                    return Err("lifecycle receipt checksum mismatch".into());
+                                }
+                                let rows = overview["stages"].as_array()
+                                    .filter(|stages| stages.len() == 7)
+                                    .ok_or("unexpected lifecycle stage inventory")?;
+                                let mut stages = Vec::with_capacity(rows.len());
+                                let allowed = [
+                                    ("question",2), ("protocol",4), ("sources",5),
+                                    ("references",20), ("review",9), ("extraction",11),
+                                    ("manuscript",19),
+                                ];
+                                for (row, (key, target_page)) in rows.iter().zip(allowed) {
+                                    if row["key"] != key
+                                        || row["target_page"] != target_page
+                                        || row["scientific_completion_verified"] != false
+                                    {
+                                        return Err("lifecycle source/workspace mapping invalid".into());
+                                    }
+                                    let count = row["records"].as_u64()
+                                        .and_then(|value| i32::try_from(value).ok())
+                                        .ok_or("lifecycle record count invalid")?;
+                                    let presence = if count > 0 {
+                                        "local_records_present"
+                                    } else {
+                                        "no_local_records"
+                                    };
+                                    if row["state"] != presence {
+                                        return Err("lifecycle stage status is inconsistent".into());
+                                    }
+                                    stages.push(ResearchLifecycleStage {
+                                        key: key.into(),
+                                        title: row["title"].as_str().ok_or("stage title missing")?.into(),
+                                        target_page,
+                                        records: count,
+                                        state: presence.into(),
+                                    });
+                                }
+                                let present = overview["stages_with_local_records"].as_u64()
+                                    .filter(|value| *value <= rows.len() as u64)
+                                    .ok_or("record-presence summary invalid")?;
+                                Ok((stages, format!(
+                                    "Read-only project inventory: {present}/7 tracked workspaces contain local records. SHA-256 {hash}. Records present does NOT mean research complete or scientifically validated; choose a stage to inspect its real data."
+                                )))
+                            })();
+                            match checked {
+                                Ok((stages, summary)) => {
+                                    ui.set_lifecycle_stages(
+                                        Rc::new(slint::VecModel::from(stages)).into(),
+                                    );
+                                    ui.set_lifecycle_status(summary.into());
+                                }
+                                Err(error) => {
+                                    ui.set_lifecycle_stages(
+                                        Rc::new(slint::VecModel::from(
+                                            Vec::<ResearchLifecycleStage>::new()
+                                        )).into(),
+                                    );
+                                    ui.set_lifecycle_status(format!(
+                                        "Research lifecycle unavailable: {error}. No project mutation was approved."
+                                    ).into());
+                                }
+                            }
                         }
                     });
                 });

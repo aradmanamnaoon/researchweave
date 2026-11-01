@@ -18,6 +18,7 @@ use tempfile::{NamedTempFile, TempDir};
 use thiserror::Error;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
+mod guided_lifecycle;
 mod handler;
 mod open_science_manifest;
 pub use handler::ProjectHandler;

@@ -3033,6 +3033,43 @@ def main() -> int:
     if not activate(app, "Home activity"):
         raise RuntimeError("Cannot return Home to verify recent-project recovery")
     time.sleep(0.25)
+    # F42: guided lifecycle is a read-only presence index over the *actual*
+    # disposable project, not a fabricated scientific-completion score.
+    if original_project is None:
+        raise RuntimeError("F42 source-bound lifecycle needs the disposable project")
+    f42_before = project_event_snapshot(original_project)
+    activate_bounded_control(
+        app, "Toggle source-verified research lifecycle navigator", down=True
+    )
+    lifecycle_names = ""
+    for _ in range(40):
+        lifecycle_names = "\n".join((node.name or "") for node, _ in walk(app))
+        if "Read-only project inventory:" in lifecycle_names:
+            break
+        if "Research lifecycle unavailable:" in lifecycle_names:
+            raise RuntimeError("F42 native lifecycle returned a rejected source receipt")
+        time.sleep(0.15)
+    if (
+        "Read-only project inventory:" not in lifecycle_names
+        or "does NOT mean research complete or scientifically validated" not in lifecycle_names
+        or "Open research lifecycle stage Protocol records" not in lifecycle_names
+    ):
+        raise RuntimeError("F42 project lifecycle native record presence not accessible")
+    if project_event_snapshot(original_project) != f42_before:
+        raise RuntimeError("F42 lifecycle read changed project event chain or revision")
+    audit(app, "home-f42-source-record-lifecycle", output)
+    activate_bounded_control(
+        app, "Open research lifecycle stage Protocol records", down=True
+    )
+    time.sleep(0.2)
+    if not nodes_named(app, "Preview protocol"):
+        raise RuntimeError("F42 native project lifecycle did not open real Protocol workflow")
+    if project_event_snapshot(original_project) != f42_before:
+        raise RuntimeError("F42 stage navigation unexpectedly mutated the project")
+    print("F42_NATIVE_LIFECYCLE_SOURCE_BOUND_NAVIGATION_NO_COMPLETION_CLAIM_OK")
+    if not activate(app, "Home activity"):
+        raise RuntimeError("F42 did not preserve Home activity navigation")
+    time.sleep(0.25)
     if not activate(app, "Open Start Center to switch projects"):
         raise RuntimeError("Cannot open Start Center to verify recent projects")
     time.sleep(0.25)
