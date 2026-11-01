@@ -227,9 +227,17 @@ def reveal_bounded_control(
 
 
 def activate_bounded_control(app: Any, accessible_name: str, *, down: bool) -> None:
-    reveal_bounded_control(app, accessible_name, down=down)
-    if not activate(app, accessible_name):
-        raise RuntimeError(f"Visible native control could not be activated: {accessible_name}")
+    # Slint/AccessKit can update conditional children one event loop after the
+    # frame has visibly reflowed. Re-resolve the *same exact named native*
+    # control after each bounded attempt; never click screenshot-derived
+    # coordinates or infer success from a dispatched click alone.
+    for attempt in range(4):
+        reveal_bounded_control(app, accessible_name, down=down)
+        if activate(app, accessible_name):
+            return
+        print(f"AT_SPI_BOUNDED_ACTIVATION_RETRY={accessible_name} attempt={attempt + 1}")
+        time.sleep(0.15)
+    raise RuntimeError(f"Visible native control could not be activated: {accessible_name}")
 
 
 def project_event_snapshot(project: pathlib.Path) -> tuple[int, tuple[tuple[Any, ...], ...]]:
@@ -1247,7 +1255,9 @@ def activate(app: Any, name: str) -> bool:
         # enabled. Verify the semantic target, then physically click its
         # coordinates INSIDE THE PRIVATE XVFB display only. Record fallback.
         try:
-            if node.getRoleName() == "button" and (node.name or "").casefold() == name.casefold():
+            # pyatspi represents the native Slint Button role as "push button"
+            # (see installed Linux native tree), not merely "button".
+            if (node.getRoleName() or "").casefold() in ("button", "push button") and (node.name or "").casefold() == name.casefold():
                 component = node.queryComponent()
                 bounds = component.getExtents(pyatspi.DESKTOP_COORDS)
                 if bounds.width >= 12 and bounds.height >= 12:

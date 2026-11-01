@@ -60,6 +60,8 @@ jobs:
         run: python3 -m unittest discover -s packaging/rust/tests -p 'test_*.py' -v
       - name: Fail-closed manual release preflight contracts
         run: python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
+      - name: Native AT-SPI push-button fallback contract
+        run: python3 -m unittest discover -s scripts/qa -p 'test_native_*.py' -v
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --locked --all-features
