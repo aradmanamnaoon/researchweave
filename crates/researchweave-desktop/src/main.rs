@@ -179,6 +179,9 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_protocol_freeze_export_receipt("".into());
     ui.set_reference_results("Register or inspect project references.".into());
     ui.set_review_results("Use persisted references to build and screen a review.".into());
+    ui.set_review_search_results(
+        "Specify PICO concepts to draft a database-specific search strategy. No search has been executed.".into(),
+    );
     ui.set_extraction_results(
         "Create a versioned extraction schema, then record validated values for a review record."
             .into(),
@@ -2600,6 +2603,66 @@ fn pretty_result_data(result: &serde_json::Value) -> String {
         .unwrap_or_else(|_| "Operation completed, but its result could not be formatted".into())
 }
 
+fn review_search_terms(input: &str) -> Vec<String> {
+    input
+        .split(';')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn review_search_preview_text(result: &serde_json::Value) -> Result<String, String> {
+    let data = result
+        .get("data")
+        .ok_or("Search builder has no verified response")?;
+    let provenance = &data["provenance"];
+    if result["status"] != "ok"
+        || data["schema_version"] != "review-search-strategy-v1"
+        || provenance["generated_offline"] != true
+        || provenance["query_executed"] != false
+        || provenance["retrieval_attempted"] != false
+        || provenance["manual_verification_required"] != true
+        || !provenance["result_count"].is_null()
+    {
+        return Err("Search provenance failed closed: queries must be unexecuted drafts".into());
+    }
+    let digest = provenance["content_sha256"]
+        .as_str()
+        .filter(|hash| hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit()))
+        .ok_or("Search provenance digest is missing or malformed")?;
+    let queries = data["queries"]
+        .as_array()
+        .filter(|rows| !rows.is_empty() && rows.len() <= 3)
+        .ok_or("No verified database query drafts were returned")?;
+    let mut out = format!(
+        "OFFLINE DRAFT ONLY · No database was queried; no results counted.\nContent SHA-256: {digest}\n\n"
+    );
+    for row in queries {
+        let database = row["database"]
+            .as_str()
+            .filter(|name| matches!(*name, "pubmed" | "scopus" | "web_of_science"))
+            .ok_or("Unknown search database")?;
+        let query = row["query"]
+            .as_str()
+            .filter(|query| !query.is_empty() && query.len() <= 12_000)
+            .ok_or("Search query exceeds safe display bounds")?;
+        let hash = row["query_sha256"]
+            .as_str()
+            .filter(|hash| hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit()))
+            .ok_or("Search query digest missing")?;
+        if row["executed"] != false {
+            return Err("Search builder incorrectly claimed a query was executed".into());
+        }
+        out.push_str(&format!("{database} · SHA-256 {hash}\n{query}\n\n"));
+    }
+    if out.len() > 36_000 {
+        return Err("Combined queries exceed the native review display limit".into());
+    }
+    out.push_str("Manually validate field tags, Boolean grammar, database coverage and search dates before running these queries in external databases. No retrieval is recorded here.");
+    Ok(out)
+}
+
 /// Human-readable, explicitly local-only protocol receipt derived from the
 /// existing verified read/record response, never from unsaved editor fields.
 fn protocol_freeze_summary(result: &serde_json::Value) -> Result<String, String> {
@@ -4994,6 +5057,60 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_review_results(error.clone().into());
                         ui.set_status(error.into());
                     }
+                }
+            }
+        }
+    });
+    app.on_build_review_search_strategy({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |population, intervention, comparison, outcome, databases| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<String, String> {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a research project first")?;
+                let database_list = review_search_terms(databases.as_str())
+                    .into_iter()
+                    .map(|database| database.to_ascii_lowercase())
+                    .collect::<Vec<_>>();
+                let mut concepts = serde_json::Map::new();
+                for (name, alternatives) in [
+                    ("population", review_search_terms(population.as_str())),
+                    ("intervention", review_search_terms(intervention.as_str())),
+                    ("comparison", review_search_terms(comparison.as_str())),
+                    ("outcome", review_search_terms(outcome.as_str())),
+                ] {
+                    // The backend's contract distinguishes an omitted optional
+                    // PICO concept from a supplied but empty alternatives list.
+                    if !alternatives.is_empty() {
+                        concepts.insert(name.into(), serde_json::json!(alternatives));
+                    }
+                }
+                let payload = serde_json::json!({
+                    "concepts": concepts,
+                    "databases": database_list
+                });
+                let receipt = evidence_read_at(
+                    &project,
+                    "review.search_strategy_build",
+                    payload,
+                    &host_data_root()?,
+                )?;
+                review_search_preview_text(&receipt)
+            })();
+            match result {
+                Ok(preview) => {
+                    ui.set_review_search_results(preview.into());
+                    ui.set_status(
+                        "Offline, non-executed review search queries prepared with provenance"
+                            .into(),
+                    );
+                }
+                Err(error) => {
+                    ui.set_review_search_results(format!("No query drafted: {error}").into());
+                    ui.set_status("Search builder input or provenance rejected".into());
                 }
             }
         }
@@ -8359,6 +8476,119 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn review_search_query_builder_is_read_only_and_project_scoped_through_desktop_host() {
+        let root = std::env::temp_dir().join(format!("rw-pico-query-host-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("Scientific review");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "PICO review",
+            true,
+            &root.join("create-audit.sqlite"),
+        )
+        .unwrap();
+        let info = ProjectStore::open(&project).unwrap().info().unwrap();
+        let host = root.join("host");
+        let args = serde_json::json!({
+            "concepts":{
+                "population":["older adults","geriatric patients"],
+                "intervention":["mindfulness"],
+                "outcome":["sleep quality"]
+            },
+            "databases":["pubmed","scopus","web_of_science"]
+        });
+        let first = evidence_read_at(
+            &project,
+            "review.search_strategy_build",
+            args.clone(),
+            &host,
+        )
+        .unwrap();
+        let displayed = review_search_preview_text(&first).unwrap();
+        assert!(displayed.contains("OFFLINE DRAFT ONLY"));
+        assert!(displayed.contains("pubmed"));
+        assert!(displayed.contains("scopus"));
+        assert!(displayed.contains("web_of_science"));
+        assert_eq!(first["data"]["project_id"], info.id);
+        assert_eq!(first["data"]["queries"].as_array().unwrap().len(), 3);
+        assert_eq!(first["data"]["provenance"]["query_executed"], false);
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            info.revision
+        );
+        let again = evidence_read_at(
+            &project,
+            "review.search_strategy_build",
+            args.clone(),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(
+            first["data"], again["data"],
+            "offline strategy must be reproducible"
+        );
+        let bad = serde_json::json!({"concepts":{"population":["science\");DROP TABLE manuscripts;--"]},"databases":["pubmed"]});
+        assert!(evidence_read_at(&project, "review.search_strategy_build", bad, &host).is_err());
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            info.revision
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn offline_review_search_preview_rejects_execution_claims_and_unverified_queries() {
+        let query_sha = "a".repeat(64);
+        let digest = "b".repeat(64);
+        let draft = serde_json::json!({
+            "status":"ok", "data":{
+                "schema_version":"review-search-strategy-v1",
+                "queries":[{
+                    "database":"pubmed", "query":"(\"anxiety\"[Title/Abstract])",
+                    "query_sha256":query_sha,"executed":false
+                }],
+                "provenance":{
+                    "content_sha256":digest,"generated_offline":true,
+                    "query_executed":false,"retrieval_attempted":false,
+                    "result_count":null,"manual_verification_required":true
+                }
+            }
+        });
+        let preview = review_search_preview_text(&draft).unwrap();
+        assert!(preview.contains("OFFLINE DRAFT ONLY"));
+        assert!(preview.contains(&digest));
+        assert!(preview.contains("no results counted"));
+        assert!(preview.contains("pubmed · SHA-256"));
+        assert_eq!(
+            review_search_terms(" anxiety ; ; stress ; "),
+            vec!["anxiety", "stress"]
+        );
+        let mut invalid = draft.clone();
+        invalid["data"]["provenance"]["query_executed"] = serde_json::json!(true);
+        assert!(review_search_preview_text(&invalid).is_err());
+        invalid = draft.clone();
+        invalid["data"]["queries"][0]["executed"] = serde_json::json!(true);
+        assert!(review_search_preview_text(&invalid).is_err());
+        invalid = draft.clone();
+        invalid["data"]["provenance"]["result_count"] = serde_json::json!(4);
+        assert!(review_search_preview_text(&invalid).is_err());
+        invalid = draft.clone();
+        invalid["data"]["queries"][0]["query_sha256"] = serde_json::json!("bad");
+        assert!(review_search_preview_text(&invalid).is_err());
+        invalid = draft.clone();
+        invalid["data"]["queries"][0]["database"] = serde_json::json!("unknown");
+        assert!(review_search_preview_text(&invalid).is_err());
+    }
 
     #[test]
     fn protocol_freeze_summary_is_source_bound_and_never_implies_external_registration() {

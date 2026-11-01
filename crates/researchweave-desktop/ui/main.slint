@@ -245,6 +245,8 @@ export component MainWindow inherits Window {
     in-out property <string> protocol-freeze-export-receipt: "";
     in-out property <string> reference-results: "Register or inspect project references.";
     in-out property <string> review-results: "Use persisted references to build and screen a review.";
+    in-out property <bool> review-search-builder-open: false;
+    in-out property <string> review-search-results: "Specify PICO concepts to draft a database-specific search strategy. No search has been executed.";
     in-out property <string> extraction-results: "Create a versioned extraction schema, then record validated values for a review record.";
     in-out property <string> analysis-results: "Import an immutable dataset revision or inspect saved analysis data.";
     in-out property <string> statistics-result-title: "No analysis run yet";
@@ -351,6 +353,7 @@ export component MainWindow inherits Window {
     callback preview-review-record(string, string);
     callback preview-review-screen(string, string, string, string, string, string);
     callback refresh-review(string);
+    callback build-review-search-strategy(string, string, string, string, string);
     callback load-review-status(string, string, string);
     callback preview-extraction-form(string, string, string);
     callback preview-extraction-form-revision(string, string, string, string, string);
@@ -1797,11 +1800,55 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 9: Rectangle {
                         background: Theme.raised;
+                        ScrollView {
                         VerticalLayout {
                             padding: 24px;
                             spacing: 9px;
                             Text { text: "Systematic review"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
                             Text { text: "Register persisted references into a review, then record independent screening votes. Writes require Preview → Record."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Button {
+                                text: root.review-search-builder-open ? "Hide search strategy builder" : "Build database search strategy";
+                                accessible-label: "Toggle review PICO search strategy builder";
+                                clicked => { root.review-search-builder-open = !root.review-search-builder-open; }
+                            }
+                            if root.review-search-builder-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 7px;
+                                    Text { text: "PICO · reproducible offline search drafting"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "Separate synonyms with semicolons. Empty PICO categories may be omitted. Query syntax must be reviewed against each database before use; ResearchWeave does NOT execute searches or count results."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    strategy-population := LineEdit { placeholder-text: "Population synonyms; separate with ;"; accessible-label: "Search strategy population terms"; }
+                                    strategy-intervention := LineEdit { placeholder-text: "Intervention or exposure synonyms; separate with ;"; accessible-label: "Search strategy intervention terms"; }
+                                    strategy-comparison := LineEdit { placeholder-text: "Comparison synonyms; separate with ;"; accessible-label: "Search strategy comparison terms"; }
+                                    strategy-outcome := LineEdit { placeholder-text: "Outcome synonyms; separate with ;"; accessible-label: "Search strategy outcome terms"; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        strategy-databases := LineEdit {
+                                            horizontal-stretch: 1;
+                                            text: "pubmed;scopus;web_of_science";
+                                            placeholder-text: "pubmed;scopus;web_of_science";
+                                            accessible-label: "Search strategy databases";
+                                        }
+                                        Button {
+                                            text: "Build queries";
+                                            accessible-label: "Build offline verified review search queries";
+                                            clicked => { root.build-review-search-strategy(strategy-population.text, strategy-intervention.text, strategy-comparison.text, strategy-outcome.text, strategy-databases.text); }
+                                        }
+                                    }
+                                    TextEdit {
+                                        min-height: 105px;
+                                        preferred-height: 160px;
+                                        max-height: 210px;
+                                        text: root.review-search-results;
+                                        read-only: true;
+                                        accessible-label: "Copyable offline search strategy query drafts";
+                                    }
+                                }
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
                                 review-id := LineEdit { placeholder-text: "Review ID"; accessible-label: "Review ID"; }
@@ -1829,6 +1876,7 @@ export component MainWindow inherits Window {
                             }
                             Text { text: root.review-results; accessible-label: "Review operation result " + root.review-results; wrap: word-wrap; color: Theme.ink; }
                             Rectangle { vertical-stretch: 1; }
+                        }
                         }
                     }
                     if root.page == 10: Rectangle {

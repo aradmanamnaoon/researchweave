@@ -20,6 +20,7 @@ mod publishing_formats;
 mod qualitative;
 mod quick_notes;
 mod review;
+mod review_search_strategy;
 
 enum EvidenceLocation {
     WorkspaceRoot(PathBuf),
@@ -127,6 +128,10 @@ impl EvidenceHandler {
                 &["project_id", "review_id", "record_id", "stage"][..],
             ),
             ("review.prisma", &["project_id", "review_id"][..]),
+            (
+                "review.search_strategy_build",
+                &["project_id", "concepts", "databases"][..],
+            ),
             ("review.form_history", &["project_id", "form_id"][..]),
             ("review.form_values", &["project_id", "form_id"][..]),
             ("qualitative.inspect", &["project_id"][..]),
@@ -450,6 +455,9 @@ impl EvidenceHandler {
             return qualitative::kappa(args);
         }
         let mut store = self.store(args, ctx)?;
+        if operation == "review.search_strategy_build" {
+            return review_search_strategy::build(args, &ctx.project_id.to_string());
+        }
         if operation == "project.open" {
             return serde_json::to_value(store.info().map_err(|_| "invalid project")?)
                 .map_err(|_| "serialization failure".into());
@@ -2060,6 +2068,83 @@ mod tests {
     use super::*;
     use researchweave_project::ProjectInfo;
     use uuid::Uuid;
+
+    #[test]
+    fn review_search_builder_is_scoped_read_only_and_restart_deterministic() {
+        let folder = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = folder.path().join("Selected Review Project");
+        ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Search strategy".into(),
+                question: "How does treatment influence sleep?".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        let handler = EvidenceHandler::bound(project_id, &path).unwrap();
+        let context = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "reviewer".into(),
+            expected_revision: Some(0),
+        };
+        let args = json!({"project_id":project_id.to_string(),"concepts":{
+            "population":["older adults", "geriatrics"],
+            "intervention":["mindfulness"],
+            "outcome":["sleep quality"]
+        },"databases":["pubmed","scopus","web_of_science"]});
+        let preview = handler.preview("review.search_strategy_build", &args, &context);
+        let executed = handler.execute("review.search_strategy_build", &args, &context);
+        assert_eq!(preview, executed);
+        assert_eq!(executed["status"], "ok", "{executed}");
+        assert_eq!(executed["data"]["queries"].as_array().unwrap().len(), 3);
+        assert_eq!(executed["data"]["provenance"]["generated_offline"], true);
+        assert_eq!(executed["data"]["provenance"]["query_executed"], false);
+        assert_eq!(
+            EvidenceHandler::bound(project_id, &path).unwrap().execute(
+                "review.search_strategy_build",
+                &args,
+                &context
+            ),
+            executed
+        );
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(EvidenceHandler::capabilities().iter().any(|capability| {
+            capability.operation == "review.search_strategy_build"
+                && capability.effect == Effect::Read
+        }));
+        let different_id = Uuid::new_v4();
+        let wrong_scope = handler.execute(
+            "review.search_strategy_build",
+            &json!({"project_id":different_id.to_string(),"concepts":{"population":["older adults"]},"databases":["pubmed"]}),
+            &context,
+        );
+        assert_eq!(wrong_scope["status"], "error");
+        let alternate_context = DispatchContext {
+            project_id: different_id,
+            ..context
+        };
+        assert_eq!(
+            handler.execute("review.search_strategy_build", &args, &alternate_context)["status"],
+            "error"
+        );
+    }
 
     #[test]
     fn host_bound_handler_preserves_exact_project_path_and_preview_is_read_only() {
