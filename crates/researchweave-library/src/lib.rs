@@ -12,6 +12,7 @@ use std::{
 use uuid::Uuid;
 mod bibliography;
 mod collections;
+mod crossref_doi;
 mod dedup;
 mod pdf_metadata_suggestions;
 mod references;
@@ -87,6 +88,7 @@ impl LibraryHandler {
             ("reference.unmerge", Effect::LocalWrite),
             ("reference.dedup_candidates", Effect::Read),
             ("reference.pdf_metadata_preview", Effect::Read),
+            ("reference.crossref_doi_lookup", Effect::ExternalNetwork),
             ("reference.dedup_decision_history", Effect::Read),
             ("reference.dedup_keep_separate", Effect::LocalWrite),
             ("reference.dedup_reconsider", Effect::LocalWrite),
@@ -163,6 +165,9 @@ impl LibraryHandler {
         preview: bool,
     ) -> Result<Value, String> {
         let mut store = self.store(args, ctx).map_err(str::to_owned)?;
+        if operation == "reference.crossref_doi_lookup" {
+            return crossref_doi::run(&store, args, ctx, preview);
+        }
         if operation == "reference.pdf_metadata_preview" {
             return pdf_metadata_suggestions::preview(&store, args, ctx);
         }
@@ -555,7 +560,13 @@ impl LibraryHandler {
                         _ => vec![],
                     }
                 };
-                json!({"status":"ok","data":data,"artifacts":[],"provenance":[],"impact":{"local_writes":local_writes,"network_hosts":[],"irreversible":false}})
+                let network_hosts: Vec<&str> = if !preview && op == "reference.crossref_doi_lookup"
+                {
+                    vec!["api.crossref.org"]
+                } else {
+                    vec![]
+                };
+                json!({"status":"ok","data":data,"artifacts":[],"provenance":[],"impact":{"local_writes":local_writes,"network_hosts":network_hosts,"irreversible":false}})
             }
             Err(message) => {
                 json!({"status":"failed","error":{"code":"LIBRARY_ERROR","message":message},"data":{}})
@@ -570,6 +581,78 @@ mod tests {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use researchweave_project::ProjectInfo;
     use tempfile::TempDir;
+
+    #[test]
+    fn crossref_preview_is_offline_scope_guarded_and_external_network_requires_approval() {
+        let temp = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = temp.path().join("Crossref preview synthetic project");
+        ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Network consent contract".into(),
+                question: "Can preview remain offline?".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: Utc::now().to_rfc3339(),
+            },
+        )
+        .unwrap();
+        let handler = LibraryHandler::bound(project_id, &path).unwrap();
+        let ctx = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "consenting author".into(),
+            expected_revision: Some(0),
+        };
+        let args = json!({"project_id":project_id.to_string(),"doi":"10.1038/nphys1170"});
+        let preview = handler.preview("reference.crossref_doi_lookup", &args, &ctx);
+        assert_eq!(preview["status"], "ok", "{preview}");
+        assert_eq!(preview["data"]["network_requests"], 0);
+        assert_eq!(preview["data"]["preview_only"], true);
+        assert_eq!(preview["data"]["automatic_reference_update"], false);
+        assert_eq!(preview["impact"]["network_hosts"], json!([]));
+        assert_eq!(
+            handler.execute("reference.crossref_doi_lookup", &args, &ctx)["status"],
+            "failed",
+            "network must not run without explicit allow_network=true"
+        );
+        let stale = DispatchContext {
+            expected_revision: Some(1),
+            ..ctx.clone()
+        };
+        assert_eq!(
+            handler.preview("reference.crossref_doi_lookup", &args, &stale)["status"],
+            "failed"
+        );
+        let mut wrong = args.clone();
+        wrong["project_id"] = json!(Uuid::new_v4().to_string());
+        assert_eq!(
+            handler.preview("reference.crossref_doi_lookup", &wrong, &ctx)["status"],
+            "failed"
+        );
+        assert_eq!(
+            ProjectStore::open(&path).unwrap().info().unwrap().revision,
+            0
+        );
+        assert_eq!(
+            ProjectStore::open(&path)
+                .unwrap()
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(LibraryHandler::capabilities().iter().any(|capability| {
+            capability.operation == "reference.crossref_doi_lookup"
+                && capability.effect == Effect::ExternalNetwork
+                && capability.effect.requires_approval()
+        }));
+    }
 
     #[test]
     fn pdf_metadata_suggestions_are_bound_source_checked_and_nonmutating() {
