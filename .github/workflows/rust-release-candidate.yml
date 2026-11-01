@@ -9,6 +9,7 @@ on:
         type: string
   pull_request:
     paths:
+      - 'README.md'
       - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -16,6 +17,8 @@ on:
       - '.gitleaksignore'
       - 'deny.toml'
       - 'packaging/rust/**'
+      - 'scripts/qa/**'
+      - '.github/workflows/release.yml'
       - '.github/workflows/rust-release-candidate.yml'
 
 permissions:

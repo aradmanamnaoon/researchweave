@@ -499,6 +499,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Security checked the default branch before multi-hour native jobs.
+          # Re-check immediately before the irreversible public visibility step:
+          # a changed main tip invalidates exact-source release acceptance.
+          current_main="$(git ls-remote --exit-code origin refs/heads/main | cut -f1)"
+          if [[ ! "$current_main" =~ ^[0-9a-f]{40}$ ]] || \
+             [[ "$current_main" != "$GITHUB_SHA" ]] || \
+             [[ "$(git rev-parse HEAD)" != "$GITHUB_SHA" ]]; then
+            echo 'Refusing public release: current main moved after security acceptance' >&2
+            exit 1
+          fi
           release_id="$(gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" --json databaseId --jq '.databaseId')"
           [[ "$release_id" =~ ^[0-9]+$ ]]
           gh api --method PATCH \
@@ -543,6 +553,12 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          current_main="$(git ls-remote --exit-code origin refs/heads/main | cut -f1)"
+          if [[ ! "$current_main" =~ ^[0-9a-f]{40}$ ]] || \
+             [[ "$current_main" != "$GITHUB_SHA" ]]; then
+            echo 'Refusing latest promotion: release source is no longer current main' >&2
+            exit 1
+          fi
           current_latest_tag="$(curl --retry 8 --retry-delay 2 --retry-all-errors --fail --location --silent --show-error \
             -H 'Accept: application/vnd.github+json' \
             -H 'X-GitHub-Api-Version: 2022-11-28' \

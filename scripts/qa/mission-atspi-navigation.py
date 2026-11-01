@@ -75,6 +75,28 @@ def read_field(app: Any, accessible_name: str) -> str:
     raise RuntimeError(f"Cannot read actual accessible field: {accessible_name}")
 
 
+def read_native_protocol_inspector(app: Any, protocol_id: str, *, frozen: bool) -> dict[str, Any]:
+    """Read the actual read-only Protocol JSON editor, not a generated receipt.
+
+    The native UI must expose the persisted JSON through AT-SPI. An inaccessible
+    editor is a release QA failure, never a reason to use a database substitute.
+    """
+    raw = wait_field(app, "Read-only inspected protocol freeze JSON")
+    try:
+        receipt = json.loads(raw)
+    except (ValueError, TypeError) as error:
+        raise RuntimeError("Native read-only Protocol inspector exposed invalid JSON") from error
+    if not isinstance(receipt, dict) or (
+        receipt.get("protocol_id") != protocol_id
+        or receipt.get("frozen") is not frozen
+        or receipt.get("local_only") is not True
+        or receipt.get("external_registration_verified") is not False
+    ):
+        raise RuntimeError("Native read-only Protocol JSON identity/state differs from persisted receipt")
+    print(f"AT_SPI_NATIVE_PROTOCOL_INSPECTOR_READ=frozen:{str(frozen).lower()}")
+    return receipt
+
+
 def wait_field(app: Any, name: str, timeout: float = 3.0) -> str:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -1088,6 +1110,12 @@ def activate(app: Any, name: str) -> bool:
                 if bounds.width >= 12 and bounds.height >= 12:
                     x = bounds.x + bounds.width // 2
                     y = bounds.y + bounds.height // 2
+                    # An offscreen child can remain in AT-SPI. Never dispatch
+                    # coordinates outside the actual private 1280x800 display
+                    # or inside the persistent Jobs drawer below y=715.
+                    if not (0 <= x < 1280 and 0 <= y < 715):
+                        print(f"XVFB_REJECT_OFFSCREEN_BUTTON_CLICK={name} x={x} y={y}")
+                        continue
                     subprocess.run(
                         ["xdotool", "mousemove", "--sync", str(x), str(y), "click", "1"],
                         check=True,
@@ -1296,11 +1324,14 @@ def main() -> int:
     if not activate(app, "Inspect local protocol freeze receipt"):
         raise RuntimeError("Cannot inspect unfrozen protocol baseline")
     time.sleep(0.2)
+    inspected_unfrozen = read_native_protocol_inspector(app, protocol_id, frozen=False)
     before_freeze = "\n".join((n.name or "") for n in nodes_named(
         app, "Protocol local freeze status"
     ))
     if '"frozen": false' not in before_freeze:
         raise RuntimeError("Unfrozen protocol status was incorrectly presented as frozen")
+    if inspected_unfrozen.get("frozen_version") not in (None, 0):
+        raise RuntimeError("Native Protocol inspector invented an earlier freeze version")
     if not activate(app, "Preview local protocol baseline freeze"):
         raise RuntimeError("Native local baseline freeze preview is unavailable")
     time.sleep(0.25)
@@ -1324,6 +1355,7 @@ def main() -> int:
     if not activate(app, "Inspect local protocol freeze receipt"):
         raise RuntimeError("Cannot inspect newly recorded local baseline")
     time.sleep(0.2)
+    inspected_frozen = read_native_protocol_inspector(app, protocol_id, frozen=True)
     frozen_summary = "\n".join((n.name or "") for n in nodes_named(
         app, "Protocol freeze summary"
     ))
@@ -1354,6 +1386,9 @@ def main() -> int:
         raise RuntimeError("Local protocol baseline receipt is not explicit and inspectable")
     if f'"snapshot_sha256": "{freeze_hash}"' not in frozen_status:
         raise RuntimeError("Detailed native freeze receipt disagrees with the readable digest")
+    if inspected_frozen.get("snapshot_sha256") != freeze_hash or inspected_frozen.get("frozen_version") != 1:
+        raise RuntimeError("Native read-only Protocol inspector disagrees with frozen SHA-256/version")
+    print("AT_SPI_NATIVE_PROTOCOL_INSPECTOR_JSON_DIGEST_OK")
     audit(app, "protocol-local-baseline-frozen", output)
     if original_project is not None:
         with sqlite3.connect(original_project / "data/project.sqlite") as db:
@@ -1795,7 +1830,9 @@ def main() -> int:
         # Reveal the exact visible field first, with bounded private scrolling.
         reveal_bounded_control(app, "Manuscript section", down=False)
         edit_text(app, "Manuscript section", "Methods")
-        reveal_bounded_control(app, "Manuscript section body", down=False)
+        # The body is below the section field in the same outer ScrollView;
+        # scrolling UP after editing the section can never reveal the body.
+        reveal_bounded_control(app, "Manuscript section body", down=True)
         edit_text(app, "Manuscript section body", "Methods use only synthetic independent measurements.")
         # The 800ms autosave is asynchronous. On a contended runner it may
         # complete later than the previous fixed 1.3s sleep. Wait only until
