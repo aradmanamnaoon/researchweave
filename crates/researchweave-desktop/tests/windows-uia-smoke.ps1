@@ -22,7 +22,7 @@ $env:RESEARCHWEAVE_HOST_DATA_DIR = $hostData
 New-Item -ItemType Directory -Path $hostData -Force | Out-Null
 $analysisInput = Join-Path $hostData 'uia-analysis.csv'
 [System.IO.File]::WriteAllText($analysisInput, "score,aux,group`n1,10,A`n3,20,A`n5,30,B`n3,40,B`n", [System.Text.UTF8Encoding]::new($false))
-$p = Start-Process -FilePath $Exe -PassThru
+$p = $null
 function Children([System.Windows.Automation.AutomationElement]$parent, [System.Windows.Automation.ControlType]$type) {
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $type)
     return $parent.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
@@ -31,14 +31,29 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
     # Slint rebuilds accessibility nodes during navigation; allow one short
     # UIA tree refresh rather than racing the asynchronous Windows provider.
     for ($attempt = 0; $attempt -lt 50; $attempt++) {
-        foreach ($item in (Children $parent $type)) { if ($item.Current.Name -eq $name) { return $item } }
+        if ($script:p -and $script:p.HasExited) {
+            throw "UIA application exited while locating $type '$name' (exit code $($script:p.ExitCode))"
+        }
+        try {
+            foreach ($item in (Children $parent $type)) {
+                if ($item.Current.Name -eq $name) { return $item }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] {
+            # Navigation may replace a node during enumeration. Retry against
+            # the live tree; never treat a missing control as a pass.
+        }
         Start-Sleep -Milliseconds 100
     }
-    $available = @($parent.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName + ' :: ' + $_.Current.Name })
-    throw "UIA element missing: $type '$name'. Available: $($available -join ' | ')"
+    $available = @()
+    try {
+        $available = @($parent.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition
+        ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName + ' :: ' + $_.Current.Name })
+    } catch [System.Windows.Automation.ElementNotAvailableException] {
+        $available = @('<accessibility tree changed during diagnostics>')
+    }
+    throw "UIA element missing after 5 seconds: $type '$name'. Live controls: $(($available | Select-Object -First 35) -join ' | ')"
 }
 function Invoke-AccessibleButton([System.Windows.Automation.AutomationElement]$parent, [string]$name) {
     $button = Named $parent ([System.Windows.Automation.ControlType]::Button) $name
@@ -261,10 +276,19 @@ function WaitForNameLike(
 ) {
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     do {
-        $names = @($Window.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition
-        ) | ForEach-Object { $_.Current.Name })
+        if ($script:p -and $script:p.HasExited) {
+            throw "UIA application exited while waiting for '$Pattern' (exit code $($script:p.ExitCode))"
+        }
+        try {
+            $names = @($Window.FindAll(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.Condition]::TrueCondition
+            ) | ForEach-Object { $_.Current.Name })
+        } catch [System.Windows.Automation.ElementNotAvailableException] {
+            # A transient Slint accessibility rebuild is neither success nor
+            # a verified absent state. The deadline still bounds the retry.
+            $names = @()
+        }
         if ($names | Where-Object { $_ -like $Pattern }) {
             return
         }
@@ -391,7 +415,66 @@ function FocusByShiftTab(
     }
     throw "UIA element was not reachable by reverse keyboard traversal: $Type '$Name'"
 }
+function Invoke-ProtocolFreezeButton(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Name
+) {
+    # Windows AccessKit only materializes the visible portion of the Protocol
+    # ScrollView. The freeze actions follow Preview amendment in actual keyboard
+    # order, even when none is yet visible in the UIA descendants tree. Use a
+    # live visible focus anchor and real Tab/Shift+Tab to scroll into that row.
+    $ordered = @(
+        'Preview protocol',
+        'Record previewed protocol',
+        'Load protocol history',
+        'View protocol Markdown export',
+        'Save prepared protocol Markdown without overwrite',
+        'Preview protocol amendment',
+        'Preview local protocol baseline freeze',
+        'Record previewed local protocol baseline freeze',
+        'Inspect local protocol freeze receipt',
+        'Prepare local protocol baseline receipt Markdown'
+    )
+    $destinationIndex = [Array]::IndexOf($ordered, $Name)
+    if ($destinationIndex -lt 6) { throw "Unexpected Protocol freeze action: $Name" }
+
+    $visible = @{}
+    foreach ($button in (Children $Window ([System.Windows.Automation.ControlType]::Button))) {
+        if ($ordered -contains $button.Current.Name) {
+            $visible[$button.Current.Name] = $button
+        }
+    }
+    if ($visible.ContainsKey($Name)) {
+        $action = $visible[$Name]
+    } else {
+        $anchorName = $null
+        $anchorIndex = -1
+        $nearest = [int]::MaxValue
+        for ($index = 0; $index -lt $ordered.Count; $index++) {
+            if (-not $visible.ContainsKey($ordered[$index])) { continue }
+            $distance = [Math]::Abs($destinationIndex - $index)
+            if ($distance -lt $nearest) {
+                $anchorName = $ordered[$index]
+                $anchorIndex = $index
+                $nearest = $distance
+            }
+        }
+        if (-not $anchorName) {
+            throw "Protocol freeze action '$Name' is outside UIA viewport and no visible Protocol work-area keyboard anchor is exposed"
+        }
+        Write-Output "UIA_VIEWPORT_RECOVERY: $anchorName -> $Name via keyboard focus"
+        $anchor = $visible[$anchorName]
+        if ($anchorIndex -lt $destinationIndex) {
+            $action = FocusByTab $anchor ([System.Windows.Automation.ControlType]::Button) $Name 20
+        } else {
+            $action = FocusByShiftTab $anchor ([System.Windows.Automation.ControlType]::Button) $Name 20
+        }
+    }
+    $action.SetFocus()
+    $action.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+}
 try {
+    $p = Start-Process -FilePath $Exe -PassThru
     $window = WindowFor $p 'Native window missing from UIA tree'
     $edits = Children $window ([System.Windows.Automation.ControlType]::Edit)
     foreach ($edit in $edits) {
@@ -507,6 +590,10 @@ try {
     if (-not $focused -or $focused.Current.Name -ne 'Command palette') {
         throw "Ctrl+K did not focus Command palette (focused='$($focused.Current.Name)')"
     }
+    # Ctrl+K proved that this is the currently focused palette element. Use
+    # that live element; the previously cached palette may have been replaced
+    # during the Welcome -> Dashboard transition.
+    $command = $focused
     ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('About')
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
@@ -523,6 +610,7 @@ try {
     # Return to Welcome using the same keyboard path and verify Unicode/Persian
     # text can be set and read through Windows UI Automation. This verifies
     # encoding/accessibility transport, not native IME composition behavior.
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('^k')
     Start-Sleep -Milliseconds 100
@@ -638,7 +726,8 @@ try {
     }
     Write-Output 'PASS: Approved persisted Protocol -> physical Markdown with version history, digest and no overwrite'
 
-    Invoke-AccessibleButton $window 'Inspect local protocol freeze receipt'
+    Invoke-ProtocolFreezeButton $window 'Inspect local protocol freeze receipt'
+    WaitForNameLike $window '*Local protocol baseline status verified against persisted history*' 10000
     Start-Sleep -Milliseconds 160
     $unfrozen = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
@@ -647,7 +736,7 @@ try {
     if (-not ($unfrozen | Where-Object { $_ -match '"frozen": false' })) {
         throw 'Newly recorded protocol was incorrectly marked frozen before approval'
     }
-    Invoke-AccessibleButton $window 'Preview local protocol baseline freeze'
+    Invoke-ProtocolFreezeButton $window 'Preview local protocol baseline freeze'
     Start-Sleep -Milliseconds 180
     $freezePreview = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
@@ -656,9 +745,10 @@ try {
     if (-not ($freezePreview | Where-Object { $_ -like '*LOCAL FREEZE PREVIEW ONLY*' })) {
         throw 'Local protocol freeze did not provide a separate non-mutating preview'
     }
-    Invoke-AccessibleButton $window 'Record previewed local protocol baseline freeze'
+    Invoke-ProtocolFreezeButton $window 'Record previewed local protocol baseline freeze'
     Start-Sleep -Milliseconds 260
-    Invoke-AccessibleButton $window 'Inspect local protocol freeze receipt'
+    Invoke-ProtocolFreezeButton $window 'Inspect local protocol freeze receipt'
+    WaitForNameLike $window '*Local protocol baseline status verified against persisted history*' 10000
     Start-Sleep -Milliseconds 180
     $frozenNames = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
@@ -667,10 +757,11 @@ try {
     if (-not ($frozenNames | Where-Object { $_ -match '"frozen": true' }) -or
         -not ($frozenNames | Where-Object { $_ -match '"frozen_version": 1' }) -or
         -not ($frozenNames | Where-Object { $_ -match '"external_registration_verified": false' }) -or
-        -not ($frozenNames | Where-Object { $_ -match '"snapshot_sha256": "[0-9a-f]{64}"' })) {
-        throw 'Approved local protocol freeze lacked immutable receipt, exact baseline version or external-registry disclaimer'
+        -not ($frozenNames | Where-Object { $_ -match '"snapshot_sha256": "[0-9a-f]{64}"' }) -or
+        -not ($frozenNames | Where-Object { $_ -match '"event_hash": "[0-9a-f]{64}"' })) {
+        throw 'Persisted local protocol freeze lacked immutable event/snapshot digests, exact baseline version or external-registry disclaimer'
     }
-    Invoke-AccessibleButton $window 'Preview local protocol baseline freeze'
+    Invoke-ProtocolFreezeButton $window 'Preview local protocol baseline freeze'
     Start-Sleep -Milliseconds 180
     $duplicateFreeze = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
@@ -2144,6 +2235,19 @@ try {
     WaitForNameLike $window '*Project metadata title UIA Updated Persian Project revision*'
     Write-Output 'PASS: approved project metadata revision survives native process restart'
     Capture-WindowScreenshot $window $Screenshot
+} catch {
+    # CI archives the requested screenshot even on failures before the last
+    # test assertion. Keep the original failure authoritative if capture fails.
+    $originalFailure = $_
+    Write-Output "UIA_FAILURE: $($originalFailure.Exception.Message)"
+    if ($Screenshot -and $window) {
+        try {
+            Capture-WindowScreenshot $window $Screenshot
+        } catch {
+            Write-Warning "Failed to capture UIA failure screenshot: $($_.Exception.Message)"
+        }
+    }
+    throw $originalFailure
 } finally {
     if ($p -and -not $p.HasExited) {
         Stop-Process -Id $p.Id -Force
@@ -2157,7 +2261,8 @@ try {
         } else {
             [IO.Path]::GetFullPath((Join-Path $repoRoot $PreserveProjectDirectory))
         }
-        if (-not $preservePath.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        $allowedPrefix = $allowedRoot.TrimEnd([char[]]@('\', '/')) + [IO.Path]::DirectorySeparatorChar
+        if (-not $preservePath.StartsWith($allowedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Preserved UIA fixtures must stay under $allowedRoot"
         }
         New-Item -ItemType Directory -Path (Split-Path -Parent $preservePath) -Force | Out-Null
