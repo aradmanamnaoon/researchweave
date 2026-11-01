@@ -15,7 +15,8 @@ those requirements.
 
 ## Prerequisites
 
-- An approved and merged PR #18 and a clean `main`.
+- A fully reviewed, feature-accepted integration into `main`. **PR #18 currently targets `mission/prime-20261031`, not `main`**; merging it alone does not update `main`. Verify the exact base and head immediately before any merge; integrate reviewed accepted changes safely into `main` via an appropriate additional PR without force pushing or discarding history.
+- All **45** rows in `docs/verification/FEATURE_EXPANSION.md` independently `RELEASE_VERIFIED`, with defensible supporting evidence; the pre-tag script now rejects `VERIFIED_LOCAL`, `IMPLEMENTED_TESTED`, `PARTIAL` and `MISSING_TARGET` equally. This gate is necessary, not a substitute for real installed GUI acceptance.
 - Rust 1.94.1+ and the documented native desktop dependencies to run local
   tests; authenticated `gh` and `git`; Python **3.11+**.
 - A release version newer than the actual public latest (example: `0.2.1`,
@@ -30,10 +31,12 @@ On Windows PowerShell, from your own ResearchWeave checkout:
 ```powershell
 $ErrorActionPreference = 'Stop'
 gh auth status
-gh pr view 18 --repo aradmanamnaoon/researchweave
+gh pr view 18 --repo aradmanamnaoon/researchweave --json baseRefName,headRefName,mergeable,mergeStateStatus
 gh pr checks 18 --repo aradmanamnaoon/researchweave
-# Merge only after substantive review and required checks pass:
-# gh pr merge 18 --repo aradmanamnaoon/researchweave --merge
+# PR #18 targets mission/prime-20261031. DO NOT mistake that branch for main.
+# Review/merge into its actual base only when ALL original scope and CI gates pass.
+# Create and review a separate main-targeted integration PR as appropriate;
+# never assume merging PR #18 by itself updates main.
 git switch main
 git pull --ff-only origin main
 git status --short --branch
@@ -94,7 +97,7 @@ $version = '0.2.1'
 python scripts/release/check_ready.py --version $version
 ```
 
-This script is **read-only** and fails closed if the exact main SHA, GitHub
+This script is **read-only** and fails closed if any F01–F45 scope item is not independently `RELEASE_VERIFIED`, or if the exact main SHA, GitHub
 release version, manifest/lock versions, README URLs, clean checkout, native
 matrix, or quality matrix cannot be proved. On PASS it prints the two tag
 commands; inspect product acceptance and release notes **before executing**:

@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+from tempfile import TemporaryDirectory
 import unittest
 
 import bump_version
@@ -30,6 +31,40 @@ def quality_jobs() -> list[dict[str, str]]:
 
 
 class ReleasePreflightTests(unittest.TestCase):
+    def test_all_45_fully_accepted_features_required_before_tag(self) -> None:
+        def ledger(rows: list[str], root: Path) -> None:
+            location = root / "docs/verification"
+            location.mkdir(parents=True, exist_ok=True)
+            (location / "FEATURE_EXPANSION.md").write_text(
+                "# Feature acceptance\n\n| ID | Feature | Status | Evidence | Next |\n"
+                "| --- | --- | --- | --- | --- |\n"
+                + "\n".join(rows) + "\n",
+                encoding="utf-8",
+            )
+
+        valid = [f"| F{i:02d} | Feature {i} | RELEASE_VERIFIED | Real validated evidence | Complete |"
+                 for i in range(1, 46)]
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            ledger(valid, root)
+            ready.check_feature_scope(root)
+            for changed in ("PARTIAL", "IMPLEMENTED_TESTED", "VERIFIED_LOCAL", "MISSING_TARGET"):
+                with self.subTest(unsafe_status=changed):
+                    modified = valid.copy()
+                    modified[39] = modified[39].replace("RELEASE_VERIFIED", changed)
+                    ledger(modified, root)
+                    with self.assertRaisesRegex(
+                        ready.ReleaseBlocked, "not independently RELEASE_VERIFIED"
+                    ):
+                        ready.check_feature_scope(root)
+            for broken in (valid[:-1], valid + [valid[-1]],
+                           valid[:-1] + ["| F46 | New | RELEASE_VERIFIED | X | Complete |"]):
+                with self.subTest(broken_rows=len(broken)):
+                    ledger(broken, root)
+                    with self.assertRaises(ready.ReleaseBlocked):
+                        ready.check_feature_scope(root)
+            ledger(valid, root)
+            ready.check_feature_scope(root)
     def test_bump_version_is_scoped_and_monotonic(self) -> None:
         cargo = (
             '[workspace]\nmembers=[]\n[workspace.package]\n'

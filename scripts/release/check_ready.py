@@ -28,6 +28,8 @@ ASSETS = (
     "linux-amd64.deb",
     "SHA256SUMS.txt",
 )
+FEATURE_IDS = tuple(f"F{index:02d}" for index in range(1, 46))
+FEATURE_RELEASE_STATUS = "RELEASE_VERIFIED"
 
 
 class ReleaseBlocked(RuntimeError):
@@ -95,6 +97,48 @@ def check_readme(root: Path, version: str) -> None:
         url = f"https://github.com/{REPOSITORY}/releases/download/{tag}/{name}"
         if url not in readme:
             raise ReleaseBlocked(f"README.md lacks exact release download link: {url}")
+
+
+def check_feature_scope(root: Path) -> None:
+    """Reject a release while any original expansion item lacks full acceptance.
+
+    RELEASE_VERIFIED is deliberately distinct from VERIFIED_LOCAL (partial
+    platform coverage) and IMPLEMENTED_TESTED (source/unit-only verification).
+    A ledger flag is a necessary operator-reviewed scope receipt, not proof of
+    installed GUI acceptance, which the exact-main hosted jobs verify later.
+    """
+    ledger = root / "docs/verification/FEATURE_EXPANSION.md"
+    try:
+        lines = ledger.read_text(encoding="utf-8").splitlines()
+    except OSError as error:
+        raise ReleaseBlocked("F01–F45 release acceptance ledger missing") from error
+    seen: dict[str, str] = {}
+    for line in lines:
+        if not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.split("|")]
+        if len(cells) < 6 or not re.fullmatch(r"F[0-9]{2}", cells[1]):
+            continue
+        feature, status = cells[1], cells[3]
+        if feature not in FEATURE_IDS:
+            raise ReleaseBlocked(f"Unexpected feature ID in release ledger: {feature}")
+        if feature in seen:
+            raise ReleaseBlocked(f"Duplicate feature ID in release ledger: {feature}")
+        seen[feature] = status
+    if set(seen) != set(FEATURE_IDS):
+        missing = sorted(set(FEATURE_IDS) - set(seen))
+        raise ReleaseBlocked(
+            f"F01–F45 release acceptance ledger incomplete: "
+            f"{len(seen)} entries; missing {', '.join(missing[:10])}"
+        )
+    incomplete = [(feature, seen[feature]) for feature in FEATURE_IDS
+                  if seen[feature] != FEATURE_RELEASE_STATUS]
+    if incomplete:
+        excerpt = ", ".join(f"{feature}={status}" for feature, status in incomplete[:12])
+        raise ReleaseBlocked(
+            f"{len(incomplete)} F01–F45 feature targets not independently "
+            f"RELEASE_VERIFIED: {excerpt}. Do not tag or publish."
+        )
 
 
 def successful_job(jobs: list[dict[str, Any]], name: str) -> bool:
@@ -212,6 +256,7 @@ def main(argv: list[str] | None = None) -> int:
     root = Path(__file__).resolve().parents[2]
     try:
         version_parts(args.version)
+        check_feature_scope(root)
         sha = check_local_state(root, args.version)
         remote = github_json(
             f"repos/{REPOSITORY}/git/ref/heads/main", cwd=root
