@@ -76,7 +76,8 @@ def read_field(app: Any, accessible_name: str) -> str:
 
 
 def read_visible_field_keyboard(
-    app: Any, accessible_name: str, *, allow_empty: bool = False
+    app: Any, accessible_name: str, *, allow_empty: bool = False,
+    force_clipboard: bool = False,
 ) -> str:
     """Read exact visible LineEdit text using native X11 keyboard+clipboard.
 
@@ -85,12 +86,13 @@ def read_visible_field_keyboard(
     prove the actual rendered editor value; a project-DB-derived substitute
     is forbidden. Only the private 1280x800 Xvfb session is used.
     """
-    try:
-        value = read_field(app, accessible_name)
-        if value or allow_empty:
-            return value
-    except RuntimeError:
-        pass
+    if not force_clipboard:
+        try:
+            value = read_field(app, accessible_name)
+            if value or allow_empty:
+                return value
+        except RuntimeError:
+            pass
     for node in nodes_named(app, accessible_name):
         if (node.name or "").casefold() != accessible_name.casefold():
             continue
@@ -2373,14 +2375,26 @@ def main() -> int:
         if not activate(app, "Analyze activity"):
             raise RuntimeError("Analyze activity missing after project switch")
         time.sleep(0.25)
-        if not nodes_named(app, "Analysis dataset ID") and not activate(app, "Data View"):
-            raise RuntimeError("Data View missing after project switch")
-        time.sleep(0.25)
+        # Analyze navigation may restore the last workspace, while a hidden
+        # or offscreen Data View editor can appear in the AT-SPI tree. Enter
+        # Data View *explicitly* before asserting cross-project emptiness.
+        activate_bounded_control(app, "Data View", down=False)
+        time.sleep(0.3)
         if nodes_named(app, "Recently imported dataset identifier and immutable revision"):
             raise RuntimeError("Dataset context leaked into a different project")
-        if read_field(app, "Analysis dataset ID") or read_field(app, "Analysis dataset revision"):
-            raise RuntimeError("Old project dataset identity leaked into new project's input fields")
-        if read_field(app, "Analysis import path"):
+        for name in ("Analysis dataset ID", "Analysis dataset revision"):
+            reveal_bounded_control(app, name, down=True)
+            # Empty native Slint Text interface is unreliable. A fresh random
+            # clipboard sentinel plus Ctrl+A/C on the visible focused editor
+            # must establish actual emptiness, not a missing AT-SPI Text value.
+            if read_visible_field_keyboard(
+                app, name, allow_empty=True, force_clipboard=True
+            ):
+                raise RuntimeError("Old project dataset identity leaked into new project's input fields")
+        reveal_bounded_control(app, "Analysis import path", down=False)
+        if read_visible_field_keyboard(
+            app, "Analysis import path", allow_empty=True, force_clipboard=True
+        ):
             raise RuntimeError("Previous project's import path leaked into the new project")
         if not activate(app, "Import previewed analysis data"):
             raise RuntimeError("Cannot activate import action for rejected stale preview")
