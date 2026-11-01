@@ -33,6 +33,8 @@ class CaptionPreviewContract(unittest.TestCase):
         self.assertIn('root.load-pdf(pdf-path.text, pdf-query.text, caption.page-number)', self.ui)
         self.assertIn("if ui.get_pdf_caption_request_id() != request_id", self.desktop)
         self.assertIn("ui.get_pdf_local_path() != path", self.desktop)
+        self.assertIn("root.pdf-caption-status = \"PDF path changed.", self.ui)
+        self.assertIn("A different PDF was selected. Prior caption anchors were cleared", self.desktop)
         self.assertNotIn("INSERT INTO", self.preview)
 
 

@@ -1867,8 +1867,12 @@ def main() -> int:
             raise RuntimeError("Cannot persist converted checklist note")
         time.sleep(0.3)
         task_name = "Research MRI note about a synthetic brain."
-        if not activate(app, "Edit quick note Synthetic MRI memo"):
-            raise RuntimeError("Cannot stage an unsaved card draft for preservation check")
+        # Hosted Linux run 41322139053 reached this real saved checklist,
+        # but AT-SPI exposed its Edit button outside the usable scroll pane.
+        # Reveal the exact accessible row control within bounded native Xvfb
+        # scrolling, then require its activation; never infer that a click
+        # succeeded or bypass the subsequent persisted-state assertions.
+        activate_bounded_control(app, "Edit quick note Synthetic MRI memo", down=True)
         edit_text(app, "Quick note body", "UNSAVED COMPOSER DRAFT SENTINEL")
         if not activate(app, "Complete " + task_name + " in note Synthetic MRI memo"):
             raise RuntimeError("Persisted checklist item is not directly interactive")
@@ -2088,8 +2092,9 @@ def main() -> int:
         time.sleep(0.35)
         audit(app, "notebook-narrow", output)
         resize_xvfb_window(1280, 800)
-        if not activate(app, "Load notebook history"):
-            raise RuntimeError("Notebook history control is not actionable")
+        # The expanded F32 panel may leave the long-form history toolbar
+        # outside the viewport. Require actual visible native activation.
+        activate_bounded_control(app, "Load notebook history", down=False)
         time.sleep(0.3)
         if activate(app, "Return to PDF"):
             raise RuntimeError("A new project with no PDF should not offer Return to PDF")

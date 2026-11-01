@@ -1176,6 +1176,13 @@ export component MainWindow inherits Window {
                                         placeholder-text: "Absolute path to a local PDF";
                                         accessible-label: "PDF file path";
                                         accessible-description: "Absolute path to the PDF file to display";
+                                        edited(value) => {
+                                            root.pdf-local-path = value;
+                                            root.pdf-caption-request-id += 1;
+                                            root.pdf-caption-busy = false;
+                                            root.pdf-caption-candidates = [];
+                                            root.pdf-caption-status = "PDF path changed. The earlier caption anchors were invalidated; scan the newly selected source.";
+                                        }
                                     }
                                     Button {
                                         text: "Browse PDF…";

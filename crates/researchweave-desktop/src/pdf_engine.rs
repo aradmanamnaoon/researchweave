@@ -1,6 +1,7 @@
 //! Native, dynamically loaded PDFium render + positioned text proof.
-// The F37 review-only caption anchor model is intentionally not wired to the
-// UI until it can display the source-page image and require human confirmation.
+// F37 caption anchors are now displayed as unverified, read-only suggestions
+// with source-page navigation. There is still NO image/table extraction,
+// accepted review decision or persistent figure/table content.
 #[allow(dead_code)]
 #[path = "pdf_figure_candidates.rs"]
 pub mod figure_candidates;

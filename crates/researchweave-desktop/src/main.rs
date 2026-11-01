@@ -3660,6 +3660,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(selected) = selected {
                         match chosen_local_file_path(selected.path()) {
                             Ok(path) if kind == "pdf" => {
+                                ui.set_pdf_caption_request_id(
+                                    ui.get_pdf_caption_request_id().wrapping_add(1),
+                                );
+                                ui.set_pdf_caption_busy(false);
+                                ui.set_pdf_caption_candidates(
+                                    Rc::new(slint::VecModel::from(
+                                        Vec::<PdfCaptionCandidate>::new()
+                                    )).into(),
+                                );
+                                ui.set_pdf_caption_status(
+                                    "A different PDF was selected. Prior caption anchors were cleared; scan the new source.".into(),
+                                );
                                 ui.set_pdf_local_path(path.into());
                                 ui.set_status("PDF selected from native file dialog".into());
                             }
