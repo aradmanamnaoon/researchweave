@@ -19,7 +19,7 @@ const MAX_NATIVE_REPORT_BYTES: usize = 64 * 1024;
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct SyntheticEvaluationPreview {
     pub(crate) markdown: String,
-    pub(crate) source_commitment_sha256: String,
+    pub(crate) evaluation_provenance_sha256: String,
     pub(crate) markdown_sha256: String,
     pub(crate) slots: usize,
 }
@@ -108,7 +108,7 @@ pub(crate) fn preview_synthetic_json(source: &str) -> Result<SyntheticEvaluation
     }
     Ok(SyntheticEvaluationPreview {
         markdown: rendered.markdown,
-        source_commitment_sha256: report.provenance_sha256,
+        evaluation_provenance_sha256: report.provenance_sha256,
         markdown_sha256: rendered.markdown_sha256,
         slots: report.overall.slots,
     })
@@ -129,7 +129,7 @@ mod tests {
         assert!(first.markdown.contains("1.0000"));
         assert!(!first.markdown.contains("Synthetic MRI measurement"));
         assert_eq!(first.markdown_sha256.len(), 64);
-        assert_eq!(first.source_commitment_sha256.len(), 64);
+        assert_eq!(first.evaluation_provenance_sha256.len(), 64);
     }
 
     #[test]

@@ -8124,9 +8124,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 match f44_synthetic_evaluation::preview_synthetic_json(fixture.as_str()) {
                     Ok(preview) => {
                         ui.set_synthetic_evaluation_status(format!(
-                            "SYNTHETIC FIXTURE ONLY — {} checked slots. Source/provenance SHA-256: {}. Markdown SHA-256: {}. Not a trained-model, gold-custody, calibration, or scientific-result claim. No project write or network.",
+                            "SYNTHETIC FIXTURE ONLY — {} checked slots. Evaluation provenance SHA-256: {}. Markdown SHA-256: {}. Not a trained-model, gold-custody, calibration, or scientific-result claim. No project write or network.",
                             preview.slots,
-                            preview.source_commitment_sha256,
+                            preview.evaluation_provenance_sha256,
                             preview.markdown_sha256
                         ).into());
                         ui.set_synthetic_evaluation_receipt(preview.markdown.into());
