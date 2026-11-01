@@ -3380,6 +3380,62 @@ try {
     }
     Assert-F14Unchanged $f07Before (Get-F14ProjectSnapshot $temporary) $window 'F07 valid DOI offline preview'
     Write-Output 'UIA_F07_NATIVE_DOI_OFFLINE_PREVIEW_ZERO_PROJECT_WRITES_NO_NETWORK_REQUEST_OK'
+    # F44: exercise the installed Windows native synthetic-only extraction
+    # evaluator through real UIA controls. No model call, source data fetch,
+    # network access or project event is permitted. This deliberately tests
+    # the *rendered* SHA receipt instead of rebuilding expected output in QA.
+    $f44Before = Get-F14ProjectSnapshot $temporary
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    $command.GetCurrentPattern($f43Value).SetValue('Diagnostics')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 250
+    Invoke-AccessibleButton $window 'Toggle offline synthetic extraction evaluation fixture panel'
+    $f44Sample = Named $window ([System.Windows.Automation.ControlType]::Button) 'Insert trusted synthetic extraction evaluation example without project data'
+    $f44Sample.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*A small, programmatically generated synthetic example is ready*' 10000
+    $f44Preview = FocusByTab $f44Sample ([System.Windows.Automation.ControlType]::Button) 'Preview strict synthetic extraction evaluation with no network or project write' 4
+    $f44Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*SYNTHETIC FIXTURE ONLY*1 checked slots*' 10000
+    $f44StatusNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    $f44Status = [string]($f44StatusNames | Where-Object { $_ -like '*SYNTHETIC FIXTURE ONLY*Markdown SHA-256:*' } | Select-Object -First 1)
+    $f44Hash = [regex]::Match($f44Status, 'Markdown SHA-256: ([0-9a-f]{64})').Groups[1].Value
+    if ($f44Hash.Length -ne 64 -or
+        -not $f44Status.Contains('Not a trained-model, gold-custody, calibration, or scientific-result claim')) {
+        throw 'F44 synthetic installed preview lacks SHA or explicit no-model-validation limits'
+    }
+    $f44ReceiptEditor = FocusByTab $f44Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable SHA verified redacted synthetic extraction evaluation receipt' 8
+    $f44Receipt = [string]$f44ReceiptEditor.GetCurrentPattern($f43Value).Current.Value
+    $f44Digest = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $f44ObservedHash = ([BitConverter]::ToString($f44Digest.ComputeHash(
+            [System.Text.Encoding]::UTF8.GetBytes($f44Receipt)
+        ))).Replace('-', '').ToLowerInvariant()
+    } finally { $f44Digest.Dispose() }
+    if ($f44ObservedHash -cne $f44Hash -or
+        -not $f44Receipt.Contains('Synthetic fixture only') -or
+        -not $f44Receipt.Contains('| ALL | 1 | 1 | 0 | 0 | 0 | 0 | 1.0000') -or
+        $f44Receipt.Contains('Synthetic MRI measurement')) {
+        throw 'F44 native installed receipt failed full Markdown SHA/metric/redaction verification'
+    }
+    Assert-F14Unchanged $f44Before (Get-F14ProjectSnapshot $temporary) $window 'F44 synthetic evaluation preview'
+    Write-Output 'UIA_F44_SYNTHETIC_SHA_VERIFIED_REDACTED_NO_PROJECT_WRITE_OK'
+
+    $f44Fixture = FocusByShiftTab $f44ReceiptEditor ([System.Windows.Automation.ControlType]::Edit) 'Synthetic extraction evaluation typed JSON fixture input' 8
+    $f44Fixture.GetCurrentPattern($f43Value).SetValue('{}')
+    $f44Preview = FocusByTab $f44Fixture ([System.Windows.Automation.ControlType]::Button) 'Preview strict synthetic extraction evaluation with no network or project write' 5
+    $f44Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Synthetic evaluation refused:*' 10000
+    $f44ReceiptEditor = FocusByTab $f44Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable SHA verified redacted synthetic extraction evaluation receipt' 8
+    $f44InvalidReceipt = [string]$f44ReceiptEditor.GetCurrentPattern($f43Value).Current.Value
+    if ($f44InvalidReceipt -cne 'No valid SHA-verified synthetic evaluation receipt for this fixture.') {
+        throw 'F44 rejected fixture retained a previously valid scientific receipt'
+    }
+    Assert-F14Unchanged $f44Before (Get-F14ProjectSnapshot $temporary) $window 'F44 malformed synthetic fixture refusal'
+    Write-Output 'UIA_F44_MALFORMED_FIXTURE_FAIL_CLOSED_NO_PROJECT_WRITE_OK'
 } catch {
     # CI archives the requested screenshot even on failures before the last
     # test assertion. Keep the original failure authoritative if capture fails.
