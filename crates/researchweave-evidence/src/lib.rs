@@ -17,6 +17,7 @@ mod forms;
 mod highlights;
 mod manuscript_comments;
 pub mod manuscript_document;
+mod media_timeline;
 mod protocol_freeze;
 mod publishing;
 mod publishing_formats;
@@ -145,6 +146,16 @@ impl EvidenceHandler {
                 &["project_id", "manuscript_id"][..],
             ),
             ("writing.claim_check", &["project_id", "claim_id"][..]),
+            (
+                "evidence.media_timeline_preview",
+                &[
+                    "project_id",
+                    "media_source_id",
+                    "source_sha256",
+                    "duration_ms",
+                    "annotations",
+                ][..],
+            ),
             (
                 "writing.quarto_source_preview",
                 &["project_id", "document"][..],
@@ -518,6 +529,9 @@ impl EvidenceHandler {
             return qualitative::kappa(args);
         }
         let mut store = self.store(args, ctx)?;
+        if operation == "evidence.media_timeline_preview" {
+            return media_timeline::preview(&store, args, ctx);
+        }
         if operation == "writing.quarto_source_preview" {
             let info = store
                 .info()
