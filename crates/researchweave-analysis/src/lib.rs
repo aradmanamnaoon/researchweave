@@ -19,6 +19,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+mod bayes;
 pub mod extraction_evaluation;
 pub mod extraction_evaluation_export;
 mod longitudinal;
@@ -3468,6 +3469,7 @@ impl AnalysisService {
             ("dataset.quality", Effect::Read),
             ("dataset.simple_impute", Effect::LocalWrite),
             ("statistics.describe", Effect::Read),
+            ("statistics.bayes_normal_mean", Effect::Read),
             ("statistics.frequency", Effect::Read),
             ("statistics.test", Effect::Read),
             ("statistics.correlate", Effect::Read),
@@ -3837,6 +3839,7 @@ impl AnalysisService {
                 )
             }
             "statistics.describe" => describe(&dataset, string_arg(object, "column")?),
+            "statistics.bayes_normal_mean" => bayes::normal_known_sd(&dataset, object),
             "statistics.pca" => {
                 let columns = object
                     .get("columns")
@@ -4332,6 +4335,71 @@ mod tests {
         assert_eq!(summary["q1"], 2.25);
         assert_eq!(summary["q3"], 4.75);
         assert!((summary["excess_kurtosis_bias_corrected"].as_f64().unwrap() + 1.2).abs() < 1e-12);
+    }
+
+    #[test]
+    fn f39_analytic_bayesian_mean_is_offline_revision_bound_and_read_only() {
+        let root = tempfile::tempdir().unwrap();
+        let imports = root.path().join("imports");
+        fs::create_dir(&imports).unwrap();
+        fs::write(imports.join("study.csv"), SAMPLE).unwrap();
+        let service = AnalysisService::new(root.path().join("data"), &imports).unwrap();
+        let context = DispatchContext {
+            request_id: uuid::Uuid::new_v4(),
+            project_id: uuid::Uuid::new_v4(),
+            actor: "independent-analyst".into(),
+            expected_revision: None,
+        };
+        let imported =
+            service.execute("dataset.import", &json!({"filename":"study.csv"}), &context);
+        assert!(imported.get("status").is_none(), "{imported}");
+        let id = imported["data"]["dataset_id"].as_str().unwrap();
+        let rev = imported["data"]["revision"].as_str().unwrap();
+        let arguments = json!({
+            "dataset_id":id,"revision":rev,"column":"score",
+            "prior_mean":0.0,"prior_sd":10.0,"observation_sd":2.0,
+            "credible_mass":0.95
+        });
+        let before = fs::read(service.store.path(id, rev).unwrap()).unwrap();
+        let result = service.execute("statistics.bayes_normal_mean", &arguments, &context);
+        assert!(result.get("status").is_none(), "{result}");
+        let data = &result["data"];
+        assert_eq!(
+            data["method"],
+            "normal_normal_conjugate_known_observation_sd"
+        );
+        assert_eq!(data["dataset_revision"], rev);
+        assert_eq!(
+            data["dataset_source_sha256"],
+            imported["data"]["source_hash"]
+        );
+        assert_eq!(data["n_observed"], 6);
+        assert_eq!(data["n_missing"], 0);
+        assert_eq!(data["mcmc_performed"], false);
+        assert_eq!(data["multilevel_model"], false);
+        assert!((data["posterior"]["mean"].as_f64().unwrap() - (5.25 / 1.51)).abs() < 1e-12);
+        assert_eq!(
+            result,
+            service.execute("statistics.bayes_normal_mean", &arguments, &context)
+        );
+        assert_eq!(
+            fs::read(service.store.path(id, rev).unwrap()).unwrap(),
+            before
+        );
+        for invalid in [
+            json!({"dataset_id":id,"revision":rev,"column":"score","prior_mean":0,"prior_sd":10,"observation_sd":0}),
+            json!({"dataset_id":id,"revision":rev,"column":"score","prior_mean":0,"prior_sd":10,"observation_sd":2,"unknown":"injected"}),
+            json!({"dataset_id":id,"revision":"0".repeat(64),"column":"score","prior_mean":0,"prior_sd":10,"observation_sd":2}),
+        ] {
+            assert_eq!(
+                service.execute("statistics.bayes_normal_mean", &invalid, &context)["status"],
+                "failed"
+            );
+        }
+        assert!(AnalysisService::capabilities().iter().any(|capability| {
+            capability.operation == "statistics.bayes_normal_mean"
+                && capability.effect == Effect::Read
+        }));
     }
 
     #[test]
