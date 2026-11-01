@@ -196,7 +196,7 @@ The current native writing workflow includes:
 - deterministic DOCX structure tests;
 - draft submission ZIP generation including `manuscript.docx`, bibliography/manifest information, hashes and an explicit `submission_performed=false` receipt.
 
-The editor is intentionally described as a **structured versioned manuscript editor**, not yet a Word-class page-layout engine. Full track changes, comment replies and authenticated collaboration, rich document trees, cross-references, footnotes/equations, DOCX comment round-trip and journal-template fidelity remain product work.
+The editor is intentionally described as a **structured versioned manuscript editor**, not yet a Word-class page-layout engine. A bounded typed manuscript-document AST with deterministic source commitments, Persian text support, citations and explicit lossy projections now exists in the Rust evidence crate; native rich editing, persisted AST revision round-trips, full track changes, comment replies and authenticated collaboration, cross-references, footnotes/equations, DOCX comment round-trip and journal-template fidelity remain product work.
 
 ## AI without silent autonomy
 
@@ -409,7 +409,7 @@ scripts/rust_rewrite/       rewrite/release verification helpers
 
 ## Current product boundaries
 
-ResearchWeave already has broad working infrastructure, but the repository intentionally keeps ambitious gaps visible. Examples include Word-class tracked edits and comment collaboration, a fully rich document tree, durable keep-separate reference decisions and broader deduplication UX, semantic/hybrid retrieval, validated AI screening/extraction evaluation, executable notebook kernels, Bayesian/multilevel breadth, media timeline coding, external knowledge-base round-trip and advanced knowledge-graph workflows.
+ResearchWeave already has broad working infrastructure, but the repository intentionally keeps ambitious gaps visible. Examples include Word-class tracked edits and comment collaboration, native document-tree editing and round-trip, durable keep-separate reference decisions and broader deduplication UX, semantic/hybrid retrieval, real-world validation of AI screening/extraction models, executable notebook kernels, Bayesian/multilevel breadth, media timeline coding, external knowledge-base round-trip and advanced knowledge-graph workflows. The analysis crate includes a bounded synthetic source-anchored extraction-evaluation engine; real blinded gold custody, native evaluation UI and model-accuracy claims still require independent verification.
 
 Those are tracked as product work rather than represented by placeholder buttons or inflated README claims.
 

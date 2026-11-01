@@ -1560,6 +1560,19 @@ export component MainWindow inherits Window {
                                         accessible-label: "Inspect local protocol freeze receipt";
                                         clicked => { root.inspect-protocol-freeze(protocol-id.text); }
                                     }
+                                    Text {
+                                        text: "Inspected local baseline JSON (read-only, selectable; not an external registration receipt)";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    TextEdit {
+                                        min-height: 90px;
+                                        preferred-height: 110px;
+                                        max-height: 130px;
+                                        text: root.protocol-freeze-status;
+                                        read-only: true;
+                                        accessible-label: "Read-only inspected protocol freeze JSON";
+                                    }
                                     Button {
                                         text: "Prepare baseline receipt .md";
                                         accessible-label: "Prepare local protocol baseline receipt Markdown";

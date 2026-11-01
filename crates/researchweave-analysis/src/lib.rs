@@ -19,6 +19,7 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 use thiserror::Error;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
+pub mod extraction_evaluation;
 mod longitudinal;
 mod mixed_methods;
 pub use mixed_methods::joint_display_with_verified_host_snapshot;

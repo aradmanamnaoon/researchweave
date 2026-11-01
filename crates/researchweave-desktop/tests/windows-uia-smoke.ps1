@@ -511,85 +511,45 @@ function Read-VisibleProtocolFreezeReceipt(
     [System.Windows.Automation.AutomationElement]$Window,
     [string]$ExpectedProtocolId
 ) {
-    # Slint's Protocol ScrollView omits off-viewport Text nodes from the
-    # Windows AccessKit tree. The inspected JSON is specifically bound to
-    # protocol-freeze-status in main.slint, *not* the bottom workbench status.
-    # Never infer frozen=true from a missing node or from a success toast.
-    $labelPrefix = 'Protocol local freeze status '
-    $receipt = $null
-    # The exact Inspect control is the focus anchor after the preceding real
-    # UIA InvokePattern action. Walk its actual parent chain to locate the
-    # native ScrollPattern rather than scroll an unrelated shell/sidebar.
+    # Hosted installed Windows UIA 41281278706 proved that the full JSON Text
+    # at the bottom of the Protocol ScrollView is not necessarily exposed at
+    # 200% scale (886x600 viewport), even after focusing the native receipt
+    # Save button and sending bounded PageDown. Read the newly exposed
+    # *read-only* inspector's actual accessible value adjacent to Inspect.
+    # It binds directly to root.protocol-freeze-status, which the Rust host
+    # loads from persisted protocol history; no synthetic receipt is supplied.
     $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
     if (-not $focused -or
         $focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button -or
         $focused.Current.Name -ne 'Inspect local protocol freeze receipt') {
-        throw 'Protocol receipt inspection did not retain its native Inspect focus anchor'
-    }
-    $walker = [System.Windows.Automation.TreeWalker]::RawViewWalker
-    $scroll = $null
-    $ancestor = $focused
-    for ($level = 0; $level -lt 28 -and $ancestor; $level++) {
-        $candidate = $null
-        if ($ancestor.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$candidate)) {
-            $pattern = [System.Windows.Automation.ScrollPattern]$candidate
-            if ($pattern.Current.VerticallyScrollable) {
-                $scroll = $pattern
-                break
-            }
-        }
-        $ancestor = $walker.GetParent($ancestor)
-    }
-    if (-not $scroll) {
-        # Some AccessKit builds expose only keyboard-scrolling, not UIA
-        # ScrollPattern. Follow the documented *real* Protocol control order
-        # to its lower receipt-save row, without invoking a write action;
-        # PageDown is still bounded and the exact JSON remains mandatory.
-        # Real installed UIA at run 41277449988 proved the offscreen path Edit
-        # is omitted from keyboard order. The adjacent Save *button* is exposed:
-        # Inspect -> Prepare Markdown -> Save. Focus it without invoking it,
-        # then use bounded PageDown to expose the persisted JSON below.
-        # Never require or guess focus on an inaccessible, lazy Edit node.
-        $receiptSave = FocusByTab $focused ([System.Windows.Automation.ControlType]::Button) 'Save verified local baseline receipt without overwrite' 5
-        Write-Host 'UIA_PROTOCOL_FREEZE_VIEWPORT_RECOVERY: native receipt-save focus, keyboard PageDown (no save invoked)'
-    }
-    # Inspect output lies below the local-freeze buttons, receipt save row,
-    # and the summary. Scroll the *same* containing native ScrollView in
-    # bounded increments; each step must prove progress in its own UIA
-    # ScrollPattern, and each read must come from the exact Text label.
-    for ($step = 0; $step -lt 48; $step++) {
-        foreach ($node in (Children $Window ([System.Windows.Automation.ControlType]::Text))) {
-            $name = $node.Current.Name
-            if (-not $name.StartsWith($labelPrefix, [StringComparison]::Ordinal)) { continue }
-            if ($null -ne $receipt) { throw 'More than one native protocol freeze JSON receipt is visible' }
-            $raw = $name.Substring($labelPrefix.Length)
-            try {
-                $receipt = $raw | ConvertFrom-Json -ErrorAction Stop
-            } catch {
-                throw "Native protocol freeze receipt is not valid JSON: $($_.Exception.Message)"
-            }
-        }
-        if ($null -ne $receipt) { break }
-        if (-not $scroll) {
-            if ($step -ge 20) { break }
-            [System.Windows.Forms.SendKeys]::SendWait('{PGDN}')
-            Start-Sleep -Milliseconds 120
-            continue
-        }
-        $before = $scroll.Current.VerticalScrollPercent
-        if ($before -ge 99.9) { break }
-        $scroll.Scroll(
-            [System.Windows.Automation.ScrollAmount]::NoAmount,
-            [System.Windows.Automation.ScrollAmount]::SmallIncrement
-        )
-        Start-Sleep -Milliseconds 100
-        $after = $scroll.Current.VerticalScrollPercent
-        if ($after -le $before) {
-            throw "Native Protocol ScrollView did not advance while locating the freeze JSON (at $before%)"
+        # The Rust-host inspection updates Slint properties and may recreate
+        # the focused AccessKit node. Re-anchor to the actual native button
+        # without invoking or mutating the inspection result.
+        $inspect = Named $Window ([System.Windows.Automation.ControlType]::Button) 'Inspect local protocol freeze receipt'
+        EnsureLiveFocus $inspect
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if (-not $focused -or
+            $focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button -or
+            $focused.Current.Name -ne 'Inspect local protocol freeze receipt') {
+            throw 'Protocol receipt inspection cannot restore its real native Inspect focus anchor'
         }
     }
-    if ($null -eq $receipt) {
-        throw 'The actual persisted protocol freeze JSON was not exposed after bounded scrolling of the native Protocol ScrollView'
+    $viewer = FocusByTab $focused ([System.Windows.Automation.ControlType]::Edit) 'Read-only inspected protocol freeze JSON' 5
+    $valuePattern = $null
+    if (-not $viewer.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+        throw 'Native read-only Protocol JSON inspector does not expose the real UIA ValuePattern'
+    }
+    if (-not $valuePattern.Current.IsReadOnly) {
+        throw 'Native Protocol JSON inspector is unexpectedly editable'
+    }
+    $raw = [string]$valuePattern.Current.Value
+    if ([string]::IsNullOrWhiteSpace($raw) -or -not $raw.TrimStart().StartsWith('{')) {
+        throw 'Native Protocol JSON inspector did not expose the inspected persisted receipt'
+    }
+    try {
+        $receipt = $raw | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw "Native inspected Protocol freeze receipt is not valid JSON: $($_.Exception.Message)"
     }
     if ($receipt.protocol_id -cne $ExpectedProtocolId -or
         $receipt.local_only -cne $true -or
@@ -597,7 +557,7 @@ function Read-VisibleProtocolFreezeReceipt(
         $receipt.frozen -isnot [bool]) {
         throw 'Persisted protocol freeze JSON failed exact identity, boolean state or local-only provenance validation'
     }
-    Write-Host "UIA_PROTOCOL_FREEZE_JSON_READ: protocol=$ExpectedProtocolId frozen=$($receipt.frozen) via native Protocol ScrollView"
+    Write-Host "UIA_PROTOCOL_FREEZE_JSON_READ: protocol=$ExpectedProtocolId frozen=$($receipt.frozen) via read-only native Protocol inspector"
     return $receipt
 }
 # F14's independent persistence oracle opens only the disposable project's

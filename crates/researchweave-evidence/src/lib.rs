@@ -15,6 +15,7 @@ use uuid::Uuid;
 mod forms;
 mod highlights;
 mod manuscript_comments;
+pub mod manuscript_document;
 mod protocol_freeze;
 mod publishing;
 mod publishing_formats;
