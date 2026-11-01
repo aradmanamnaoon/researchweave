@@ -144,6 +144,10 @@ impl EvidenceHandler {
             ("writing.claim_check", &["project_id", "claim_id"][..]),
             ("review.records", &["project_id", "review_id"][..]),
             (
+                "review.suggestion_source",
+                &["project_id", "review_id", "record_id"][..],
+            ),
+            (
                 "review.adjudications",
                 &["project_id", "review_id", "record_id"][..],
             ),
@@ -646,6 +650,7 @@ impl EvidenceHandler {
         if matches!(
             operation,
             "review.records"
+                | "review.suggestion_source"
                 | "review.votes"
                 | "review.status"
                 | "review.prisma"
@@ -2130,6 +2135,94 @@ mod tests {
     use super::*;
     use researchweave_project::ProjectInfo;
     use uuid::Uuid;
+
+    #[test]
+    fn review_suggestion_source_is_scoped_versioned_and_leaves_blinded_votes_unread() {
+        let folder = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let reference_id = Uuid::new_v4();
+        let path = folder.path().join("pico-project");
+        let store = ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Scoped PICO".into(),
+                question: "Question".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        store.connection().execute(
+            "INSERT INTO reference(id,title,authors_json,year,doi,kind,format,raw,metadata_json,status,imported_at)
+             VALUES (?1,'Older adults','[]',2025,NULL,'article','bibtex','',?2,'unverified',?3)",
+            params![reference_id.to_string(), json!({"abstract":"Mindfulness and sleep quality."}).to_string(), timestamp()],
+        ).unwrap();
+        drop(store);
+        let handler = EvidenceHandler::bound(project_id, &path).unwrap();
+        let mut ctx = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "screening-tester".into(),
+            expected_revision: Some(0),
+        };
+        let created = handler.execute("review.record_add", &json!({
+            "project_id":project_id.to_string(),"review_id":"review-a","reference_id":reference_id.to_string()
+        }), &ctx);
+        assert_eq!(created["status"], "ok", "{created}");
+        let record_id = created["data"]["record_id"].as_str().unwrap();
+        let args = json!({"project_id":project_id.to_string(),"review_id":"review-a","record_id":record_id});
+        let first = handler.execute("review.suggestion_source", &args, &ctx);
+        assert_eq!(first["status"], "ok", "{first}");
+        assert_eq!(first["data"]["project_revision"], 1);
+        assert_eq!(first["data"]["stage"], "title_abstract");
+        assert_eq!(first["data"]["project_database_verified"], true);
+        assert_eq!(first["data"]["contains_review_votes"], false);
+        assert_eq!(
+            first["data"]["abstract_text"],
+            "Mindfulness and sleep quality."
+        );
+        let source_hash = digest(
+            &serde_json::to_vec(&json!({
+                "title":"Older adults","abstract_text":"Mindfulness and sleep quality."
+            }))
+            .unwrap(),
+        );
+        assert_eq!(first["data"]["source_sha256"], source_hash);
+        assert!(first["data"].get("votes").is_none());
+        assert_eq!(
+            handler.execute(
+                "review.suggestion_source",
+                &json!({
+                    "project_id":project_id.to_string(),"review_id":"review-b","record_id":record_id
+                }),
+                &ctx
+            )["status"],
+            "error"
+        );
+        assert_eq!(handler.execute("review.suggestion_source", &json!({
+            "project_id":Uuid::new_v4().to_string(),"review_id":"review-a","record_id":record_id
+        }), &ctx)["status"], "error");
+        ctx.expected_revision = Some(1);
+        ctx.request_id = Uuid::new_v4();
+        assert_eq!(handler.execute("review.vote", &json!({
+            "project_id":project_id.to_string(),"review_id":"review-a", "record_id":record_id,
+            "reviewer":"blind-reviewer","stage":"title_abstract","decision":"include","reason":"Independent judgment"
+        }), &ctx)["status"], "ok");
+        let second = handler.execute("review.suggestion_source", &args, &ctx);
+        assert_eq!(second["status"], "ok", "{second}");
+        assert_eq!(second["data"]["project_revision"], 2);
+        assert_eq!(second["data"]["source_sha256"], source_hash);
+        assert!(!second.to_string().contains("blind-reviewer"));
+        assert!(!second.to_string().contains("Independent judgment"));
+        assert_eq!(
+            ProjectStore::open(&path).unwrap().info().unwrap().revision,
+            2
+        );
+    }
 
     #[test]
     fn title_page_is_read_only_project_scoped_and_does_not_claim_journal_compliance() {

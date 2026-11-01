@@ -120,7 +120,11 @@ def reveal_bounded_control(
                 rect = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
                 cx = rect.x + rect.width // 2
                 cy = rect.y + rect.height // 2
-                if rect.width >= 8 and rect.height >= 8 and 50 <= cx < 1280 and 40 <= cy < 790:
+                # 1280x800 isolated Xvfb layout reserves the header above
+                # y=118 and the persistent Jobs tray from about y=728.
+                # A node whose center is behind either chrome region must
+                # not be mistaken for a usable editor/action target.
+                if rect.width >= 8 and rect.height >= 8 and 50 <= cx < 1280 and 130 <= cy < 715:
                     return
             except Exception:
                 continue
@@ -821,6 +825,248 @@ def exercise_f14_positive_dedup(app: Any, project: pathlib.Path, output: pathlib
     print("F14_POSITIVE_EXPLICIT_UNDO_BOTH_REFERENCES_UNCHANGED_OK")
 
 
+def exercise_f26_sourcebound_screening(
+    app: Any, project: pathlib.Path, output: pathlib.Path
+) -> None:
+    """Exercise actual native Review F26 on F05's UI-registered source.
+
+    The synthetic source is already persisted via an approved F05 native
+    operation. This adds a review link and one unsure peer vote through the
+    native Preview/Record workflow, then proves every F26 read and refusal is
+    source-bound and leaves the SQLite project event chain unchanged.
+    """
+    database = project / "data/project.sqlite"
+    review_id = "f26-atspi-sourcebound-review"
+    peer_reviewer = "f26-private-synthetic-peer"
+    peer_reason = "f26-private-peer-reason-never-display"
+
+    def read_state() -> tuple[tuple[Any, ...], tuple[Any, ...], tuple[Any, ...]]:
+        with sqlite3.connect(database) as db:
+            records = tuple(db.execute(
+                "SELECT id,review_id,reference_id,study_id,stage "
+                "FROM review_records ORDER BY id"
+            ).fetchall())
+            votes = tuple(db.execute(
+                "SELECT review_id,record_id,reviewer,stage,decision,reason "
+                "FROM votes ORDER BY review_id,record_id,reviewer,stage"
+            ).fetchall())
+            adjudications = tuple(db.execute(
+                "SELECT review_id,record_id,stage,decision,reason,adjudicator "
+                "FROM adjudications ORDER BY review_id,record_id,stage"
+            ).fetchall())
+        return records, votes, adjudications
+
+    def status_seen(needle: str) -> bool:
+        for _ in range(8):
+            if any(needle in (node.name or "") for node, _ in walk(app)):
+                return True
+            time.sleep(0.15)
+        return False
+
+    def assert_unchanged(
+        before: tuple[int, tuple[tuple[Any, ...], ...]],
+        rows_before: tuple[tuple[Any, ...], tuple[Any, ...], tuple[Any, ...]],
+        operation: str,
+    ) -> None:
+        if project_event_snapshot(project) != before or read_state() != rows_before:
+            raise RuntimeError(f"F26 {operation} changed revision, events, votes or review rows")
+
+    with sqlite3.connect(database) as db:
+        project_id, revision = db.execute("SELECT id,revision FROM project").fetchone()
+        references = db.execute(
+            "SELECT id,title,metadata_json FROM reference "
+            "WHERE title=? ORDER BY id",
+            ("Synthetic offline citation for native F05 QA",),
+        ).fetchall()
+        existing = db.execute(
+            "SELECT count(*) FROM review_records WHERE review_id=?", (review_id,)
+        ).fetchone()[0]
+    if (len(references) not in (1, 2) or existing != 0
+            or str(uuid.UUID(project_id)) != project_id or revision <= 0):
+        raise RuntimeError("F26 requires untouched F05 native synthetic reference and review ID")
+    # F14 optional positive adds a distinct second reference with the same
+    # title; choose the F05 original by its first registration event payload.
+    with sqlite3.connect(database) as db:
+        first_ref_event = db.execute(
+            "SELECT payload_json FROM events WHERE operation='library.reference_add' "
+            "ORDER BY sequence LIMIT 1"
+        ).fetchone()
+    if first_ref_event is None:
+        raise RuntimeError("F26 cannot prove original reference came from native registration")
+    reference_id = json.loads(first_ref_event[0]).get("reference_id")
+    source_rows = [row for row in references if row[0] == reference_id]
+    if len(source_rows) != 1 or str(uuid.UUID(reference_id)) != reference_id:
+        raise RuntimeError("F26 native reference identity does not match recorded event")
+    _, title, metadata_json = source_rows[0]
+    metadata = json.loads(metadata_json)
+    if not isinstance(metadata, dict):
+        raise RuntimeError("F26 persisted reference metadata is not an object")
+    abstract = metadata.get("abstract", metadata.get("abstract_text"))
+    if abstract is not None and not isinstance(abstract, str):
+        raise RuntimeError("F26 persisted abstract has unexpected type")
+    structured_source = json.dumps(
+        {"title": title, "abstract_text": abstract},
+        ensure_ascii=False, sort_keys=True, separators=(",", ":"),
+    ).encode("utf-8")
+    expected_sha = hashlib.sha256(structured_source).hexdigest()
+    before_registration = project_event_snapshot(project)
+    rows_before = read_state()
+    if not activate(app, "Sources activity"):
+        raise RuntimeError("F26 cannot reach Sources activity from prior F03/F14 flow")
+    time.sleep(0.2)
+    activate_bounded_control(app, "Review workspace screen", down=False)
+    time.sleep(0.2)
+    # The earlier PICO query-builder remains expanded. Collapse it to expose
+    # Review inputs in the bounded native viewport; no source read is faked.
+    if nodes_named(app, "Search strategy population terms"):
+        activate_bounded_control(app, "Toggle review PICO search strategy builder", down=False)
+    for name, value in (
+        ("Review ID", review_id),
+        ("Review reference ID", reference_id),
+    ):
+        reveal_bounded_control(app, name, down=True)
+        edit_text(app, name, value, allow_unreadable=True)
+    activate_bounded_control(app, "Preview add review record", down=True)
+    if not status_seen("Review-record preview ready; no project data changed"):
+        raise RuntimeError("F26 Review record GUI registration preview not acknowledged")
+    assert_unchanged(before_registration, rows_before, "record registration preview")
+    activate_bounded_control(app, "Record previewed review action", down=True)
+    if not status_seen("Previewed evidence operation recorded and audited"):
+        raise RuntimeError("F26 native review-record registration lacked audit receipt")
+    after_registration = project_event_snapshot(project)
+    if (after_registration[0] != before_registration[0] + 1
+            or after_registration[1][:-1] != before_registration[1]
+            or after_registration[1][-1][1] != "review.record_add"):
+        raise RuntimeError("F26 native review record did not append one audited event")
+    with sqlite3.connect(database) as db:
+        saved = db.execute(
+            "SELECT id,reference_id,stage FROM review_records WHERE review_id=?",
+            (review_id,),
+        ).fetchall()
+    if (len(saved) != 1 or saved[0][1:] != (reference_id, "title_abstract")
+            or str(uuid.UUID(saved[0][0])) != saved[0][0]):
+        raise RuntimeError("F26 native Review registered a wrong record or reference")
+    record_id = saved[0][0]
+    print("F26_NATIVE_UI_RECORD_REGISTERED_WITH_EXACT_PERSISTED_REFERENCE_OK")
+
+    # Add an independent unsure vote via native UI so the subsequent F26
+    # output must hide a real peer identity and reason. Neither implies
+    # inclusion/exclusion or final screening adjudication.
+    for name, value in (
+        ("Review record ID", record_id),
+        ("Review reviewer", peer_reviewer),
+        ("Review stage", "title_abstract"),
+        ("Review decision", "unsure"),
+        ("Review decision reason", peer_reason),
+    ):
+        reveal_bounded_control(app, name, down=True)
+        edit_text(app, name, value, allow_unreadable=True)
+    before_vote = project_event_snapshot(project)
+    rows_before_vote = read_state()
+    activate_bounded_control(app, "Preview screening vote", down=True)
+    if not status_seen("Screening preview ready; no project data changed"):
+        raise RuntimeError("F26 synthetic peer vote was not previewed through native UI")
+    assert_unchanged(before_vote, rows_before_vote, "peer vote preview")
+    activate_bounded_control(app, "Record previewed review action", down=True)
+    if not status_seen("Previewed evidence operation recorded and audited"):
+        raise RuntimeError("F26 synthetic peer vote not approved through native UI")
+    after_vote = project_event_snapshot(project)
+    rows_after_vote = read_state()
+    if (after_vote[0] != before_vote[0] + 1
+            or after_vote[1][:-1] != before_vote[1]
+            or after_vote[1][-1][1] != "review.screen"
+            or rows_after_vote[1] != ((review_id, record_id, peer_reviewer,
+                                      "title_abstract", "unsure", peer_reason),)
+            or rows_after_vote[2]):
+        raise RuntimeError("F26 expected exactly one audited blinded synthetic unsure vote")
+    print("F26_BLINDED_PEER_VOTE_CREATED_VIA_NATIVE_UI_OK")
+
+    # The actual F26 suggestion requires persisted source ownership, not the
+    # title typed into an untrusted UI field. Lexical matching is positive on
+    # the title, while missing abstract requires manual-uncertain priority.
+    activate_bounded_control(
+        app, "Toggle offline suggest-only PICO screening for an existing review record", down=True
+    )
+    for name, value in (
+        ("Screening PICO population synonyms", "Synthetic"),
+        ("Screening PICO intervention synonyms", "citation"),
+    ):
+        reveal_bounded_control(app, name, down=True)
+        edit_text(app, name, value, allow_unreadable=True)
+    before_suggestion = project_event_snapshot(project)
+    suggestion_rows = read_state()
+    activate_bounded_control(
+        app, "Read existing record and display local PICO matches without voting", down=True
+    )
+    if not status_seen("Persisted offline screening suggestion loaded; no review vote changed"):
+        raise RuntimeError("F26 sourcebound Review suggestion was not accepted by native host")
+    reveal_bounded_control(
+        app, "Read-only provenance, source and local PICO screening suggestion", down=True
+    )
+    result = wait_field(
+        app, "Read-only provenance, source and local PICO screening suggestion"
+    )
+    expected_fragments = (
+        "OFFLINE PICO LEXICAL SUGGESTION", "NO SCREENING DECISION",
+        f"Project: {project_id}", f"Review: {review_id}",
+        f"Review record: {record_id}", f"Persisted reference: {reference_id}",
+        f"Snapshot project revision: {before_suggestion[0]}",
+        f"Source SHA-256: {expected_sha}", "Suggestion SHA-256:",
+        f"Title: {title}", "Literal concept coverage: 2 of 2 groups (100%)",
+        "Manual review; priority uncertain", "Independent reviewer decisions remain blinded",
+        "No project record, reviewer vote, adjudication or exclusion was changed",
+    )
+    if not all(fragment in result for fragment in expected_fragments):
+        raise RuntimeError("F26 accessible result omitted exact persisted source or manual caveat")
+    if (abstract is None and "[not supplied; no abstract inferred]" not in result) or (
+        abstract is not None and f"Abstract: {abstract}" not in result
+    ):
+        raise RuntimeError("F26 accessible source abstract disagrees with persisted metadata")
+    if (peer_reviewer in result or peer_reason in result
+            or not re.search(r"Suggestion SHA-256: [a-f0-9]{64}", result)):
+        raise RuntimeError("F26 suggestion exposed blinded peer or lacks digest provenance")
+    assert_unchanged(before_suggestion, suggestion_rows, "positive suggestion")
+    audit(app, "f26-native-sourcebound-positive-no-write", output)
+    print("F26_NATIVE_SOURCEBOUND_PICO_SUGGESTION_PEER_BLIND_NO_WRITE_OK")
+
+    # Adversarial wrong record identity: native refusal is required, even
+    # though the active project and PICO concepts remain valid.
+    invalid_id = str(uuid.uuid4())
+    if invalid_id == record_id:
+        raise RuntimeError("F26 negative fixture unexpectedly reused real record ID")
+    reveal_bounded_control(app, "Review record ID", down=False)
+    edit_text(app, "Review record ID", invalid_id, allow_unreadable=True)
+    activate_bounded_control(
+        app, "Read existing record and display local PICO matches without voting", down=True
+    )
+    if not status_seen("Screening suggestion unavailable; inspect source and criteria"):
+        raise RuntimeError("F26 wrong-record request did not trigger native refusal")
+    refusal = wait_field(app, "Read-only provenance, source and local PICO screening suggestion")
+    if not refusal.startswith("Suggestion refused:") or "review record not found" not in refusal:
+        raise RuntimeError("F26 wrong-record refusal not specific to trusted missing review record")
+    assert_unchanged(before_suggestion, suggestion_rows, "wrong record")
+    print("F26_UNKNOWN_REVIEW_RECORD_REFUSED_WITH_NO_PROJECT_EVENTS_OK")
+
+    reveal_bounded_control(app, "Review record ID", down=False)
+    edit_text(app, "Review record ID", record_id, allow_unreadable=True)
+    invalid_terms = ";".join(f"invalid-term-{index}" for index in range(13))
+    reveal_bounded_control(app, "Screening PICO population synonyms", down=True)
+    edit_text(app, "Screening PICO population synonyms", invalid_terms, allow_unreadable=True)
+    activate_bounded_control(
+        app, "Read existing record and display local PICO matches without voting", down=True
+    )
+    if not status_seen("Screening suggestion unavailable; inspect source and criteria"):
+        raise RuntimeError("F26 oversized PICO alternatives did not trigger native refusal")
+    invalid_result = wait_field(
+        app, "Read-only provenance, source and local PICO screening suggestion"
+    )
+    if not invalid_result.startswith("Suggestion refused:") or "screening concepts" not in invalid_result:
+        raise RuntimeError("F26 PICO refusal did not report the bounded concepts contract")
+    assert_unchanged(before_suggestion, suggestion_rows, "invalid PICO")
+    audit(app, "f26-native-sourcebound-negatives-no-write", output)
+    print("F26_INVALID_PICO_REFUSED_AND_BLINDED_VOTE_UNCHANGED_OK")
+
+
 def activate(app: Any, name: str) -> bool:
     for node in nodes_named(app, name):
         try:
@@ -1402,6 +1648,11 @@ def main() -> int:
         audit(app, "manuscript", output)
         edit_text(app, "Manuscript ID", "synthetic-research")
         edit_text(app, "Manuscript section", "Abstract")
+        # Hosted Linux 41281278706 showed that the body starts behind the
+        # fixed Jobs tray immediately after opening Manuscript. Bring this
+        # exact editor into the usable content pane before native typing;
+        # a focused but occluded AT-SPI entry is insufficient evidence.
+        reveal_bounded_control(app, "Manuscript section body", down=True)
         edit_text(app, "Manuscript section body", "Synthetic manuscript for isolated project recovery.")
         time.sleep(1.3)
         visible = [(node.name or "") for node, _ in walk(app)]
@@ -2159,6 +2410,12 @@ def main() -> int:
             print("F14_POSITIVE_SKIPPED_EXPLICIT_OPT_IN_REQUIRED")
         else:
             raise RuntimeError("RW_QA_F14_POSITIVE must be exactly 0 or 1")
+        # F26 runs after F03/F05/F14 so all earlier scientific/native gates
+        # retain their original ordering and their event-count expectations.
+        # This is a real AT-SPI-driven read-only suggestion after explicit
+        # UI registration + a synthetic blinded peer vote. It fails closed if
+        # Slint cannot expose the exact provenance through accessible text.
+        exercise_f26_sourcebound_screening(app, original_project, output)
     if not activate(app, "Home activity"):
         raise RuntimeError("Cannot return Home to verify recent-project recovery")
     time.sleep(0.25)

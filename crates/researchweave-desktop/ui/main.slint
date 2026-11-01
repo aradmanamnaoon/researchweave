@@ -263,6 +263,8 @@ export component MainWindow inherits Window {
     in-out property <string> reference-dedup-fingerprint: "";
     in-out property <string> reference-dedup-rationale: "";
     in-out property <string> review-results: "Use persisted references to build and screen a review.";
+    in-out property <bool> review-screening-open: false;
+    in-out property <string> review-screening-results: "No screening suggestion loaded. Open a project and choose a persisted title/abstract review record.";
     in-out property <bool> review-search-builder-open: false;
     in-out property <string> review-search-results: "Specify PICO concepts to draft a database-specific search strategy. No search has been executed.";
     in-out property <string> extraction-results: "Create a versioned extraction schema, then record validated values for a review record.";
@@ -392,6 +394,7 @@ export component MainWindow inherits Window {
     callback refresh-review(string);
     callback build-review-search-strategy(string, string, string, string, string);
     callback load-review-status(string, string, string);
+    callback suggest-review-screening(string, string, string, string, string, string);
     callback preview-extraction-form(string, string, string);
     callback preview-extraction-form-revision(string, string, string, string, string);
     callback preview-extraction-values(string, string, string, string);
@@ -1963,18 +1966,53 @@ export component MainWindow inherits Window {
                             }
                             HorizontalLayout {
                                 spacing: 8px;
-                                review-id := LineEdit { placeholder-text: "Review ID"; accessible-label: "Review ID"; }
+                                review-id := LineEdit { placeholder-text: "Review ID"; accessible-label: "Review ID"; edited(text) => { root.review-screening-results = "Review identity changed. Generate a new source-bound suggestion."; } }
                                 review-reference-id := LineEdit { placeholder-text: "Reference ID"; accessible-label: "Review reference ID"; }
                                 Button { text: "Preview add record"; accessible-label: "Preview add review record"; clicked => { root.preview-review-record(review-id.text, review-reference-id.text); } }
                             }
                             HorizontalLayout {
                                 spacing: 8px;
-                                review-record-id := LineEdit { placeholder-text: "Review record ID"; accessible-label: "Review record ID"; }
+                                review-record-id := LineEdit { placeholder-text: "Review record ID"; accessible-label: "Review record ID"; edited(text) => { root.review-screening-results = "Record identity changed. Generate a new source-bound suggestion."; } }
                                 review-reviewer := LineEdit { placeholder-text: "Reviewer"; accessible-label: "Review reviewer"; }
                                 review-stage := LineEdit { placeholder-text: "Stage: title_abstract or full_text"; accessible-label: "Review stage"; }
                                 review-decision := LineEdit { placeholder-text: "Decision: include, exclude, unsure"; accessible-label: "Review decision"; }
                             }
                             review-reason := LineEdit { placeholder-text: "Reason (required for exclusion)"; accessible-label: "Review decision reason"; }
+                            Button {
+                                text: root.review-screening-open ? "Hide offline PICO screening assistance" : "Inspect offline PICO screening assistance";
+                                accessible-label: "Toggle offline suggest-only PICO screening for an existing review record";
+                                clicked => { root.review-screening-open = !root.review-screening-open; }
+                            }
+                            if root.review-screening-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text { text: "Literal PICO matches · read-only"; font-weight: 700; color: Theme.ink; }
+                                    Text { text: "Use Review ID and Review record ID above. The exact persisted reference title and optional abstract are read from the open project. Separate synonyms with semicolons; at most 12 per PICO group. Missing concepts may be left empty."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    screen-population := LineEdit { placeholder-text: "Population terms; separate with ;"; accessible-label: "Screening PICO population synonyms"; edited(text) => { root.review-screening-results = "PICO criteria edited. Generate a new source-bound suggestion."; } }
+                                    screen-intervention := LineEdit { placeholder-text: "Intervention terms; separate with ;"; accessible-label: "Screening PICO intervention synonyms"; edited(text) => { root.review-screening-results = "PICO criteria edited. Generate a new source-bound suggestion."; } }
+                                    screen-comparison := LineEdit { placeholder-text: "Comparison terms; separate with ;"; accessible-label: "Screening PICO comparison synonyms"; edited(text) => { root.review-screening-results = "PICO criteria edited. Generate a new source-bound suggestion."; } }
+                                    screen-outcome := LineEdit { placeholder-text: "Outcome terms; separate with ;"; accessible-label: "Screening PICO outcome synonyms"; edited(text) => { root.review-screening-results = "PICO criteria edited. Generate a new source-bound suggestion."; } }
+                                    Button {
+                                        text: "Inspect persisted record and suggest";
+                                        accessible-label: "Read existing record and display local PICO matches without voting";
+                                        clicked => { root.suggest-review-screening(review-id.text, review-record-id.text, screen-population.text, screen-intervention.text, screen-comparison.text, screen-outcome.text); }
+                                    }
+                                    Text { text: "No exclusions, votes, adjudications or project writes. Lexical coverage is not probability or eligibility. Reviewers must decide independently."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    TextEdit {
+                                        min-height: 145px;
+                                        preferred-height: 220px;
+                                        max-height: 300px;
+                                        read-only: true;
+                                        text: root.review-screening-results;
+                                        accessible-label: "Read-only provenance, source and local PICO screening suggestion";
+                                    }
+                                }
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
                                 Button {

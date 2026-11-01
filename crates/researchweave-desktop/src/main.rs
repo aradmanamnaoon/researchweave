@@ -41,6 +41,7 @@ mod physical_export;
 mod quick_note_checklist;
 mod recent_projects;
 mod reference_dedup_view;
+mod review_screening;
 mod writing_autosave;
 
 fn flush_writing_drafts(
@@ -196,6 +197,8 @@ fn reset_project_visible_state(ui: &MainWindow) {
     // contents are destroyed instead of surviving a project identity switch.
     ui.set_reference_dedup_open(false);
     ui.set_review_results("Use persisted references to build and screen a review.".into());
+    ui.set_review_screening_open(false);
+    ui.set_review_screening_results("No screening suggestion loaded. Open a project and choose a persisted title/abstract review record.".into());
     ui.set_review_search_results(
         "Specify PICO concepts to draft a database-specific search strategy. No search has been executed.".into(),
     );
@@ -5540,6 +5543,70 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_review_results(error.clone().into());
                         ui.set_status(error.into());
                     }
+                }
+            }
+        }
+    });
+    app.on_suggest_review_screening({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |review_id, record_id, population, intervention, comparison, outcome| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<String, String> {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a project first")?;
+                let before = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?;
+                let review_id = review_id.as_str().trim();
+                let record_id = record_id.as_str().trim();
+                // Source text and record ownership come from the trusted,
+                // project-bound read handler, never from user-supplied text.
+                let receipt = evidence_read_at(
+                    &project,
+                    "review.suggestion_source",
+                    serde_json::json!({"review_id":review_id,"record_id":record_id}),
+                    &host_data_root()?,
+                )?;
+                let after = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?;
+                if before.id != after.id
+                    || before.revision != after.revision
+                    || receipt["data"]["project_revision"] != after.revision
+                {
+                    return Err("Review source changed during inspection; load again".into());
+                }
+                review_screening::render(
+                    &receipt,
+                    &after.id,
+                    review_id,
+                    record_id,
+                    researchweave_ai::screening_suggestions::ScreeningConcepts {
+                        population: review_search_terms(population.as_str()),
+                        intervention: review_search_terms(intervention.as_str()),
+                        comparison: review_search_terms(comparison.as_str()),
+                        outcome: review_search_terms(outcome.as_str()),
+                    },
+                )
+            })();
+            match result {
+                Ok(text) => {
+                    ui.set_review_screening_results(text.into());
+                    ui.set_status(
+                        "Persisted offline screening suggestion loaded; no review vote changed"
+                            .into(),
+                    );
+                }
+                Err(error) => {
+                    ui.set_review_screening_results(format!("Suggestion refused: {error}").into());
+                    ui.set_status(
+                        "Screening suggestion unavailable; inspect source and criteria".into(),
+                    );
                 }
             }
         }

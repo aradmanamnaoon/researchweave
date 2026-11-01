@@ -600,6 +600,151 @@ function Read-VisibleProtocolFreezeReceipt(
     Write-Host "UIA_PROTOCOL_FREEZE_JSON_READ: protocol=$ExpectedProtocolId frozen=$($receipt.frozen) via native Protocol ScrollView"
     return $receipt
 }
+# F14's independent persistence oracle opens only the disposable project's
+# SQLite file, with WinSQLite's READONLY flag. It cannot create tables, write
+# aliases, or substitute direct SQL mutation for real installed UIA gestures.
+# Windows supplies winsqlite3.dll; absence/incompatible APIs fail the gate.
+$f14ReadonlySqliteSource = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class RwUiaReadOnlySqlite {
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_open_v2(byte[] path, out IntPtr db, int flags, IntPtr vfs);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_prepare_v2(IntPtr db, byte[] sql, int length, out IntPtr statement, IntPtr tail);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_step(IntPtr statement);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_column_count(IntPtr statement);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_column_type(IntPtr statement, int column);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr sqlite3_column_text(IntPtr statement, int column);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_column_bytes(IntPtr statement, int column);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_finalize(IntPtr statement);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_close(IntPtr db);
+
+    public static string[] Rows(string databasePath, string query) {
+        if (!query.TrimStart().StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase)) {
+            throw new InvalidOperationException("F14 SQLite oracle allows SELECT only");
+        }
+        IntPtr db = IntPtr.Zero;
+        IntPtr statement = IntPtr.Zero;
+        try {
+            byte[] path = Encoding.UTF8.GetBytes(databasePath + "\0");
+            if (sqlite3_open_v2(path, out db, 1, IntPtr.Zero) != 0) {
+                throw new InvalidOperationException("F14 SQLite read-only open failed");
+            }
+            byte[] sql = Encoding.UTF8.GetBytes(query + "\0");
+            if (sqlite3_prepare_v2(db, sql, -1, out statement, IntPtr.Zero) != 0 || statement == IntPtr.Zero) {
+                throw new InvalidOperationException("F14 SQLite read-only prepare failed");
+            }
+            var rows = new List<string>();
+            while (true) {
+                int state = sqlite3_step(statement);
+                if (state == 101) break; // SQLITE_DONE
+                if (state != 100) throw new InvalidOperationException("F14 SQLite read-only step failed: " + state);
+                if (rows.Count >= 5000) throw new InvalidOperationException("F14 SQLite snapshot exceeds bounded row limit");
+                int count = sqlite3_column_count(statement);
+                if (count < 1 || count > 32) throw new InvalidOperationException("F14 SQLite unexpected column count");
+                var columns = new string[count];
+                for (int i = 0; i < count; i++) {
+                    if (sqlite3_column_type(statement, i) == 5) { // SQL NULL
+                        columns[i] = "~";
+                        continue;
+                    }
+                    int length = sqlite3_column_bytes(statement, i);
+                    if (length < 0 || length > 4194304) throw new InvalidOperationException("F14 oversized SQLite column");
+                    byte[] bytes = new byte[length];
+                    if (length > 0) Marshal.Copy(sqlite3_column_text(statement, i), bytes, 0, length);
+                    columns[i] = Convert.ToBase64String(bytes);
+                }
+                // Base64 never contains '|', so this preserves NULL, raw UTF-8,
+                // field boundaries, and byte-exact source records for comparisons.
+                rows.Add(String.Join("|", columns));
+            }
+            return rows.ToArray();
+        } finally {
+            if (statement != IntPtr.Zero) sqlite3_finalize(statement);
+            if (db != IntPtr.Zero) sqlite3_close(db);
+        }
+    }
+    public static string Scalar(string databasePath, string query) {
+        string[] rows = Rows(databasePath, query);
+        if (rows.Length != 1) throw new InvalidOperationException("F14 scalar query requires exactly one row");
+        string[] columns = rows[0].Split('|');
+        if (columns.Length != 1 || columns[0] == "~") throw new InvalidOperationException("F14 scalar query returned NULL or multiple columns");
+        return Encoding.UTF8.GetString(Convert.FromBase64String(columns[0]));
+    }
+}
+'@
+function Get-F14ProjectSnapshot([string]$ProjectPath) {
+    $database = Join-Path $ProjectPath 'data/project.sqlite'
+    if (-not (Test-Path -LiteralPath $database -PathType Leaf)) {
+        throw 'F14 disposable project SQLite database is absent'
+    }
+    $revision = [long][RwUiaReadOnlySqlite]::Scalar($database, 'SELECT revision FROM project')
+    $references = @([RwUiaReadOnlySqlite]::Rows($database, 'SELECT id,title,authors_json,year,doi,kind,format,raw,metadata_json,status,imported_at FROM reference ORDER BY id'))
+    $aliases = @([RwUiaReadOnlySqlite]::Rows($database, 'SELECT original_id,canonical_id,reason FROM reference_alias ORDER BY original_id'))
+    $events = @([RwUiaReadOnlySqlite]::Rows($database, 'SELECT sequence,operation,payload_hash,event_hash FROM events ORDER BY sequence'))
+    if ($revision -ne $events.Count) {
+        throw "F14 persisted revision/event count mismatch: revision=$revision events=$($events.Count)"
+    }
+    return [pscustomobject]@{ Revision = $revision; References = $references; Aliases = $aliases; Events = $events }
+}
+function Assert-F14RowsEqual([string[]]$Before, [string[]]$After, [string]$Label) {
+    if ($Before.Count -ne $After.Count -or
+        [string]::Join("`n", $Before) -cne [string]::Join("`n", $After)) {
+        throw "F14 $Label changed unexpectedly"
+    }
+}
+function Assert-F14Unchanged(
+    [object]$Before,
+    [object]$After,
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Stage
+) {
+    if ($After.Revision -ne $Before.Revision -or (Get-VisibleProjectRevision $Window) -ne $Before.Revision) {
+        throw "F14 $Stage changed project revision without approved write"
+    }
+    Assert-F14RowsEqual $Before.References $After.References "$Stage source reference rows"
+    Assert-F14RowsEqual $Before.Aliases $After.Aliases "$Stage alias rows"
+    Assert-F14RowsEqual $Before.Events $After.Events "$Stage append-only event chain"
+}
+function Assert-F14SingleEvent(
+    [object]$Before,
+    [object]$After,
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Operation
+) {
+    if ($After.Revision -ne ($Before.Revision + 1) -or
+        (Get-VisibleProjectRevision $Window) -ne $After.Revision -or
+        $After.Events.Count -ne ($Before.Events.Count + 1)) {
+        throw "F14 $Operation did not append exactly one persisted project revision/event"
+    }
+    for ($index = 0; $index -lt $Before.Events.Count; $index++) {
+        if ($Before.Events[$index] -cne $After.Events[$index]) {
+            throw "F14 $Operation modified earlier immutable event history"
+        }
+    }
+    $parts = $After.Events[$After.Events.Count - 1].Split('|')
+    if ($parts.Count -ne 4 -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[0])) -cne [string]$After.Revision -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[1])) -cne $Operation) {
+        throw "F14 $Operation latest persisted event identity/sequence is incorrect"
+    }
+    foreach ($hashPart in @($parts[2], $parts[3])) {
+        if ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($hashPart)) -cnotmatch '^[0-9a-f]{64}$') {
+            throw "F14 $Operation persisted event lacks a valid payload/event SHA-256"
+        }
+    }
+}
 try {
     $p = Start-Process -FilePath $Exe -PassThru
     $window = WindowFor $p 'Native window missing from UIA tree'
@@ -2792,6 +2937,223 @@ try {
     WaitForNameLike $window '*Project metadata title UIA Updated Persian Project revision*'
     Write-Output 'PASS: approved project metadata revision survives native process restart'
     Capture-WindowScreenshot $window $Screenshot
+
+    # F14 positive: run after all existing Windows GUI journeys and their final
+    # screenshot. This app process was just restarted, so the F14 review panel
+    # is collapsed. A disposable second reference is registered through the
+    # installed GUI; a separate READONLY WinSQLite connection independently
+    # proves exact source bytes, project revision and append-only event history.
+    # The outer catch still captures a failure screenshot for this new gate.
+    Add-Type -TypeDefinition $f14ReadonlySqliteSource -ErrorAction Stop
+    $f14Baseline = Get-F14ProjectSnapshot $temporary
+    if ($f14Baseline.References.Count -ne 1 -or $f14Baseline.Aliases.Count -ne 0 -or
+        (Get-VisibleProjectRevision $window) -ne $f14Baseline.Revision) {
+        throw 'F14 positive fixture requires exactly one existing unaliased native UIA reference'
+    }
+    $f14InitialParts = $f14Baseline.References[0].Split('|')
+    if ($f14InitialParts.Count -ne 11 -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14InitialParts[0])) -cne $referenceId) {
+        throw 'F14 existing persisted source identity differs from the earlier native registration'
+    }
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('References')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 180
+
+    $f14SecondRaw = '@article{uia2025reviewduplicate,author={UIA Researcher},title={UIA memory evidence},year={2025},note={Byte-distinct reviewed QA fixture}}'
+    $f14ReferenceValue = [System.Windows.Automation.ValuePattern]::Pattern
+    $f14Input = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Reference title'
+    EnsureLiveFocus $f14Input
+    $f14Input.GetCurrentPattern($f14ReferenceValue).SetValue('UIA memory evidence')
+    foreach ($f14Pair in @(
+        @('Reference authors', 'UIA Researcher'),
+        @('Reference year', '2025'),
+        @('Reference DOI', ''),
+        @('Reference kind', 'article'),
+        @('Reference format', 'bibtex'),
+        @('Raw reference record', $f14SecondRaw)
+    )) {
+        $f14Input = FocusByTab $f14Input ([System.Windows.Automation.ControlType]::Edit) $f14Pair[0] 6
+        $f14Input.GetCurrentPattern($f14ReferenceValue).SetValue($f14Pair[1])
+    }
+    $f14RegistrationPreview = FocusByTab $f14Input ([System.Windows.Automation.ControlType]::Button) 'Preview reference registration' 4
+    $f14RegistrationPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference preview ready; no project data changed*' 10000
+    Assert-F14Unchanged $f14Baseline (Get-F14ProjectSnapshot $temporary) $window 'second registration preview'
+    $f14RegistrationRecord = FocusByTab $f14RegistrationPreview ([System.Windows.Automation.ControlType]::Button) 'Register previewed reference' 3
+    $f14RegistrationRecord.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Previewed library operation recorded and audited*' 10000
+    $f14Registered = Get-F14ProjectSnapshot $temporary
+    Assert-F14SingleEvent $f14Baseline $f14Registered $window 'library.reference_add'
+    if ($f14Registered.References.Count -ne 2 -or $f14Registered.Aliases.Count -ne 0 -or
+        $f14Registered.References -cnotcontains $f14Baseline.References[0]) {
+        throw 'F14 new native reference registration did not preserve original source row'
+    }
+    $f14AddedRows = @($f14Registered.References | Where-Object { $_ -cne $f14Baseline.References[0] })
+    if ($f14AddedRows.Count -ne 1) {
+        throw 'F14 expected exactly one byte-distinct newly persisted native reference'
+    }
+    $f14DecodedAdded = [System.Collections.Generic.List[object]]::new()
+    foreach ($f14Cell in $f14AddedRows[0].Split('|')) {
+        if ($f14Cell -eq '~') {
+            $f14DecodedAdded.Add($null)
+        } else {
+            $f14DecodedAdded.Add([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14Cell)))
+        }
+    }
+    if ($f14DecodedAdded.Count -ne 11 -or $f14DecodedAdded[1] -cne 'UIA memory evidence' -or
+        $f14DecodedAdded[2] -cne '["UIA Researcher"]' -or $f14DecodedAdded[3] -cne '2025' -or
+        $null -ne $f14DecodedAdded[4] -or $f14DecodedAdded[5] -cne 'article' -or
+        $f14DecodedAdded[6] -cne 'bibtex' -or $f14DecodedAdded[7] -cne $f14SecondRaw -or
+        $f14DecodedAdded[9] -cne 'unverified') {
+        throw 'F14 registered second source lost expected metadata or exact distinct raw record'
+    }
+    $f14SecondId = $f14DecodedAdded[0]
+    $f14UuidRegex = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    if ($f14SecondId -cnotmatch $f14UuidRegex -or $f14SecondId -ceq $referenceId) {
+        throw 'F14 new native reference identity is missing, malformed or equal to original'
+    }
+    Write-Output 'UIA_F14_TWO_DISTINCT_SOURCES_PERSISTED: exactly one approved registration event; first raw row unchanged'
+
+    # Bounded keyboard focus reveals candidate controls in Slint's scrollable
+    # form. Selecting a candidate copies trusted scan fields; it cannot write.
+    $f14Toggle = FocusByTab $f14RegistrationRecord ([System.Windows.Automation.ControlType]::Button) 'Toggle reviewable reference duplicate finder' 6
+    $f14Toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f14Scan = FocusByTab $f14Toggle ([System.Windows.Automation.ControlType]::Button) 'Scan local reference duplicate candidates without changing data' 4
+    $f14Scan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference candidates scanned locally; no changes recorded*' 10000
+    $f14ReceiptEditor = FocusByTab $f14Scan ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 20
+    $f14ScanText = $f14ReceiptEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    if (-not $f14ScanText.StartsWith('READ-ONLY CANDIDATE SCAN. No merge, revision or event was recorded.')) {
+        throw 'F14 positive scan did not expose exact native read-only receipt'
+    }
+    $f14ScanJsonOffset = $f14ScanText.IndexOf('{')
+    if ($f14ScanJsonOffset -lt 0) { throw 'F14 positive native scan has no structured candidate JSON' }
+    $f14ScanResult = $f14ScanText.Substring($f14ScanJsonOffset) | ConvertFrom-Json -ErrorAction Stop
+    $f14Ids = @($referenceId, $f14SecondId) | Sort-Object -CaseSensitive
+    $f14Candidate = @($f14ScanResult.candidates)
+    if ($f14ScanResult.candidate_count_in_scan -ne 1 -or $f14Candidate.Count -ne 1 -or
+        $f14ScanResult.scan_truncated -ne $false -or $f14ScanResult.candidates_truncated -ne $false -or
+        $f14ScanResult.writes -ne 0 -or $f14ScanResult.automatic_merge -ne $false -or
+        $f14ScanResult.review_required -ne $true -or $f14ScanResult.project_revision -ne $f14Registered.Revision -or
+        $f14Candidate[0].left_id -cne $f14Ids[0] -or $f14Candidate[0].right_id -cne $f14Ids[1] -or
+        $f14Candidate[0].score -ne 80 -or $f14Candidate[0].eligible_for_approval -ne $true -or
+        $f14Candidate[0].review_status -cne 'review_required' -or
+        $f14Candidate[0].candidate_sha256 -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'F14 native candidate scan lacks exactly one eligible score-80 source-bound pair'
+    }
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'positive candidate scan'
+    # Build the Unicode middle dot explicitly: PowerShell 5.1 can decode an
+    # unmarked UTF-8 .ps1 as ANSI, but its native UIA label is actual Unicode.
+    $f14CandidateLabel = 'Select unapproved reference candidate Score 80/100 ' + [char]0x00b7 +
+        ' Needs human source review ' + [char]0x00b7 + ' UIA memory evidence / UIA memory evidence'
+    $f14CandidateButton = FocusByShiftTab $f14ReceiptEditor ([System.Windows.Automation.ControlType]::Button) $f14CandidateLabel 16
+    $f14CandidateButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f14CanonicalEdit = FocusByTab $f14CandidateButton ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review canonical reference ID' 4
+    $f14DuplicateEdit = FocusByTab $f14CanonicalEdit ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review duplicate reference ID' 3
+    $f14FingerprintEdit = FocusByTab $f14DuplicateEdit ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review candidate SHA256' 3
+    if ($f14CanonicalEdit.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14Ids[0] -or
+        $f14DuplicateEdit.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14Ids[1] -or
+        $f14FingerprintEdit.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14Candidate[0].candidate_sha256) {
+        throw 'F14 actual native candidate selection did not populate exact approved IDs and fingerprint'
+    }
+    $f14RationaleEdit = FocusByTab $f14FingerprintEdit ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review rationale' 3
+    $f14Rationale = 'UIA synthetic human review of original bibliography identity'
+    $f14RationaleEdit.GetCurrentPattern($f14ReferenceValue).SetValue($f14Rationale)
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'candidate selection and rationale'
+
+    # An invented candidate SHA must be rejected during Preview, before any
+    # Record action could become approvable. Then stage a valid preview and
+    # edit the rationale before Record to prove one-use stale input refusal.
+    $f14FingerprintEdit.GetCurrentPattern($f14ReferenceValue).SetValue(('0' * 64))
+    $f14InvalidPreview = FocusByTab $f14FingerprintEdit ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 6
+    $f14InvalidPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup preview rejected*' 10000
+    $f14InvalidReceipt = FocusByTab $f14InvalidPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 6
+    if ($f14InvalidReceipt.GetCurrentPattern($f14ReferenceValue).Current.Value -notlike '*Dedup review rejected: stale candidate fingerprint*') {
+        throw 'F14 native candidate preview accepted fabricated SHA or reported unexpected rejection'
+    }
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'invalid fingerprint preview'
+    $f14FingerprintEdit = FocusByShiftTab $f14InvalidReceipt ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review candidate SHA256' 8
+    $f14FingerprintEdit.GetCurrentPattern($f14ReferenceValue).SetValue($f14Candidate[0].candidate_sha256)
+    $f14ValidPreview = FocusByTab $f14FingerprintEdit ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 6
+    $f14ValidPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'valid alias preview'
+    $f14RationaleEdit = FocusByShiftTab $f14ValidPreview ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review rationale' 3
+    $f14Rationale = 'UIA explicit reviewed identity; preserve two independent raw source records'
+    $f14RationaleEdit.GetCurrentPattern($f14ReferenceValue).SetValue($f14Rationale)
+    $f14StaleRecord = FocusByTab $f14RationaleEdit ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved reference dedup decision' 5
+    $f14StaleRecord.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference decision rejected; preview again*' 10000
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'stale rationale Record refusal'
+
+    # Only the second explicit valid Preview + Record is permitted to change
+    # the durable project, and the exact project event must be reference.merge.
+    $f14Preview = FocusByShiftTab $f14StaleRecord ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 4
+    $f14Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'final approved alias preview'
+    $f14ApprovedEditor = FocusByTab $f14Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 6
+    $f14ApprovedText = $f14ApprovedEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    $f14ApprovedStart = $f14ApprovedText.IndexOf('{')
+    if (-not $f14ApprovedText.StartsWith('PREVIEW ONLY. Nothing recorded.') -or $f14ApprovedStart -lt 0) {
+        throw 'F14 approved alias preview did not show its independent native planned decision'
+    }
+    $f14ApprovedJson = $f14ApprovedText.Substring($f14ApprovedStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($f14ApprovedJson.decision -cne 'approve_alias' -or
+        $f14ApprovedJson.candidate_sha256 -cne $f14Candidate[0].candidate_sha256 -or
+        $f14ApprovedJson.alias_operation.preview -ne $true -or
+        $f14ApprovedJson.alias_operation.canonical_id -cne $f14Ids[0] -or
+        $f14ApprovedJson.alias_operation.alias_id -cne $f14Ids[1] -or
+        $f14ApprovedJson.alias_operation.metadata_resolution -cne 'preserved_both_records_no_auto_overwrite') {
+        throw 'F14 approved alias preview mismatched candidate, proposed identities or source-preservation guarantee'
+    }
+    $f14Record = FocusByShiftTab $f14ApprovedEditor ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved reference dedup decision' 3
+    $f14Record.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reviewed reference identity decision recorded locally*' 10000
+    $f14Aliased = Get-F14ProjectSnapshot $temporary
+    Assert-F14SingleEvent $f14Registered $f14Aliased $window 'reference.merge'
+    Assert-F14RowsEqual $f14Registered.References $f14Aliased.References 'approved alias immutable original reference'
+    $f14EncodedAlias = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($f14Ids[1])) + '|' +
+        [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($f14Ids[0])) + '|' +
+        [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($f14Rationale))
+    if ($f14Aliased.Aliases.Count -ne 1 -or $f14Aliased.Aliases[0] -cne $f14EncodedAlias) {
+        throw 'F14 explicitly approved alias was not durably bound to exact original identities and rationale'
+    }
+
+    # Reversal is a different, separately previewed human decision. It cannot
+    # delete or overwrite either bibliography source or rewrite earlier events.
+    $f14UndoPreview = FocusByShiftTab $f14Record ([System.Windows.Automation.ControlType]::Button) 'Preview restoring independent references' 4
+    $f14UndoPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
+    Assert-F14Unchanged $f14Aliased (Get-F14ProjectSnapshot $temporary) $window 'explicit restore preview'
+    $f14UndoEditor = FocusByTab $f14UndoPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 5
+    $f14UndoText = $f14UndoEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    $f14UndoStart = $f14UndoText.IndexOf('{')
+    if (-not $f14UndoText.StartsWith('PREVIEW ONLY. Nothing recorded.') -or $f14UndoStart -lt 0) {
+        throw 'F14 undo preview did not show the persisted alias being restored'
+    }
+    $f14UndoJson = $f14UndoText.Substring($f14UndoStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($f14UndoJson.decision -cne 'restore_independent_reference' -or
+        $f14UndoJson.alias_operation.preview -ne $true -or
+        $f14UndoJson.alias_operation.previous_canonical_id -cne $f14Ids[0] -or
+        $f14UndoJson.alias_operation.alias_id -cne $f14Ids[1] -or
+        $f14UndoJson.alias_operation.reverted -ne $false) {
+        throw 'F14 undo preview mismatched exact persisted alias and separate restore approval'
+    }
+    $f14UndoRecord = FocusByShiftTab $f14UndoEditor ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved reference dedup decision' 3
+    $f14UndoRecord.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reviewed reference identity decision recorded locally*' 10000
+    $f14Restored = Get-F14ProjectSnapshot $temporary
+    Assert-F14SingleEvent $f14Aliased $f14Restored $window 'reference.unmerge'
+    Assert-F14RowsEqual $f14Registered.References $f14Restored.References 'reversed alias original raw and metadata rows'
+    Assert-F14RowsEqual $f14Registered.Aliases $f14Restored.Aliases 'reversed alias map'
+    if ($f14Restored.Aliases.Count -ne 0 -or $f14Restored.References.Count -ne 2) {
+        throw 'F14 explicit undo failed to restore two intact independent source identities'
+    }
+    Write-Output 'PASS: F14 installed Windows UIA registers two distinct original records; selects a real score-80 candidate; rejects invented fingerprint and stale approval without writes; separately previews/records exactly one alias event and one undo event; read-only independent SQLite snapshots preserve both source records and prior events'
 } catch {
     # CI archives the requested screenshot even on failures before the last
     # test assertion. Keep the original failure authoritative if capture fails.
