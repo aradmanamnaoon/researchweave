@@ -2765,6 +2765,36 @@ def main() -> int:
                 raise RuntimeError("F43 invalid preview changed source/reference counts")
         audit(app, "references-f43-unverified-negative", output)
         print("F43_INDEXED_PDF_METADATA_NATIVE_NEGATIVE_NO_WRITE_OK")
+        # F07: prove that the *real* native References consent controls can
+        # stage a DOI lookup offline, refuse invalid DOI input, and preserve
+        # project revision/events. Never activate the enabled Fetch button in
+        # hosted tests: a live Crossref request requires separate human consent
+        # and would make deterministic offline CI depend on external service.
+        f07_before = project_event_snapshot(original_project)
+        activate_bounded_control(app, "Toggle consent-gated DOI Crossref lookup", down=True)
+        reveal_bounded_control(app, "DOI for explicit Crossref lookup", down=True)
+        edit_text(app, "DOI for explicit Crossref lookup", "not-a-doi", allow_unreadable=True)
+        activate_bounded_control(app, "Preview Crossref DOI lookup offline without network", down=True)
+        if not any(
+            "Crossref offline preview rejected; no network request" in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("F07 native offline preview accepted an invalid DOI")
+        if project_event_snapshot(original_project) != f07_before:
+            raise RuntimeError("F07 invalid offline DOI preview mutated the project")
+        reveal_bounded_control(app, "DOI for explicit Crossref lookup", down=False)
+        edit_text(app, "DOI for explicit Crossref lookup", "10.1038/nphys1170", allow_unreadable=True)
+        activate_bounded_control(app, "Preview Crossref DOI lookup offline without network", down=True)
+        if not any(
+            "Crossref request previewed locally; zero network requests" in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("F07 native valid DOI was not previewed offline")
+        if not nodes_named(app, "Approve and fetch one Crossref DOI metadata record"):
+            raise RuntimeError("F07 explicit externally approved Fetch control is not accessible")
+        if project_event_snapshot(original_project) != f07_before:
+            raise RuntimeError("F07 valid offline DOI preview mutated project events or revision")
+        print("F07_NATIVE_INVALID_AND_VALID_DOI_PREVIEW_NO_NETWORK_NO_PROJECT_EVENTS_OK")
     if not activate(app, "Home activity"):
         raise RuntimeError("Cannot return Home to verify recent-project recovery")
     time.sleep(0.25)

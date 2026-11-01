@@ -3332,6 +3332,27 @@ try {
         throw 'F43 native invalid indexed PDF preview did not explain its strict refusal'
     }
     Write-Output 'UIA_F43_INDEXED_PDF_SUGGEST_ONLY_NATIVE_NEGATIVE_NO_PROJECT_WRITES_OK'
+    # F07: a preview must never send a network request. Inspect the actual
+    # native consent panel and its enabled separate Fetch control, but DO NOT
+    # activate Fetch in unattended CI (live Crossref needs user approval).
+    $f07Before = Get-F14ProjectSnapshot $temporary
+    $f07Toggle = FocusByTab $f43Result ([System.Windows.Automation.ControlType]::Button) 'Toggle consent-gated DOI Crossref lookup' 10
+    $f07Toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f07Input = FocusByTab $f07Toggle ([System.Windows.Automation.ControlType]::Edit) 'DOI for explicit Crossref lookup' 6
+    $f07Input.GetCurrentPattern($f43Value).SetValue('not-a-doi')
+    $f07Preview = FocusByTab $f07Input ([System.Windows.Automation.ControlType]::Button) 'Preview Crossref DOI lookup offline without network' 4
+    $f07Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Crossref offline preview rejected; no network request*' 10000
+    Assert-F14Unchanged $f07Before (Get-F14ProjectSnapshot $temporary) $window 'F07 invalid DOI offline preview'
+    $f07Input.GetCurrentPattern($f43Value).SetValue('10.1038/nphys1170')
+    $f07Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Crossref request previewed locally; zero network requests*' 10000
+    $f07Fetch = Named $window ([System.Windows.Automation.ControlType]::Button) 'Approve and fetch one Crossref DOI metadata record'
+    if (-not $f07Fetch.Current.IsEnabled) {
+        throw 'F07 native Fetch consent action did not become separately available after offline preview'
+    }
+    Assert-F14Unchanged $f07Before (Get-F14ProjectSnapshot $temporary) $window 'F07 valid DOI offline preview'
+    Write-Output 'UIA_F07_NATIVE_DOI_OFFLINE_PREVIEW_ZERO_PROJECT_WRITES_NO_NETWORK_REQUEST_OK'
 } catch {
     # CI archives the requested screenshot even on failures before the last
     # test assertion. Keep the original failure authoritative if capture fails.
