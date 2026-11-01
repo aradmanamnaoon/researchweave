@@ -1,0 +1,11 @@
+# F33 human-labeled evidence polarity: bounded first slice
+
+Implemented source: `crates/researchweave-evidence/src/contradiction_overview.rs` and `EvidenceHandler` registration in `lib.rs`.
+
+The project-scoped, read-only operation `evidence.human_polarity_overview` takes a `project_id`, claim UUID and text, and one to 128 explicitly **human-classified** records. Each record must have a nonnil record UUID, source UUID, caller-declared 64-character source SHA-256, quoted excerpt, a `supports` / `contradicts` / `uncertain` classification, human `low` / `medium` / `high` / `unknown` uncertainty, and nonempty rationale. It uses bounded inputs; rejects unexpected keys, duplicate record identifiers, malformed digests, invalid categories and stale project revisions when provided in the dispatch context.
+
+The output is a deterministic normalized listing, counts, an accessible three-bar SVG and a SHA-256 commitment that includes the currently opened project revision and claim identity. Record order does not change the commitment; project-revision changes do. The SVG inserts only controlled static strings and numeric counts, not arbitrary user text. The operation is zero-write and network-free.
+
+**Unaccepted/critical restrictions:** These are **caller-declared source digests**, not independently verified against the project source store. No NLP classifier determines actual contradictions. Counts are not effect sizes, certainty scores, study weights, truth, consensus, or research findings. SVG counts do not prove source independence. There is no reviewer approval, persistent contradiction graph, contradiction-calibration benchmark or desktop-native editor. The output explicitly sets `machine_inferred_contradiction=false`, `statistical_confidence_computed=false`, `independently_source_verified=false` and `persisted=false`.
+
+Validation coverage in the new pure-module tests: Unicode claim, mixed explicitly human annotations, no source verification claims, deterministic order-independent SHA/revision binding, no input mutation, rejected duplicates/bad enums/invalid source SHA/empty rationale/oversized evidence lists. This is a **PARTIAL** F33 result, not a completed feature or release-quality native GUI acceptance.

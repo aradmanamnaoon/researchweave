@@ -12,6 +12,7 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 use uuid::Uuid;
+mod contradiction_overview;
 mod forms;
 mod highlights;
 mod manuscript_comments;
@@ -143,6 +144,10 @@ impl EvidenceHandler {
                 &["project_id", "manuscript_id"][..],
             ),
             ("writing.claim_check", &["project_id", "claim_id"][..]),
+            (
+                "evidence.human_polarity_overview",
+                &["project_id", "claim_id", "claim", "evidence"][..],
+            ),
             ("review.records", &["project_id", "review_id"][..]),
             (
                 "review.suggestion_source",
@@ -508,6 +513,21 @@ impl EvidenceHandler {
             return qualitative::kappa(args);
         }
         let mut store = self.store(args, ctx)?;
+        if operation == "evidence.human_polarity_overview" {
+            let info = store
+                .info()
+                .map_err(|_| "project information unavailable")?;
+            if let Some(expected) = ctx.expected_revision {
+                if u64::try_from(info.revision).ok() != Some(expected) {
+                    return Err("stale project revision for evidence comparison".into());
+                }
+            }
+            return contradiction_overview::overview(
+                args,
+                &ctx.project_id.to_string(),
+                info.revision,
+            );
+        }
         if operation == "review.search_strategy_build" {
             return review_search_strategy::build(args, &ctx.project_id.to_string());
         }
@@ -2294,6 +2314,93 @@ mod tests {
             capability.operation == "writing.title_page_preview"
                 && capability.effect == Effect::Read
         }));
+    }
+
+    #[test]
+    fn human_polarity_overview_is_project_scoped_revision_bound_and_zero_write() {
+        let folder = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = folder.path().join("Evidence comparison fixture");
+        ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Human-annotated comparison".into(),
+                question: "What do reviewers label?".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        let handler = EvidenceHandler::bound(project_id, &path).unwrap();
+        let context = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "human-reviewer".into(),
+            expected_revision: Some(0),
+        };
+        let args = json!({
+            "project_id":project_id.to_string(),
+            "claim_id":Uuid::new_v4().to_string(),
+            "claim":"Synthetic review claim (not an observed finding)",
+            "evidence":[{
+                "record_id":Uuid::new_v4().to_string(),
+                "source_id":Uuid::new_v4().to_string(),
+                "declared_source_sha256":"f".repeat(64),
+                "excerpt":"Synthetic source text only",
+                "polarity":"uncertain",
+                "uncertainty":"high",
+                "rationale":"No source validated in this synthetic fixture"
+            }]
+        });
+        let preview = handler.preview("evidence.human_polarity_overview", &args, &context);
+        let executed = handler.execute("evidence.human_polarity_overview", &args, &context);
+        assert_eq!(preview, executed);
+        assert_eq!(executed["status"], "ok", "{executed}");
+        assert_eq!(executed["data"]["independently_source_verified"], false);
+        assert_eq!(executed["data"]["machine_inferred_contradiction"], false);
+        assert_eq!(executed["data"]["persisted"], false);
+        assert_eq!(
+            EvidenceHandler::bound(project_id, &path).unwrap().execute(
+                "evidence.human_polarity_overview",
+                &args,
+                &context
+            ),
+            executed
+        );
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(EvidenceHandler::capabilities().iter().any(|c| {
+            c.operation == "evidence.human_polarity_overview" && c.effect == Effect::Read
+        }));
+        let stale = DispatchContext {
+            expected_revision: Some(1),
+            ..context.clone()
+        };
+        assert_eq!(
+            handler.execute("evidence.human_polarity_overview", &args, &stale)["status"],
+            "error"
+        );
+        let mut wrong_scope = args.clone();
+        wrong_scope["project_id"] = json!(Uuid::new_v4().to_string());
+        assert_eq!(
+            handler.execute("evidence.human_polarity_overview", &wrong_scope, &context)["status"],
+            "error"
+        );
+        assert_eq!(
+            ProjectStore::open(&path).unwrap().info().unwrap().revision,
+            0
+        );
     }
 
     #[test]
