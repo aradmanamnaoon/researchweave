@@ -14,6 +14,7 @@ use std::{
 use uuid::Uuid;
 mod forms;
 mod highlights;
+mod manuscript_comments;
 mod protocol_freeze;
 mod publishing;
 mod publishing_formats;
@@ -94,6 +95,25 @@ impl EvidenceHandler {
             (
                 "writing.section_history",
                 &["project_id", "manuscript_id", "section"][..],
+            ),
+            (
+                "writing.comment_list",
+                &["project_id", "manuscript_id", "section"][..],
+            ),
+            (
+                "writing.comment_preview",
+                &[
+                    "project_id",
+                    "manuscript_id",
+                    "section",
+                    "source_revision",
+                    "source_body_sha256",
+                    "start_scalar",
+                    "end_scalar",
+                    "quote",
+                    "reviewer",
+                    "comment",
+                ][..],
             ),
             ("writing.inspect", &["project_id", "manuscript_id"][..]),
             ("writing.bibliography", &["project_id", "manuscript_id"][..]),
@@ -294,6 +314,22 @@ impl EvidenceHandler {
                 ][..],
             ),
             (
+                "writing.comment_record",
+                &[
+                    "project_id",
+                    "manuscript_id",
+                    "section",
+                    "source_revision",
+                    "source_body_sha256",
+                    "start_scalar",
+                    "end_scalar",
+                    "quote",
+                    "reviewer",
+                    "comment",
+                    "approved_preview_sha256",
+                ][..],
+            ),
+            (
                 "writing.section_restore",
                 &["project_id", "manuscript_id", "section", "source_revision"][..],
             ),
@@ -472,6 +508,15 @@ impl EvidenceHandler {
         }
         if operation == "writing.title_page_preview" {
             return title_page::preview(args, &ctx.project_id.to_string());
+        }
+        if operation == "writing.comment_preview" {
+            return manuscript_comments::preview(&store, args, ctx);
+        }
+        if operation == "writing.comment_record" {
+            return manuscript_comments::record(&mut store, args, ctx);
+        }
+        if operation == "writing.comment_list" {
+            return manuscript_comments::list(&store, args);
         }
         if operation == "project.open" {
             return serde_json::to_value(store.info().map_err(|_| "invalid project")?)
@@ -2023,7 +2068,9 @@ fn writing_read(store: &ProjectStore, operation: &str, args: &Value) -> Result<V
 
 impl OperationHandler for EvidenceHandler {
     fn preview(&self, operation: &str, arguments: &Value, context: &DispatchContext) -> Value {
-        let result = if matches!(
+        let result = if operation == "writing.comment_record" {
+            self.run("writing.comment_preview", arguments, context)
+        } else if matches!(
             operation,
             "protocol.create"
                 | "protocol.amend"

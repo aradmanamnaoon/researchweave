@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import pathlib
 import re
 import sqlite3
@@ -422,6 +423,402 @@ def exercise_f05_project_citation(app: Any, project: pathlib.Path, output: pathl
     if project_event_snapshot(project) != reopened_before_select:
         raise RuntimeError("Selecting the verified manuscript revision unexpectedly wrote project events")
     print("F05_CITATION_APPLY_AUTOSAVE_REOPEN_SQLITE_SECTION_SELECTION_OK")
+
+
+def exercise_f03_manuscript_reviewer_comment(
+    app: Any, project: pathlib.Path, output: pathlib.Path
+) -> None:
+    """Native F03 preview/approve/history plus invalid and stale-input refusal."""
+    db_path = project / "data/project.sqlite"
+
+    def comments() -> tuple[tuple[Any, ...], ...]:
+        with sqlite3.connect(db_path) as db:
+            return tuple(db.execute(
+                "SELECT id,manuscript_id,section,source_revision,source_body_sha256,"
+                "start_scalar,end_scalar,quote,reviewer,comment,actor,recorded_at,"
+                "project_revision FROM manuscript_comments ORDER BY project_revision,id"
+            ).fetchall())
+
+    versions_before = f05_saved_abstract(project)
+    if not versions_before or comments():
+        raise RuntimeError("F03 requires saved Abstract and no existing synthetic reviewer comments")
+    source_revision, source_body, _ = versions_before[-1]
+    source_sha = hashlib.sha256(source_body.encode("utf-8")).hexdigest()
+    quote = "Verified manuscript for isolated project recovery."
+    reviewer = "Synthetic F03 QA reviewer"
+    note = "Synthetic review: confirm this saved passage against project evidence."
+    if source_body.count(quote) != 1:
+        raise RuntimeError("F03 anchor must occur exactly once in latest saved Abstract")
+    start = source_body.index(quote)
+    end = start + len(quote)  # Python indexes Unicode scalars, matching Rust chars().
+    if (
+        read_field(app, "Manuscript ID") != "synthetic-research"
+        or read_field(app, "Manuscript section") != "Abstract"
+        or read_field(app, "Manuscript section body") != source_body
+    ):
+        raise RuntimeError("F03 editor is not displaying the latest saved Abstract")
+    before_preview = project_event_snapshot(project)
+    activate_bounded_control(app, "Toggle source-bound manuscript reviewer comments", down=True)
+    for name, value in (
+        ("Reviewer comment exact saved manuscript quote", quote),
+        ("Reviewer comment author label", reviewer),
+        ("Reviewer comment text input", note),
+    ):
+        reveal_bounded_control(app, name, down=True)
+        edit_text(app, name, value, allow_unreadable=True)
+    activate_bounded_control(
+        app, "Preview source-bound manuscript reviewer comment without writing", down=True
+    )
+    time.sleep(0.2)
+    if not any(
+        "Reviewer comment previewed against saved source; no write" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F03 exact-source reviewer preview was refused")
+    if (
+        project_event_snapshot(project) != before_preview
+        or f05_saved_abstract(project) != versions_before
+        or comments()
+        or read_field(app, "Manuscript section body") != source_body
+    ):
+        raise RuntimeError("F03 reviewer preview changed source, comments or project events")
+    audit(app, "f03-source-bound-comment-preview", output)
+    print("F03_REVIEWER_COMMENT_EXACT_SOURCE_PREVIEW_NO_WRITE_OK")
+
+    activate_bounded_control(
+        app, "Record explicitly approved immutable manuscript reviewer comment", down=True
+    )
+    time.sleep(0.2)
+    if not any(
+        "Immutable reviewer comment recorded with source provenance" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F03 reviewer comment was not explicitly recorded by native host")
+    after_record = project_event_snapshot(project)
+    recorded_rows = comments()
+    if (
+        after_record[0] != before_preview[0] + 1
+        or after_record[1][:-1] != before_preview[1]
+        or after_record[1][-1][1] != "writing.comment_record"
+        or len(recorded_rows) != 1
+    ):
+        raise RuntimeError("F03 did not append exactly one immutable reviewer comment and event")
+    row = recorded_rows[0]
+    if (
+        re.fullmatch(r"[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}", row[0]) is None
+        or row[1:10] != (
+            "synthetic-research", "Abstract", source_revision, source_sha,
+            start, end, quote, reviewer, note
+        )
+        or not row[10] or not row[11] or row[12] != after_record[0]
+        or f05_saved_abstract(project) != versions_before
+        or read_field(app, "Manuscript section body") != source_body
+    ):
+        raise RuntimeError("F03 recorded anchor/reviewer/source differs or mutated saved manuscript")
+    with sqlite3.connect(db_path) as db:
+        event_json = db.execute(
+            "SELECT payload_json FROM events ORDER BY sequence DESC LIMIT 1"
+        ).fetchone()[0]
+    payload = json.loads(event_json)
+    if (
+        payload.get("comment_id") != row[0]
+        or payload.get("source_revision") != source_revision
+        or payload.get("source_body_sha256") != source_sha
+        or payload.get("start_scalar") != start
+        or payload.get("end_scalar") != end
+        or payload.get("quote_sha256") != hashlib.sha256(quote.encode("utf-8")).hexdigest()
+        or payload.get("reviewer_sha256") != hashlib.sha256(reviewer.encode("utf-8")).hexdigest()
+        or payload.get("comment_sha256") != hashlib.sha256(note.encode("utf-8")).hexdigest()
+        or payload.get("text_redacted") is not True
+        or any(field in payload for field in ("quote", "reviewer", "comment"))
+    ):
+        raise RuntimeError("F03 append-only audit event lacks exact redacted source provenance")
+    audit(app, "f03-reviewer-comment-recorded", output)
+    print("F03_REVIEWER_COMMENT_IMMUTABLE_ROW_AND_ONE_AUDITED_EVENT_OK")
+
+    activate_bounded_control(app, "Load saved manuscript reviewer comments", down=True)
+    time.sleep(0.2)
+    if not any(
+        "Source-bound reviewer comments loaded from project history" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F03 native project-local reviewer history load did not succeed")
+    reveal_bounded_control(app, "Copyable source-bound reviewer comment history and preview", down=True)
+    text = read_field(app, "Copyable source-bound reviewer comment history and preview")
+    prefix = "PROJECT-LOCAL IMMUTABLE REVIEW HISTORY."
+    if not text.startswith(prefix) or "\n{" not in text:
+        raise RuntimeError("F03 native reviewer history is not an independently readable JSON receipt")
+    history = json.loads(text.split("\n", 1)[1])
+    loaded = history.get("comments")
+    if (
+        history.get("manuscript_id") != "synthetic-research"
+        or history.get("section") != "Abstract"
+        or history.get("count") != 1
+        or history.get("read_only") is not True
+        or history.get("historical_anchors_never_silently_relocated") is not True
+        or not isinstance(loaded, list) or len(loaded) != 1
+    ):
+        raise RuntimeError("F03 native history response omitted exact project-local stored comment")
+    saved = loaded[0]
+    if (
+        saved.get("id") != row[0] or saved.get("source_revision") != source_revision
+        or saved.get("source_body_sha256") != source_sha
+        or saved.get("start_scalar") != start or saved.get("end_scalar") != end
+        or saved.get("quote") != quote or saved.get("reviewer") != reviewer
+        or saved.get("comment") != note or saved.get("anchor_status") != "current"
+        or saved.get("auto_relocated") is not False
+        or project_event_snapshot(project) != after_record
+        or f05_saved_abstract(project) != versions_before or comments() != recorded_rows
+    ):
+        raise RuntimeError("F03 native Load did not show unrelocated current immutable source anchor")
+    audit(app, "f03-reviewer-comment-history-current", output)
+    print("F03_REVIEWER_COMMENT_LOAD_CURRENT_SOURCE_ANCHOR_OK")
+
+    # A valid preview followed by edited (stale) quote must not be approvable.
+    citation_markers = re.findall(r"\[@[0-9a-f-]{36}\]", source_body)
+    if len(citation_markers) != 1:
+        raise RuntimeError("F03 stale-input test requires the one F05 appended citation marker")
+    reveal_bounded_control(app, "Reviewer comment exact saved manuscript quote", down=False)
+    edit_text(
+        app, "Reviewer comment exact saved manuscript quote",
+        citation_markers[0], allow_unreadable=True
+    )
+    activate_bounded_control(
+        app, "Preview source-bound manuscript reviewer comment without writing", down=True
+    )
+    if not any(
+        "Reviewer comment previewed against saved source; no write" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F03 stale-input setup could not preview a distinct, valid quote")
+    invalid_quote = "F03 synthetic quote absent from the saved manuscript."
+    if invalid_quote in source_body:
+        raise RuntimeError("F03 invalid-quote test accidentally matches saved source")
+    reveal_bounded_control(app, "Reviewer comment exact saved manuscript quote", down=False)
+    edit_text(
+        app, "Reviewer comment exact saved manuscript quote",
+        invalid_quote, allow_unreadable=True
+    )
+    activate_bounded_control(
+        app, "Record explicitly approved immutable manuscript reviewer comment", down=True
+    )
+    if not any(
+        "Reviewer comment rejected; preview again" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F03 edited-after-preview reviewer comment was not rejected")
+    activate_bounded_control(
+        app, "Preview source-bound manuscript reviewer comment without writing", down=True
+    )
+    if not any(
+        "Reviewer comment preview rejected" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F03 invalid manuscript quote preview was not rejected")
+    if (
+        project_event_snapshot(project) != after_record
+        or f05_saved_abstract(project) != versions_before
+        or comments() != recorded_rows
+        or read_field(app, "Manuscript section body") != source_body
+    ):
+        raise RuntimeError("F03 stale/invalid quote attempt modified reviewer or source history")
+    print("F03_REVIEWER_COMMENT_STALE_AND_INVALID_QUOTE_REFUSED_NO_WRITE_OK")
+
+
+def exercise_f14_positive_dedup(app: Any, project: pathlib.Path, output: pathlib.Path) -> None:
+    """Opted-in, native consent-only pair registration, alias and explicit undo."""
+    database = project / "data/project.sqlite"
+
+    def rows() -> tuple[tuple[Any, ...], ...]:
+        with sqlite3.connect(database) as db:
+            return tuple(db.execute(
+                "SELECT id,title,authors_json,year,doi,kind,format,raw,metadata_json,status "
+                "FROM reference ORDER BY id"
+            ).fetchall())
+
+    def aliases() -> tuple[tuple[str, str, str], ...]:
+        with sqlite3.connect(database) as db:
+            return tuple(db.execute(
+                "SELECT original_id,canonical_id,reason FROM reference_alias ORDER BY original_id"
+            ).fetchall())
+
+    def assert_one_event(before: tuple[Any, ...], operation: str) -> None:
+        after = project_event_snapshot(project)
+        if (
+            after[0] != before[0] + 1
+            or after[1][:-1] != before[1]
+            or after[1][-1][1] != operation
+        ):
+            raise RuntimeError(f"F14 expected exactly one append-only {operation} event")
+
+    reference_before = rows()
+    if len(reference_before) != 1 or aliases():
+        raise RuntimeError("F14 positive opt-in requires exactly one unaliased F05 local reference")
+    first = reference_before[0]
+    if first[1:5] != (
+        "Synthetic offline citation for native F05 QA", '["Fixture Researcher"]', 2026, None
+    ):
+        raise RuntimeError("F14 positive reference A is not the expected synthetic F05 record")
+    if not activate(app, "Sources activity"):
+        raise RuntimeError("Cannot reach Sources for opted-in F14 reference review")
+    time.sleep(0.2)
+    activate_bounded_control(app, "References workspace screen", down=False)
+    time.sleep(0.2)
+    second_raw = (
+        "@article{syntheticF14duplicate,author={Fixture Researcher},"
+        "title={Synthetic offline citation for native F05 QA},year={2026},"
+        "note={Distinct local raw record for reversible F14 review}}"
+    )
+    for name, value, down in (
+        ("Reference title", first[1], False),
+        ("Reference authors", "Fixture Researcher", True),
+        ("Reference year", "2026", True),
+        ("Reference DOI", "", True),
+        ("Reference kind", "article", True),
+        ("Reference format", "bibtex", True),
+        ("Raw reference record", second_raw, True),
+    ):
+        reveal_bounded_control(app, name, down=down)
+        edit_text(app, name, value, allow_unreadable=True)
+    before_registration = project_event_snapshot(project)
+    activate_bounded_control(app, "Preview reference registration", down=True)
+    if not any(
+        "Reference preview ready; no project data changed" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("Second F14 registration preview was not acknowledged")
+    if rows() != reference_before or aliases() or project_event_snapshot(project) != before_registration:
+        raise RuntimeError("Second F14 reference registration preview modified local project")
+    activate_bounded_control(app, "Register previewed reference", down=True)
+    if not any(
+        "Previewed library operation recorded and audited" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("Second F14 reference registration was not approved through native UI")
+    assert_one_event(before_registration, "library.reference_add")
+    references = rows()
+    new = [row for row in references if row[0] != first[0]]
+    if (
+        len(references) != 2 or len(new) != 1 or new[0][0] == first[0]
+        or new[0][1:8] != (first[1], first[2], first[3], None, "article", "bibtex", second_raw)
+        or new[0][9] != "unverified" or aliases()
+    ):
+        raise RuntimeError("F14 second audited reference differs from approved synthetic fixture")
+    second = new[0]
+    print("F14_POSITIVE_TWO_DISTINCT_UI_REGISTERED_REFERENCES_OK")
+
+    try:
+        reveal_bounded_control(
+            app, "Scan local reference duplicate candidates without changing data", down=True
+        )
+    except RuntimeError:
+        # A hidden conditional panel is distinguishable from an offscreen
+        # control only after bounded scrolling. Open it once, never toggle an
+        # already-expanded panel merely because Slint lazily hid its nodes.
+        activate_bounded_control(
+            app, "Toggle reviewable reference duplicate finder", down=False
+        )
+    before_scan = project_event_snapshot(project)
+    activate_bounded_control(
+        app, "Scan local reference duplicate candidates without changing data", down=True
+    )
+    if not any(
+        "Reference candidates scanned locally; no changes recorded" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F14 candidate scan native status missing")
+    # New native review rows expose the candidate metadata directly. Unlike
+    # Slint's read-only multi-line TextEdit, the actual selected ID and SHA
+    # LineEdit fields have accessible text on supported installed builds.
+    # Do not accept any offscreen JSON/status-only substitute for selection.
+    expected_title = "Synthetic offline citation for native F05 QA"
+    expected_accessible_row = (
+        "Select unapproved reference candidate Score 80/100 · Needs human source review · "
+        f"{expected_title} / {expected_title}"
+    )
+    # Exact semantic label is independently determined from real persisted
+    # title/author/year. Bounded scrolling must reveal the actual row; a
+    # stale/offscreen or fabricated candidate never counts as acceptance.
+    activate_bounded_control(app, expected_accessible_row, down=True)
+    if project_event_snapshot(project) != before_scan or rows() != references or aliases():
+        raise RuntimeError("F14 candidate scan or selection modified persisted project data")
+
+    # The fingerprint is project revision and source-record bound. Independently
+    # rebuild the known deterministic digest rather than trusting a UI label.
+    left, right = sorted((first, second), key=lambda row: row[0])
+    fingerprint_source = {
+        "schema": "reference-dedup-f14-v1", "revision": before_scan[0],
+        "left_id": left[0], "right_id": right[0],
+        "left_title": left[1], "right_title": right[1],
+        "left_authors": json.loads(left[2]), "right_authors": json.loads(right[2]),
+        "left_year": left[3], "right_year": right[3],
+        "left_doi": left[4], "right_doi": right[4],
+        "left_raw_sha256": hashlib.sha256(left[7].encode("utf-8")).hexdigest(),
+        "right_raw_sha256": hashlib.sha256(right[7].encode("utf-8")).hexdigest(),
+    }
+    computed = hashlib.sha256(
+        json.dumps(fingerprint_source, sort_keys=True, ensure_ascii=False, separators=(",", ":"))
+        .encode("utf-8")
+    ).hexdigest()
+    fingerprint = computed
+    for name, value in (
+        ("Duplicate review canonical reference ID", left[0]),
+        ("Duplicate review duplicate reference ID", right[0]),
+        ("Duplicate review candidate SHA256", fingerprint),
+    ):
+        reveal_bounded_control(app, name, down=True)
+        if read_field(app, name) != value:
+            raise RuntimeError(f"F14 native candidate selection did not populate exact {name}")
+    audit(app, "f14-positive-candidate-scan", output)
+    print("F14_POSITIVE_EXACT_NATIVE_CANDIDATE_SHA_AND_NO_WRITE_OK")
+
+    rationale = "Synthetic reviewed identity for reversible offline QA only"
+    reveal_bounded_control(app, "Duplicate review rationale", down=True)
+    edit_text(app, "Duplicate review rationale", rationale, allow_unreadable=True)
+    before_alias = project_event_snapshot(project)
+    activate_bounded_control(app, "Preview reviewed reference alias without changes", down=True)
+    if not any(
+        "Reference dedup decision previewed; no changes recorded" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F14 explicit alias preview was not acknowledged")
+    if project_event_snapshot(project) != before_alias or rows() != references or aliases():
+        raise RuntimeError("F14 alias preview mutated reference or project data")
+    audit(app, "f14-positive-alias-preview", output)
+    activate_bounded_control(app, "Record explicitly approved reference dedup decision", down=True)
+    if not any(
+        "Reviewed reference identity decision recorded locally" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F14 alias record lacked explicit native consent receipt")
+    assert_one_event(before_alias, "reference.merge")
+    if aliases() != ((right[0], left[0], rationale),) or rows() != references:
+        raise RuntimeError("F14 approved alias did not preserve both unchanged source records")
+    audit(app, "f14-positive-alias-recorded", output)
+    print("F14_POSITIVE_EXPLICIT_ALIAS_EXACT_ROWS_AND_EVENT_OK")
+
+    before_restore = project_event_snapshot(project)
+    activate_bounded_control(app, "Preview restoring independent references", down=False)
+    if not any(
+        "Reference dedup decision previewed; no changes recorded" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F14 native undo preview was refused")
+    if project_event_snapshot(project) != before_restore or rows() != references:
+        raise RuntimeError("F14 undo preview modified reference data or project revision")
+    if aliases() != ((right[0], left[0], rationale),):
+        raise RuntimeError("F14 undo preview silently removed the active alias")
+    activate_bounded_control(app, "Record explicitly approved reference dedup decision", down=True)
+    if not any(
+        "Reviewed reference identity decision recorded locally" in (node.name or "")
+        for node, _ in walk(app)
+    ):
+        raise RuntimeError("F14 native undo record lacked explicit approval receipt")
+    assert_one_event(before_restore, "reference.unmerge")
+    if aliases() or rows() != references:
+        raise RuntimeError("F14 explicit undo failed to restore both unchanged identities")
+    audit(app, "f14-positive-alias-undone", output)
+    print("F14_POSITIVE_EXPLICIT_UNDO_BOTH_REFERENCES_UNCHANGED_OK")
 
 
 def activate(app: Any, name: str) -> bool:
@@ -1736,6 +2133,16 @@ def main() -> int:
                 raise RuntimeError("Invalid F14 alias preview persisted a reference mapping")
         print("F14_INVALID_ALIAS_PREVIEW_REFUSED_NO_PROJECT_EVENTS_OK")
         exercise_f05_project_citation(app, original_project, output)
+        exercise_f03_manuscript_reviewer_comment(app, original_project, output)
+        # Explicitly opt in: two extra audited writes and a Slint TextEdit scan
+        # readback could otherwise destabilize the independent F04/F05 baseline.
+        gate = os.environ.get("RW_QA_F14_POSITIVE", "0")
+        if gate == "1":
+            exercise_f14_positive_dedup(app, original_project, output)
+        elif gate == "0":
+            print("F14_POSITIVE_SKIPPED_EXPLICIT_OPT_IN_REQUIRED")
+        else:
+            raise RuntimeError("RW_QA_F14_POSITIVE must be exactly 0 or 1")
     if not activate(app, "Home activity"):
         raise RuntimeError("Cannot return Home to verify recent-project recovery")
     time.sleep(0.25)

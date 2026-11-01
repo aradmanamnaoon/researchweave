@@ -26,6 +26,17 @@ export struct ManuscriptSection {
     revision: int,
 }
 
+export struct ReferenceDuplicateCandidate {
+    left-id: string,
+    right-id: string,
+    left-title: string,
+    right-title: string,
+    candidate-sha256: string,
+    eligible: bool,
+    score: int,
+    label: string,
+}
+
 export global Theme {
     in-out property <bool> dark-mode: false;
     in-out property <bool> high-contrast: false;
@@ -246,6 +257,11 @@ export component MainWindow inherits Window {
     in-out property <string> reference-results: "Register or inspect project references.";
     in-out property <bool> reference-dedup-open: false;
     in-out property <string> reference-dedup-results: "Scan local records, inspect source metadata, and explicitly preview a reversible decision. No automatic merge.";
+    in-out property <[ReferenceDuplicateCandidate]> reference-dedup-candidates: [];
+    in-out property <string> reference-dedup-canonical-id: "";
+    in-out property <string> reference-dedup-duplicate-id: "";
+    in-out property <string> reference-dedup-fingerprint: "";
+    in-out property <string> reference-dedup-rationale: "";
     in-out property <string> review-results: "Use persisted references to build and screen a review.";
     in-out property <bool> review-search-builder-open: false;
     in-out property <string> review-search-results: "Specify PICO concepts to draft a database-specific search strategy. No search has been executed.";
@@ -288,6 +304,11 @@ export component MainWindow inherits Window {
     in-out property <string> manuscript-draft-body: "";
     in-out property <string> manuscript-citation-reference-id: "";
     in-out property <string> manuscript-citation-status: "Enter a reference ID from this project's library. Preview before applying; the marker is appended at the end, not at the cursor.";
+    in-out property <bool> manuscript-review-open: false;
+    in-out property <string> manuscript-review-quote: "";
+    in-out property <string> manuscript-review-reviewer: "";
+    in-out property <string> manuscript-review-comment: "";
+    in-out property <string> manuscript-review-results: "Reviewer comments are anchored to an exact saved section revision; no comments loaded.";
     in-out property <bool> manuscript-title-page-open: false;
     in-out property <string> manuscript-title-page-preview: "Preview a title page from validated fields; this does not save or submit anything.";
     in-out property <[ManuscriptSection]> manuscript-sections: [];
@@ -313,6 +334,10 @@ export component MainWindow inherits Window {
     callback manuscript-draft-edited(string, string, string, string);
     callback preview-manuscript-citation();
     callback apply-manuscript-citation();
+    callback preview-manuscript-comment();
+    callback record-manuscript-comment();
+    callback load-manuscript-comments();
+    callback invalidate-manuscript-comment-preview();
     callback load-manuscript-sections(string);
     callback select-manuscript-section(string, int);
     callback preview-manuscript-replace(string, string);
@@ -361,6 +386,7 @@ export component MainWindow inherits Window {
     callback scan-reference-duplicates();
     callback preview-reference-dedup(string, string, string, string, string);
     callback record-reference-dedup();
+    callback invalidate-reference-dedup-preview();
     callback preview-review-record(string, string);
     callback preview-review-screen(string, string, string, string, string, string);
     callback refresh-review(string);
@@ -1625,12 +1651,44 @@ export component MainWindow inherits Window {
                                     Button {
                                         text: "Scan for possible duplicates";
                                         accessible-label: "Scan local reference duplicate candidates without changing data";
-                                        clicked => { root.scan-reference-duplicates(); }
+                                        clicked => {
+                                            root.reference-dedup-canonical-id = "";
+                                            root.reference-dedup-duplicate-id = "";
+                                            root.reference-dedup-fingerprint = "";
+                                            root.reference-dedup-rationale = "";
+                                            root.scan-reference-duplicates();
+                                        }
                                     }
-                                    dedup-canonical := LineEdit { placeholder-text: "Canonical reference ID to retain"; accessible-label: "Duplicate review canonical reference ID"; }
-                                    dedup-duplicate := LineEdit { placeholder-text: "Duplicate reference ID to alias or restore"; accessible-label: "Duplicate review duplicate reference ID"; }
-                                    dedup-fingerprint := LineEdit { placeholder-text: "Candidate SHA-256 from scan (approval only)"; accessible-label: "Duplicate review candidate SHA256"; }
-                                    dedup-rationale := LineEdit { placeholder-text: "Reason for this human decision"; accessible-label: "Duplicate review rationale"; }
+                                    if root.reference-dedup-candidates.length > 0: Rectangle {
+                                        background: Theme.raised;
+                                        min-height: 60px;
+                                        preferred-height: min(220px, 20px + root.reference-dedup-candidates.length * 48px);
+                                        max-height: 220px;
+                                        border-radius: Theme.control-radius;
+                                        ScrollView {
+                                            VerticalLayout {
+                                                padding: 6px;
+                                                spacing: 5px;
+                                                for candidate in root.reference-dedup-candidates: Button {
+                                                    text: candidate.label;
+                                                    accessible-label: "Select unapproved reference candidate " + candidate.label;
+                                                    clicked => {
+                                                        // Selection copies only audited scan fields.
+                                                        // It does NOT preview, merge or approve a write.
+                                                        root.invalidate-reference-dedup-preview();
+                                                        root.reference-dedup-canonical-id = candidate.left-id;
+                                                        root.reference-dedup-duplicate-id = candidate.right-id;
+                                                        root.reference-dedup-fingerprint = candidate.candidate-sha256;
+                                                        root.reference-dedup-rationale = "";
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    dedup-canonical := LineEdit { placeholder-text: "Canonical reference ID to retain"; accessible-label: "Duplicate review canonical reference ID"; text <=> root.reference-dedup-canonical-id; edited(text) => { root.invalidate-reference-dedup-preview(); } }
+                                    dedup-duplicate := LineEdit { placeholder-text: "Duplicate reference ID to alias or restore"; accessible-label: "Duplicate review duplicate reference ID"; text <=> root.reference-dedup-duplicate-id; edited(text) => { root.invalidate-reference-dedup-preview(); } }
+                                    dedup-fingerprint := LineEdit { placeholder-text: "Candidate SHA-256 from scan (approval only)"; accessible-label: "Duplicate review candidate SHA256"; text <=> root.reference-dedup-fingerprint; edited(text) => { root.invalidate-reference-dedup-preview(); } }
+                                    dedup-rationale := LineEdit { placeholder-text: "Reason for this human decision"; accessible-label: "Duplicate review rationale"; text <=> root.reference-dedup-rationale; edited(text) => { root.invalidate-reference-dedup-preview(); } }
                                     HorizontalLayout {
                                         spacing: 8px;
                                         Button { text: "Preview merge"; accessible-label: "Preview reviewed reference alias without changes"; clicked => { root.preview-reference-dedup("approve", dedup-canonical.text, dedup-duplicate.text, dedup-fingerprint.text, dedup-rationale.text); } }
@@ -2573,6 +2631,69 @@ export component MainWindow inherits Window {
                                         text: root.manuscript-title-page-preview;
                                         read-only: true;
                                         accessible-label: "Copyable unsaved title page preview";
+                                    }
+                                }
+                            }
+                            Button {
+                                text: root.manuscript-review-open ? "Hide reviewer comments" : "Reviewer comments";
+                                accessible-label: "Toggle source-bound manuscript reviewer comments";
+                                clicked => { root.manuscript-review-open = !root.manuscript-review-open; }
+                            }
+                            if root.manuscript-review-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 8px;
+                                    Text { text: "Source-bound, immutable reviewer comments"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "Copy an exact, unique passage from the latest SAVED version of this manuscript section. Comments bind the section SHA-256 and Unicode text position; they never edit the manuscript or automatically relocate after revisions. Not Microsoft Word Track Changes."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    manuscript-review-quote-input := LineEdit {
+                                        placeholder-text: "Exact unique passage in saved section";
+                                        accessible-label: "Reviewer comment exact saved manuscript quote";
+                                        text <=> root.manuscript-review-quote;
+                                        edited(text) => { root.invalidate-manuscript-comment-preview(); }
+                                    }
+                                    manuscript-review-reviewer-input := LineEdit {
+                                        placeholder-text: "Reviewer display label";
+                                        accessible-label: "Reviewer comment author label";
+                                        text <=> root.manuscript-review-reviewer;
+                                        edited(text) => { root.invalidate-manuscript-comment-preview(); }
+                                    }
+                                    manuscript-review-comment-input := TextEdit {
+                                        min-height: 70px;
+                                        preferred-height: 100px;
+                                        max-height: 180px;
+                                        accessible-label: "Reviewer comment text input";
+                                        text <=> root.manuscript-review-comment;
+                                        edited(text) => { root.invalidate-manuscript-comment-preview(); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Preview comment";
+                                            accessible-label: "Preview source-bound manuscript reviewer comment without writing";
+                                            clicked => { root.preview-manuscript-comment(); }
+                                        }
+                                        Button {
+                                            text: "Record comment";
+                                            accessible-label: "Record explicitly approved immutable manuscript reviewer comment";
+                                            clicked => { root.record-manuscript-comment(); }
+                                        }
+                                        Button {
+                                            text: "Load comments";
+                                            accessible-label: "Load saved manuscript reviewer comments";
+                                            clicked => { root.load-manuscript-comments(); }
+                                        }
+                                    }
+                                    TextEdit {
+                                        min-height: 130px;
+                                        preferred-height: 180px;
+                                        max-height: 260px;
+                                        read-only: true;
+                                        text: root.manuscript-review-results;
+                                        accessible-label: "Copyable source-bound reviewer comment history and preview";
                                     }
                                 }
                             }

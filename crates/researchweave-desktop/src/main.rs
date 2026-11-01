@@ -34,11 +34,13 @@ mod display_contrast;
 mod durable_activity;
 mod manuscript_citation_insert;
 mod manuscript_outline;
+mod manuscript_review_anchor;
 mod manuscript_search;
 mod pdf_engine;
 mod physical_export;
 mod quick_note_checklist;
 mod recent_projects;
+mod reference_dedup_view;
 mod writing_autosave;
 
 fn flush_writing_drafts(
@@ -180,6 +182,16 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_protocol_freeze_export_receipt("".into());
     ui.set_reference_results("Register or inspect project references.".into());
     ui.set_reference_dedup_results("Scan local records, inspect source metadata, and explicitly preview a reversible decision. No automatic merge.".into());
+    ui.set_reference_dedup_candidates(
+        Rc::new(slint::VecModel::from(
+            Vec::<ReferenceDuplicateCandidate>::new(),
+        ))
+        .into(),
+    );
+    ui.set_reference_dedup_canonical_id("".into());
+    ui.set_reference_dedup_duplicate_id("".into());
+    ui.set_reference_dedup_fingerprint("".into());
+    ui.set_reference_dedup_rationale("".into());
     // Collapse project-specific editing panels so their uncontrolled line-edit
     // contents are destroyed instead of surviving a project identity switch.
     ui.set_reference_dedup_open(false);
@@ -217,6 +229,14 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_manuscript_draft_body("".into());
     ui.set_manuscript_citation_reference_id("".into());
     ui.set_manuscript_citation_status("Choose a reference from this project; preview then explicitly apply. The marker is appended at the end.".into());
+    ui.set_manuscript_review_open(false);
+    ui.set_manuscript_review_quote("".into());
+    ui.set_manuscript_review_reviewer("".into());
+    ui.set_manuscript_review_comment("".into());
+    ui.set_manuscript_review_results(
+        "Reviewer comments are anchored to an exact saved section revision; no comments loaded."
+            .into(),
+    );
     ui.set_manuscript_title_page_preview(
         "Preview a title page from validated fields; this does not save or submit anything.".into(),
     );
@@ -3984,6 +4004,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pending_manuscript_citation: Rc<
         RefCell<Option<manuscript_citation_insert::PendingCitation>>,
     > = Rc::new(RefCell::new(None));
+    let pending_manuscript_comment: Rc<RefCell<Option<PendingEvidenceAction>>> =
+        Rc::new(RefCell::new(None));
     app.on_preview_manuscript_replace({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -4133,8 +4155,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         let pending_manuscript_citation = pending_manuscript_citation.clone();
+        let pending_manuscript_comment = pending_manuscript_comment.clone();
         move |id, section, citations, body| {
             pending_manuscript_citation.borrow_mut().take();
+            pending_manuscript_comment.borrow_mut().take();
             if let Some(ui) = weak.upgrade() {
                 let (words, chars) = manuscript_search::counts(body.as_str());
                 ui.set_manuscript_word_count(i32::try_from(words).unwrap_or(i32::MAX));
@@ -4221,6 +4245,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let selected_agent_action = selected_agent_action.clone();
         let pending_manuscript_replace = pending_manuscript_replace.clone();
         let pending_manuscript_citation = pending_manuscript_citation.clone();
+        let pending_manuscript_comment = pending_manuscript_comment.clone();
         move || {
             pending_project_metadata.borrow_mut().take();
             pending_evidence.borrow_mut().take();
@@ -4233,6 +4258,174 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             selected_agent_action.borrow_mut().take();
             pending_manuscript_replace.borrow_mut().take();
             pending_manuscript_citation.borrow_mut().take();
+            pending_manuscript_comment.borrow_mut().take();
+        }
+    });
+    app.on_invalidate_manuscript_comment_preview({
+        let weak = app.as_weak();
+        let pending = pending_manuscript_comment.clone();
+        move || {
+            pending.borrow_mut().take();
+            if let Some(ui) = weak.upgrade() {
+                ui.set_status("Reviewer comment input changed; preview again".into());
+            }
+        }
+    });
+    app.on_preview_manuscript_comment({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_comment = pending_manuscript_comment.clone();
+        move || {
+            pending_comment.borrow_mut().take();
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<(PendingEvidenceAction, String), String> {
+                let project = active_project.borrow().clone()
+                    .ok_or("Open a project before reviewing a manuscript")?;
+                let manuscript_id = ui.get_manuscript_draft_id().trim().to_string();
+                let section = ui.get_manuscript_draft_section().trim().to_string();
+                if manuscript_id.is_empty() || section.is_empty() {
+                    return Err("Choose a manuscript ID and saved section before reviewing".into());
+                }
+                let quote = ui.get_manuscript_review_quote().to_string();
+                let reviewer = ui.get_manuscript_review_reviewer().to_string();
+                let comment = ui.get_manuscript_review_comment().to_string();
+                let root = host_data_root()?;
+                let history = evidence_read_at(
+                    &project,
+                    "writing.section_history",
+                    serde_json::json!({"manuscript_id":manuscript_id,"section":section}),
+                    &root,
+                )?;
+                let latest = history["data"]["revisions"].as_array()
+                    .and_then(|revisions| revisions.last())
+                    .ok_or("Save a manuscript section before anchoring reviewer comments")?;
+                let source_revision = latest["revision"].as_i64().filter(|revision| *revision > 0)
+                    .ok_or("Latest saved manuscript revision invalid")?;
+                let source_body = latest["body"].as_str().ok_or("Saved manuscript body missing")?;
+                let source_sha256 = format!("{:x}", Sha256::digest(source_body.as_bytes()));
+                if latest["body_sha256"] != source_sha256 {
+                    return Err("Stored manuscript history digest failed validation".into());
+                }
+                let (start_scalar,end_scalar) =
+                    manuscript_review_anchor::unique_scalar_span(source_body, &quote)?;
+                let (mut pending, preview) = evidence_preview_at(
+                    &project,
+                    "writing.comment_record",
+                    "manuscript_comment",
+                    serde_json::json!({
+                        "manuscript_id":manuscript_id,
+                        "section":section,
+                        "source_revision":source_revision,
+                        "source_body_sha256":source_sha256,
+                        "start_scalar":start_scalar,
+                        "end_scalar":end_scalar,
+                        "quote":quote,
+                        "reviewer":reviewer,
+                        "comment":comment,
+                    }),
+                    &root,
+                )?;
+                let preview_data = &preview["data"];
+                let digest = preview_data["preview_sha256"].as_str()
+                    .ok_or("Missing reviewer-comment preview digest")?;
+                if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+                    || preview_data["writes"] != 0
+                    || preview_data["approved"] != false
+                    || preview_data["requires_explicit_human_approval"] != true
+                    || preview_data["source_revision"] != source_revision
+                    || preview_data["source_body_sha256"] != source_sha256
+                    || preview_data["start_scalar"] != start_scalar
+                    || preview_data["end_scalar"] != end_scalar
+                {
+                    return Err("Source-bound reviewer comment preview failed provenance validation".into());
+                }
+                pending.arguments["approved_preview_sha256"] = serde_json::json!(digest);
+                Ok((pending,format!(
+                    "PREVIEW ONLY. Latest saved section r{source_revision}, SHA-256 {source_sha256}, exact Unicode scalar span {start_scalar}..{end_scalar}.\nPreview digest: {digest}\nNo text or project events changed. Recheck the selected quote and authorship before clicking Record comment. This is NOT Word Track Changes."
+                )))
+            })();
+            match result {
+                Ok((pending,notice)) => {
+                    *pending_comment.borrow_mut() = Some(pending);
+                    ui.set_manuscript_review_results(notice.into());
+                    ui.set_status("Reviewer comment previewed against saved source; no write".into());
+                }
+                Err(error) => {
+                    ui.set_manuscript_review_results(format!("Reviewer comment preview refused: {error}").into());
+                    ui.set_status("Reviewer comment preview rejected".into());
+                }
+            }
+        }
+    });
+    app.on_record_manuscript_comment({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_comment = pending_manuscript_comment.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let pending = pending_comment.borrow_mut().take();
+            let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                (Some(path), Some(action)) if action.surface == "manuscript_comment"
+                    && action.operation == "writing.comment_record" => {
+                    if action.arguments["manuscript_id"] != ui.get_manuscript_draft_id().as_str().trim()
+                        || action.arguments["section"] != ui.get_manuscript_draft_section().as_str().trim()
+                        || action.arguments["quote"] != ui.get_manuscript_review_quote().as_str()
+                        || action.arguments["reviewer"] != ui.get_manuscript_review_reviewer().as_str()
+                        || action.arguments["comment"] != ui.get_manuscript_review_comment().as_str()
+                    {
+                        Err("Manuscript or reviewer input changed after preview; preview again".into())
+                    } else {
+                        host_data_root().and_then(|root| evidence_execute_pending(action, path, &root))
+                    }
+                }
+                (None, _) => Err("Open a project first".into()),
+                _ => Err("Preview a source-bound reviewer comment before recording".into()),
+            };
+            match result {
+                Ok((recorded,revision)) => {
+                    ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                    ui.set_manuscript_review_results(format!(
+                        "APPEND-ONLY REVIEWER COMMENT RECORDED. Manuscript text unchanged; inspect the audited history with Load comments.\n{}",
+                        pretty_result_data(&recorded)
+                    ).into());
+                    ui.set_status("Immutable reviewer comment recorded with source provenance".into());
+                }
+                Err(error) => {
+                    ui.set_manuscript_review_results(format!("Reviewer comment NOT recorded: {error}").into());
+                    ui.set_status("Reviewer comment rejected; preview again".into());
+                }
+            }
+        }
+    });
+    app.on_load_manuscript_comments({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = active_project.borrow().as_ref()
+                .ok_or_else(|| "Open a project before loading comments".to_string())
+                .and_then(|project| evidence_read_at(
+                    project,
+                    "writing.comment_list",
+                    serde_json::json!({
+                        "manuscript_id":ui.get_manuscript_draft_id().as_str().trim(),
+                        "section":ui.get_manuscript_draft_section().as_str().trim(),
+                    }),
+                    &host_data_root()?,
+                ));
+            match result {
+                Ok(receipt) => {
+                    ui.set_manuscript_review_results(format!(
+                        "PROJECT-LOCAL IMMUTABLE REVIEW HISTORY. The current/historical/invalid anchor state is explicit; no automatic relocation.\n{}",
+                        pretty_result_data(&receipt)
+                    ).into());
+                    ui.set_status("Source-bound reviewer comments loaded from project history".into());
+                }
+                Err(error) => {
+                    ui.set_manuscript_review_results(format!("Comment history unavailable: {error}").into());
+                    ui.set_status("Reviewer comment history unavailable".into());
+                }
+            }
         }
     });
     app.on_preview_manuscript_citation({
@@ -5054,27 +5247,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         move || {
             let Some(ui) = weak.upgrade() else { return };
             pending_library.borrow_mut().take();
+            ui.set_reference_dedup_candidates(Rc::new(slint::VecModel::from(Vec::<ReferenceDuplicateCandidate>::new())).into());
             let result = active_project
                 .borrow()
                 .as_ref()
                 .ok_or_else(|| "Open a project first".to_string())
                 .and_then(|path| {
-                    library_read_at(
+                    let revision = ProjectStore::open(path).map_err(|error|error.to_string())?
+                        .info().map_err(|error|error.to_string())?.revision;
+                    let receipt = library_read_at(
                         path,
                         "reference.dedup_candidates",
                         serde_json::json!({"limit":50}),
                         &host_data_root()?,
-                    )
+                    )?;
+                    let candidates = reference_dedup_view::candidates(&receipt, revision)?;
+                    Ok((receipt,candidates))
                 });
             match result {
-                Ok(receipt) => {
-                    ui.set_reference_dedup_results(format!("READ-ONLY CANDIDATE SCAN. No merge, revision or event was recorded. Compare source records before selecting IDs and copying the candidate_sha256.\n{}", pretty_result_data(&receipt)).into());
+                Ok((receipt,candidates)) => {
+                    ui.set_reference_dedup_candidates(Rc::new(slint::VecModel::from(candidates)).into());
+                    ui.set_reference_dedup_results(format!("READ-ONLY CANDIDATE SCAN. No merge, revision or event was recorded. Select one candidate row to fill IDs/digest, compare original records, then provide rationale and separately preview/record.\n{}", pretty_result_data(&receipt)).into());
                     ui.set_status("Reference candidates scanned locally; no changes recorded".into());
                 }
                 Err(error) => {
                     ui.set_reference_dedup_results(format!("Duplicate scan refused: {error}").into());
                     ui.set_status("Duplicate scan unavailable".into());
                 }
+            }
+        }
+    });
+    app.on_invalidate_reference_dedup_preview({
+        let weak = app.as_weak();
+        let pending_library = pending_library.clone();
+        move || {
+            pending_library.borrow_mut().take();
+            if let Some(ui) = weak.upgrade() {
+                ui.set_status(
+                    "Reference decision inputs changed; preview again before recording".into(),
+                );
             }
         }
     });
@@ -5132,7 +5343,16 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 (Some(path), Some(action))
                     if action.surface == "reference_dedup"
                         && matches!(action.operation.as_str(), "reference.dedup_approve" | "reference.dedup_restore") => {
-                    host_data_root().and_then(|root| library_execute_pending(action, path, &root))
+                    if action.arguments["canonical_id"] != ui.get_reference_dedup_canonical_id().as_str().trim()
+                        || action.arguments["duplicate_id"] != ui.get_reference_dedup_duplicate_id().as_str().trim()
+                        || action.arguments["rationale"] != ui.get_reference_dedup_rationale().as_str().trim()
+                        || (action.operation == "reference.dedup_approve"
+                            && action.arguments["candidate_sha256"] != ui.get_reference_dedup_fingerprint().as_str().trim())
+                    {
+                        Err("Review decision inputs changed after preview; preview again".into())
+                    } else {
+                        host_data_root().and_then(|root| library_execute_pending(action, path, &root))
+                    }
                 }
                 (None, _) => Err("Open a project first".into()),
                 _ => Err("Preview a specific duplicate merge or undo before recording".into()),
@@ -8797,6 +9017,119 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn reviewer_comment_preview_and_approval_use_real_desktop_host_and_immutable_project() {
+        let folder = std::env::temp_dir().join(format!("rw-comment-host-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let project = folder.join("Synthetic reviewer project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Synthetic researcher",
+            true,
+            &folder.join("creation-audit.sqlite"),
+        )
+        .unwrap();
+        let host = folder.join("host");
+        let original = "Context 🧠 فارسی analysis";
+        let (save_pending, save_preview) = evidence_preview_at(
+            &project,
+            "writing.section_save",
+            "writing",
+            serde_json::json!({
+                "manuscript_id":"paper-f03","section":"Results",
+                "body":original,"citations":[]
+            }),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(save_preview["status"], "ok");
+        let (_, saved_revision) = evidence_execute_pending(&save_pending, &project, &host).unwrap();
+        assert_eq!(saved_revision, 1);
+        let quote = "🧠 فارسی";
+        let (start_scalar, end_scalar) =
+            manuscript_review_anchor::unique_scalar_span(original, quote).unwrap();
+        let source_hash = format!("{:x}", Sha256::digest(original.as_bytes()));
+        let (mut pending, preview) = evidence_preview_at(
+            &project,
+            "writing.comment_record",
+            "manuscript_comment",
+            serde_json::json!({
+                "manuscript_id":"paper-f03","section":"Results",
+                "source_revision":1,"source_body_sha256":source_hash,
+                "start_scalar":start_scalar,"end_scalar":end_scalar,
+                "quote":quote,"reviewer":"Synthetic reviewer",
+                "comment":"Clarify the synthetic source passage"
+            }),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(pending.expected_revision, 1);
+        assert_eq!(preview["status"], "ok", "{preview}");
+        assert_eq!(preview["data"]["writes"], 0);
+        let approved = preview["data"]["preview_sha256"].as_str().unwrap();
+        assert_eq!(approved.len(), 64);
+        pending.arguments["approved_preview_sha256"] = serde_json::json!(approved);
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            1
+        );
+        let (record, rev) = evidence_execute_pending(&pending, &project, &host).unwrap();
+        assert_eq!(rev, 2);
+        assert_eq!(record["data"]["appended"], true);
+        assert_eq!(record["data"]["manuscript_body_mutated"], false);
+        assert!(evidence_execute_pending(&pending, &project, &host).is_err());
+        let listed = evidence_read_at(
+            &project,
+            "writing.comment_list",
+            serde_json::json!({"manuscript_id":"paper-f03","section":"Results"}),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(listed["data"]["count"], 1);
+        assert_eq!(listed["data"]["comments"][0]["anchor_status"], "current");
+        assert_eq!(listed["data"]["comments"][0]["quote"], quote);
+        let history = evidence_read_at(
+            &project,
+            "writing.section_history",
+            serde_json::json!({"manuscript_id":"paper-f03","section":"Results"}),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(history["data"]["count"], 1);
+        assert_eq!(history["data"]["revisions"][0]["body"], original);
+        let wrong_project = folder.join("Different project");
+        load_project_with_audit(
+            wrong_project.to_str().unwrap(),
+            "Unrelated",
+            true,
+            &folder.join("other-audit.sqlite"),
+        )
+        .unwrap();
+        assert!(evidence_execute_pending(&pending, &wrong_project, &host).is_err());
+        let store = ProjectStore::open(&project).unwrap();
+        assert_eq!(
+            store
+                .connection()
+                .query_row::<i64, _, _>("SELECT count(*) FROM manuscript_comments", [], |r| r
+                    .get(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .connection()
+                .query_row::<i64, _, _>("SELECT count(*) FROM events", [], |r| r.get(0))
+                .unwrap(),
+            2
+        );
+        drop(store);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
 
     #[test]
     fn review_search_query_builder_is_read_only_and_project_scoped_through_desktop_host() {

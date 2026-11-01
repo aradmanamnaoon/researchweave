@@ -21,7 +21,7 @@ use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 mod handler;
 pub use handler::ProjectHandler;
 
-pub const SCHEMA_VERSION: u32 = 5;
+pub const SCHEMA_VERSION: u32 = 6;
 pub const ARCHIVE_VERSION: &str = "1.0.0";
 pub const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_ENTRIES: usize = 4096;
@@ -222,6 +222,26 @@ CREATE TABLE evidence_highlight_relocations (
  review_required INTEGER NOT NULL CHECK(review_required IN(0,1)), recorded_at TEXT NOT NULL
 );
 CREATE INDEX evidence_highlight_relocations_history ON evidence_highlight_relocations(highlight_id,recorded_at,id);
+CREATE TABLE manuscript_comments (
+ id TEXT PRIMARY KEY,
+ manuscript_id TEXT NOT NULL, section TEXT NOT NULL,
+ source_revision INTEGER NOT NULL CHECK(source_revision>0),
+ source_body_sha256 TEXT NOT NULL CHECK(length(source_body_sha256)=64),
+ start_scalar INTEGER NOT NULL CHECK(start_scalar>=0),
+ end_scalar INTEGER NOT NULL CHECK(end_scalar>start_scalar),
+ quote TEXT NOT NULL CHECK(length(quote)>0),
+ reviewer TEXT NOT NULL CHECK(length(reviewer)>0),
+ comment TEXT NOT NULL CHECK(length(comment)>0),
+ actor TEXT NOT NULL, recorded_at TEXT NOT NULL,
+ project_revision INTEGER NOT NULL CHECK(project_revision>0),
+ FOREIGN KEY(manuscript_id,section,source_revision)
+ REFERENCES manuscripts(id,section,revision)
+);
+CREATE INDEX manuscript_comments_section ON manuscript_comments(manuscript_id,section,project_revision,id);
+CREATE TRIGGER manuscript_comments_no_update BEFORE UPDATE ON manuscript_comments
+ BEGIN SELECT RAISE(ABORT,'reviewer comments are immutable'); END;
+CREATE TRIGGER manuscript_comments_no_delete BEFORE DELETE ON manuscript_comments
+ BEGIN SELECT RAISE(ABORT,'reviewer comments are immutable'); END;
 "#;
 
 const V0_TO_V1_SQL: &str = r#"
@@ -362,6 +382,29 @@ CREATE TABLE IF NOT EXISTS qualitative_transcripts (
 CREATE INDEX IF NOT EXISTS qualitative_transcripts_case ON qualitative_transcripts(case_id);
 "#;
 
+const MANUSCRIPT_COMMENTS_SCHEMA_V6_SQL: &str = r#"
+CREATE TABLE manuscript_comments (
+ id TEXT PRIMARY KEY,
+ manuscript_id TEXT NOT NULL, section TEXT NOT NULL,
+ source_revision INTEGER NOT NULL CHECK(source_revision>0),
+ source_body_sha256 TEXT NOT NULL CHECK(length(source_body_sha256)=64),
+ start_scalar INTEGER NOT NULL CHECK(start_scalar>=0),
+ end_scalar INTEGER NOT NULL CHECK(end_scalar>start_scalar),
+ quote TEXT NOT NULL CHECK(length(quote)>0),
+ reviewer TEXT NOT NULL CHECK(length(reviewer)>0),
+ comment TEXT NOT NULL CHECK(length(comment)>0),
+ actor TEXT NOT NULL, recorded_at TEXT NOT NULL,
+ project_revision INTEGER NOT NULL CHECK(project_revision>0),
+ FOREIGN KEY(manuscript_id,section,source_revision)
+ REFERENCES manuscripts(id,section,revision)
+);
+CREATE INDEX manuscript_comments_section ON manuscript_comments(manuscript_id,section,project_revision,id);
+CREATE TRIGGER manuscript_comments_no_update BEFORE UPDATE ON manuscript_comments
+ BEGIN SELECT RAISE(ABORT,'reviewer comments are immutable'); END;
+CREATE TRIGGER manuscript_comments_no_delete BEFORE DELETE ON manuscript_comments
+ BEGIN SELECT RAISE(ABORT,'reviewer comments are immutable'); END;
+"#;
+
 const LEGACY_REQUIRED_TABLES: &[&str] = &[
     "project",
     "events",
@@ -492,6 +535,7 @@ impl ProjectStore {
             return Err(ProjectError::SchemaMismatch);
         }
         verify_connection(&conn)?;
+        verify_comment_schema(&conn)?;
         Ok(Self {
             root: root.to_path_buf(),
             conn,
@@ -605,6 +649,27 @@ fn verify_connection(conn: &Connection) -> Result<(), ProjectError> {
     Ok(())
 }
 
+fn verify_comment_schema(conn: &Connection) -> Result<(), ProjectError> {
+    for (name, kind) in [
+        ("manuscript_comments", "table"),
+        ("manuscript_comments_section", "index"),
+        ("manuscript_comments_no_update", "trigger"),
+        ("manuscript_comments_no_delete", "trigger"),
+    ] {
+        let exists: i64 = conn.query_row(
+            "SELECT count(*) FROM sqlite_master WHERE type=?1 AND name=?2",
+            params![kind, name],
+            |r| r.get(0),
+        )?;
+        if exists != 1 {
+            return Err(ProjectError::Integrity(
+                "immutable reviewer comment schema incomplete".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_info(info: &ProjectInfo) -> Result<(), ProjectError> {
     const DESIGNS: &[&str] = &[
         "exploratory",
@@ -665,12 +730,31 @@ pub fn inspect_schema(root: impl AsRef<Path>) -> Result<SchemaInspection, Projec
     if current_version >= 5 && !tables.contains("qualitative_transcripts") {
         missing_required_tables.push("qualitative_transcripts".into());
     }
+    if current_version >= 6 {
+        if !tables.contains("manuscript_comments") {
+            missing_required_tables.push("manuscript_comments".into());
+        }
+        for (name, kind) in [
+            ("manuscript_comments_section", "index"),
+            ("manuscript_comments_no_update", "trigger"),
+            ("manuscript_comments_no_delete", "trigger"),
+        ] {
+            let exists: i64 = conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type=?1 AND name=?2",
+                params![kind, name],
+                |row| row.get(0),
+            )?;
+            if exists != 1 {
+                missing_required_tables.push(name.into());
+            }
+        }
+    }
     missing_required_tables.sort_unstable();
     let compatibility = if current_version > SCHEMA_VERSION {
         SchemaCompatibility::FutureUnsupported
     } else if current_version == SCHEMA_VERSION && missing_required_tables.is_empty() {
         SchemaCompatibility::Current
-    } else if matches!(current_version, 0..=4) && missing_required_tables.is_empty() {
+    } else if matches!(current_version, 0..=5) && missing_required_tables.is_empty() {
         SchemaCompatibility::UpgradeAvailable
     } else {
         SchemaCompatibility::UnsupportedLegacy
@@ -782,7 +866,7 @@ pub fn migrate_project(root: impl AsRef<Path>) -> Result<MigrationReceipt, Proje
             "INSERT OR IGNORE INTO migrations(version,installed_at) VALUES (3,?1)",
             [&timestamp],
         )?;
-        transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
+        transaction.pragma_update(None, "user_version", 3_u32)?;
         installed_versions.push(3);
     }
     if preview.current_version <= 3 {
@@ -802,6 +886,19 @@ pub fn migrate_project(root: impl AsRef<Path>) -> Result<MigrationReceipt, Proje
         )?;
         transaction.pragma_update(None, "user_version", 5_u32)?;
         installed_versions.push(5);
+    }
+    if preview.current_version <= 5 {
+        // The v6 DDL includes SQLite BEGIN...END trigger bodies containing
+        // internal semicolons. Do not use execute_static_sql's simplistic
+        // semicolon splitting: execute the trusted, static DDL as one batch
+        // inside the existing IMMEDIATE migration transaction.
+        transaction.execute_batch(MANUSCRIPT_COMMENTS_SCHEMA_V6_SQL)?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO migrations(version,installed_at) VALUES (6,?1)",
+            [&timestamp],
+        )?;
+        transaction.pragma_update(None, "user_version", 6_u32)?;
+        installed_versions.push(6);
     }
     verify_connection(&transaction)?;
     transaction.commit()?;
@@ -1647,6 +1744,11 @@ mod tests {
         let id = project.info().unwrap().id;
         drop(project);
         let connection = Connection::open(root.join("data/project.sqlite")).unwrap();
+        if version <= 5 {
+            connection
+                .execute("DROP TABLE manuscript_comments", [])
+                .unwrap();
+        }
         if version <= 3 {
             connection
                 .execute("DROP TABLE evidence_highlight_relocations", [])
@@ -1752,6 +1854,130 @@ mod tests {
     }
 
     #[test]
+    fn v5_to_v6_comment_schema_is_additive_backed_up_and_immutable() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("synthetic-v5");
+        let id = downgrade_for_migration(&root, 5);
+        let conn = Connection::open(root.join("data/project.sqlite")).unwrap();
+        conn.execute(
+            "INSERT INTO manuscripts(id,section,revision,body,citations_json,edited_at)
+             VALUES ('m','Results',1,'🧠汉', '[]', '2026-01-01')",
+            [],
+        )
+        .unwrap();
+        drop(conn);
+        assert!(matches!(
+            ProjectStore::open(&root),
+            Err(ProjectError::SchemaMismatch)
+        ));
+        let plan = inspect_schema(&root).unwrap();
+        assert_eq!(plan.compatibility, SchemaCompatibility::UpgradeAvailable);
+        assert_eq!(plan.migration_path, vec![6]);
+        assert_eq!(plan.writes, 0);
+        let receipt = migrate_project(&root).unwrap();
+        assert_eq!((receipt.from_version, receipt.to_version), (5, 6));
+        assert!(receipt.changed);
+        let backup = Connection::open(receipt.backup.unwrap()).unwrap();
+        assert_eq!(
+            backup
+                .pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))
+                .unwrap(),
+            5
+        );
+        assert_eq!(
+            backup
+                .pragma_query_value::<String, _>(None, "integrity_check", |r| r.get(0))
+                .unwrap(),
+            "ok"
+        );
+        drop(backup);
+        let reopened = ProjectStore::open(&root).unwrap();
+        assert_eq!(reopened.info().unwrap().id, id);
+        let original: String = reopened
+            .connection()
+            .query_row(
+                "SELECT body FROM manuscripts WHERE id='m' AND section='Results' AND revision=1",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(original, "🧠汉");
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row::<i64, _, _>("SELECT count(*) FROM manuscript_comments", [], |r| r
+                    .get(0))
+                .unwrap(),
+            0
+        );
+        // Prove BOTH migrated trigger bodies execute against a real row.
+        // Merely checking sqlite_master names would miss malformed trigger DDL.
+        reopened
+            .connection()
+            .execute(
+                "INSERT INTO manuscript_comments
+                 (id,manuscript_id,section,source_revision,source_body_sha256,
+                  start_scalar,end_scalar,quote,reviewer,comment,actor,recorded_at,project_revision)
+                 VALUES ('comment-1','m','Results',1,?1,0,1,'🧠','synthetic-reviewer',
+                         'Synthetic test comment','test','2026-11-01',1)",
+                [sha256("🧠汉".as_bytes())],
+            )
+            .unwrap();
+        assert!(reopened
+            .connection()
+            .execute(
+                "UPDATE manuscript_comments SET comment='tampered' WHERE id='comment-1'",
+                [],
+            )
+            .is_err());
+        assert!(reopened
+            .connection()
+            .execute("DELETE FROM manuscript_comments WHERE id='comment-1'", [])
+            .is_err());
+        let retained: String = reopened
+            .connection()
+            .query_row(
+                "SELECT comment FROM manuscript_comments WHERE id='comment-1'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(retained, "Synthetic test comment");
+        drop(reopened);
+        let repeated = migrate_project(&root).unwrap();
+        assert!(!repeated.changed);
+        assert!(repeated.backup.is_none());
+    }
+
+    #[test]
+    fn comment_immutability_triggers_cannot_be_silently_stripped() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path().join("tampered-v6");
+        drop(ProjectStore::create(&root, &info()).unwrap());
+        let db = root.join("data/project.sqlite");
+        let conn = Connection::open(&db).unwrap();
+        conn.execute("DROP TRIGGER manuscript_comments_no_delete", [])
+            .unwrap();
+        drop(conn);
+        let inspection = inspect_schema(&root).unwrap();
+        assert_eq!(
+            inspection.compatibility,
+            SchemaCompatibility::UnsupportedLegacy
+        );
+        assert!(inspection
+            .missing_required_tables
+            .contains(&"manuscript_comments_no_delete".to_string()));
+        assert!(matches!(
+            ProjectStore::open(&root),
+            Err(ProjectError::Integrity(_))
+        ));
+        assert!(matches!(
+            migrate_project(&root),
+            Err(ProjectError::SchemaMismatch)
+        ));
+    }
+
+    #[test]
     fn populated_v4_highlights_relocations_migrate_to_v5_without_case_inference() {
         let base = tempfile::tempdir().unwrap();
         let root = base.path().join("v4-highlights");
@@ -1789,7 +2015,7 @@ mod tests {
         };
         drop(connection);
         let receipt = migrate_project(&root).unwrap();
-        assert_eq!((receipt.from_version, receipt.to_version), (4, 5));
+        assert_eq!((receipt.from_version, receipt.to_version), (4, 6));
         let backup = Connection::open(receipt.backup.as_ref().unwrap()).unwrap();
         let old_version: u32 = backup
             .pragma_query_value(None, "user_version", |r| r.get(0))

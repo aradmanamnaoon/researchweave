@@ -439,6 +439,16 @@ function Read-F05ManuscriptDraft([System.Windows.Automation.AutomationElement]$W
     $null = FocusByShiftTab $editor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID' 35
     return @{ Body = $body; Citations = $metadata }
 }
+function Read-F03ManuscriptBody(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [System.Windows.Automation.AutomationElement]$ReviewResult
+) {
+    # The expanded F03 panel lives between citation controls and the editor.
+    # Return to the real source field by bounded Shift+Tab rather than Named
+    # while that source is offscreen, then use the proven native F05 reader.
+    $null = FocusByShiftTab $ReviewResult ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID' 16
+    return (Read-F05ManuscriptDraft $Window).Body
+}
 function Invoke-ProtocolFreezeButton(
     [System.Windows.Automation.AutomationElement]$Window,
     [string]$Name
@@ -2071,6 +2081,182 @@ try {
         throw 'Debounced manuscript autosave was not persisted in the manuscript revision store'
     }
     Write-Output 'PASS: manuscript edit is journaled then debounced into the revision/CAS/audit save path'
+
+    # F03: use the exact SAVED Unicode manuscript section tested above. The
+    # real native F03 controls are collapsed by default. Open them via bounded
+    # Slint/AccessKit keyboard traversal: the reviewer toggle follows the
+    # citation controls and the (collapsed) F04 title-page builder.
+    # This must run only AFTER the manuscript autosave/inspect assertion and
+    # BEFORE Notebook/abrupt-exit recovery; close the panel afterwards.
+    # The preceding F05 gate already collapsed operation details. Inspect
+    # refreshes the result without opening it; do not toggle it again here.
+    $f03Before = Get-VisibleProjectRevision $window
+    $f03EditorBefore = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
+    $null = FocusByShiftTab $f03EditorBefore ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID' 35
+    $f03Body = (Read-F05ManuscriptDraft $window).Body
+    if ($f03Body -cne $autosaveManuscript) {
+        throw 'F03 active manuscript editor differs from the verified saved Unicode section'
+    }
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03Manuscript = FocusByShiftTab $f03Reference ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID' 5
+    $f03Section = FocusByTab $f03Manuscript ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section' 3
+    $f03Value = [System.Windows.Automation.ValuePattern]::Pattern
+    if ($f03Manuscript.GetCurrentPattern($f03Value).Current.Value -cne 'uia-paper' -or
+        $f03Section.GetCurrentPattern($f03Value).Current.Value -cne 'Results') {
+        throw 'F03 does not have the original source manuscript ID and Results section'
+    }
+    if ($autosaveManuscript.IndexOf($persianWord, [System.StringComparison]::Ordinal) -lt 0 -or
+        $autosaveManuscript.IndexOf($persianWord, $autosaveManuscript.IndexOf($persianWord, [System.StringComparison]::Ordinal) + 1, [System.StringComparison]::Ordinal) -ge 0) {
+        throw 'F03 synthetic Unicode quote is not unique in the saved manuscript'
+    }
+    $f03SourceHashBytes = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $f03BodySha = [BitConverter]::ToString($f03SourceHashBytes.ComputeHash(
+            [System.Text.Encoding]::UTF8.GetBytes($autosaveManuscript)
+        )).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $f03SourceHashBytes.Dispose()
+    }
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03Toggle = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Button) 'Toggle source-bound manuscript reviewer comments' 12
+    $f03Toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f03QuoteInput = FocusByTab $f03Toggle ([System.Windows.Automation.ControlType]::Edit) 'Reviewer comment exact saved manuscript quote' 4
+    $f03QuoteInput.GetCurrentPattern($f03Value).SetValue('a')
+    $f03ReviewerInput = FocusByTab $f03QuoteInput ([System.Windows.Automation.ControlType]::Edit) 'Reviewer comment author label' 3
+    $f03Reviewer = 'UIA reviewer (synthetic)'
+    $f03ReviewerInput.GetCurrentPattern($f03Value).SetValue($f03Reviewer)
+    $f03CommentInput = FocusByTab $f03ReviewerInput ([System.Windows.Automation.ControlType]::Edit) 'Reviewer comment text input' 3
+    $f03Comment = "Check Unicode source quotation and local evidence for $persianWord."
+    $f03CommentInput.GetCurrentPattern($f03Value).SetValue($f03Comment)
+
+    # An ambiguous 'a' occurs repeatedly in the saved synthetic section.
+    # Preview is required to refuse it without even staging an approved write.
+    $f03Preview = FocusByTab $f03CommentInput ([System.Windows.Automation.ControlType]::Button) 'Preview source-bound manuscript reviewer comment without writing' 4
+    $f03Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f03Result = FocusByTab $f03Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 7
+    $f03AmbiguousReceipt = $f03Result.GetCurrentPattern($f03Value).Current.Value
+    if (-not $f03AmbiguousReceipt.Contains('Reviewer comment preview refused:') -or
+        -not $f03AmbiguousReceipt.Contains('Quoted text occurs more than once')) {
+        throw 'F03 did not refuse ambiguous saved-source quotation via native preview'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $f03Before -or
+        (Read-F03ManuscriptBody $window $f03Result) -cne $f03Body) {
+        throw 'F03 ambiguous-quote preview unexpectedly changed project or manuscript'
+    }
+
+    # Unsaved passage is also prohibited, even if entered into a real UI field.
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03QuoteInput = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Edit) 'Reviewer comment exact saved manuscript quote' 14
+    $f03QuoteInput.GetCurrentPattern($f03Value).SetValue('Not a passage in the persisted synthetic section')
+    $f03Preview = FocusByTab $f03QuoteInput ([System.Windows.Automation.ControlType]::Button) 'Preview source-bound manuscript reviewer comment without writing' 8
+    $f03Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f03Result = FocusByTab $f03Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 7
+    $f03UnsavedReceipt = $f03Result.GetCurrentPattern($f03Value).Current.Value
+    if (-not $f03UnsavedReceipt.Contains('Reviewer comment preview refused:') -or
+        -not $f03UnsavedReceipt.Contains('Quoted text is not present in the latest saved manuscript revision')) {
+        throw 'F03 did not refuse a quote absent from persisted source'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $f03Before -or
+        (Read-F03ManuscriptBody $window $f03Result) -cne $f03Body) {
+        throw 'F03 unsaved-quote preview unexpectedly changed project or manuscript'
+    }
+
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03QuoteInput = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Edit) 'Reviewer comment exact saved manuscript quote' 14
+    $f03QuoteInput.GetCurrentPattern($f03Value).SetValue($persianWord)
+    $f03Preview = FocusByTab $f03QuoteInput ([System.Windows.Automation.ControlType]::Button) 'Preview source-bound manuscript reviewer comment without writing' 8
+    $f03Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f03Result = FocusByTab $f03Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 7
+    $f03PreviewText = $f03Result.GetCurrentPattern($f03Value).Current.Value
+    $f03ExpectedStart = 'Debounced manuscript autosave '.Length
+    $f03ExpectedEnd = $f03ExpectedStart + $persianWord.Length
+    $f03SourceRegex = [regex]::Match(
+        $f03PreviewText,
+        'PREVIEW ONLY\. Latest saved section r([1-9][0-9]*), SHA-256 ([0-9a-f]{64}), exact Unicode scalar span ([0-9]+)\.\.([0-9]+)\.'
+    )
+    if (-not $f03SourceRegex.Success -or
+        $f03SourceRegex.Groups[2].Value -cne $f03BodySha -or
+        [int]::Parse($f03SourceRegex.Groups[3].Value) -ne $f03ExpectedStart -or
+        [int]::Parse($f03SourceRegex.Groups[4].Value) -ne $f03ExpectedEnd -or
+        -not $f03PreviewText.Contains('No text or project events changed.') -or
+        -not $f03PreviewText.Contains('This is NOT Word Track Changes.')) {
+        throw 'F03 preview failed source SHA, exact Unicode scalar span or no-write disclosure'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $f03Before -or
+        (Read-F03ManuscriptBody $window $f03Result) -cne $f03Body) {
+        throw 'F03 valid source-bound preview silently modified project or manuscript'
+    }
+
+    # The native Record is a distinct, explicit UIA InvokePattern action,
+    # exercising the trusted host's one-use approval and project CAS.
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03Preview = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Button) 'Preview source-bound manuscript reviewer comment without writing' 17
+    $f03Record = FocusByTab $f03Preview ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved immutable manuscript reviewer comment' 3
+    $f03Record.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Immutable reviewer comment recorded with source provenance*' 10000
+    $f03Result = FocusByTab $f03Record ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 5
+    $f03RecordedText = $f03Result.GetCurrentPattern($f03Value).Current.Value
+    if (-not $f03RecordedText.Contains('APPEND-ONLY REVIEWER COMMENT RECORDED.') -or
+        -not $f03RecordedText.Contains('Manuscript text unchanged;') -or
+        -not $f03RecordedText.Contains('"appended": true') -or
+        -not $f03RecordedText.Contains('"manuscript_body_mutated": false')) {
+        throw 'F03 explicit Record did not disclose its durable append-only event result'
+    }
+    $f03AfterRecord = Get-VisibleProjectRevision $window
+    if ($f03AfterRecord -ne ($f03Before + 1) -or
+        -not $f03RecordedText.Contains('"project_revision": ' + $f03AfterRecord) -or
+        (Read-F03ManuscriptBody $window $f03Result) -cne $f03Body) {
+        throw 'F03 approved comment did not append exactly one project revision or changed manuscript text'
+    }
+
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03Record = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved immutable manuscript reviewer comment' 18
+    $f03Load = FocusByTab $f03Record ([System.Windows.Automation.ControlType]::Button) 'Load saved manuscript reviewer comments' 3
+    $f03Load.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Source-bound reviewer comments loaded from project history*' 10000
+    $f03Result = FocusByTab $f03Load ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 4
+    $f03LoadedText = $f03Result.GetCurrentPattern($f03Value).Current.Value
+    if (-not $f03LoadedText.StartsWith('PROJECT-LOCAL IMMUTABLE REVIEW HISTORY.') -or
+        -not $f03LoadedText.Contains('no automatic relocation.')) {
+        throw 'F03 Load did not disclose project-local immutable comment history'
+    }
+    $f03JsonStart = $f03LoadedText.IndexOf('{')
+    if ($f03JsonStart -lt 0) { throw 'F03 Load did not expose its persisted structured comment list' }
+    $f03Loaded = $f03LoadedText.Substring($f03JsonStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($f03Loaded.count -ne 1 -or @($f03Loaded.comments).Count -ne 1 -or
+        $f03Loaded.manuscript_id -cne 'uia-paper' -or
+        $f03Loaded.section -cne 'Results' -or
+        $f03Loaded.read_only -ne $true -or
+        $f03Loaded.historical_anchors_never_silently_relocated -ne $true -or
+        $f03Loaded.comments[0].quote -cne $persianWord -or
+        $f03Loaded.comments[0].reviewer -cne $f03Reviewer -or
+        $f03Loaded.comments[0].comment -cne $f03Comment -or
+        $f03Loaded.comments[0].source_body_sha256 -cne $f03BodySha -or
+        $f03Loaded.comments[0].anchor_status -cne 'current' -or
+        [int]$f03Loaded.comments[0].start_scalar -ne $f03ExpectedStart -or
+        [int]$f03Loaded.comments[0].end_scalar -ne $f03ExpectedEnd) {
+        throw 'F03 persisted comment list mismatches unique synthetic source, reviewer, quote, hash or current anchor'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $f03AfterRecord -or
+        (Read-F03ManuscriptBody $window $f03Result) -cne $f03Body) {
+        throw 'F03 Load changed the project revision or edited original manuscript'
+    }
+
+    # Restore the pre-F03 collapsed layout for the existing Notebook and
+    # abrupt-exit recovery journeys. Do not reset, delete, or hide test data.
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03Result = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 19
+    $f03Toggle = FocusByShiftTab $f03Result ([System.Windows.Automation.ControlType]::Button) 'Toggle source-bound manuscript reviewer comments' 10
+    $f03Toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f03Controls = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if ($f03Controls -contains 'Reviewer comment exact saved manuscript quote' -or
+        $f03Controls -contains 'Reviewer comment text input') {
+        throw 'F03 reviewer panel failed to collapse before existing native QA resumed'
+    }
+    Write-Output 'PASS: F03 native installed reviewer comments: ambiguous/unsaved quotes refused without writes; Unicode source-bound preview no-write; separate approved Record increments exactly one audited project revision; Load returns exact immutable current anchor; original manuscript unchanged'
 
     $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
     ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Notebook')
