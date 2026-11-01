@@ -879,6 +879,71 @@ def main() -> int:
         if not any("Loaded saved section Abstract" in (node.name or "") for node, _ in walk(app)):
             raise RuntimeError("Outline did not acknowledge the bound persisted revision")
         print("MANUSCRIPT_VERIFIED_SECTION_OUTLINE_NAVIGATION_OK")
+        # A restore is NOT a destructive rollback: create a second actual
+        # version, inspect the immutable history, preview source v1, and only
+        # then record a new v3 preserving both previous revisions.
+        changed_abstract = "Later revised synthetic abstract; the prior study version must survive."
+        edit_text(app, "Manuscript section body", changed_abstract)
+        for _ in range(25):
+            with sqlite3.connect(original_project / "data/project.sqlite") as db:
+                versions = db.execute(
+                    "SELECT revision,body,citations_json FROM manuscripts "
+                    "WHERE id=? AND section=? ORDER BY revision",
+                    ("synthetic-research", "Abstract"),
+                ).fetchall()
+            if len(versions) >= 2 and versions[-1][1] == changed_abstract:
+                break
+            time.sleep(0.3)
+        else:
+            raise RuntimeError("Second Abstract version did not autosave before restore")
+        before_restore = versions[:]
+        source_rows = [
+            row for row in before_restore[:-1]
+            if "Verified manuscript for isolated project recovery" in row[1]
+        ]
+        if not source_rows:
+            raise RuntimeError("Expected verified earlier Abstract version is absent")
+        source_row = source_rows[-1]
+        for _ in range(12):
+            if activate(app, "Toggle manuscript revision history and restore"):
+                break
+            subprocess.run(["xdotool", "mousemove", "1266", "440", "click", "4"], check=True, timeout=10)
+            time.sleep(0.15)
+        else:
+            raise RuntimeError("Cannot access manuscript revision history toggle")
+        if not activate(app, "Load manuscript section revision history"):
+            raise RuntimeError("Cannot retrieve persisted manuscript history through native GUI")
+        if not any("immutable revisions" in (node.name or "") for node, _ in walk(app)):
+            raise RuntimeError("Manuscript revision inspector did not display persisted hashes")
+        edit_text(app, "Manuscript restore source revision", str(source_row[0]), allow_unreadable=True)
+        if not activate(app, "Preview saved manuscript revision restore"):
+            raise RuntimeError("Cannot preview immutable manuscript version restore")
+        time.sleep(0.15)
+        if not any("RESTORE PREVIEW ONLY" in (node.name or "") for node, _ in walk(app)):
+            raise RuntimeError("Restore preview did not expose its source digest and no-write boundary")
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            before_commit = db.execute(
+                "SELECT revision,body,citations_json FROM manuscripts WHERE id=? AND section=? ORDER BY revision",
+                ("synthetic-research", "Abstract"),
+            ).fetchall()
+        if before_commit != before_restore:
+            raise RuntimeError("Previewing manuscript restore modified persisted source revisions")
+        audit(app, "manuscript-restore-preview", output)
+        if not activate(app, "Record approved manuscript revision restore"):
+            raise RuntimeError("Cannot explicitly commit reviewed manuscript restoration")
+        time.sleep(0.35)
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            after_restore = db.execute(
+                "SELECT revision,body,citations_json FROM manuscripts WHERE id=? AND section=? ORDER BY revision",
+                ("synthetic-research", "Abstract"),
+            ).fetchall()
+        if (after_restore[:-1] != before_restore or len(after_restore) != len(before_restore) + 1
+                or after_restore[-1][1:] != source_row[1:]):
+            raise RuntimeError("Restore failed to create one new identical version while preserving history")
+        if "Verified manuscript for isolated project recovery" not in read_field(app, "Manuscript section body"):
+            raise RuntimeError("Restored version was not reflected in the actual native editor")
+        audit(app, "manuscript-restore-recorded", output)
+        print("MANUSCRIPT_RESTORE_NEW_IMMUTABLE_REVISION_GUI_AND_SQLITE_OK")
         resize_xvfb_window(850, 600)
         time.sleep(0.35)
         audit(app, "manuscript-narrow", output)

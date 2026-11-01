@@ -285,6 +285,9 @@ export component MainWindow inherits Window {
     in-out property <[ManuscriptSection]> manuscript-sections: [];
     in-out property <bool> manuscript-outline-open: false;
     in-out property <string> manuscript-outline-status: "Load saved sections to navigate this manuscript.";
+    in-out property <string> manuscript-revision-summary: "Select a saved manuscript section and load its revision history.";
+    in-out property <string> manuscript-restore-source: "";
+    in-out property <bool> manuscript-history-panel-open: false;
     in-out property <int> manuscript-word-count: 0;
     in-out property <int> manuscript-character-count: 0;
     in-out property <int> manuscript-editor-zoom: 100;
@@ -373,6 +376,9 @@ export component MainWindow inherits Window {
     callback run-mixed-joint-display(string, string, string, string, string, string);
     callback preview-writing-section(string, string, string, string);
     callback inspect-manuscript(string);
+    callback inspect-manuscript-revisions(string, string);
+    callback preview-manuscript-restore(string, string, string);
+    callback record-manuscript-restore();
     callback export-manuscript(string, string);
     callback save-prepared-export(string, string);
     callback publishing-action(string, string, string);
@@ -2436,6 +2442,61 @@ export component MainWindow inherits Window {
                                             text: section.label;
                                             accessible-label: "Open saved manuscript section " + section.label;
                                             clicked => { root.select-manuscript-section(section.name, section.revision); }
+                                        }
+                                    }
+                                }
+                            }
+                            Button {
+                                text: root.manuscript-history-panel-open ? "Hide revision history" : "Revision history / Restore";
+                                accessible-label: "Toggle manuscript revision history and restore";
+                                clicked => { root.manuscript-history-panel-open = !root.manuscript-history-panel-open; }
+                            }
+                            if root.manuscript-history-panel-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 6px;
+                                    Text { text: "VERSION HISTORY AND SAFE RESTORE"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "Inspect saved section versions, then preview a previous version. Recording creates a NEW audited revision and preserves every earlier version."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Load revisions";
+                                            accessible-label: "Load manuscript section revision history";
+                                            clicked => { root.inspect-manuscript-revisions(manuscript-id.text, manuscript-section.text); }
+                                        }
+                                        LineEdit {
+                                            horizontal-stretch: 1;
+                                            text <=> root.manuscript-restore-source;
+                                            placeholder-text: "Prior version number, e.g. 1";
+                                            accessible-label: "Manuscript restore source revision";
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Preview restore";
+                                            accessible-label: "Preview saved manuscript revision restore";
+                                            clicked => { root.preview-manuscript-restore(manuscript-id.text, manuscript-section.text, root.manuscript-restore-source); }
+                                        }
+                                        Button {
+                                            text: "Record restore";
+                                            accessible-label: "Record approved manuscript revision restore";
+                                            clicked => { root.record-manuscript-restore(); }
+                                        }
+                                    }
+                                    ScrollView {
+                                        min-height: 58px;
+                                        preferred-height: 110px;
+                                        max-height: 148px;
+                                        Text {
+                                            text: root.manuscript-revision-summary;
+                                            accessible-label: "Manuscript revision history status " + root.manuscript-revision-summary;
+                                            color: Theme.muted-ink;
+                                            wrap: word-wrap;
                                         }
                                     }
                                 }

@@ -4116,6 +4116,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let pending_evidence: Rc<RefCell<Option<PendingEvidenceAction>>> = Rc::new(RefCell::new(None));
+    let pending_manuscript_restore: Rc<RefCell<Option<PendingEvidenceAction>>> =
+        Rc::new(RefCell::new(None));
     let pending_physical_export: Rc<RefCell<Option<physical_export::PreparedPhysicalExport>>> =
         Rc::new(RefCell::new(None));
     let pending_library: Rc<RefCell<Option<PendingLibraryAction>>> = Rc::new(RefCell::new(None));
@@ -4131,6 +4133,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let invalidate_project_previews = Rc::new({
         let pending_project_metadata = pending_project_metadata.clone();
         let pending_evidence = pending_evidence.clone();
+        let pending_manuscript_restore = pending_manuscript_restore.clone();
         let pending_physical_export = pending_physical_export.clone();
         let pending_library = pending_library.clone();
         let pending_analysis = pending_analysis.clone();
@@ -4141,6 +4144,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         move || {
             pending_project_metadata.borrow_mut().take();
             pending_evidence.borrow_mut().take();
+            pending_manuscript_restore.borrow_mut().take();
             pending_physical_export.borrow_mut().take();
             pending_library.borrow_mut().take();
             pending_analysis.borrow_mut().take();
@@ -7311,11 +7315,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let weak = app.as_weak();
         let active_project = active_project.clone();
         let pending_evidence = pending_evidence.clone();
+        let pending_restore = pending_manuscript_restore.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |manuscript_id, section, citations, body| {
             if let Some(ui) = weak.upgrade() {
                 pending_evidence.borrow_mut().take();
+                pending_restore.borrow_mut().take();
                 let citations: Vec<_> = citations
                     .as_str()
                     .split(',')
@@ -7373,6 +7379,187 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_manuscript_operation_details_open(true);
                         ui.set_status(error.into());
                     }
+                }
+            }
+        }
+    });
+    app.on_inspect_manuscript_revisions({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_restore = pending_manuscript_restore.clone();
+        move |manuscript_id, section| {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_restore.borrow_mut().take();
+            let result = (|| -> Result<String, String> {
+                let project = active_project.borrow().clone().ok_or("Open a project first")?;
+                let receipt = evidence_read_at(
+                    &project,
+                    "writing.section_history",
+                    serde_json::json!({
+                        "manuscript_id":manuscript_id.as_str().trim(),
+                        "section":section.as_str().trim()
+                    }),
+                    &host_data_root()?,
+                )?;
+                let records = receipt["data"]["revisions"]
+                    .as_array()
+                    .ok_or("Verified revision history is unavailable")?;
+                if records.is_empty() {
+                    return Ok("No recorded revisions for this section. Save it before restoring.".into());
+                }
+                let mut rows = vec![format!("{} immutable revisions. Six most recent versions:", records.len())];
+                for record in records.iter().rev().take(6) {
+                    let revision = record["revision"].as_i64().filter(|value| *value > 0).ok_or("Stored revision number invalid")?;
+                    let hash = record["body_sha256"].as_str().filter(|value| value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit())).ok_or("Stored revision digest invalid")?;
+                    let edited_at = record["edited_at"].as_str().unwrap_or("local time unavailable");
+                    rows.push(format!("v{revision} · SHA-256 {hash} · {edited_at}"));
+                }
+                rows.push("Type a prior version number, Preview restore, then Record restore. History is never overwritten.".into());
+                Ok(rows.join("\n"))
+            })();
+            match result {
+                Ok(history) => ui.set_manuscript_revision_summary(history.into()),
+                Err(error) => ui.set_manuscript_revision_summary(format!("History not loaded: {error}").into()),
+            }
+        }
+    });
+    app.on_preview_manuscript_restore({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_restore = pending_manuscript_restore.clone();
+        let pending_evidence = pending_evidence.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
+        move |manuscript_id, section, source_revision| {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_restore.borrow_mut().take();
+            // Only one pending section save or restore proposal at a time.
+            pending_evidence.borrow_mut().take();
+            let result = (|| -> Result<(PendingEvidenceAction, String), String> {
+                let revision: i64 = source_revision.as_str().trim().parse().map_err(|_| "Enter a positive numeric source revision")?;
+                if revision <= 0 { return Err("Source revision must be positive".into()); }
+                let project = active_project.borrow().clone().ok_or("Open a project first")?;
+                if ui.get_manuscript_draft_id().as_str().trim() != manuscript_id.as_str().trim()
+                    || ui.get_manuscript_draft_section().as_str().trim() != section.as_str().trim()
+                {
+                    return Err("Select the section being restored before previewing".into());
+                }
+                let root = host_data_root()?;
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    let project_revision = flush_writing_drafts(&project, &mut drafts.borrow_mut(), &root)?;
+                    ui.set_project_revision(i32::try_from(project_revision).unwrap_or(i32::MAX));
+                }
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    return Err("Unsaved writing drafts must be resolved before restoring".into());
+                }
+                timer.stop();
+                let history = evidence_read_at(
+                    &project,
+                    "writing.section_history",
+                    serde_json::json!({"manuscript_id":manuscript_id.as_str().trim(),"section":section.as_str().trim()}),
+                    &root,
+                )?;
+                let records = history["data"]["revisions"].as_array().ok_or("Revision history is malformed")?;
+                let latest = records.last().and_then(|entry| entry["revision"].as_i64()).ok_or("No recorded revision exists")?;
+                if revision == latest { return Err("That version is already current; choose an earlier revision".into()); }
+                let source = records.iter().find(|entry| entry["revision"] == revision).ok_or("Source revision was not found in the persisted history")?;
+                let digest = source["body_sha256"].as_str().filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())).ok_or("Source body digest is invalid")?;
+                let body = source["body"].as_str().ok_or("Source body is missing")?;
+                // The persisted version may be a million-character document.
+                // Preserve its full digest while bounding the visible preview.
+                let excerpt: String = body.chars().take(2000).collect();
+                let omitted = body.chars().count().saturating_sub(2000);
+                let (pending, _) = evidence_preview_at(
+                    &project, "writing.section_restore", "writing",
+                    serde_json::json!({"manuscript_id":manuscript_id.as_str().trim(),"section":section.as_str().trim(),"source_revision":revision}),
+                    &root,
+                )?;
+                Ok((pending, format!(
+                    "RESTORE PREVIEW ONLY. No project write.\nSource version {revision}; current version {latest}.\nSource SHA-256: {digest}\nSource excerpt (first 2000 characters):\n{excerpt}\n{omitted} additional characters not shown.\n\nRecord restore creates an additional immutable revision with the COMPLETE original body and citations; earlier versions stay intact."
+                )))
+            })();
+            match result {
+                Ok((pending, summary)) => {
+                    *pending_restore.borrow_mut() = Some(pending);
+                    ui.set_manuscript_revision_summary(summary.into());
+                    ui.set_status("Manuscript revision restore previewed; nothing has been changed".into());
+                }
+                Err(error) => ui.set_manuscript_revision_summary(format!("Restore not previewed: {error}").into()),
+            }
+        }
+    });
+    app.on_record_manuscript_restore({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_restore = pending_manuscript_restore.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let pending = pending_restore.borrow_mut().take();
+            let result = (|| -> Result<(i64, String, String, String), String> {
+                let pending = pending.ok_or("Preview a previous manuscript revision before recording restore")?;
+                if pending.operation != "writing.section_restore" || pending.surface != "writing" {
+                    return Err("Restore approval does not match the manuscript operation".into());
+                }
+                let project = active_project.borrow().clone().ok_or("Open a project first")?;
+                let manuscript_id = pending.arguments["manuscript_id"].as_str().ok_or("Missing prepared manuscript ID")?;
+                let section = pending.arguments["section"].as_str().ok_or("Missing prepared manuscript section")?;
+                let approved_source = pending.arguments["source_revision"]
+                    .as_i64()
+                    .ok_or("Missing previewed source revision")?;
+                let visible_source: i64 = ui.get_manuscript_restore_source().as_str().trim()
+                    .parse().map_err(|_| "Restore source revision changed after preview; preview again")?;
+                if visible_source != approved_source {
+                    return Err("Restore source revision changed after preview; preview again".into());
+                }
+                if ui.get_manuscript_draft_id().as_str().trim() != manuscript_id
+                    || ui.get_manuscript_draft_section().as_str().trim() != section
+                {
+                    return Err("Manuscript or section changed since preview; preview again".into());
+                }
+                if drafts.borrow().manuscript_dirty {
+                    return Err("Manuscript draft changed since preview; save it and preview restore again".into());
+                }
+                let root = host_data_root()?;
+                let (executed, project_revision) = evidence_execute_pending(&pending, &project, &root)?;
+                let restored_revision = executed["data"]["section_revision"].as_i64().ok_or("Restored version missing")?;
+                let history = evidence_read_at(
+                    &project, "writing.section_history",
+                    serde_json::json!({"manuscript_id":manuscript_id,"section":section}), &root,
+                )?;
+                let restored = history["data"]["revisions"].as_array()
+                    .and_then(|rows| rows.iter().find(|row| row["revision"] == restored_revision))
+                    .ok_or("Restored revision not readable after approved save")?;
+                let body = restored["body"].as_str().ok_or("Restored section body unreadable")?.to_string();
+                let citations = restored["citations"].as_array().ok_or("Restored citations malformed")?
+                    .iter().map(|value| value.as_str().ok_or("Restored citation invalid"))
+                    .collect::<Result<Vec<_>,_>>()?.join(", ");
+                let mut updated = drafts.borrow().clone();
+                updated.manuscript_id = manuscript_id.into();
+                updated.section = section.into();
+                updated.body = body.clone();
+                updated.citations = citations.clone();
+                updated.manuscript_dirty = false;
+                writing_autosave::save(&writing_autosave::path(&root, &pending.project_id.to_string()), &updated)?;
+                *drafts.borrow_mut() = updated;
+                timer.stop();
+                Ok((project_revision, body, citations, format!("Restored as new version {restored_revision}, preserving all previous versions and citations.")))
+            })();
+            match result {
+                Ok((revision, body, citations, summary)) => {
+                    ui.set_manuscript_draft_body(body.clone().into());
+                    ui.set_manuscript_draft_citations(citations.into());
+                    let (words, chars) = manuscript_search::counts(&body);
+                    ui.set_manuscript_word_count(i32::try_from(words).unwrap_or(i32::MAX));
+                    ui.set_manuscript_character_count(i32::try_from(chars).unwrap_or(i32::MAX));
+                    ui.set_manuscript_revision_summary(summary.into());
+                    ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                    ui.set_status("Manuscript prior revision restored through approved audit".into());
+                }
+                Err(error) => {
+                    ui.set_manuscript_revision_summary(format!("Restore not recorded or reload failed: {error}").into());
+                    ui.set_status("Manuscript restore needs review; inspect current persisted history".into());
                 }
             }
         }
