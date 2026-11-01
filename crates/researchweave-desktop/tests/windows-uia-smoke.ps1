@@ -3276,6 +3276,27 @@ try {
     }
     Assert-F14Unchanged $f14Kept (Get-F14ProjectSnapshot $temporary) $window 'restart native kept-separate candidate scan'
     Write-Output 'UIA_F14_KEEP_SEPARATE_COLD_RESTART_SOURCEBOUND_ROW_WITH_NO_WRITE_OK'
+    # F43 is strictly suggest-only. Verify the installed accessible native
+    # entry point refuses an invalid source UUID and neither mutates the
+    # project revision nor changes the persisted reference/source/alias state.
+    $reviewToggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f43Toggle = FocusByTab $reviewToggle ([System.Windows.Automation.ControlType]::Button) 'Toggle suggest-only reference PDF metadata inspector' 8
+    $f43Toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f43Source = FocusByTab $f43Toggle ([System.Windows.Automation.ControlType]::Edit) 'Indexed PDF source ID for metadata suggestions' 5
+    $f43Value = [System.Windows.Automation.ValuePattern]::Pattern
+    $f43Source.GetCurrentPattern($f43Value).SetValue('this-is-not-a-source-uuid')
+    $f43Before = Get-F14ProjectSnapshot $temporary
+    $f43Preview = FocusByTab $f43Source ([System.Windows.Automation.ControlType]::Button) 'Preview unverified PDF source metadata without recording' 4
+    $f43Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*PDF metadata suggestions unavailable; no changes recorded*' 10000
+    Assert-F14Unchanged $f43Before (Get-F14ProjectSnapshot $temporary) $window 'F43 invalid indexed PDF metadata preview'
+    $f43Result = FocusByTab $f43Preview ([System.Windows.Automation.ControlType]::Edit) 'Read-only unverified reference PDF metadata candidates' 4
+    $f43Text = [string]$f43Result.GetCurrentPattern($f43Value).Current.Value
+    if (-not $f43Text.StartsWith('PDF metadata suggestions refused:') -or
+        -not $f43Text.Contains('No changes recorded')) {
+        throw 'F43 native invalid indexed PDF preview did not explain its strict refusal'
+    }
+    Write-Output 'UIA_F43_INDEXED_PDF_SUGGEST_ONLY_NATIVE_NEGATIVE_NO_PROJECT_WRITES_OK'
 } catch {
     # CI archives the requested screenshot even on failures before the last
     # test assertion. Keep the original failure authoritative if capture fails.

@@ -182,6 +182,10 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_protocol_freeze_summary("No local baseline inspected yet.".into());
     ui.set_protocol_freeze_export_receipt("".into());
     ui.set_reference_results("Register or inspect project references.".into());
+    ui.set_reference_pdf_metadata_open(false);
+    ui.set_reference_pdf_metadata_results(
+        "Choose an already indexed PDF source ID. Suggestions are unverified and never change bibliography records.".into(),
+    );
     ui.set_reference_dedup_results("Scan local records, inspect source metadata, and explicitly preview a reversible decision. No automatic merge.".into());
     ui.set_reference_dedup_candidates(
         Rc::new(slint::VecModel::from(
@@ -5250,6 +5254,41 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_reference_results(error.clone().into());
                         ui.set_status(error.into());
                     }
+                }
+            }
+        }
+    });
+    app.on_preview_reference_pdf_metadata({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |selected_source_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = Uuid::parse_str(selected_source_id.trim())
+                .map_err(|_| "Select an indexed PDF source using its actual UUID; no reference was changed".to_owned())
+                .and_then(|source_id| {
+                    active_project
+                        .borrow()
+                        .as_ref()
+                        .ok_or_else(|| "Open a local project before inspecting a PDF source".to_owned())
+                        .and_then(|path| {
+                            library_read_at(
+                                path,
+                                "reference.pdf_metadata_preview",
+                                serde_json::json!({"source_id": source_id.to_string()}),
+                                &host_data_root()?,
+                            )
+                        })
+                });
+            match result {
+                Ok(receipt) => {
+                    ui.set_reference_pdf_metadata_results(
+                        format!("READ-ONLY PDF TEXT SUGGESTIONS. No reference was created, changed, merged or resolved externally. Review the indexed source and exact PDF before manually approving fields.\n{}", pretty_result_data(&receipt)).into(),
+                    );
+                    ui.set_status("PDF metadata text candidates inspected locally; no project changes".into());
+                }
+                Err(error) => {
+                    ui.set_reference_pdf_metadata_results(format!("PDF metadata suggestions refused: {error}. No changes recorded.").into());
+                    ui.set_status("PDF metadata suggestions unavailable; no changes recorded".into());
                 }
             }
         }

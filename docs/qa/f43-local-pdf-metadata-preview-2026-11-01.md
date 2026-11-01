@@ -8,4 +8,6 @@ It never writes or merges project references, applies DOI matching automatically
 
 Tests cover Unicode title text, literal DOI finding/deduplication, malformed DOI refusal, project-scope/revision refusal, stable reopen, preview=execute read-only output, real project SQLite index receipt, hash corruption refusal, and no project revision or audit event mutation. The indexed PDF text is a **synthetic fixture**: these tests do not prove correct extraction from actual PDFs.
 
-Status remains **PARTIAL**. Native PDF QA, real-document fidelity, trusted approval path, and external verification are still mandatory before any F43 completion claim.
+The native References workspace now includes an explicitly optional, read-only indexed-PDF metadata inspector at the **end** of the deduplication UI. Its UUID field, Preview button and read-only TextEdit are accessibility-labeled. The callback only invokes the project-scoped `reference.pdf_metadata_preview` read operation and renders a refusal or clearly unverified candidates; no Apply action exists and no reference can be silently modified. The inspector is destroyed/reset on project change, protecting project-specific display state. Placing it after existing dedup controls preserves established keyboard tab order through F14.
+
+Status remains **PARTIAL**. Source compilation alone does not prove installed native accessibility, PDF extraction fidelity, trusted reviewer approval, or external validation. Those must pass on the final Windows/Linux/macOS installers before any F43 completion claim.

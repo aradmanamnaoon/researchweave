@@ -2689,6 +2689,41 @@ def main() -> int:
         # UI registration + a synthetic blinded peer vote. It fails closed if
         # Slint cannot expose the exact provenance through accessible text.
         exercise_f26_sourcebound_screening(app, original_project, output)
+        # F43 source-bound PDF hints are deliberately suggest-only. Even an
+        # invalid, entirely empty UUID must reach the real native callback,
+        # refuse before any project mutation, and expose the read-only panel.
+        f43_before = project_event_snapshot(original_project)
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            f43_sources_before = db.execute("SELECT count(*) FROM sources").fetchone()[0]
+            f43_references_before = db.execute("SELECT count(*) FROM reference").fetchone()[0]
+        activate_bounded_control(app, "References workspace screen", down=False)
+        time.sleep(0.2)
+        activate_bounded_control(
+            app, "Toggle suggest-only reference PDF metadata inspector", down=True
+        )
+        time.sleep(0.2)
+        reveal_bounded_control(
+            app, "Indexed PDF source ID for metadata suggestions", down=True
+        )
+        activate_bounded_control(
+            app, "Preview unverified PDF source metadata without recording", down=True
+        )
+        time.sleep(0.25)
+        if not any(
+            "PDF metadata suggestions unavailable; no changes recorded" in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("F43 native invalid source UUID was not refused")
+        if project_event_snapshot(original_project) != f43_before:
+            raise RuntimeError("F43 invalid source preview changed project events or revision")
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            if (
+                db.execute("SELECT count(*) FROM sources").fetchone()[0],
+                db.execute("SELECT count(*) FROM reference").fetchone()[0],
+            ) != (f43_sources_before, f43_references_before):
+                raise RuntimeError("F43 invalid preview changed source/reference counts")
+        audit(app, "references-f43-unverified-negative", output)
+        print("F43_INDEXED_PDF_METADATA_NATIVE_NEGATIVE_NO_WRITE_OK")
     if not activate(app, "Home activity"):
         raise RuntimeError("Cannot return Home to verify recent-project recovery")
     time.sleep(0.25)

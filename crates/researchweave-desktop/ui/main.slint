@@ -255,6 +255,8 @@ export component MainWindow inherits Window {
     in-out property <string> protocol-freeze-summary: "No local baseline inspected yet.";
     in-out property <string> protocol-freeze-export-receipt: "";
     in-out property <string> reference-results: "Register or inspect project references.";
+    in-out property <bool> reference-pdf-metadata-open: false;
+    in-out property <string> reference-pdf-metadata-results: "Choose an already indexed PDF source ID. Suggestions are unverified and never change bibliography records.";
     in-out property <bool> reference-dedup-open: false;
     in-out property <string> reference-dedup-results: "Scan local records, inspect source metadata, and explicitly preview a reversible decision. No automatic merge.";
     in-out property <[ReferenceDuplicateCandidate]> reference-dedup-candidates: [];
@@ -385,6 +387,7 @@ export component MainWindow inherits Window {
     callback preview-reference(string, string, string, string, string, string, string);
     callback apply-library-preview();
     callback refresh-references();
+    callback preview-reference-pdf-metadata(string);
     callback scan-reference-duplicates();
     callback preview-reference-dedup(string, string, string, string, string);
     callback load-reference-dedup-history(string, string);
@@ -1762,6 +1765,59 @@ export component MainWindow inherits Window {
                                         text: root.reference-dedup-results;
                                         read-only: true;
                                         accessible-label: "Copyable reference duplicate candidate or decision details";
+                                    }
+                                }
+                            }
+                            Button {
+                                text: root.reference-pdf-metadata-open ? "Hide PDF metadata suggestions" : "Review indexed PDF metadata suggestions";
+                                accessible-label: "Toggle suggest-only reference PDF metadata inspector";
+                                clicked => { root.reference-pdf-metadata-open = !root.reference-pdf-metadata-open; }
+                            }
+                            if root.reference-pdf-metadata-open: Rectangle {
+                                background: Theme.surface;
+                                border-width: 1px;
+                                border-color: Theme.divider;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text {
+                                        text: "UNVERIFIED PDF TEXT CANDIDATES — REVIEW ONLY";
+                                        color: Theme.ink;
+                                        font-weight: 700;
+                                        accessible-label: "Unverified PDF text metadata review";
+                                    }
+                                    Text {
+                                        text: "Only existing project-indexed PDF source IDs are accepted. DOI patterns and first-line titles are unverified, not resolved; preview never changes the project.";
+                                        wrap: word-wrap;
+                                        color: Theme.muted-ink;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        pdf-metadata-source-id := LineEdit {
+                                            placeholder-text: "Indexed PDF source UUID";
+                                            accessible-label: "Indexed PDF source ID for metadata suggestions";
+                                            horizontal-stretch: 1;
+                                            edited(text) => { root.reference-pdf-metadata-results = "Source changed. Preview the current indexed PDF before reviewing unverified candidates."; }
+                                        }
+                                        Button {
+                                            text: "Preview candidates";
+                                            accessible-label: "Preview unverified PDF source metadata without recording";
+                                            clicked => { root.preview-reference-pdf-metadata(pdf-metadata-source-id.text); }
+                                        }
+                                    }
+                                    TextEdit {
+                                        min-height: 90px;
+                                        preferred-height: 165px;
+                                        max-height: 250px;
+                                        read-only: true;
+                                        text: root.reference-pdf-metadata-results;
+                                        accessible-label: "Read-only unverified reference PDF metadata candidates";
+                                    }
+                                    Text {
+                                        text: "No Apply button exists. Independently verify the original PDF and each proposed field before entering metadata through the normal human-approved reference workflow.";
+                                        wrap: word-wrap;
+                                        color: Theme.warning;
                                     }
                                 }
                             }
