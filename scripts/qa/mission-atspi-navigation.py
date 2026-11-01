@@ -2434,6 +2434,11 @@ def main() -> int:
             raise RuntimeError(
                 "Previous project's revision history editor remained expanded after project switch"
             )
+        # The manuscript canvas begins below the top-of-page title/citation
+        # controls. A new project's *empty* editor must be physically visible
+        # before keyboard/clipboard inspection; an offscreen AT-SPI node is
+        # not proof of an empty and usable draft.
+        reveal_bounded_control(app, "Manuscript section body", down=True)
         if read_visible_field_keyboard(app, "Manuscript section body", allow_empty=True):
             raise RuntimeError("Previous project manuscript draft leaked across projects")
         print("NOTEBOOK_AND_MANUSCRIPT_PROJECT_ISOLATION_OK")
