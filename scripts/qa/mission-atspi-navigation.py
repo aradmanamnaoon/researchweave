@@ -1232,6 +1232,49 @@ def main() -> int:
             raise RuntimeError("Previously autosaved manuscript is not available after reopening")
         print("NOTES_AND_MANUSCRIPT_REOPEN_PERSISTENCE_OK")
         audit(app, "reopened-project-writing", output)
+        # Review search drafting is a project-scoped, explicitly non-executed
+        # read operation, not a hidden network retrieval or PRISMA mutation.
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            review_events_before = db.execute("SELECT count(*) FROM events").fetchone()[0]
+        if not activate(app, "Sources activity"):
+            raise RuntimeError("Cannot navigate to Sources for review search drafting")
+        time.sleep(0.25)
+        if not activate(app, "Review workspace screen"):
+            raise RuntimeError("Cannot navigate to systematic Review workspace")
+        time.sleep(0.3)
+        if not activate(app, "Toggle review PICO search strategy builder"):
+            raise RuntimeError("PICO query builder is missing from Review")
+        time.sleep(0.2)
+        edit_text(app, "Search strategy population terms", "older adults;geriatric patients", allow_unreadable=True)
+        edit_text(app, "Search strategy intervention terms", "mindfulness", allow_unreadable=True)
+        edit_text(app, "Search strategy outcome terms", "sleep quality", allow_unreadable=True)
+        if not activate(app, "Build offline verified review search queries"):
+            raise RuntimeError("Offline PICO query generation cannot be activated")
+        time.sleep(0.3)
+        visible_names = [(node.name or "") for node, _ in walk(app)]
+        if not any("Offline, non-executed review search queries prepared" in name for name in visible_names):
+            raise RuntimeError("Native Review did not acknowledge verified, non-executed search drafting")
+        query_view = ""
+        for _ in range(3):
+            try:
+                query_view = read_field(app, "Copyable offline search strategy query drafts")
+                break
+            except RuntimeError:
+                time.sleep(0.2)
+        if query_view:
+            if ("OFFLINE DRAFT ONLY" not in query_view
+                    or "No database was queried" not in query_view
+                    or not all(database in query_view for database in ("pubmed", "scopus", "web_of_science"))):
+                raise RuntimeError("Native Review query output omitted scope or provenance")
+            print("OFFLINE_PICO_NATIVE_QUERY_TEXT_READBACK_OK")
+        else:
+            print("OFFLINE_PICO_NATIVE_OUTPUT_TEXT_READBACK_UNAVAILABLE; native status and backend digest test required")
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            review_events_after = db.execute("SELECT count(*) FROM events").fetchone()[0]
+        if review_events_after != review_events_before:
+            raise RuntimeError("Read-only PICO search drafting wrote a project event")
+        print("OFFLINE_PICO_REVIEW_GUI_NO_RETRIEVAL_NO_EVENT_OK")
+        audit(app, "review-search-drafts", output)
     if not activate(app, "Home activity"):
         raise RuntimeError("Cannot return Home to verify recent-project recovery")
     time.sleep(0.25)

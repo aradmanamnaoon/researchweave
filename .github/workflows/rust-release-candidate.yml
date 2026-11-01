@@ -135,7 +135,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfuse2 xvfb xauth dbus-x11 at-spi2-core python3-pyatspi
+          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfuse2 xvfb xauth dbus-x11 at-spi2-core python3-pyatspi xdotool imagemagick
       - name: Resolve version and PDFium expected digest
         shell: bash
         run: |
@@ -258,6 +258,29 @@ jobs:
         if: matrix.platform == 'linux-x64'
         shell: bash
         run: bash packaging/rust/linux-native-acceptance.sh "$RELEASE_VERSION"
+      - name: Full isolated Linux scientific GUI interaction regression
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        timeout-minutes: 20
+        run: |
+          set -euo pipefail
+          mkdir -p target/qa/mission-full-native
+          bash scripts/qa/mission-xvfb-ui-smoke.sh \
+            "$PWD/target/native-package/linux-x64/researchweave-desktop" \
+            "$PWD/target/qa/mission-full-native" \
+            2>&1 | tee target/qa/mission-full-native-ci.log
+          grep -F 'ISOLATED_XVFB_TEST_DONE' target/qa/mission-full-native-ci.log
+          grep -F 'AT_SPI_NAVIGATION_PROBE_OK' target/qa/mission-full-native/atspi-navigation.txt
+      - name: Archive full Linux GUI source and accessibility receipts
+        if: ${{ always() && matrix.platform == 'linux-x64' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-linux-full-native-gui-evidence
+          path: |
+            target/qa/mission-full-native/
+            target/qa/mission-full-native-ci.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Verify candidate files
         shell: bash
         run: |
