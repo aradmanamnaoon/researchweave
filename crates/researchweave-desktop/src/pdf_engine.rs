@@ -362,14 +362,15 @@ mod tests {
 
     #[test]
     fn oversized_sparse_pdf_is_rejected_before_loading_native_pdfium() {
-        let directory = tempfile::tempdir().unwrap();
-        let source = directory.path().join("oversized.pdf");
+        let source =
+            std::env::temp_dir().join(format!("rw-oversized-pdf-{}.pdf", uuid::Uuid::new_v4()));
         let file = std::fs::File::create(&source).unwrap();
         file.set_len(MAX_NATIVE_PDF_BYTES + 1).unwrap();
         drop(file);
         let error = render_search_at(&source, "", 0).unwrap_err();
         assert!(error.contains("bounded native file budget"), "{error}");
         assert!(read_bounded_pdf(&source).is_err());
+        std::fs::remove_file(&source).unwrap();
     }
     #[test]
     fn native_pdfium_renders_and_maps_text() {
@@ -485,7 +486,7 @@ mod tests {
             .unwrap();
         assert!(read_bounded_pdf(&input)
             .unwrap_err()
-            .contains("bounded find-next file budget"));
+            .contains("bounded native file budget"));
         std::fs::remove_file(input).unwrap();
     }
 }

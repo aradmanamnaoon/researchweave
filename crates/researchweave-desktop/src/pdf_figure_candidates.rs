@@ -10,7 +10,7 @@ use serde::Serialize;
 use sha2::{Digest, Sha256};
 use std::path::Path;
 
-use super::{read_bounded_find_next_pdf, runtime_library};
+use super::{read_bounded_pdf, runtime_library};
 
 const MAX_PAGES: usize = 64;
 const MAX_PAGE_CHARS: usize = 40_000;
@@ -251,7 +251,7 @@ fn locate_caption_anchors(chars: &[PageChar], page_bounds: PageRect) -> (Vec<Cap
 pub fn preview_pdf_figure_table_candidates(pdf_path: &Path) -> Result<FigureTablePreview, String> {
     // The existing bounded read rejects large/swap-grown files before
     // attempting to load the native parser, using one file handle.
-    let bytes = read_bounded_find_next_pdf(pdf_path)?;
+    let bytes = read_bounded_pdf(pdf_path)?;
     let digest = hex::encode(Sha256::digest(&bytes));
     let runtime = runtime_library()?;
     let pdfium = Pdfium::load_from_path(runtime).map_err(|e| e.to_string())?;
@@ -407,7 +407,7 @@ mod tests {
         let file = std::fs::File::create(&path).unwrap();
         file.set_len(128 * 1024 * 1024 + 1).unwrap();
         let err = preview_pdf_figure_table_candidates(&path).unwrap_err();
-        assert!(err.contains("bounded find-next file budget"));
+        assert!(err.contains("bounded native file budget"));
         std::fs::remove_file(&path).unwrap();
     }
 
