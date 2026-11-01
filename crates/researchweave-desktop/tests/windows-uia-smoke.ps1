@@ -1217,7 +1217,12 @@ try {
     $dedupScan = FocusByTab $dedupToggle ([System.Windows.Automation.ControlType]::Button) 'Scan local reference duplicate candidates without changing data' 4
     $dedupScan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*Reference candidates scanned locally; no changes recorded*' 10000
-    $dedupDetails = FocusByTab $dedupScan ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 12
+    # The expanded F14 panel now has identity/rationale fields and six separate
+    # human decision controls before the read-only receipt. Twelve tabs stopped
+    # at Record in installed Windows 886x567, *before* reaching the receipt.
+    # Traverse at most 28 actual native keyboard stops; do not read hidden
+    # ValuePattern content without proving that the real editor got focus.
+    $dedupDetails = FocusByTab $dedupScan ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 28
     $dedupText = ([System.Windows.Automation.ValuePattern]$dedupDetails.GetCurrentPattern(
         [System.Windows.Automation.ValuePattern]::Pattern
     )).Current.Value
@@ -1252,7 +1257,7 @@ try {
     $invalidDedupPreview = FocusByTab $dedupRationale ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 3
     $invalidDedupPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*Reference dedup preview rejected*' 10000
-    $rejectionDetails = FocusByTab $invalidDedupPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 5
+    $rejectionDetails = FocusByTab $invalidDedupPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
     $rejectionText = ([System.Windows.Automation.ValuePattern]$rejectionDetails.GetCurrentPattern(
         [System.Windows.Automation.ValuePattern]::Pattern
     )).Current.Value
@@ -3093,7 +3098,7 @@ try {
     $f14InvalidPreview = FocusByTab $f14FingerprintEdit ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 6
     $f14InvalidPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*Reference dedup preview rejected*' 10000
-    $f14InvalidReceipt = FocusByTab $f14InvalidPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 6
+    $f14InvalidReceipt = FocusByTab $f14InvalidPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
     if ($f14InvalidReceipt.GetCurrentPattern($f14ReferenceValue).Current.Value -notlike '*Dedup review rejected: stale candidate fingerprint*') {
         throw 'F14 native candidate preview accepted fabricated SHA or reported unexpected rejection'
     }
@@ -3118,7 +3123,7 @@ try {
     $f14Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
     Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'final approved alias preview'
-    $f14ApprovedEditor = FocusByTab $f14Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 6
+    $f14ApprovedEditor = FocusByTab $f14Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
     $f14ApprovedText = $f14ApprovedEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
     $f14ApprovedStart = $f14ApprovedText.IndexOf('{')
     if (-not $f14ApprovedText.StartsWith('PREVIEW ONLY. Nothing recorded.') -or $f14ApprovedStart -lt 0) {
@@ -3152,7 +3157,7 @@ try {
     $f14UndoPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
     Assert-F14Unchanged $f14Aliased (Get-F14ProjectSnapshot $temporary) $window 'explicit restore preview'
-    $f14UndoEditor = FocusByTab $f14UndoPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 5
+    $f14UndoEditor = FocusByTab $f14UndoPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
     $f14UndoText = $f14UndoEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
     $f14UndoStart = $f14UndoText.IndexOf('{')
     if (-not $f14UndoText.StartsWith('PREVIEW ONLY. Nothing recorded.') -or $f14UndoStart -lt 0) {
@@ -3217,7 +3222,7 @@ try {
     $f14KeepPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
     Assert-F14Unchanged $f14Restored (Get-F14ProjectSnapshot $temporary) $window 'native keep-separate preview'
-    $f14KeepPreviewEditor = FocusByTab $f14KeepPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 6
+    $f14KeepPreviewEditor = FocusByTab $f14KeepPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
     $f14KeepPreviewText = [string]$f14KeepPreviewEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
     $f14KeepPreviewStart = $f14KeepPreviewText.IndexOf('{')
     if (-not $f14KeepPreviewText.StartsWith('PREVIEW ONLY. Nothing recorded.') -or $f14KeepPreviewStart -lt 0) {
@@ -3254,7 +3259,7 @@ try {
     $f14HistoryButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*Immutable reference decision history loaded locally*' 10000
     Assert-F14Unchanged $f14Kept (Get-F14ProjectSnapshot $temporary) $window 'read-only decision history load'
-    $f14HistoryEditor = FocusByTab $f14HistoryButton ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 4
+    $f14HistoryEditor = FocusByTab $f14HistoryButton ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
     $f14HistoryText = [string]$f14HistoryEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
     $f14HistoryStart = $f14HistoryText.IndexOf('{')
     if (-not $f14HistoryText.StartsWith('READ-ONLY IMMUTABLE REFERENCE DECISION HISTORY.') -or $f14HistoryStart -lt 0) {
