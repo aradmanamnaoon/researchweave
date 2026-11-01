@@ -40,6 +40,10 @@ class ArithmeticNotebookContract(unittest.TestCase):
         self.assertIn('serde_json::json!({"limit":100,"offset":offset_usize})', self.desktop)
         self.assertIn('"total":total', self.runtime)
         self.assertIn('"offset":offset', self.runtime)
+        self.assertIn('"project_revision":info.revision', self.runtime)
+        self.assertIn('"expected_project_revision"', self.runtime)
+        self.assertIn('"expected_project_revision"', self.desktop)
+        self.assertIn('"cell list snapshot changed; refresh before changing pages"', self.runtime)
         self.assertIn('persisted_cell_pagination_reaches_after_first_hundred_without_losing_integrity', self.runtime)
         for label in (
             "Load previous page of saved arithmetic notebook cells",
@@ -48,6 +52,8 @@ class ArithmeticNotebookContract(unittest.TestCase):
             self.assertIn(label, self.ui)
         self.assertIn('root.load-arithmetic-cells(root.notebook-cell-offset + 100);', self.ui)
         self.assertIn('ui.set_notebook_cell_offset(0);', self.desktop)
+        self.assertIn('ui.set_notebook_cell_snapshot_revision(-1);', self.desktop)
+        self.assertIn('ui.set_notebook_cell_snapshot_revision(snapshot);', self.desktop)
 
     def test_runtime_cannot_launch_arbitrary_processes(self) -> None:
         for bad in (

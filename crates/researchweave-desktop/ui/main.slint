@@ -313,6 +313,10 @@ export component MainWindow inherits Window {
     in-out property <string> provider-results: "Provider validation is offline-only; remote egress is disabled until explicitly configured.";
     in-out property <string> diagnostics-results: "Run structural diagnostics for the open project.";
     in-out property <string> open-science-preview-results: "Research-object inventory is local and read-only. It cannot authorize redistribution, publish files, or verify consent.";
+    in-out property <bool> synthetic-evaluation-open: false;
+    in-out property <string> synthetic-evaluation-fixture: "";
+    in-out property <string> synthetic-evaluation-status: "Synthetic-only extraction metrics playground. No project source or trained model is evaluated.";
+    in-out property <string> synthetic-evaluation-receipt: "Load or paste a synthetic fixture and preview its redacted technical receipt. Nothing is saved.";
     in-out property <int> open-science-request-id: 0;
     in-out property <bool> open-science-busy: false;
     in-out property <bool> lifecycle-open: false;
@@ -331,6 +335,7 @@ export component MainWindow inherits Window {
     in-out property <string> notebook-cell-status: "Arithmetic cells run an offline restricted expression language; no Python kernel, file, or network access.";
     in-out property <int> notebook-cell-offset: 0;
     in-out property <int> notebook-cell-total: 0;
+    in-out property <int> notebook-cell-snapshot-revision: -1;
     in-out property <[NotebookCell]> notebook-cells: [];
     in-out property <[PdfCaptionCandidate]> pdf-caption-candidates: [];
     in-out property <string> pdf-caption-status: "Figure/table caption candidates are unverified text anchors; image pixels and table cells are not extracted.";
@@ -385,6 +390,8 @@ export component MainWindow inherits Window {
     callback run-arithmetic-cell();
     callback load-arithmetic-cells(int);
     callback preview-open-science-manifest();
+    callback load-synthetic-evaluation-example();
+    callback preview-synthetic-evaluation(string);
     callback load-research-lifecycle();
     callback scan-pdf-caption-candidates(string, int);
     callback refresh-quick-notes(string, string);
@@ -2380,7 +2387,7 @@ export component MainWindow inherits Window {
                                                 Button {
                                                     text: "Previous 100";
                                                     accessible-label: "Load previous page of saved arithmetic notebook cells";
-                                                    enabled: root.notebook-cell-offset > 0;
+                                                    enabled: root.notebook-cell-offset > 0 && root.notebook-cell-snapshot-revision >= 0;
                                                     clicked => {
                                                         root.load-arithmetic-cells(root.notebook-cell-offset >= 100 ? root.notebook-cell-offset - 100 : 0);
                                                     }
@@ -2388,7 +2395,7 @@ export component MainWindow inherits Window {
                                                 Button {
                                                     text: "Next 100";
                                                     accessible-label: "Load next page of saved arithmetic notebook cells";
-                                                    enabled: root.notebook-cell-offset + 100 < root.notebook-cell-total;
+                                                    enabled: root.notebook-cell-snapshot-revision >= 0 && root.notebook-cell-offset + 100 < root.notebook-cell-total;
                                                     clicked => { root.load-arithmetic-cells(root.notebook-cell-offset + 100); }
                                                 }
                                             }
@@ -3706,6 +3713,78 @@ export component MainWindow inherits Window {
                                 accessible-label: "Redacted open science inventory preview " + root.open-science-preview-results;
                                 color: Theme.muted-ink;
                                 wrap: word-wrap;
+                            }
+                            Button {
+                                text: root.synthetic-evaluation-open ? "▾ Synthetic extraction evaluation (fixture only)" : "▸ Synthetic extraction evaluation (fixture only)";
+                                accessible-label: "Toggle offline synthetic extraction evaluation fixture panel";
+                                clicked => { root.synthetic-evaluation-open = !root.synthetic-evaluation-open; }
+                            }
+                            if root.synthetic-evaluation-open: Rectangle {
+                                border-color: Theme.outline;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text {
+                                        text: "F44 — synthetic fixture evaluator";
+                                        color: Theme.ink;
+                                        font-weight: 700;
+                                    }
+                                    Text {
+                                        text: "This is a bounded, offline and zero-write demonstration. It checks supplied SHA-256 gold/prediction commitments and exact source-byte anchors. It is NOT a trained-model benchmark, independent human-gold validation, patient-data analysis or calibration certification.";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    synthetic-eval-input := TextEdit {
+                                        min-height: 130px;
+                                        preferred-height: 200px;
+                                        max-height: 280px;
+                                        text: root.synthetic-evaluation-fixture;
+                                        accessible-label: "Synthetic extraction evaluation typed JSON fixture input";
+                                        edited(text) => {
+                                            root.synthetic-evaluation-fixture = text;
+                                            root.synthetic-evaluation-status = "Fixture changed; preview again. No prior result is valid for these bytes.";
+                                            root.synthetic-evaluation-receipt = "No current receipt after a source edit.";
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Load safe synthetic sample";
+                                            accessible-label: "Insert trusted synthetic extraction evaluation example without project data";
+                                            clicked => { root.load-synthetic-evaluation-example(); }
+                                        }
+                                        Button {
+                                            text: "Preview synthetic receipt";
+                                            accessible-label: "Preview strict synthetic extraction evaluation with no network or project write";
+                                            clicked => { root.preview-synthetic-evaluation(synthetic-eval-input.text); }
+                                        }
+                                        Button {
+                                            text: "Clear fixture";
+                                            accessible-label: "Clear local synthetic evaluation input and preview";
+                                            clicked => {
+                                                root.synthetic-evaluation-fixture = "";
+                                                root.synthetic-evaluation-receipt = "No fixture or verified receipt loaded.";
+                                                root.synthetic-evaluation-status = "Synthetic fixture cleared from this view; no project write occurred.";
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: root.synthetic-evaluation-status;
+                                        accessible-label: "Synthetic extraction evaluation status " + root.synthetic-evaluation-status;
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    TextEdit {
+                                        min-height: 130px;
+                                        preferred-height: 220px;
+                                        max-height: 330px;
+                                        read-only: true;
+                                        text: root.synthetic-evaluation-receipt;
+                                        accessible-label: "Copyable SHA verified redacted synthetic extraction evaluation receipt";
+                                    }
+                                }
                             }
                          }
                         }

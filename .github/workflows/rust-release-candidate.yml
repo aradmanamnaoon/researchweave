@@ -296,6 +296,8 @@ jobs:
           grep -F 'F32_NATIVE_ARITHMETIC_EXECUTION_APPEND_SOURCE_PROVENANCE_OK' target/qa/mission-full-native/atspi-navigation.txt
           grep -F 'F32_NATIVE_INVALID_EXPRESSION_REFUSED_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
           grep -F 'F34_NATIVE_REDACTED_PROJECT_INVENTORY_INTEGRITY_NO_WRITE_NO_DEPOSIT_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F44_NATIVE_SYNTHETIC_SHA_REDACTED_PREVIEW_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F44_NATIVE_INVALID_FIXTURE_REFUSED_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
           grep -F 'F42_NATIVE_LIFECYCLE_SOURCE_BOUND_NAVIGATION_NO_COMPLETION_CLAIM_OK' target/qa/mission-full-native/atspi-navigation.txt
       - name: Archive full Linux GUI source and accessibility receipts
         if: ${{ always() && matrix.platform == 'linux-x64' }}

@@ -333,7 +333,12 @@ pub(super) fn execute(
 }
 
 pub(super) fn list(store: &ProjectStore, args: &Value) -> Result<Value, String> {
-    let limit = args.get("limit").and_then(Value::as_u64).unwrap_or(100);
+    let limit = match args.get("limit") {
+        Some(value) => value
+            .as_u64()
+            .ok_or("cell list limit must be a positive integer")?,
+        None => 100,
+    };
     if !(1..=500).contains(&limit) {
         return Err("cell list limit must be 1..=500".into());
     }
@@ -345,6 +350,18 @@ pub(super) fn list(store: &ProjectStore, args: &Value) -> Result<Value, String> 
     };
     if offset > MAX_CELLS as u64 {
         return Err("cell list offset exceeds the bounded notebook capacity".into());
+    }
+    let info = store
+        .info()
+        .map_err(|_| "cell list project snapshot unavailable")?;
+    if let Some(expected) = args.get("expected_project_revision") {
+        let expected = expected
+            .as_i64()
+            .filter(|revision| *revision >= 0)
+            .ok_or("cell list snapshot revision must be a nonnegative integer")?;
+        if expected != info.revision {
+            return Err("cell list snapshot changed; refresh before changing pages".into());
+        }
     }
     let total: i64 = store
         .connection()
@@ -416,7 +433,8 @@ pub(super) fn list(store: &ProjectStore, args: &Value) -> Result<Value, String> 
     let count = cells.len();
     Ok(
         json!({"cells":cells,"count":count,"limit":limit,"offset":offset,
-        "total":total,"has_more":offset + (count as u64) < total as u64}),
+        "total":total,"project_revision":info.revision,
+        "has_more":offset + (count as u64) < total as u64}),
     )
 }
 
@@ -518,11 +536,34 @@ mod tests {
         assert_eq!(second["count"], 5);
         assert_eq!(second["total"], 105);
         assert_eq!(second["has_more"], false);
+        assert_eq!(second["project_revision"], 0);
+        assert_eq!(
+            list(
+                &store,
+                &json!({"limit":100,"offset":100,
+            "expected_project_revision":0})
+            )
+            .unwrap()["count"],
+            5
+        );
+        assert!(list(
+            &store,
+            &json!({"limit":100,"offset":100,
+            "expected_project_revision":1})
+        )
+        .is_err());
+        assert!(list(
+            &store,
+            &json!({"limit":100,"offset":100,
+            "expected_project_revision":-1})
+        )
+        .is_err());
         let exhausted = list(&store, &json!({"limit":100,"offset":105})).unwrap();
         assert_eq!(exhausted["count"], 0);
         assert_eq!(exhausted["total"], 105);
         assert!(list(&store, &json!({"limit":100,"offset":501})).is_err());
         assert!(list(&store, &json!({"limit":100,"offset":-1})).is_err());
+        assert!(list(&store, &json!({"limit":-1,"offset":0})).is_err());
     }
 
     #[test]

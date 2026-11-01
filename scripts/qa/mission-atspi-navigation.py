@@ -3029,6 +3029,89 @@ def main() -> int:
             raise RuntimeError("F34 read-only inventory modified immutable project event history")
         audit(app, "diagnostics-f34-redacted-open-science-preview", output)
         print("F34_NATIVE_REDACTED_PROJECT_INVENTORY_INTEGRITY_NO_WRITE_NO_DEPOSIT_OK")
+        # F44: real installed Slint interaction with a completely synthetic
+        # example. The typed Rust evaluator recomputes independent supplied
+        # commitments; the UI exposes only a redacted SHA-verifiable receipt.
+        # The source project must remain physically untouched throughout.
+        f44_before = project_event_snapshot(original_project)
+        activate_bounded_control(
+            app, "Toggle offline synthetic extraction evaluation fixture panel", down=True
+        )
+        time.sleep(0.16)
+        activate_bounded_control(
+            app, "Insert trusted synthetic extraction evaluation example without project data",
+            down=True,
+        )
+        if not any(
+            "A small, programmatically generated synthetic example is ready" in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("F44 native synthetic sample was not loaded")
+        activate_bounded_control(
+            app, "Preview strict synthetic extraction evaluation with no network or project write",
+            down=True,
+        )
+        f44_status = ""
+        for _ in range(20):
+            f44_status = "\n".join((node.name or "") for node, _ in walk(app))
+            if "SYNTHETIC FIXTURE ONLY" in f44_status:
+                break
+            time.sleep(0.1)
+        if (
+            "SYNTHETIC FIXTURE ONLY" not in f44_status
+            or "1 checked slots" not in f44_status
+            or "Not a trained-model, gold-custody, calibration, or scientific-result claim" not in f44_status
+        ):
+            raise RuntimeError("F44 native preview omitted its synthetic source and limitation labels")
+        f44_hash_match = re.search(r"Markdown SHA-256: ([0-9a-f]{64})", f44_status)
+        if f44_hash_match is None:
+            raise RuntimeError("F44 native receipt did not expose its SHA-256")
+        reveal_bounded_control(
+            app, "Copyable SHA verified redacted synthetic extraction evaluation receipt", down=True
+        )
+        # Use actual native AT-SPI or private-Xvfb keyboard clipboard readback,
+        # never a synthetic Python reconstruction of the Rust report.
+        f44_receipt = read_visible_field_keyboard(
+            app, "Copyable SHA verified redacted synthetic extraction evaluation receipt",
+            force_clipboard=True,
+        )
+        if (
+            "Synthetic fixture only" not in f44_receipt
+            or "Synthetic extraction evaluation" not in f44_receipt
+            or "| ALL | 1 | 1 | 0 | 0 | 0 | 0 | 1.0000" not in f44_receipt
+            or "Synthetic MRI measurement" in f44_receipt
+        ):
+            raise RuntimeError("F44 actual native receipt omitted verified metrics or leaked source")
+        if f44_hash_match.group(1) not in {
+            hashlib.sha256(f44_receipt.encode("utf-8")).hexdigest(),
+            hashlib.sha256((f44_receipt + "\n").encode("utf-8")).hexdigest(),
+        }:
+            raise RuntimeError("F44 actual native receipt differs from published Markdown SHA-256")
+        if project_event_snapshot(original_project) != f44_before:
+            raise RuntimeError("F44 synthetic evaluation wrote to a real research project")
+        audit(app, "diagnostics-f44-synthetic-hashed-receipt", output)
+        print("F44_NATIVE_SYNTHETIC_SHA_REDACTED_PREVIEW_NO_WRITE_OK")
+
+        reveal_bounded_control(
+            app, "Synthetic extraction evaluation typed JSON fixture input", down=False
+        )
+        edit_text(
+            app, "Synthetic extraction evaluation typed JSON fixture input", "{}",
+            allow_unreadable=True,
+        )
+        activate_bounded_control(
+            app, "Preview strict synthetic extraction evaluation with no network or project write",
+            down=True,
+        )
+        f44_negative = "\n".join((node.name or "") for node, _ in walk(app))
+        if (
+            "Synthetic evaluation refused:" not in f44_negative
+            or "No valid SHA-verified synthetic evaluation receipt" not in f44_negative
+        ):
+            raise RuntimeError("F44 native invalid synthetic fixture was not refused and cleared")
+        if project_event_snapshot(original_project) != f44_before:
+            raise RuntimeError("F44 invalid fixture mutated project event history")
+        print("F44_NATIVE_INVALID_FIXTURE_REFUSED_NO_WRITE_OK")
     if not activate(app, "Home activity"):
         raise RuntimeError("Cannot return Home to verify recent-project recovery")
     time.sleep(0.25)

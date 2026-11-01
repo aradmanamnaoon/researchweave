@@ -32,6 +32,7 @@ use uuid::Uuid;
 #[cfg(test)]
 mod display_contrast;
 mod durable_activity;
+mod f44_synthetic_evaluation;
 mod manuscript_citation_insert;
 mod manuscript_outline;
 mod manuscript_review_anchor;
@@ -148,6 +149,18 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_open_science_preview_results(
         "No research-object inventory preview for this project. Source rights and patient consent are not verified.".into(),
     );
+    // An unsaved synthetic fixture is not tied to a project, but it may still
+    // contain sensitive text pasted in error. Never carry it to another view
+    // and never preserve a now-stale receipt across a project switch.
+    ui.set_synthetic_evaluation_fixture("".into());
+    ui.set_synthetic_evaluation_receipt(
+        "No synthetic fixture evaluated for this project view.".into(),
+    );
+    ui.set_synthetic_evaluation_status(
+        "Synthetic-only evaluation is offline and has no access to project research objects."
+            .into(),
+    );
+    ui.set_synthetic_evaluation_open(false);
     ui.set_pdf_caption_request_id(ui.get_pdf_caption_request_id().wrapping_add(1));
     ui.set_pdf_caption_busy(false);
     ui.set_pdf_caption_candidates(
@@ -163,6 +176,7 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_notebook_cell_approval("".into());
     ui.set_notebook_cell_offset(0);
     ui.set_notebook_cell_total(0);
+    ui.set_notebook_cell_snapshot_revision(-1);
     ui.set_notebook_cell_status(
         "Arithmetic cells are project-scoped and run only a restricted offline expression language.".into(),
     );
@@ -470,12 +484,24 @@ fn refresh_arithmetic_cells(
     offset: i32,
 ) -> Result<(usize, i32), String> {
     let offset_usize = usize::try_from(offset).map_err(|_| "Negative cell page offset")?;
-    let result = evidence_read_at(
-        project,
-        "notebook.cell_list",
-        serde_json::json!({"limit":100,"offset":offset_usize}),
-        root,
-    )?;
+    let expected_snapshot = ui.get_notebook_cell_snapshot_revision();
+    let mut request = serde_json::json!({"limit":100,"offset":offset_usize});
+    if offset_usize > 0 {
+        if expected_snapshot < 0 {
+            return Err("Refresh saved cells before navigating history pages".into());
+        }
+        request["expected_project_revision"] = serde_json::json!(expected_snapshot);
+    }
+    let result = evidence_read_at(project, "notebook.cell_list", request, root)?;
+    let snapshot = result
+        .pointer("/data/project_revision")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|revision| i32::try_from(revision).ok())
+        .filter(|revision| *revision >= 0)
+        .ok_or("Persisted arithmetic cell source revision unavailable")?;
+    if offset_usize > 0 && snapshot != expected_snapshot {
+        return Err("Saved arithmetic cells changed; refresh the first page".into());
+    }
     let total = result
         .pointer("/data/total")
         .and_then(serde_json::Value::as_i64)
@@ -530,6 +556,7 @@ fn refresh_arithmetic_cells(
     ui.set_notebook_cells(Rc::new(slint::VecModel::from(cells)).into());
     ui.set_notebook_cell_offset(offset);
     ui.set_notebook_cell_total(total);
+    ui.set_notebook_cell_snapshot_revision(snapshot);
     Ok((count, total))
 }
 
@@ -8062,6 +8089,57 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|path| host_data_root().and_then(|root| project_read_safe(path,"project.diagnostics",
                         serde_json::json!({"project_id":ProjectStore::open(path).map_err(|e|e.to_string())?.info().map_err(|e|e.to_string())?.id}), &root)));
                 ui.set_diagnostics_results(match result { Ok(value) => safe_diagnostics(&value), Err(_) => "Diagnostics unavailable; verify the project and retry".into() }.into());
+            }
+        }
+    });
+    app.on_load_synthetic_evaluation_example({
+        let weak = app.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                match f44_synthetic_evaluation::sample_fixture_json() {
+                    Ok(example) => {
+                        ui.set_synthetic_evaluation_fixture(example.into());
+                        ui.set_synthetic_evaluation_receipt(
+                            "Example loaded but not evaluated. Run the explicit offline preview.".into(),
+                        );
+                        ui.set_synthetic_evaluation_status(
+                            "A small, programmatically generated synthetic example is ready; no real research object was read.".into(),
+                        );
+                    }
+                    Err(_) => {
+                        ui.set_synthetic_evaluation_fixture("".into());
+                        ui.set_synthetic_evaluation_receipt("No valid fixture receipt available.".into());
+                        ui.set_synthetic_evaluation_status("Synthetic example creation refused.".into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_preview_synthetic_evaluation({
+        let weak = app.as_weak();
+        move |fixture| {
+            if let Some(ui) = weak.upgrade() {
+                // No project handler, external transport, filesystem or
+                // persistence call is reachable from this callback.
+                match f44_synthetic_evaluation::preview_synthetic_json(fixture.as_str()) {
+                    Ok(preview) => {
+                        ui.set_synthetic_evaluation_status(format!(
+                            "SYNTHETIC FIXTURE ONLY — {} checked slots. Source/provenance SHA-256: {}. Markdown SHA-256: {}. Not a trained-model, gold-custody, calibration, or scientific-result claim. No project write or network.",
+                            preview.slots,
+                            preview.source_commitment_sha256,
+                            preview.markdown_sha256
+                        ).into());
+                        ui.set_synthetic_evaluation_receipt(preview.markdown.into());
+                    }
+                    Err(reason) => {
+                        ui.set_synthetic_evaluation_status(
+                            format!("Synthetic evaluation refused: {reason}. No result was recorded or uploaded.").into(),
+                        );
+                        ui.set_synthetic_evaluation_receipt(
+                            "No valid SHA-verified synthetic evaluation receipt for this fixture.".into(),
+                        );
+                    }
+                }
             }
         }
     });
