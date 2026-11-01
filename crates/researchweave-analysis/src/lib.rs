@@ -20,6 +20,7 @@ use std::path::{Path, PathBuf};
 use thiserror::Error;
 use time::{format_description::well_known::Rfc3339, OffsetDateTime};
 mod bayes;
+mod bayes_unknown;
 pub mod extraction_evaluation;
 pub mod extraction_evaluation_export;
 mod longitudinal;
@@ -3470,6 +3471,7 @@ impl AnalysisService {
             ("dataset.simple_impute", Effect::LocalWrite),
             ("statistics.describe", Effect::Read),
             ("statistics.bayes_normal_mean", Effect::Read),
+            ("statistics.bayes_normal_unknown_sd", Effect::Read),
             ("statistics.frequency", Effect::Read),
             ("statistics.test", Effect::Read),
             ("statistics.correlate", Effect::Read),
@@ -3840,6 +3842,7 @@ impl AnalysisService {
             }
             "statistics.describe" => describe(&dataset, string_arg(object, "column")?),
             "statistics.bayes_normal_mean" => bayes::normal_known_sd(&dataset, object),
+            "statistics.bayes_normal_unknown_sd" => bayes_unknown::run(&dataset, object),
             "statistics.pca" => {
                 let columns = object
                     .get("columns")
@@ -4398,6 +4401,73 @@ mod tests {
         }
         assert!(AnalysisService::capabilities().iter().any(|capability| {
             capability.operation == "statistics.bayes_normal_mean"
+                && capability.effect == Effect::Read
+        }));
+    }
+
+    #[test]
+    fn f39_normal_inverse_gamma_unknown_sd_is_source_bound_and_nonmutating() {
+        let root = tempfile::tempdir().unwrap();
+        let imports = root.path().join("imports");
+        fs::create_dir(&imports).unwrap();
+        fs::write(imports.join("study.csv"), SAMPLE).unwrap();
+        let service = AnalysisService::new(root.path().join("data"), &imports).unwrap();
+        let context = DispatchContext {
+            request_id: uuid::Uuid::new_v4(),
+            project_id: uuid::Uuid::new_v4(),
+            actor: "scientific-reviewer".into(),
+            expected_revision: None,
+        };
+        let imported =
+            service.execute("dataset.import", &json!({"filename":"study.csv"}), &context);
+        assert!(imported.get("status").is_none(), "{imported}");
+        let id = imported["data"]["dataset_id"].as_str().unwrap();
+        let revision = imported["data"]["revision"].as_str().unwrap();
+        let arguments = json!({
+            "dataset_id":id,"revision":revision,"column":"score",
+            "prior_mean":0,"prior_kappa":1,"prior_alpha":2,"prior_beta":2,
+            "credible_mass":0.95
+        });
+        let before = fs::read(service.store.path(id, revision).unwrap()).unwrap();
+        let actual = service.execute("statistics.bayes_normal_unknown_sd", &arguments, &context);
+        assert!(actual.get("status").is_none(), "{actual}");
+        assert_eq!(
+            actual["data"]["method"],
+            "normal_inverse_gamma_conjugate_unknown_variance"
+        );
+        assert_eq!(actual["data"]["dataset_revision"], revision);
+        assert_eq!(
+            actual["data"]["dataset_source_sha256"],
+            imported["data"]["source_hash"]
+        );
+        assert_eq!(actual["data"]["n_observed"], 6);
+        assert_eq!(actual["data"]["n_missing"], 0);
+        assert_eq!(actual["data"]["posterior_hyperparameters"]["mu_n"], 3.0);
+        assert_eq!(actual["data"]["posterior_hyperparameters"]["kappa_n"], 7.0);
+        assert_eq!(actual["data"]["posterior_hyperparameters"]["alpha_n"], 5.0);
+        assert_eq!(actual["data"]["posterior_hyperparameters"]["beta_n"], 16.0);
+        assert_eq!(actual["data"]["mcmc_performed"], false);
+        assert_eq!(actual["data"]["multilevel_model"], false);
+        assert_eq!(
+            actual,
+            service.execute("statistics.bayes_normal_unknown_sd", &arguments, &context)
+        );
+        assert_eq!(
+            fs::read(service.store.path(id, revision).unwrap()).unwrap(),
+            before
+        );
+        for invalid in [
+            json!({"dataset_id":id,"revision":revision,"column":"score","prior_mean":0,"prior_kappa":0,"prior_alpha":2,"prior_beta":2}),
+            json!({"dataset_id":id,"revision":"0".repeat(64),"column":"score","prior_mean":0,"prior_kappa":1,"prior_alpha":2,"prior_beta":2}),
+            json!({"dataset_id":id,"revision":revision,"column":"score","prior_mean":0,"prior_kappa":1,"prior_alpha":2,"prior_beta":2,"exec":"os.system"}),
+        ] {
+            assert_eq!(
+                service.execute("statistics.bayes_normal_unknown_sd", &invalid, &context)["status"],
+                "failed"
+            );
+        }
+        assert!(AnalysisService::capabilities().iter().any(|capability| {
+            capability.operation == "statistics.bayes_normal_unknown_sd"
                 && capability.effect == Effect::Read
         }));
     }

@@ -1,0 +1,70 @@
+{
+  "format": "f39-nig-scipy-student-t-oracle-v1",
+  "oracle": "Python scipy.stats.t.ppf with independently computed conjugate update",
+  "cases": [
+    {
+      "observations": [1, 2, 3],
+      "prior_mean": 0,
+      "prior_kappa": 1,
+      "prior_alpha": 2,
+      "prior_beta": 2,
+      "credible_mass": 0.95,
+      "expected_sample_mean": 2.0,
+      "expected_sum_squares": 2.0,
+      "expected_mu_n": 1.5,
+      "expected_kappa_n": 4.0,
+      "expected_alpha_n": 3.5,
+      "expected_beta_n": 4.5,
+      "expected_mean_interval": [0.15938406132284255, 2.8406159386771574],
+      "expected_predictive_interval": [-1.4977083706018135, 4.4977083706018135]
+    },
+    {
+      "observations": [2, 4, 6, 1, 3, 5],
+      "prior_mean": 0,
+      "prior_kappa": 1,
+      "prior_alpha": 2,
+      "prior_beta": 2,
+      "credible_mass": 0.95,
+      "expected_sample_mean": 3.5,
+      "expected_sum_squares": 17.5,
+      "expected_mu_n": 3.0,
+      "expected_kappa_n": 7.0,
+      "expected_alpha_n": 5.0,
+      "expected_beta_n": 16.0,
+      "expected_mean_interval": [1.4935031752943106, 4.506496824705689],
+      "expected_predictive_interval": [-1.2610164823415788, 7.261016482341579]
+    },
+    {
+      "observations": [10],
+      "prior_mean": 2,
+      "prior_kappa": 3,
+      "prior_alpha": 0.1,
+      "prior_beta": 0.5,
+      "credible_mass": 0.9,
+      "expected_sample_mean": 10.0,
+      "expected_sum_squares": 0.0,
+      "expected_mu_n": 4.0,
+      "expected_kappa_n": 4.0,
+      "expected_alpha_n": 0.6,
+      "expected_beta_n": 24.5,
+      "expected_mean_interval": [-11.322816710596808, 19.322816710596793],
+      "expected_predictive_interval": [-30.262859771664182, 38.262859771664154]
+    },
+    {
+      "observations": [-10, -2, 0, 6],
+      "prior_mean": -5,
+      "prior_kappa": 0.2,
+      "prior_alpha": 3,
+      "prior_beta": 4,
+      "credible_mass": 0.99,
+      "expected_sample_mean": -1.5,
+      "expected_sum_squares": 131.0,
+      "expected_mu_n": -1.6666666666666665,
+      "expected_kappa_n": 4.2,
+      "expected_alpha_n": 5.0,
+      "expected_beta_n": 70.66666666666667,
+      "expected_mean_interval": [-7.480428836793241, 4.147095503459909],
+      "expected_predictive_interval": [-14.924084174165374, 11.590750840832042]
+    }
+  ]
+}
