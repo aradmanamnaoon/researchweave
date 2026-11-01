@@ -3000,6 +3000,36 @@ def main() -> int:
         if project_event_snapshot(original_project) != f07_before:
             raise RuntimeError("F07 valid offline DOI preview mutated project events or revision")
         print("F07_NATIVE_INVALID_AND_VALID_DOI_PREVIEW_NO_NETWORK_NO_PROJECT_EVENTS_OK")
+        # F34: read-only redacted cryptographic research-object inventory.
+        # No online deposit or license/clinical-consent declaration is
+        # treated as verified. Execute the real desktop Diagnostics callback,
+        # then independently check the disposable project's SQLite events.
+        f34_before = project_event_snapshot(original_project)
+        activate_bounded_control(app, "Diagnostics workspace screen", down=False)
+        time.sleep(0.25)
+        activate_bounded_control(
+            app,
+            "Preview integrity-verified redacted research-object manifest without publishing",
+            down=True,
+        )
+        f34_names = ""
+        for _ in range(40):
+            f34_names = "\n".join((node.name or "") for node, _ in walk(app))
+            if "READ-ONLY REDACTED INVENTORY" in f34_names:
+                break
+            if "Open-science inventory refused:" in f34_names:
+                raise RuntimeError("F34 native inventory refused real test project")
+            time.sleep(0.15)
+        if (
+            "READ-ONLY REDACTED INVENTORY" not in f34_names
+            or "License, permission and clinical consent are UNVERIFIED" not in f34_names
+            or "publication and OSF deposit are NOT authorized" not in f34_names
+        ):
+            raise RuntimeError("F34 native redacted inventory receipt unavailable")
+        if project_event_snapshot(original_project) != f34_before:
+            raise RuntimeError("F34 read-only inventory modified immutable project event history")
+        audit(app, "diagnostics-f34-redacted-open-science-preview", output)
+        print("F34_NATIVE_REDACTED_PROJECT_INVENTORY_INTEGRITY_NO_WRITE_NO_DEPOSIT_OK")
     if not activate(app, "Home activity"):
         raise RuntimeError("Cannot return Home to verify recent-project recovery")
     time.sleep(0.25)

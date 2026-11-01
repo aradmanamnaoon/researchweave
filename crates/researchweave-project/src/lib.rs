@@ -19,6 +19,7 @@ use thiserror::Error;
 use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 
 mod handler;
+mod open_science_manifest;
 pub use handler::ProjectHandler;
 
 pub const SCHEMA_VERSION: u32 = 7;

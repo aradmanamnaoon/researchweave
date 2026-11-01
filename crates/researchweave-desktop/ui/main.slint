@@ -304,6 +304,9 @@ export component MainWindow inherits Window {
     in-out property <string> agent-action-results: "Stage an offline retrieval tool proposal to review its exact operation, effect and fingerprint before approval.";
     in-out property <string> provider-results: "Provider validation is offline-only; remote egress is disabled until explicitly configured.";
     in-out property <string> diagnostics-results: "Run structural diagnostics for the open project.";
+    in-out property <string> open-science-preview-results: "Research-object inventory is local and read-only. It cannot authorize redistribution, publish files, or verify consent.";
+    in-out property <int> open-science-request-id: 0;
+    in-out property <bool> open-science-busy: false;
     in-out property <string> project-activity-results: "Local project event provenance is not authenticated identity evidence.";
     in-out property <string> notebook-results: "Save a revisioned project notebook, inspect history, or export Markdown.";
     in-out property <string> notebook-draft: "";
@@ -366,6 +369,7 @@ export component MainWindow inherits Window {
     callback preview-arithmetic-cell();
     callback run-arithmetic-cell();
     callback load-arithmetic-cells();
+    callback preview-open-science-manifest();
     callback scan-pdf-caption-candidates(string, int);
     callback refresh-quick-notes(string, string);
     callback save-quick-note(string, int, string, string, string, string, bool, bool);
@@ -3608,6 +3612,20 @@ export component MainWindow inherits Window {
                             Text { text: "Structural checks only. No scientific or external-source certification."; color: Theme.muted-ink; wrap: word-wrap; }
                             Button { text: "Run diagnostics"; accessible-label: "Run project diagnostics"; clicked => { root.run-diagnostics(); } }
                             Text { text: root.diagnostics-results; accessible-label: "Project diagnostics summary " + root.diagnostics-results; color: Theme.ink; wrap: word-wrap; }
+                            Text { text: "Open-science inventory (offline preview)"; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Source hashes and byte counts only. Private titles and paths are redacted. This cannot approve patient-data publication or verify any license, consent, or OSF deposit."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Button {
+                                text: root.open-science-busy ? "Verifying local object hashes…" : "Preview redacted research-object inventory";
+                                enabled: !root.open-science-busy;
+                                accessible-label: "Preview integrity-verified redacted research-object manifest without publishing";
+                                clicked => { root.preview-open-science-manifest(); }
+                            }
+                            Text {
+                                text: root.open-science-preview-results;
+                                accessible-label: "Redacted open science inventory preview " + root.open-science-preview-results;
+                                color: Theme.muted-ink;
+                                wrap: word-wrap;
+                            }
                          }
                         }
                     }

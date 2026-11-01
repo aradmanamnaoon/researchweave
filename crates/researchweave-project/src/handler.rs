@@ -1,3 +1,4 @@
+use super::open_science_manifest;
 use super::{
     archive_project, archive_project_encrypted, inspect_schema, migrate_project, restore_archive,
     restore_encrypted_archive, sha256, validate_info, verify_archive, verify_encrypted_archive,
@@ -79,6 +80,7 @@ impl ProjectHandler {
             ("project.migration_preview", Effect::Read),
             ("project.migrate", Effect::LocalWrite),
             ("project.integrity", Effect::Read),
+            ("project.open_science_manifest_preview", Effect::Read),
             ("project.diagnostics", Effect::Read),
             ("project.activity", Effect::Read),
             ("project.timeline", Effect::Read),
@@ -405,6 +407,10 @@ impl ProjectHandler {
                 )
             }
             "project.integrity" => project_integrity(&path),
+            "project.open_science_manifest_preview" => {
+                let receipt = project_integrity(&path)?;
+                open_science_manifest::preview(&path, arguments, context, &receipt)
+            }
             "project.diagnostics" => project_diagnostics(&path),
             "project.activity" => project_activity(&path, arguments),
             "project.timeline" => timeline(&path, arguments),

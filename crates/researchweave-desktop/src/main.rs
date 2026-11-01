@@ -134,6 +134,11 @@ fn restore_writing_drafts(
 /// the previously active project.  Switching projects must never leave results
 /// from one project looking like they were computed for another.
 fn reset_project_visible_state(ui: &MainWindow) {
+    ui.set_open_science_request_id(ui.get_open_science_request_id().wrapping_add(1));
+    ui.set_open_science_busy(false);
+    ui.set_open_science_preview_results(
+        "No research-object inventory preview for this project. Source rights and patient consent are not verified.".into(),
+    );
     ui.set_pdf_caption_request_id(ui.get_pdf_caption_request_id().wrapping_add(1));
     ui.set_pdf_caption_busy(false);
     ui.set_pdf_caption_candidates(
@@ -8022,6 +8027,90 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .and_then(|path| host_data_root().and_then(|root| project_read_safe(path,"project.diagnostics",
                         serde_json::json!({"project_id":ProjectStore::open(path).map_err(|e|e.to_string())?.info().map_err(|e|e.to_string())?.id}), &root)));
                 ui.set_diagnostics_results(match result { Ok(value) => safe_diagnostics(&value), Err(_) => "Diagnostics unavailable; verify the project and retry".into() }.into());
+            }
+        }
+    });
+    app.on_preview_open_science_manifest({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let Some(project) = active_project.borrow().clone() else {
+                    ui.set_open_science_preview_results(
+                        "Open a research project before previewing its inventory.".into(),
+                    );
+                    return;
+                };
+                let request = ui.get_open_science_request_id().wrapping_add(1);
+                ui.set_open_science_request_id(request);
+                ui.set_open_science_busy(true);
+                ui.set_open_science_preview_results(
+                    "Checking the exact local event chain and every stored content hash. Nothing is uploaded or approved for public release.".into(),
+                );
+                let weak = weak.clone();
+                let active_project = active_project.clone();
+                std::thread::spawn(move || {
+                    let result = host_data_root().and_then(|root|
+                        project_read_safe(
+                            &project,
+                            "project.open_science_manifest_preview",
+                            serde_json::json!({}),
+                            &root,
+                        )
+                    );
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = weak.upgrade() {
+                            if ui.get_open_science_request_id() != request
+                                || active_project.borrow().as_ref() != Some(&project)
+                            {
+                                return;
+                            }
+                            ui.set_open_science_busy(false);
+                            let message = (|| -> Result<String, String> {
+                                let data = result?;
+                                let manifest = &data["manifest"];
+                                if data["preview_only"] != true
+                                    || data["writes"] != 0
+                                    || data["physical_file_written"] != false
+                                    || data["remote_service_contacted"] != false
+                                    || manifest["redistribution_authorized"] != false
+                                    || manifest["rights_verified"] != false
+                                    || manifest["ethics_or_patient_consent_verified"] != false
+                                    || manifest["external_deposit_performed"] != false
+                                    || manifest["source_titles_and_paths_redacted"] != true
+                                {
+                                    return Err("research-object preview failed closed on privacy or no-write guarantees".into());
+                                }
+                                let encoded = data["manifest_json"]
+                                    .as_str()
+                                    .ok_or("research-object manifest receipt missing")?;
+                                let hash = data["manifest_sha256"]
+                                    .as_str()
+                                    .ok_or("research-object manifest checksum missing")?;
+                                if hash.len() != 64
+                                    || hex::encode(Sha256::digest(encoded.as_bytes())) != hash
+                                {
+                                    return Err("research-object inventory checksum invalid".into());
+                                }
+                                let source_count = manifest["source_count"]
+                                    .as_u64().ok_or("source count not verified")?;
+                                let byte_count = manifest["included_total_bytes"]
+                                    .as_u64().ok_or("inventory size not verified")?;
+                                Ok(format!(
+                                    "READ-ONLY REDACTED INVENTORY. {source_count} active source records, {byte_count} bytes. Manifest SHA-256: {hash}. No source files were copied, and no network was contacted. License, permission and clinical consent are UNVERIFIED; publication and OSF deposit are NOT authorized."
+                                ))
+                            })();
+                            ui.set_open_science_preview_results(
+                                match message {
+                                    Ok(summary) => summary,
+                                    Err(error) => format!(
+                                        "Open-science inventory refused: {error}. No public deposit or rights clearance claimed."
+                                    ),
+                                }.into(),
+                            );
+                        }
+                    });
+                });
             }
         }
     });
