@@ -1872,6 +1872,13 @@ try {
     }
     Write-Output 'PASS: F04 collapsed native title-page builder previews an attributed unsaved draft with matching SHA-256 and no project revision change'
 
+    # The expanded title page may leave the parent Manuscript ID editor above
+    # the installed Windows viewport after collapse. Navigate from the real
+    # visible F05 citation editor back to that exact native control rather
+    # than assuming a clipped AccessKit node remains in the UIA tree.
+    $manuscriptReferenceAfterF04 = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $null = FocusByShiftTab $manuscriptReferenceAfterF04 ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID' 12
+
     foreach ($pair in @(
         @('Manuscript ID','uia-paper'),
         @('Manuscript section','Results'),
@@ -2133,7 +2140,8 @@ try {
     # approved stored manuscript used by those earlier checks is untouched.
     # Reuse the same disposable project and persisted $referenceId registered
     # through the real References native UI. Only UIA controls may mutate it.
-    $f05ManuscriptId = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID'
+    $f05ManuscriptAnchor = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05ManuscriptId = FocusByShiftTab $f05ManuscriptAnchor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID' 12
     $f05Section = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section'
     $f05Value = [System.Windows.Automation.ValuePattern]::Pattern
     if ($f05ManuscriptId.GetCurrentPattern($f05Value).Current.Value -ne 'uia-paper' -or
