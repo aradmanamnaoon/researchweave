@@ -58,6 +58,8 @@ jobs:
           cargo +1.94.1 check --workspace --locked
       - name: Offline pinned PDFium fetch security and retry contracts
         run: python3 -m unittest discover -s packaging/rust/tests -p 'test_*.py' -v
+      - name: Fail-closed manual release preflight contracts
+        run: python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --locked --all-features
