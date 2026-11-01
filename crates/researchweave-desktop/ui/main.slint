@@ -329,6 +329,8 @@ export component MainWindow inherits Window {
     in-out property <string> notebook-cell-code: "";
     in-out property <string> notebook-cell-approval: "";
     in-out property <string> notebook-cell-status: "Arithmetic cells run an offline restricted expression language; no Python kernel, file, or network access.";
+    in-out property <int> notebook-cell-offset: 0;
+    in-out property <int> notebook-cell-total: 0;
     in-out property <[NotebookCell]> notebook-cells: [];
     in-out property <[PdfCaptionCandidate]> pdf-caption-candidates: [];
     in-out property <string> pdf-caption-status: "Figure/table caption candidates are unverified text anchors; image pixels and table cells are not extracted.";
@@ -381,7 +383,7 @@ export component MainWindow inherits Window {
     callback notebook-draft-edited(string);
     callback preview-arithmetic-cell();
     callback run-arithmetic-cell();
-    callback load-arithmetic-cells();
+    callback load-arithmetic-cells(int);
     callback preview-open-science-manifest();
     callback load-research-lifecycle();
     callback scan-pdf-caption-candidates(string, int);
@@ -2363,10 +2365,32 @@ export component MainWindow inherits Window {
                                                 color: Theme.muted-ink;
                                                 wrap: word-wrap;
                                             }
-                                            Button {
-                                                text: "Refresh saved cells";
-                                                accessible-label: "Refresh immutable arithmetic notebook cells";
-                                                clicked => { root.load-arithmetic-cells(); }
+                                            Text {
+                                                text: root.notebook-cell-total == 0 ? "No saved arithmetic cells on this project." : "Saved arithmetic cells: " + root.notebook-cell-total + " total; this page begins at record " + (root.notebook-cell-offset + 1) + ".";
+                                                color: Theme.muted-ink;
+                                                wrap: word-wrap;
+                                            }
+                                            HorizontalLayout {
+                                                spacing: 8px;
+                                                Button {
+                                                    text: "Refresh saved cells";
+                                                    accessible-label: "Refresh immutable arithmetic notebook cells";
+                                                    clicked => { root.load-arithmetic-cells(0); }
+                                                }
+                                                Button {
+                                                    text: "Previous 100";
+                                                    accessible-label: "Load previous page of saved arithmetic notebook cells";
+                                                    enabled: root.notebook-cell-offset > 0;
+                                                    clicked => {
+                                                        root.load-arithmetic-cells(root.notebook-cell-offset >= 100 ? root.notebook-cell-offset - 100 : 0);
+                                                    }
+                                                }
+                                                Button {
+                                                    text: "Next 100";
+                                                    accessible-label: "Load next page of saved arithmetic notebook cells";
+                                                    enabled: root.notebook-cell-offset + 100 < root.notebook-cell-total;
+                                                    clicked => { root.load-arithmetic-cells(root.notebook-cell-offset + 100); }
+                                                }
                                             }
                                             for cell in root.notebook-cells: Button {
                                                 text: "v" + cell.revision + ": " + cell.code + " = " + cell.result;

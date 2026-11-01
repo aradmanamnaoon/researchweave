@@ -67,6 +67,11 @@ class NativeObsidianContract(unittest.TestCase):
         )
         self.assertIn('imported_event != ("knowledge.obsidian_import",)', self.atspi)
         self.assertIn("imported_card_rows[:-1] != prior_card_rows", self.atspi)
+        self.assertIn(
+            'activate_bounded_control(app, "Show long form project notebook", down=False)',
+            self.atspi,
+        )
+        self.assertNotIn('if not activate(app, "Show long form project notebook")', self.atspi)
 
 
 if __name__ == "__main__":

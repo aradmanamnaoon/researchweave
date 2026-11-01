@@ -19,7 +19,7 @@ class ArithmeticNotebookContract(unittest.TestCase):
         for callback in (
             "callback preview-arithmetic-cell();",
             "callback run-arithmetic-cell();",
-            "callback load-arithmetic-cells();",
+            "callback load-arithmetic-cells(int);",
         ):
             self.assertIn(callback, self.ui)
         for control in (
@@ -35,6 +35,19 @@ class ArithmeticNotebookContract(unittest.TestCase):
         self.assertIn('"notebook.cell_preview"', self.desktop)
         self.assertIn('"notebook.cell_list"', self.desktop)
         self.assertIn('evidence_execute_pending(&pending, &project, &root)', self.desktop)
+
+    def test_cell_pages_cover_all_bounded_history_without_one_hundred_row_truncation(self) -> None:
+        self.assertIn('serde_json::json!({"limit":100,"offset":offset_usize})', self.desktop)
+        self.assertIn('"total":total', self.runtime)
+        self.assertIn('"offset":offset', self.runtime)
+        self.assertIn('persisted_cell_pagination_reaches_after_first_hundred_without_losing_integrity', self.runtime)
+        for label in (
+            "Load previous page of saved arithmetic notebook cells",
+            "Load next page of saved arithmetic notebook cells",
+        ):
+            self.assertIn(label, self.ui)
+        self.assertIn('root.load-arithmetic-cells(root.notebook-cell-offset + 100);', self.ui)
+        self.assertIn('ui.set_notebook_cell_offset(0);', self.desktop)
 
     def test_runtime_cannot_launch_arbitrary_processes(self) -> None:
         for bad in (

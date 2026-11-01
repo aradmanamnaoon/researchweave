@@ -337,17 +337,37 @@ pub(super) fn list(store: &ProjectStore, args: &Value) -> Result<Value, String> 
     if !(1..=500).contains(&limit) {
         return Err("cell list limit must be 1..=500".into());
     }
+    let offset = match args.get("offset") {
+        Some(value) => value
+            .as_u64()
+            .ok_or("cell list offset must be nonnegative")?,
+        None => 0,
+    };
+    if offset > MAX_CELLS as u64 {
+        return Err("cell list offset exceeds the bounded notebook capacity".into());
+    }
+    let total: i64 = store
+        .connection()
+        .query_row(
+            "SELECT COUNT(DISTINCT id) FROM notebook_entries WHERE id LIKE 'cell:%'",
+            [],
+            |row| row.get(0),
+        )
+        .map_err(|_| "cell count unavailable")?;
+    if !(0..=MAX_CELLS).contains(&total) {
+        return Err("persisted notebook cell count exceeds the supported capacity".into());
+    }
     let mut statement = store
         .connection()
         .prepare(
             "SELECT n.id,n.revision,n.body,n.edited_at FROM notebook_entries n
          JOIN (SELECT id, MAX(revision) latest FROM notebook_entries
              WHERE id LIKE 'cell:%' GROUP BY id) t
-          ON t.id=n.id AND t.latest=n.revision ORDER BY n.edited_at DESC,n.id LIMIT ?1",
+          ON t.id=n.id AND t.latest=n.revision ORDER BY n.edited_at DESC,n.id LIMIT ?1 OFFSET ?2",
         )
         .map_err(|_| "cell list unavailable")?;
     let rows = statement
-        .query_map([limit as i64], |row| {
+        .query_map(params![limit as i64, offset as i64], |row| {
             Ok((
                 row.get::<_, String>(0)?,
                 row.get::<_, i64>(1)?,
@@ -393,7 +413,11 @@ pub(super) fn list(store: &ProjectStore, args: &Value) -> Result<Value, String> 
         cells.push(json!({"cell_id":id,"cell_revision":rev,
             "edited_at":time,"document":document}));
     }
-    Ok(json!({"cells":cells,"count":cells.len(),"limit":limit}))
+    let count = cells.len();
+    Ok(
+        json!({"cells":cells,"count":count,"limit":limit,"offset":offset,
+        "total":total,"has_more":offset + (count as u64) < total as u64}),
+    )
 }
 
 #[cfg(test)]
@@ -440,6 +464,65 @@ mod tests {
         }
         assert!(evaluate(&format!("{}1{}", "(".repeat(26), ")".repeat(26))).is_err());
         assert!(evaluate(&"1+".repeat(300)).is_err());
+    }
+
+    #[test]
+    fn persisted_cell_pagination_reaches_after_first_hundred_without_losing_integrity() {
+        // Populate a disposable project with structurally valid, sealed test
+        // documents. This tests bounded read pagination, not an event-write path.
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("Paging");
+        ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: Uuid::new_v4().to_string(),
+                title: "Paged cells".into(),
+                question: "Q".into(),
+                design: "exploratory".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: super::super::timestamp(),
+            },
+        )
+        .unwrap();
+        let store = ProjectStore::open(&path).unwrap();
+        for i in 0..105 {
+            let code = format!("{i}+1");
+            let mut document = json!({
+                "schema":1,"language":LANGUAGE,
+                "code":code,"code_sha256":digest(code.as_bytes()),
+                "result":{"kind":"finite_f64","value":(i + 1) as f64},
+                "runtime":"deterministic-arithmetic-v1",
+                "data_sources":[],"external_execution":false,
+            });
+            let canonical = serde_json::to_string(&document).unwrap();
+            document["content_sha256"] = json!(digest(canonical.as_bytes()));
+            store
+                .connection()
+                .execute(
+                    "INSERT INTO notebook_entries(id,revision,body,edited_at) VALUES (?1,1,?2,?3)",
+                    params![
+                        format!("cell:{}", Uuid::new_v4()),
+                        serde_json::to_string(&document).unwrap(),
+                        format!("{i:04}")
+                    ],
+                )
+                .unwrap();
+        }
+        let first = list(&store, &json!({"limit":100,"offset":0})).unwrap();
+        assert_eq!(first["count"], 100);
+        assert_eq!(first["total"], 105);
+        assert_eq!(first["has_more"], true);
+        let second = list(&store, &json!({"limit":100,"offset":100})).unwrap();
+        assert_eq!(second["count"], 5);
+        assert_eq!(second["total"], 105);
+        assert_eq!(second["has_more"], false);
+        let exhausted = list(&store, &json!({"limit":100,"offset":105})).unwrap();
+        assert_eq!(exhausted["count"], 0);
+        assert_eq!(exhausted["total"], 105);
+        assert!(list(&store, &json!({"limit":100,"offset":501})).is_err());
+        assert!(list(&store, &json!({"limit":100,"offset":-1})).is_err());
     }
 
     #[test]

@@ -1999,8 +1999,9 @@ def main() -> int:
             raise RuntimeError("F41 native import changed unrelated source fields or exact text")
         print("F41_NATIVE_OBSIDIAN_APPROVED_APPEND_PRESERVES_HISTORY_AND_METADATA_OK")
         audit(app, "quick-note-obsidian-approved-import", output)
-        if not activate(app, "Show long form project notebook"):
-            raise RuntimeError("Long form project notebook view cannot be opened")
+        # The F41 Markdown panel can push the Notebook view switch above the
+        # visible native viewport. Reveal and activate the actual AT-SPI button.
+        activate_bounded_control(app, "Show long form project notebook", down=False)
         time.sleep(0.25)
         edit_text(app, "Project notebook text", "ResearchWeave isolated UX note: source-grounded observations.")
         time.sleep(1.5)
@@ -2660,8 +2661,7 @@ def main() -> int:
                 raise RuntimeError("New project's notebook is unavailable")
             time.sleep(0.3)
         if not nodes_named(app, "Project notebook text"):
-            if not activate(app, "Show long form project notebook"):
-                raise RuntimeError("Long form notebook not reachable in second project")
+            activate_bounded_control(app, "Show long form project notebook", down=False)
             time.sleep(0.3)
         # A populated offscreen TextEdit can exist in AT-SPI while its Text
         # interface is missing. Prove the *actual visible* new-project editor
@@ -2720,8 +2720,7 @@ def main() -> int:
                 raise RuntimeError("Previously saved notebook is unavailable")
             time.sleep(0.3)
         if not nodes_named(app, "Project notebook text"):
-            if not activate(app, "Show long form project notebook"):
-                raise RuntimeError("Previous project's long form notebook inaccessible")
+            activate_bounded_control(app, "Show long form project notebook", down=False)
             time.sleep(0.3)
         # The exact TextEdit failed AT-SPI queryText during the preceding
         # project-B empty-state probe on installed Linux. Re-open the saved

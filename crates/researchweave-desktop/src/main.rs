@@ -161,6 +161,8 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_notebook_cell_revision(0);
     ui.set_notebook_cell_code("".into());
     ui.set_notebook_cell_approval("".into());
+    ui.set_notebook_cell_offset(0);
+    ui.set_notebook_cell_total(0);
     ui.set_notebook_cell_status(
         "Arithmetic cells are project-scoped and run only a restricted offline expression language.".into(),
     );
@@ -461,13 +463,35 @@ fn show_activity(ui: &MainWindow, state: &durable_activity::Activity) {
 
 slint::include_modules!();
 
-fn refresh_arithmetic_cells(ui: &MainWindow, project: &Path, root: &Path) -> Result<usize, String> {
+fn refresh_arithmetic_cells(
+    ui: &MainWindow,
+    project: &Path,
+    root: &Path,
+    offset: i32,
+) -> Result<(usize, i32), String> {
+    let offset_usize = usize::try_from(offset).map_err(|_| "Negative cell page offset")?;
     let result = evidence_read_at(
         project,
         "notebook.cell_list",
-        serde_json::json!({"limit":100}),
+        serde_json::json!({"limit":100,"offset":offset_usize}),
         root,
     )?;
+    let total = result
+        .pointer("/data/total")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|count| i32::try_from(count).ok())
+        .filter(|count| (0..=500).contains(count))
+        .ok_or("Bounded saved-cell total unavailable")?;
+    if (total > 0 && offset >= total) || (total == 0 && offset != 0) {
+        return Err("Saved arithmetic cell page is beyond the current history".into());
+    }
+    if result
+        .pointer("/data/offset")
+        .and_then(serde_json::Value::as_u64)
+        != Some(offset_usize as u64)
+    {
+        return Err("Saved arithmetic cell page receipt has a mismatched offset".into());
+    }
     let rows = result
         .pointer("/data/cells")
         .and_then(serde_json::Value::as_array)
@@ -504,7 +528,9 @@ fn refresh_arithmetic_cells(ui: &MainWindow, project: &Path, root: &Path) -> Res
     }
     let count = cells.len();
     ui.set_notebook_cells(Rc::new(slint::VecModel::from(cells)).into());
-    Ok(count)
+    ui.set_notebook_cell_offset(offset);
+    ui.set_notebook_cell_total(total);
+    Ok((count, total))
 }
 
 fn refresh_quick_note_cards(
@@ -3922,7 +3948,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         .as_f64()
                         .filter(|value| value.is_finite())
                         .ok_or("Recorded arithmetic result unavailable")?;
-                    refresh_arithmetic_cells(&ui, &project, &root)?;
+                    refresh_arithmetic_cells(&ui, &project, &root, 0)?;
                     Ok((cell_revision, project_revision, number))
                 })();
                 match result {
@@ -3943,17 +3969,17 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     app.on_load_arithmetic_cells({
         let weak = app.as_weak();
         let active_project = active_project.clone();
-        move || {
+        move |offset| {
             if let Some(ui) = weak.upgrade() {
                 ui.set_notebook_cell_approval("".into());
                 let result = active_project.borrow().as_ref()
                     .ok_or_else(|| "Open a research project first".to_owned())
                     .and_then(|project| {
-                        refresh_arithmetic_cells(&ui, project, &host_data_root()?)
+                        refresh_arithmetic_cells(&ui, project, &host_data_root()?, offset)
                     });
                 match result {
-                    Ok(count) => ui.set_notebook_cell_status(
-                        format!("Loaded {count} latest arithmetic cells from this project. Select a saved cell to review or append another revision.").into()
+                    Ok((count, total)) => ui.set_notebook_cell_status(
+                        format!("Loaded {count} latest arithmetic cells at offset {offset} of {total} in this project. Select a saved cell to review or append another revision.").into()
                     ),
                     Err(error) => ui.set_notebook_cell_status(
                         format!("Arithmetic cell history unavailable: {error}").into()
