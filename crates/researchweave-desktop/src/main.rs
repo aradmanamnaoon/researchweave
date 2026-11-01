@@ -32,6 +32,7 @@ use uuid::Uuid;
 #[cfg(test)]
 mod display_contrast;
 mod durable_activity;
+mod manuscript_citation_insert;
 mod manuscript_outline;
 mod manuscript_search;
 mod pdf_engine;
@@ -214,8 +215,10 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_manuscript_draft_section("".into());
     ui.set_manuscript_draft_citations("".into());
     ui.set_manuscript_draft_body("".into());
+    ui.set_manuscript_citation_reference_id("".into());
+    ui.set_manuscript_citation_status("Choose a reference from this project; preview then explicitly apply. The marker is appended at the end.".into());
     ui.set_manuscript_title_page_preview(
-        "Preview a title page from verified input; this does not save or submit anything.".into(),
+        "Preview a title page from validated fields; this does not save or submit anything.".into(),
     );
     ui.set_manuscript_title_page_open(false);
     ui.set_manuscript_sections(
@@ -3978,6 +3981,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let pending_manuscript_replace: Rc<RefCell<Option<manuscript_search::PendingReplace>>> =
         Rc::new(RefCell::new(None));
+    let pending_manuscript_citation: Rc<
+        RefCell<Option<manuscript_citation_insert::PendingCitation>>,
+    > = Rc::new(RefCell::new(None));
     app.on_preview_manuscript_replace({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -4126,7 +4132,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let active_project = active_project.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
+        let pending_manuscript_citation = pending_manuscript_citation.clone();
         move |id, section, citations, body| {
+            pending_manuscript_citation.borrow_mut().take();
             if let Some(ui) = weak.upgrade() {
                 let (words, chars) = manuscript_search::counts(body.as_str());
                 ui.set_manuscript_word_count(i32::try_from(words).unwrap_or(i32::MAX));
@@ -4212,6 +4220,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let pending_ai = pending_ai.clone();
         let selected_agent_action = selected_agent_action.clone();
         let pending_manuscript_replace = pending_manuscript_replace.clone();
+        let pending_manuscript_citation = pending_manuscript_citation.clone();
         move || {
             pending_project_metadata.borrow_mut().take();
             pending_evidence.borrow_mut().take();
@@ -4223,6 +4232,144 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             pending_ai.borrow_mut().take();
             selected_agent_action.borrow_mut().take();
             pending_manuscript_replace.borrow_mut().take();
+            pending_manuscript_citation.borrow_mut().take();
+        }
+    });
+    app.on_preview_manuscript_citation({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_citation = pending_manuscript_citation.clone();
+        move || {
+            pending_citation.borrow_mut().take();
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<manuscript_citation_insert::PendingCitation, String> {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a project before citing a reference")?;
+                let info = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?;
+                let project_id = Uuid::parse_str(&info.id).map_err(|_| "Invalid project ID")?;
+                let reference_id = Uuid::parse_str(
+                    ui.get_manuscript_citation_reference_id().as_str().trim(),
+                )
+                .map_err(|_| "Enter an exact registered reference UUID")?;
+                let draft = manuscript_citation_insert::DraftSnapshot {
+                    manuscript_id: ui.get_manuscript_draft_id().to_string(),
+                    section: ui.get_manuscript_draft_section().to_string(),
+                    body: ui.get_manuscript_draft_body().to_string(),
+                    citations: ui.get_manuscript_draft_citations().to_string(),
+                };
+                let prepared = manuscript_citation_insert::prepare(&draft, reference_id)?;
+                let receipt = library_read_at(
+                    &project,
+                    "library.reference_export",
+                    serde_json::json!({"reference_id":reference_id.to_string()}),
+                    &host_data_root()?,
+                )?;
+                let reference =
+                    manuscript_citation_insert::verified_reference(reference_id, &receipt)?;
+                Ok(manuscript_citation_insert::PendingCitation {
+                    project,
+                    project_id,
+                    project_revision: info.revision,
+                    draft,
+                    reference,
+                    prepared,
+                })
+            })();
+            match result {
+                Ok(pending) => {
+                    let marker = format!("[@{}]", pending.reference.id);
+                    let title: String = pending
+                        .reference
+                        .title
+                        .chars()
+                        .take(100)
+                        .map(|character| if character.is_control() { ' ' } else { character })
+                        .collect();
+                    ui.set_manuscript_citation_status(
+                        format!("PREVIEW ONLY — no draft changes. Locally registered reference: {title} (status: {}). Apply to append {marker} at the END of the section and deduplicate citation IDs. No claim or external metadata verification; autosave follows explicit apply.", pending.reference.status).into(),
+                    );
+                    *pending_citation.borrow_mut() = Some(pending);
+                }
+                Err(error) => ui.set_manuscript_citation_status(
+                    format!("Citation preview refused: {error}").into(),
+                ),
+            }
+        }
+    });
+    app.on_apply_manuscript_citation({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_citation = pending_manuscript_citation.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<manuscript_citation_insert::CitationDraft, String> {
+                let pending = pending_citation
+                    .borrow_mut()
+                    .take()
+                    .ok_or("Preview this citation before applying it")?;
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a project before inserting a citation")?;
+                let info = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?;
+                let project_id = Uuid::parse_str(&info.id).map_err(|_| "Invalid project ID")?;
+                let requested_id = ui.get_manuscript_citation_reference_id().to_string();
+                let draft = manuscript_citation_insert::DraftSnapshot {
+                    manuscript_id: ui.get_manuscript_draft_id().to_string(),
+                    section: ui.get_manuscript_draft_section().to_string(),
+                    body: ui.get_manuscript_draft_body().to_string(),
+                    citations: ui.get_manuscript_draft_citations().to_string(),
+                };
+                // Re-read the exact project-bound library row. Deleted or modified
+                // source records cannot inherit an earlier preview's authority.
+                let receipt = library_read_at(
+                    &project,
+                    "library.reference_export",
+                    serde_json::json!({"reference_id":pending.reference.id.to_string()}),
+                    &host_data_root()?,
+                )?;
+                let reference = manuscript_citation_insert::verified_reference(
+                    pending.reference.id,
+                    &receipt,
+                )?;
+                pending.validate(
+                    &project,
+                    project_id,
+                    info.revision,
+                    &draft,
+                    &requested_id,
+                    &reference,
+                )?;
+                Ok(pending.prepared)
+            })();
+            match result {
+                Ok(prepared) => {
+                    ui.set_manuscript_draft_body(prepared.body.clone().into());
+                    ui.set_manuscript_draft_citations(prepared.citations.clone().into());
+                    // Existing recoverable manuscript draft and autosave contract;
+                    // no separate write or claim that autosave already succeeded.
+                    ui.invoke_manuscript_draft_edited(
+                        ui.get_manuscript_draft_id(),
+                        ui.get_manuscript_draft_section(),
+                        prepared.citations.into(),
+                        prepared.body.into(),
+                    );
+                    ui.set_manuscript_citation_status(
+                        "Applied the locally registered citation to this editable draft; marker appended at end and metadata deduplicated. Autosave is pending, not yet confirmed. No external claim verification.".into(),
+                    );
+                }
+                Err(error) => ui.set_manuscript_citation_status(
+                    format!("Citation not applied: {error}").into(),
+                ),
+            }
         }
     });
     app.on_preview_question({
