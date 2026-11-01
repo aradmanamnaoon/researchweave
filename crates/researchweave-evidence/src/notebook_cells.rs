@@ -430,6 +430,18 @@ pub(super) fn list(store: &ProjectStore, args: &Value) -> Result<Value, String> 
         cells.push(json!({"cell_id":id,"cell_revision":rev,
             "edited_at":time,"document":document}));
     }
+    // Do not return a purportedly stable page if another local process
+    // committed a project revision while this page was being materialized.
+    // This does not replace a transactional snapshot, but detects a changing
+    // project revision within this bounded read operation and fails closed.
+    if store
+        .info()
+        .map_err(|_| "cell list post-read project revision unavailable")?
+        .revision
+        != info.revision
+    {
+        return Err("cell list changed during read; refresh the first page".into());
+    }
     let count = cells.len();
     Ok(
         json!({"cells":cells,"count":count,"limit":limit,"offset":offset,
