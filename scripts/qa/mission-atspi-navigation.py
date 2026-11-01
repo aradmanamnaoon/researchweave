@@ -1678,11 +1678,28 @@ def main() -> int:
     if "already has an immutable local freeze baseline" not in duplicate_status:
         raise RuntimeError("Duplicate local baseline was not rejected")
     print("LOCAL_PROTOCOL_FREEZE_ONE_TIME_DIGEST_AND_NO_PREVIEW_WRITE_OK")
-    scroll_protocol(False)
+    # After two physical Save attempts the Protocol viewport is near the
+    # bottom. Five generic wheel-up events do not reliably re-materialize
+    # objective/rationale fields in Slint's accessible tree. Reveal each
+    # exact editor before typing; the following audited amend/save and
+    # immutable freeze-digest checks must still pass.
+    # Protocol's nested scrollbars consume wheel events when aimed at x=1266
+    # (the generic manuscript/reference reveal target). Restore the parent
+    # Protocol scroll using its established interior x=1100 wheel path first.
+    # A bounded visible-control check still guards the subsequent typing.
+    scroll_protocol(False, 22)
+    audit(app, "protocol-amendment-objective-reveal-diagnostic", output)
+    for node in nodes_named(app, "Protocol objective"):
+        try:
+            rect = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+            print(f"PROTOCOL_OBJECTIVE_BOUNDS={rect.x},{rect.y},{rect.width},{rect.height}")
+        except Exception as error:
+            print(f"PROTOCOL_OBJECTIVE_BOUNDS_UNAVAILABLE={type(error).__name__}")
+    reveal_bounded_control(app, "Protocol objective", down=False)
     edit_text(app, "Protocol objective", "Amended after the locked baseline", allow_unreadable=True)
+    reveal_bounded_control(app, "Protocol amendment rationale", down=True)
     edit_text(app, "Protocol amendment rationale", "Transparent post-freeze change", allow_unreadable=True)
-    if not activate(app, "Preview protocol amendment"):
-        raise RuntimeError("Post-freeze amendments should remain permitted with disclosure")
+    activate_bounded_control(app, "Preview protocol amendment", down=True)
     time.sleep(0.25)
     if not activate(app, "Record previewed protocol"):
         raise RuntimeError("Post-freeze amendment was not recorded")

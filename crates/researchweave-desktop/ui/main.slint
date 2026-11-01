@@ -1469,7 +1469,21 @@ export component MainWindow inherits Window {
                                 protocol-design := LineEdit { placeholder-text: "Design: observational, experimental, qualitative, mixed…"; accessible-label: "Protocol design"; }
                                 protocol-author := LineEdit { placeholder-text: "Author"; accessible-label: "Protocol author"; }
                             }
-                            protocol-objective := TextEdit { accessible-label: "Protocol objective"; text: ""; }
+                            // An unconstrained TextEdit inside this ScrollView
+                            // collapsed to height=0 after the longer local
+                            // baseline/receipt panels were introduced. Real
+                            // Linux Xvfb/AT-SPI showed its node at x=373,
+                            // y=305, width=883, height=0; the objective was
+                            // invisible and post-freeze amendment impossible.
+                            // Keep a usable multiline editor at narrow widths
+                            // while allowing the outer page to scroll.
+                            protocol-objective := TextEdit {
+                                accessible-label: "Protocol objective";
+                                text: "";
+                                min-height: 96px;
+                                preferred-height: 112px;
+                                max-height: 176px;
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
                                 Button {
