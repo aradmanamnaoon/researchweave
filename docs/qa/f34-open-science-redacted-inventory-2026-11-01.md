@@ -12,6 +12,8 @@ Optional caller declarations map a known source UUID to a bounded, syntactically
 
 The native Diagnostics workspace now includes **Preview redacted research-object inventory**. It hashes the local project's objects asynchronously, verifies its exact receipt checksum and all no-publication/no-write flags before displaying only aggregate counts and a digest. Switching projects invalidates outstanding results; the UI never approves rights, includes source bytes, or initiates a remote service call.
 
+The first hosted exact-source quality candidate exposed a genuine compile-time Send violation: the asynchronous callback attempted to move the GUI's `Rc<RefCell<Option<PathBuf>>>` project selector across a worker thread boundary. The subsequent source fix keeps the selector on the UI thread and uses the already incremented UI request identifier (bumped on project switch) as the cancellation/stale-result fence. This fix remains pending exact patched-source hosted desktop compilation; it is not a claimed installed GUI pass.
+
 A real disposable-project Rust unit test inserts synthetic source metadata into its own test database, verifies SHA-256, redaction, deterministic repeated output, exact SQLite no-write, invalid rights/source refusal, and publication gate. The focused test and strict project-crate Clippy passed on Windows locally. Native source-contract tests and a separate Xvfb/AT-SPI genuine read-only user action with independently checked SQLite event immutability were added. **The native installed scenario has not yet passed on this source SHA.**
 
 ## Remaining F34 release requirements

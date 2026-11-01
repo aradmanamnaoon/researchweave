@@ -270,13 +270,16 @@ pub(super) fn execute(
         return Err("explicit exact notebook execution approval required".into());
     }
     let (id, expected, code, result) = checked_args(args)?;
-    let stored = json!({
+    let mut stored = json!({
         "schema":1,"language":LANGUAGE,
         "code":code,"code_sha256":digest(code.as_bytes()),
         "result":{"kind":"finite_f64","value":result},
         "runtime":"deterministic-arithmetic-v1",
         "data_sources":[],"external_execution":false
     });
+    let content =
+        serde_json::to_string(&stored).map_err(|_| "cell content serialization unavailable")?;
+    stored["content_sha256"] = json!(digest(content.as_bytes()));
     let serialized =
         serde_json::to_string(&stored).map_err(|_| "cell serialization unavailable")?;
     let record_sha = digest(serialized.as_bytes());
@@ -360,11 +363,30 @@ pub(super) fn list(store: &ProjectStore, args: &Value) -> Result<Value, String> 
         let document: Value =
             serde_json::from_str(&encoded).map_err(|_| "corrupt persisted cell document")?;
         let source = document["code"].as_str().ok_or("cell code absent")?;
+        // Source code and result are sealed together, rather than validating
+        // only the code hash while accepting an altered stored numeric result.
+        let mut unsigned = document.clone();
+        let claimed = unsigned
+            .as_object_mut()
+            .and_then(|properties| properties.remove("content_sha256"))
+            .and_then(|value| value.as_str().map(str::to_owned))
+            .ok_or("cell content commitment missing")?;
+        let canonical =
+            serde_json::to_string(&unsigned).map_err(|_| "cell content cannot be reserialized")?;
+        let stored_value = document["result"]["value"]
+            .as_f64()
+            .filter(|value| value.is_finite())
+            .ok_or("nonfinite stored arithmetic result")?;
         if document["schema"] != 1
             || document["language"] != LANGUAGE
             || document["code_sha256"] != digest(source.as_bytes())
+            || claimed != digest(canonical.as_bytes())
             || document["external_execution"] != false
-            || !document["result"]["value"].is_number()
+            || document["result"]["kind"] != "finite_f64"
+            || document["runtime"] != "deterministic-arithmetic-v1"
+            || evaluate(source).map_or(true, |value| {
+                (value - stored_value).abs() > 1e-12 * value.abs().max(stored_value.abs()).max(1.0)
+            })
         {
             return Err("cell revision failed integrity checks".into());
         }
@@ -505,7 +527,7 @@ mod tests {
                 .prepare("SELECT revision,body FROM notebook_entries WHERE id=? ORDER BY revision")
                 .unwrap();
             statement
-                .query_map([cell], |row| Ok((row.get(0)?, row.get(1)?)))
+                .query_map([&cell], |row| Ok((row.get(0)?, row.get(1)?)))
                 .unwrap()
                 .map(|row| row.unwrap())
                 .collect()
@@ -538,5 +560,25 @@ mod tests {
             )["status"],
             "ok"
         );
+        let mut tampered: Value = serde_json::from_str(&history[1].1).unwrap();
+        tampered["result"]["value"] = json!(999.0);
+        let tampered_body = serde_json::to_string(&tampered).unwrap();
+        // Model a manually damaged local file, without ever touching a real
+        // user database: the original event receipts must remain unchanged.
+        assert_eq!(
+            db.connection()
+                .execute(
+                    "UPDATE notebook_entries SET body=?1 WHERE id=?2 AND revision=2",
+                    params![tampered_body, cell],
+                )
+                .unwrap(),
+            1
+        );
+        let rejected = host.execute(
+            "notebook.cell_list",
+            &json!({"project_id":project}),
+            &context,
+        );
+        assert_eq!(rejected["status"], "error", "{rejected}");
     }
 }

@@ -8048,7 +8048,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     "Checking the exact local event chain and every stored content hash. Nothing is uploaded or approved for public release.".into(),
                 );
                 let weak = weak.clone();
-                let active_project = active_project.clone();
+                // Rc<RefCell<...>> is a UI-thread-only project selector. It
+                // must never cross the Send boundary of std::thread::spawn.
+                // reset_project_visible_state increments the UI request ID
+                // on every project switch; that ID is the stale-job fence.
                 std::thread::spawn(move || {
                     let result = host_data_root().and_then(|root|
                         project_read_safe(
@@ -8060,9 +8063,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     );
                     let _ = slint::invoke_from_event_loop(move || {
                         if let Some(ui) = weak.upgrade() {
-                            if ui.get_open_science_request_id() != request
-                                || active_project.borrow().as_ref() != Some(&project)
-                            {
+                            if ui.get_open_science_request_id() != request {
                                 return;
                             }
                             ui.set_open_science_busy(false);

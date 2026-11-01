@@ -21,7 +21,7 @@ class NativeOpenScienceManifestContract(unittest.TestCase):
         self.assertIn('app.on_preview_open_science_manifest({', self.desktop)
         self.assertIn('"project.open_science_manifest_preview"', self.desktop)
         self.assertIn('ui.get_open_science_request_id() != request', self.desktop)
-        self.assertIn('active_project.borrow().as_ref() != Some(&project)', self.desktop)
+        self.assertIn("reset_project_visible_state increments the UI request ID", self.desktop)
         self.assertIn('project_read_safe(', self.desktop)
 
     def test_refuses_license_and_consent_approval_without_proof(self) -> None:

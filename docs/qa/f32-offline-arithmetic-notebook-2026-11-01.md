@@ -11,6 +11,8 @@ A deterministic **offline arithmetic-only execution runtime** is integrated into
 
 The language supports finite numeric literals, scientific notation, `+`, `-`, `*`, `/`, unary signs, parentheses, `sqrt()`, `ln()`, and `abs()`. The evaluator enforces operation/depth/magnitude limits, finite outputs, and refusal of unsupported syntax, division by zero, invalid function domains, identifiers, shell/Python constructs, and non-ASCII/code injection. It uses **no external process or interpreter**, no filesystem, network or FFI.
 
+Additional data-integrity hardening: each saved cell's exact canonical code/result/runtime record now carries a deterministic `content_sha256` field; list/read recomputes it, verifies the source digest and deterministic result, and refuses nonfinite, unsupported, or altered persisted result values. A disposable-database negative test deliberately changes the most recent stored numeric result while preserving the old checksum and confirms that the native notebook handler refuses to load the tampered record. Hashes detect accidental/content modification and support project provenance; they are not cryptographically authenticated external authorship.
+
 ## Verification
 
 Two focused Rust unit tests of the real project service and expression grammar passed locally on a disposable project before GUI additions. The local native source-contract tests, Python syntax check and Rust formatting pass. The private Linux Xvfb/AT-SPI script now exercises a genuine user-entered expression, no-write preview, separately approved project event, actual immutable SQLite cell record and unsafe expression refusal. Both candidate/release workflows require exact three positive markers and fail if Notebook cannot be reached.
