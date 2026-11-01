@@ -13,6 +13,7 @@ use uuid::Uuid;
 mod bibliography;
 mod collections;
 mod dedup;
+mod pdf_metadata_suggestions;
 mod references;
 mod relations;
 
@@ -85,6 +86,7 @@ impl LibraryHandler {
             ("reference.merge", Effect::LocalWrite),
             ("reference.unmerge", Effect::LocalWrite),
             ("reference.dedup_candidates", Effect::Read),
+            ("reference.pdf_metadata_preview", Effect::Read),
             ("reference.dedup_decision_history", Effect::Read),
             ("reference.dedup_keep_separate", Effect::LocalWrite),
             ("reference.dedup_reconsider", Effect::LocalWrite),
@@ -161,6 +163,9 @@ impl LibraryHandler {
         preview: bool,
     ) -> Result<Value, String> {
         let mut store = self.store(args, ctx).map_err(str::to_owned)?;
+        if operation == "reference.pdf_metadata_preview" {
+            return pdf_metadata_suggestions::preview(&store, args, ctx);
+        }
         if matches!(
             operation,
             "reference.dedup_candidates"
@@ -565,6 +570,109 @@ mod tests {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use researchweave_project::ProjectInfo;
     use tempfile::TempDir;
+
+    #[test]
+    fn pdf_metadata_suggestions_are_bound_source_checked_and_nonmutating() {
+        let temp = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = temp.path().join("PDF local metadata suggestion");
+        let store = ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "PDF suggestions".into(),
+                question: "Synthetic fixture only".into(),
+                design: "observational".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: Utc::now().to_rfc3339(),
+            },
+        )
+        .unwrap();
+        // Unit-test fixture simulates already indexed PDF text; it is not a
+        // real PDF parser test or evidence of metadata accuracy.
+        let source_id = Uuid::new_v4().to_string();
+        let pdf_sha = store
+            .put_object(b"%PDF-1.4 synthetic fixture bytes")
+            .unwrap();
+        let body = "A Synthetic Research Paper\nDOI: 10.1234/fixture.2026.1\n";
+        let body_hash = hex::encode(Sha256::digest(body.as_bytes()));
+        store.connection().execute(
+            "INSERT INTO sources(id,title,media_type,digest,imported_at,origin,deleted) VALUES(?1,'fixture.pdf','application/pdf',?2,'2026-01-01','synthetic',0)",
+            params![source_id, pdf_sha],
+        ).unwrap();
+        store.connection().execute(
+            "INSERT INTO document_text(source_id,body,extraction_version,body_hash) VALUES(?1,?2,'synthetic-fixture',?3)",
+            params![source_id,body,body_hash],
+        ).unwrap();
+        let handler = LibraryHandler::bound(project_id, &path).unwrap();
+        let ctx = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "tester".into(),
+            expected_revision: Some(0),
+        };
+        let args = json!({"project_id":project_id.to_string(),"source_id":source_id});
+        let preview = handler.preview("reference.pdf_metadata_preview", &args, &ctx);
+        let executed = handler.execute("reference.pdf_metadata_preview", &args, &ctx);
+        assert_eq!(preview, executed);
+        assert_eq!(executed["status"], "ok", "{executed}");
+        assert_eq!(executed["data"]["preview_only"], true);
+        assert_eq!(executed["data"]["external_doi_verified"], false);
+        assert_eq!(
+            executed["data"]["doi_candidates"][0]["value"],
+            "10.1234/fixture.2026.1"
+        );
+        assert_eq!(executed["data"]["automatic_reference_update"], false);
+        assert_eq!(executed["data"]["extracted_text_sha256"], body_hash);
+        assert_eq!(executed["data"]["truncated"], false);
+        assert_eq!(
+            LibraryHandler::bound(project_id, &path).unwrap().execute(
+                "reference.pdf_metadata_preview",
+                &args,
+                &ctx
+            ),
+            executed
+        );
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        let mut wrong = args.clone();
+        wrong["project_id"] = json!(Uuid::new_v4().to_string());
+        assert_eq!(
+            handler.execute("reference.pdf_metadata_preview", &wrong, &ctx)["status"],
+            "failed"
+        );
+        let stale = DispatchContext {
+            expected_revision: Some(1),
+            ..ctx.clone()
+        };
+        assert_eq!(
+            handler.execute("reference.pdf_metadata_preview", &args, &stale)["status"],
+            "failed"
+        );
+        store
+            .connection()
+            .execute(
+                "UPDATE document_text SET body_hash=?1 WHERE source_id=?2",
+                params!["0".repeat(64), source_id],
+            )
+            .unwrap();
+        assert_eq!(
+            handler.execute("reference.pdf_metadata_preview", &args, &ctx)["status"],
+            "failed"
+        );
+        assert!(LibraryHandler::capabilities()
+            .iter()
+            .any(|c| c.operation == "reference.pdf_metadata_preview" && c.effect == Effect::Read));
+    }
 
     #[test]
     fn host_bound_handler_supports_arbitrary_project_folder_without_path_arguments() {
