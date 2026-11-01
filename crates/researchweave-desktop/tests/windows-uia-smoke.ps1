@@ -307,6 +307,18 @@ function WaitForNameLike(
     }
     throw "UIA result missing: $Pattern"
 }
+function Get-VisibleProjectRevision([System.Windows.Automation.AutomationElement]$Window) {
+    # The workbench header exposes the actual revision from the native project
+    # store, not the last operation's self-reported writes=0 field.
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        foreach ($item in (Children $Window ([System.Windows.Automation.ControlType]::Text))) {
+            $match = [regex]::Match($item.Current.Name, ' · r([0-9]+)$')
+            if ($match.Success) { return [long]::Parse($match.Groups[1].Value) }
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    throw 'Project revision was not exposed by the native workbench header'
+}
 function AssertImplementedPageHasNoFallback(
     [System.Windows.Automation.AutomationElement]$Window,
     [string]$Page
@@ -920,6 +932,63 @@ try {
     $referenceId = [regex]::Match([string]$referenceResult, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}').Value
     if ([string]::IsNullOrWhiteSpace($referenceId)) { throw 'Reference registration did not expose its generated reference ID' }
 
+    # F14: the disposable project has exactly one registered reference here,
+    # so the real scanner must return zero candidate pairs, write no decision,
+    # and leave the native project revision unchanged.
+    $dedupRevisionBefore = Get-VisibleProjectRevision $window
+    $registerAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Register previewed reference'
+    $dedupToggle = FocusByTab $registerAnchor ([System.Windows.Automation.ControlType]::Button) 'Toggle reviewable reference duplicate finder' 6
+    $dedupToggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $dedupScan = FocusByTab $dedupToggle ([System.Windows.Automation.ControlType]::Button) 'Scan local reference duplicate candidates without changing data' 4
+    $dedupScan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference candidates scanned locally; no changes recorded*' 10000
+    $dedupDetails = FocusByTab $dedupScan ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 12
+    $dedupText = ([System.Windows.Automation.ValuePattern]$dedupDetails.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+    )).Current.Value
+    if (-not $dedupText.StartsWith('READ-ONLY CANDIDATE SCAN. No merge, revision or event was recorded.')) {
+        throw 'F14 native scan did not expose the read-only candidate receipt'
+    }
+    $jsonStart = $dedupText.IndexOf('{')
+    if ($jsonStart -lt 0) { throw 'F14 candidate scan did not expose its structured result' }
+    $dedupResult = $dedupText.Substring($jsonStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($dedupResult.candidate_count_in_scan -ne 0 -or
+        @($dedupResult.candidates).Count -ne 0 -or
+        $dedupResult.writes -ne 0 -or
+        $dedupResult.automatic_merge -ne $false -or
+        $dedupResult.review_required -ne $true -or
+        $dedupResult.scan_truncated -ne $false -or
+        $dedupResult.project_revision -ne $dedupRevisionBefore) {
+        throw 'F14 single-reference scan returned candidates, an unexpected write or a revision mismatch'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $dedupRevisionBefore) {
+        throw 'F14 candidate scan unexpectedly changed the project revision'
+    }
+    # Explicitly invalid decision: an ID cannot alias itself. Preview must be
+    # rejected before a pending human-approved action can be recorded.
+    $dedupCanonical = FocusByTab $dedupScan ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review canonical reference ID' 4
+    ([System.Windows.Automation.ValuePattern]$dedupCanonical.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($referenceId)
+    $dedupDuplicate = FocusByTab $dedupCanonical ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review duplicate reference ID' 2
+    ([System.Windows.Automation.ValuePattern]$dedupDuplicate.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($referenceId)
+    $dedupFingerprint = FocusByTab $dedupDuplicate ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review candidate SHA256' 2
+    ([System.Windows.Automation.ValuePattern]$dedupFingerprint.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue(('0' * 64))
+    $dedupRationale = FocusByTab $dedupFingerprint ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review rationale' 2
+    ([System.Windows.Automation.ValuePattern]$dedupRationale.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('UIA invalid same-reference decision')
+    $invalidDedupPreview = FocusByTab $dedupRationale ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 3
+    $invalidDedupPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup preview rejected*' 10000
+    $rejectionDetails = FocusByTab $invalidDedupPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 5
+    $rejectionText = ([System.Windows.Automation.ValuePattern]$rejectionDetails.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+    )).Current.Value
+    if ($rejectionText -notlike '*Dedup review rejected: invalid reviewer approval or candidate digest*') {
+        throw 'F14 did not reject preview of a self-alias before human approval'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $dedupRevisionBefore) {
+        throw 'F14 rejected preview unexpectedly changed the project revision'
+    }
+    Write-Output 'PASS: F14 native duplicate scan returns zero candidates for one persisted reference, writes=0 and stable project revision; self-alias preview is rejected'
+
     $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
     ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Review')
     $command.SetFocus()
@@ -1431,6 +1500,79 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
+    # F04: the Title Page builder is collapsed on entry. Exercise its actual
+    # accessible toggle, fields and preview, then close it before the existing
+    # manuscript approval/export workflow. Synthetic author data stays in this
+    # disposable project; a title-page preview must never create a revision.
+    $manuscriptIdForTitle = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID'
+    ([System.Windows.Automation.ValuePattern]$manuscriptIdForTitle.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+    )).SetValue('uia-paper')
+    # Manuscript draft autosave is an existing separate feature. Allow its
+    # debounce to complete BEFORE taking a baseline for preview-only behavior.
+    Start-Sleep -Milliseconds 1100
+    $titlePageRevisionBefore = Get-VisibleProjectRevision $window
+    $titlePageToggle = FocusByTab $manuscriptIdForTitle ([System.Windows.Automation.ControlType]::Button) 'Toggle offline manuscript title page builder' 5
+    $collapsedTitleInputs = @((Children $window ([System.Windows.Automation.ControlType]::Edit)) | ForEach-Object { $_.Current.Name })
+    if ($collapsedTitleInputs -contains 'Title page manuscript title') {
+        throw 'F04 title page builder was unexpectedly open before the user expanded it'
+    }
+    $titlePageToggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $titlePageTitle = FocusByTab $titlePageToggle ([System.Windows.Automation.ControlType]::Edit) 'Title page manuscript title' 3
+    ([System.Windows.Automation.ValuePattern]$titlePageTitle.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Cortical memory networks')
+    $titlePageAuthors = FocusByTab $titlePageTitle ([System.Windows.Automation.ControlType]::Edit) 'Title page authors and affiliations' 2
+    ([System.Windows.Automation.ValuePattern]$titlePageAuthors.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Alex Doe | Lab One; Bea Nguyen | Lab Two')
+    $titlePageEmail = FocusByTab $titlePageAuthors ([System.Windows.Automation.ControlType]::Edit) 'Title page corresponding email' 2
+    ([System.Windows.Automation.ValuePattern]$titlePageEmail.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('alex@example.org')
+    $titlePageJournal = FocusByTab $titlePageEmail ([System.Windows.Automation.ControlType]::Edit) 'Title page target journal' 2
+    ([System.Windows.Automation.ValuePattern]$titlePageJournal.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Unverified UIA Journal')
+    $titlePagePreviewAction = FocusByTab $titlePageJournal ([System.Windows.Automation.ControlType]::Button) 'Preview offline title page without saving' 3
+    $titlePagePreviewAction.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Title page previewed offline; nothing saved or submitted*' 10000
+    $titlePagePreviewControl = FocusByTab $titlePagePreviewAction ([System.Windows.Automation.ControlType]::Edit) 'Copyable unsaved title page preview' 4
+    $titlePagePreviewText = ([System.Windows.Automation.ValuePattern]$titlePagePreviewControl.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+    )).Current.Value
+    $previewMatch = [regex]::Match($titlePagePreviewText, '(?s)^UNSAVED TITLE PAGE · SHA-256 ([0-9a-f]{64})\r?\n(.+?)\r?\n\r?\n(.+)$')
+    if (-not $previewMatch.Success) {
+        throw 'F04 title page preview lacks the unsaved marker, content or 64-character digest'
+    }
+    $titlePageNotice = $previewMatch.Groups[2].Value
+    $titlePageBody = $previewMatch.Groups[3].Value -replace '\r\n', [string][char]10
+    if (-not $titlePageNotice.Contains('Nothing has been saved or submitted') -or
+        -not $titlePageBody.Contains('Cortical memory networks') -or
+        -not $titlePageBody.Contains('Alex Doe') -or
+        -not $titlePageBody.Contains('Lab One') -or
+        -not $titlePageBody.Contains('Bea Nguyen') -or
+        -not $titlePageBody.Contains('Lab Two') -or
+        -not $titlePageBody.Contains('Corresponding author: alex@example.org') -or
+        -not $titlePageBody.Contains('Target journal (requirements not verified): Unverified UIA Journal')) {
+        throw 'F04 title page preview lost an author, affiliation, email, journal disclaimer or unsaved notice'
+    }
+    $titlePageSha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $actualDraftHash = ([BitConverter]::ToString($titlePageSha.ComputeHash(
+            [System.Text.Encoding]::UTF8.GetBytes($titlePageBody)
+        ))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $titlePageSha.Dispose()
+    }
+    if ($actualDraftHash -ne $previewMatch.Groups[1].Value) {
+        throw 'F04 unsaved title page preview SHA-256 does not match the real draft body'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $titlePageRevisionBefore) {
+        throw 'F04 title page preview unexpectedly recorded a project revision'
+    }
+    $closeTitlePage = FocusByShiftTab $titlePageTitle ([System.Windows.Automation.ControlType]::Button) 'Toggle offline manuscript title page builder' 2
+    $closeTitlePage.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 100
+    $closedTitleInputs = @((Children $window ([System.Windows.Automation.ControlType]::Edit)) | ForEach-Object { $_.Current.Name })
+    if ($closedTitleInputs -contains 'Title page manuscript title' -or
+        $closedTitleInputs -contains 'Copyable unsaved title page preview') {
+        throw 'F04 title page builder remained expanded after its collapse action'
+    }
+    Write-Output 'PASS: F04 collapsed native title-page builder previews an attributed unsaved draft with matching SHA-256 and no project revision change'
+
     foreach ($pair in @(
         @('Manuscript ID','uia-paper'),
         @('Manuscript section','Results'),

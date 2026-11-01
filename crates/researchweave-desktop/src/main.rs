@@ -179,6 +179,9 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_protocol_freeze_export_receipt("".into());
     ui.set_reference_results("Register or inspect project references.".into());
     ui.set_reference_dedup_results("Scan local records, inspect source metadata, and explicitly preview a reversible decision. No automatic merge.".into());
+    // Collapse project-specific editing panels so their uncontrolled line-edit
+    // contents are destroyed instead of surviving a project identity switch.
+    ui.set_reference_dedup_open(false);
     ui.set_review_results("Use persisted references to build and screen a review.".into());
     ui.set_review_search_results(
         "Specify PICO concepts to draft a database-specific search strategy. No search has been executed.".into(),
@@ -214,6 +217,7 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_manuscript_title_page_preview(
         "Preview a title page from verified input; this does not save or submit anything.".into(),
     );
+    ui.set_manuscript_title_page_open(false);
     ui.set_manuscript_sections(
         Rc::new(slint::VecModel::from(Vec::<ManuscriptSection>::new())).into(),
     );

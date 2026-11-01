@@ -98,6 +98,64 @@ def scroll_protocol(down: bool, steps: int = 5) -> None:
     time.sleep(0.3)
 
 
+def reveal_bounded_control(
+    app: Any, accessible_name: str, *, down: bool, max_scrolls: int = 24
+) -> None:
+    """Reveal an exact native control within the *private* 1280x800 Xvfb pane.
+
+    Manuscript and References have long scrollable forms. AT-SPI can expose
+    offscreen descendants; an offscreen node is not proof of a usable action.
+    Scroll inside the outer content margin, never click an assumed button
+    coordinate, and fail after a bounded number of attempts.
+    """
+    if not 1 <= max_scrolls <= 24:
+        raise ValueError("invalid bounded native scroll limit")
+    for attempt in range(max_scrolls + 1):
+        for node in nodes_named(app, accessible_name):
+            try:
+                if (node.name or "").casefold() != accessible_name.casefold():
+                    continue
+                rect = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+                cx = rect.x + rect.width // 2
+                cy = rect.y + rect.height // 2
+                if rect.width >= 8 and rect.height >= 8 and 50 <= cx < 1280 and 40 <= cy < 790:
+                    return
+            except Exception:
+                continue
+        if attempt == max_scrolls:
+            break
+        subprocess.run(
+            ["xdotool", "mousemove", "1266", "470", "click", "--repeat", "2",
+             "--delay", "60", "5" if down else "4"],
+            check=True, timeout=8,
+        )
+        time.sleep(0.12)
+    raise RuntimeError(f"Control remained outside bounded native viewport: {accessible_name}")
+
+
+def activate_bounded_control(app: Any, accessible_name: str, *, down: bool) -> None:
+    reveal_bounded_control(app, accessible_name, down=down)
+    if not activate(app, accessible_name):
+        raise RuntimeError(f"Visible native control could not be activated: {accessible_name}")
+
+
+def project_event_snapshot(project: pathlib.Path) -> tuple[int, tuple[tuple[Any, ...], ...]]:
+    """Use the disposable project's real SQLite timeline, not a UI status claim."""
+    database = project / "data/project.sqlite"
+    if not database.is_file():
+        raise RuntimeError("Disposable project SQLite missing for read-only UI proof")
+    with sqlite3.connect(database) as db:
+        revision_row = db.execute("SELECT revision FROM project").fetchone()
+        if revision_row is None:
+            raise RuntimeError("Disposable project has no revision")
+        events = tuple(db.execute(
+            "SELECT sequence,operation,payload_hash,event_hash FROM events ORDER BY sequence"
+        ).fetchall())
+    if revision_row[0] != len(events):
+        raise RuntimeError("Disposable project event chain/revision diverged before UI proof")
+    return revision_row[0], events
+
+
 def activate(app: Any, name: str) -> bool:
     for node in nodes_named(app, name):
         try:
@@ -1232,6 +1290,69 @@ def main() -> int:
             raise RuntimeError("Previously autosaved manuscript is not available after reopening")
         print("NOTES_AND_MANUSCRIPT_REOPEN_PERSISTENCE_OK")
         audit(app, "reopened-project-writing", output)
+        # F04: exercise the real native offline title-page builder against
+        # synthetic, non-personal authorship data. Do not edit the section
+        # canvas, invoke Save, or infer certification by an actual journal.
+        title_page_before = project_event_snapshot(original_project)
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            title_sections_before = db.execute(
+                "SELECT count(*) FROM manuscripts WHERE section='Title Page'"
+            ).fetchone()[0]
+        activate_bounded_control(
+            app, "Toggle offline manuscript title page builder", down=False
+        )
+        time.sleep(0.2)
+        title_page_title = "Synthetic prospective study of offline research workflows"
+        title_page_authors = "Ada Researcher | Synthetic Institute; Bea Tester | Example Lab"
+        title_page_email = "ada@example.invalid"
+        title_page_journal = "Unverified Example Journal"
+        for name, value in (
+            ("Title page manuscript title", title_page_title),
+            ("Title page authors and affiliations", title_page_authors),
+            ("Title page corresponding email", title_page_email),
+            ("Title page target journal", title_page_journal),
+        ):
+            reveal_bounded_control(app, name, down=True)
+            edit_text(app, name, value, allow_unreadable=True)
+        activate_bounded_control(app, "Preview offline title page without saving", down=True)
+        time.sleep(0.3)
+        reveal_bounded_control(app, "Copyable unsaved title page preview", down=True)
+        title_page_preview = read_field(app, "Copyable unsaved title page preview")
+        receipt_match = re.search(
+            r"UNSAVED TITLE PAGE\s*·\s*SHA-256\s+([a-f0-9]{64})",
+            title_page_preview,
+        )
+        expected_title_body = (
+            f"{title_page_title}\n\n"
+            "Ada Researcher \u2014 Synthetic Institute\n"
+            "Bea Tester \u2014 Example Lab\n\n"
+            f"Corresponding author: {title_page_email}\n\n"
+            f"Target journal (requirements not verified): {title_page_journal}"
+        )
+        expected_title_hash = hashlib.sha256(expected_title_body.encode("utf-8")).hexdigest()
+        if (
+            receipt_match is None
+            or receipt_match.group(1) != expected_title_hash
+            or expected_title_body not in title_page_preview
+            or "Draft only." not in title_page_preview
+            or "Nothing has been saved or submitted" not in title_page_preview
+        ):
+            raise RuntimeError("Native title-page draft missing exact body, SHA-256 or unsaved caveat")
+        if not any(
+            "Title page previewed offline; nothing saved or submitted" in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("Native title-page preview success was not accessible")
+        if project_event_snapshot(original_project) != title_page_before:
+            raise RuntimeError("F04 offline title-page preview mutated project revision/events")
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            title_sections_after = db.execute(
+                "SELECT count(*) FROM manuscripts WHERE section='Title Page'"
+            ).fetchone()[0]
+        if title_sections_after != title_sections_before:
+            raise RuntimeError("F04 unsaved title-page preview persisted a Title Page section")
+        audit(app, "manuscript-title-page-offline-preview", output)
+        print("F04_TITLE_PAGE_EXACT_SHA256_UNSAVED_NO_PROJECT_EVENTS_OK")
         # Review search drafting is a project-scoped, explicitly non-executed
         # read operation, not a hidden network retrieval or PRISMA mutation.
         with sqlite3.connect(original_project / "data/project.sqlite") as db:
@@ -1275,6 +1396,75 @@ def main() -> int:
             raise RuntimeError("Read-only PICO search drafting wrote a project event")
         print("OFFLINE_PICO_REVIEW_GUI_NO_RETRIEVAL_NO_EVENT_OK")
         audit(app, "review-search-drafts", output)
+        # F14: the existing disposable project has no reference registrations.
+        # This is an intentionally empty, deterministic native scan fixture;
+        # do not write synthetic references directly into SQLite (which would
+        # bypass ResearchWeave's event journal) or claim candidate matching.
+        dedup_before = project_event_snapshot(original_project)
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            references_before = db.execute("SELECT count(*) FROM reference").fetchone()[0]
+            aliases_before = db.execute("SELECT count(*) FROM reference_alias").fetchone()[0]
+        if references_before != 0 or aliases_before != 0:
+            raise RuntimeError("F14 empty reference fixture unexpectedly contains identity records")
+        activate_bounded_control(app, "References workspace screen", down=False)
+        time.sleep(0.25)
+        activate_bounded_control(app, "Toggle reviewable reference duplicate finder", down=True)
+        time.sleep(0.2)
+        activate_bounded_control(
+            app, "Scan local reference duplicate candidates without changing data", down=True
+        )
+        time.sleep(0.3)
+        if not any(
+            "Reference candidates scanned locally; no changes recorded" in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("Native F14 duplicate scan did not report completed read-only dispatch")
+        reveal_bounded_control(
+            app, "Copyable reference duplicate candidate or decision details", down=True
+        )
+        try:
+            dedup_result = read_field(app, "Copyable reference duplicate candidate or decision details")
+        except RuntimeError:
+            # Some installed Slint AT-SPI TextEdit builds expose an exact
+            # accessible editor but not queryText. The success state above is
+            # set only by successful library_read_at; SQL proves no writes.
+            # Do not pretend the inaccessible JSON was independently inspected.
+            dedup_result = ""
+            print("F14_COPYABLE_CANDIDATE_JSON_NOT_ATSPI_READABLE; status and SQLite tested")
+        if dedup_result and (
+            "READ-ONLY CANDIDATE SCAN" not in dedup_result
+            or not re.search(r'"candidate_count_in_scan"\s*:\s*0\b', dedup_result)
+            or not re.search(r'"candidates"\s*:\s*\[\s*\]', dedup_result)
+        ):
+            raise RuntimeError("F14 native read-only result contradicted the empty reference fixture")
+        if project_event_snapshot(original_project) != dedup_before:
+            raise RuntimeError("F14 read-only candidate scan changed the project event chain")
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            references_after = db.execute("SELECT count(*) FROM reference").fetchone()[0]
+            aliases_after = db.execute("SELECT count(*) FROM reference_alias").fetchone()[0]
+        if (references_after, aliases_after) != (references_before, aliases_before):
+            raise RuntimeError("F14 read-only candidate scan altered reference/alias records")
+        audit(app, "references-read-only-dedup-scan", output)
+        print("F14_REFERENCES_EMPTY_FIXTURE_READ_ONLY_SCAN_NO_PROJECT_EVENTS_OK")
+
+        # An invalid alias request must be refused at preview, not fabricate
+        # approval or silently insert a reference alias. No record button is
+        # clicked; retain the original operation's fail-closed semantics.
+        activate_bounded_control(
+            app, "Preview reviewed reference alias without changes", down=False
+        )
+        time.sleep(0.2)
+        if not any(
+            "Reference dedup preview rejected" in (node.name or "")
+            for node, _ in walk(app)
+        ):
+            raise RuntimeError("Invalid F14 reference alias preview was not rejected by native UI")
+        if project_event_snapshot(original_project) != dedup_before:
+            raise RuntimeError("Invalid F14 alias preview changed project events or revision")
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            if db.execute("SELECT count(*) FROM reference_alias").fetchone()[0] != aliases_before:
+                raise RuntimeError("Invalid F14 alias preview persisted a reference mapping")
+        print("F14_INVALID_ALIAS_PREVIEW_REFUSED_NO_PROJECT_EVENTS_OK")
     if not activate(app, "Home activity"):
         raise RuntimeError("Cannot return Home to verify recent-project recovery")
     time.sleep(0.25)
