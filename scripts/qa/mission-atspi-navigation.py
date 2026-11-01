@@ -856,7 +856,14 @@ def activate(app: Any, name: str) -> bool:
 
 
 def edit_text(app: Any, name: str, value: str, *, allow_unreadable: bool = False) -> None:
-    targets = nodes_named(app, name)
+    # `nodes_named` is deliberately substring-based for diagnostic discovery.
+    # Never use its fuzzy matches as editable targets: e.g. an offscreen
+    # "Manuscript section" must not redirect typing into the visible
+    # "Manuscript section body" or an unrelated status/label.
+    targets = [
+        node for node in nodes_named(app, name)
+        if (node.name or "").casefold() == name.casefold()
+    ]
     if not targets:
         raise RuntimeError(f"Missing editable field: {name}")
     for node in targets:
@@ -908,7 +915,10 @@ def edit_text(app: Any, name: str, value: str, *, allow_unreadable: bool = False
     # keyboard input. Reacquire live nodes twice before declaring readback
     # unavailable; never accept a value solely because input was sent.
     for readback_attempt in range(3):
-        for refreshed in nodes_named(app, name):
+        for refreshed in (
+            node for node in nodes_named(app, name)
+            if (node.name or "").casefold() == name.casefold()
+        ):
             try:
                 source = refreshed.queryText()
                 rendered = source.getText(0, source.characterCount)
@@ -1528,7 +1538,13 @@ def main() -> int:
         # not just swap labels or show a static navigation mock.
         if not activate(app, "Toggle manuscript operation details"):
             raise RuntimeError("Cannot collapse inspect pane before writing second section")
+        # The previous installed Xvfb run showed that Slint exposes only the
+        # bottom manuscript controls after Inspect; fuzzy AT-SPI name matching
+        # could focus the *body* instead of the offscreen section field.
+        # Reveal the exact visible field first, with bounded private scrolling.
+        reveal_bounded_control(app, "Manuscript section", down=False)
         edit_text(app, "Manuscript section", "Methods")
+        reveal_bounded_control(app, "Manuscript section body", down=False)
         edit_text(app, "Manuscript section body", "Methods use only synthetic independent measurements.")
         # The 800ms autosave is asynchronous. On a contended runner it may
         # complete later than the previous fixed 1.3s sleep. Wait only until

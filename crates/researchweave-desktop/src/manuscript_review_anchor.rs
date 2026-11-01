@@ -9,11 +9,19 @@ pub(crate) fn unique_scalar_span(body: &str, quote: &str) -> Result<(usize, usiz
     if body.chars().count() > 1_000_000 {
         return Err("Saved manuscript exceeds bounded review range".into());
     }
-    let mut matches = body.match_indices(quote);
-    let (start_byte, _) = matches
-        .next()
+    let start_byte = body
+        .find(quote)
         .ok_or("Quoted text is not present in the latest saved manuscript revision")?;
-    if matches.next().is_some() {
+    // str::match_indices yields NON-overlapping hits. That would incorrectly
+    // label 'aa' in 'aaa' as unique, although it occurs at offsets 0 and 1.
+    // Restart after the first Unicode scalar to detect overlapping matches
+    // without slicing in the middle of a multibyte character.
+    let first_scalar_len = body[start_byte..]
+        .chars()
+        .next()
+        .ok_or("Empty matched passage")?
+        .len_utf8();
+    if body[start_byte + first_scalar_len..].contains(quote) {
         return Err(
             "Quoted text occurs more than once; select a longer unique exact passage".into(),
         );
@@ -48,6 +56,12 @@ mod tests {
     #[test]
     fn refuses_ambiguous_missing_or_control_quote() {
         assert!(unique_scalar_span("repeat repeat", "repeat")
+            .unwrap_err()
+            .contains("more than once"));
+        assert!(unique_scalar_span("aaa", "aa")
+            .unwrap_err()
+            .contains("more than once"));
+        assert!(unique_scalar_span("🧠🧠🧠", "🧠🧠")
             .unwrap_err()
             .contains("more than once"));
         assert!(unique_scalar_span("text", "no").is_err());

@@ -545,8 +545,12 @@ function Read-VisibleProtocolFreezeReceipt(
         # ScrollPattern. Follow the documented *real* Protocol control order
         # to its lower receipt-save row, without invoking a write action;
         # PageDown is still bounded and the exact JSON remains mandatory.
-        $receiptPath = FocusByTab $focused ([System.Windows.Automation.ControlType]::Edit) 'Local protocol baseline receipt destination path' 12
-        $receiptSave = FocusByTab $receiptPath ([System.Windows.Automation.ControlType]::Button) 'Save verified local baseline receipt without overwrite' 4
+        # Real installed UIA at run 41277449988 proved the offscreen path Edit
+        # is omitted from keyboard order. The adjacent Save *button* is exposed:
+        # Inspect -> Prepare Markdown -> Save. Focus it without invoking it,
+        # then use bounded PageDown to expose the persisted JSON below.
+        # Never require or guess focus on an inaccessible, lazy Edit node.
+        $receiptSave = FocusByTab $focused ([System.Windows.Automation.ControlType]::Button) 'Save verified local baseline receipt without overwrite' 5
         Write-Host 'UIA_PROTOCOL_FREEZE_VIEWPORT_RECOVERY: native receipt-save focus, keyboard PageDown (no save invoked)'
     }
     # Inspect output lies below the local-freeze buttons, receipt save row,

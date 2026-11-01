@@ -34,6 +34,7 @@ pub(crate) fn candidates(
         || data["automatic_merge"] != false
         || data["review_required"] != true
         || data["scan_truncated"] != false
+        || data["candidates_truncated"] != false
     {
         return Err("reference candidate scan is stale, incomplete or not read-only".into());
     }
@@ -43,8 +44,8 @@ pub(crate) fn candidates(
     let total = data["candidate_count_in_scan"]
         .as_u64()
         .ok_or("reference scan lacks a total candidate count")?;
-    if rows.len() > 50 || total < rows.len() as u64 {
-        return Err("reference candidate count exceeds scan response limits".into());
+    if rows.len() > 50 || total != rows.len() as u64 {
+        return Err("reference candidate list is incomplete or exceeds limits".into());
     }
     let mut output = Vec::with_capacity(rows.len());
     for row in rows {
@@ -124,7 +125,8 @@ mod tests {
     fn valid() -> Value {
         json!({"status":"ok","data":{
             "project_revision":4,"writes":0,"automatic_merge":false,
-            "review_required":true,"scan_truncated":false,"candidate_count_in_scan":1,
+            "review_required":true,"scan_truncated":false,
+            "candidates_truncated":false,"candidate_count_in_scan":1,
             "candidates":[{
                 "left_id":"12345678-1234-4123-8123-123456789abc",
                 "right_id":"12345678-1234-4123-8123-123456789abd",
@@ -152,8 +154,10 @@ mod tests {
             ("writes", json!(1)),
             ("automatic_merge", json!(true)),
             ("scan_truncated", json!(true)),
+            ("candidates_truncated", json!(true)),
             ("review_required", json!(false)),
             ("candidate_count_in_scan", json!(0)),
+            ("candidate_count_in_scan", json!(2)),
         ] {
             let mut response = valid();
             response["data"][path] = value;

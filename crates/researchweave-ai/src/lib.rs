@@ -10,6 +10,7 @@ pub mod grounding;
 pub mod operations;
 pub mod profile_store;
 pub mod prompts;
+pub mod screening_suggestions;
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum AiError {
