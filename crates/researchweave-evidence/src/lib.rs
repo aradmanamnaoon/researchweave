@@ -21,6 +21,7 @@ mod protocol_freeze;
 mod publishing;
 mod publishing_formats;
 mod qualitative;
+pub mod quarto_source;
 mod quick_notes;
 mod review;
 mod review_search_strategy;
@@ -144,6 +145,10 @@ impl EvidenceHandler {
                 &["project_id", "manuscript_id"][..],
             ),
             ("writing.claim_check", &["project_id", "claim_id"][..]),
+            (
+                "writing.quarto_source_preview",
+                &["project_id", "document"][..],
+            ),
             (
                 "evidence.human_polarity_overview",
                 &["project_id", "claim_id", "claim", "evidence"][..],
@@ -513,6 +518,37 @@ impl EvidenceHandler {
             return qualitative::kappa(args);
         }
         let mut store = self.store(args, ctx)?;
+        if operation == "writing.quarto_source_preview" {
+            let info = store
+                .info()
+                .map_err(|_| "project information unavailable")?;
+            if let Some(expected) = ctx.expected_revision {
+                if u64::try_from(info.revision).ok() != Some(expected) {
+                    return Err("stale project revision for Quarto source preview".into());
+                }
+            }
+            let document_value = args.get("document").ok_or("document AST required")?;
+            let document = manuscript_document::ManuscriptDocument::from_value(document_value)
+                .map_err(|error| error.to_string())?;
+            let preview = quarto_source::render_quarto_source(&document)
+                .map_err(|error| error.to_string())?;
+            return Ok(json!({
+                "project_id":ctx.project_id.to_string(),
+                "project_revision":info.revision,
+                "format":preview.format,
+                "media_type":preview.media_type,
+                "filename_suffix":preview.filename_suffix,
+                "source_document_sha256":preview.source_document_sha256,
+                "qmd_sha256":preview.qmd_sha256,
+                "qmd":preview.qmd,
+                "loss_codes":preview.loss_codes,
+                "renderer_invoked":preview.renderer_invoked,
+                "executable_cells_present":preview.executable_cells_present,
+                "citations_resolved":preview.citations_resolved,
+                "persisted":false,
+                "warning":"Inert Quarto HTML source preview only. No PDF/DOCX render, external toolchain, citation resolver, executable notebook, or physical save is performed."
+            }));
+        }
         if operation == "evidence.human_polarity_overview" {
             let info = store
                 .info()
@@ -2313,6 +2349,104 @@ mod tests {
         assert!(EvidenceHandler::capabilities().iter().any(|capability| {
             capability.operation == "writing.title_page_preview"
                 && capability.effect == Effect::Read
+        }));
+    }
+
+    #[test]
+    fn quarto_preview_is_revision_bound_read_only_and_deterministic() {
+        let folder = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = folder.path().join("Quarto preview synthetic project");
+        ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Source-only renderer test".into(),
+                question: "Synthetic question".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        let handler = EvidenceHandler::bound(project_id, &path).unwrap();
+        let ctx = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "synthetic-author".into(),
+            expected_revision: Some(0),
+        };
+        let document = manuscript_document::ManuscriptDocument {
+            title: "Persian عنوان: Quarto".into(),
+            blocks: vec![manuscript_document::Block::Paragraph {
+                content: vec![manuscript_document::Inline::Text(
+                    "Literal <script> content only".into(),
+                )],
+            }],
+        };
+        let args = json!({
+            "project_id":project_id.to_string(),
+            "document":document.to_value().unwrap()
+        });
+        let executed = handler.execute("writing.quarto_source_preview", &args, &ctx);
+        assert_eq!(executed["status"], "ok", "{executed}");
+        assert_eq!(
+            executed,
+            handler.preview("writing.quarto_source_preview", &args, &ctx)
+        );
+        assert_eq!(executed["data"]["renderer_invoked"], false);
+        assert_eq!(executed["data"]["persisted"], false);
+        assert_eq!(executed["data"]["project_revision"], 0);
+        assert!(executed["data"]["qmd"]
+            .as_str()
+            .unwrap()
+            .contains("execute:\n  enabled: false"));
+        assert!(!executed["data"]["qmd"]
+            .as_str()
+            .unwrap()
+            .contains("<script>"));
+        assert_eq!(
+            EvidenceHandler::bound(project_id, &path).unwrap().execute(
+                "writing.quarto_source_preview",
+                &args,
+                &ctx
+            ),
+            executed
+        );
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        let stale = DispatchContext {
+            expected_revision: Some(1),
+            ..ctx.clone()
+        };
+        assert_eq!(
+            handler.execute("writing.quarto_source_preview", &args, &stale)["status"],
+            "error"
+        );
+        let mut wrong = args.clone();
+        wrong["project_id"] = json!(Uuid::new_v4().to_string());
+        assert_eq!(
+            handler.execute("writing.quarto_source_preview", &wrong, &ctx)["status"],
+            "error"
+        );
+        wrong = args.clone();
+        wrong["document"]["blocks"][0]["content"][0]["text"] = json!("\u{202e}spoof");
+        assert_eq!(
+            handler.execute("writing.quarto_source_preview", &wrong, &ctx)["status"],
+            "error"
+        );
+        assert!(EvidenceHandler::capabilities().iter().any(|c| {
+            c.operation == "writing.quarto_source_preview" && c.effect == Effect::Read
         }));
     }
 
