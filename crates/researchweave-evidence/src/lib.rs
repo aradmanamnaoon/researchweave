@@ -18,6 +18,7 @@ mod highlights;
 mod manuscript_comments;
 pub mod manuscript_document;
 mod media_timeline;
+mod obsidian_roundtrip;
 mod protocol_freeze;
 mod publishing;
 mod publishing_formats;
@@ -96,6 +97,14 @@ impl EvidenceHandler {
             ),
             ("evidence.notebook_history", &["project_id"][..]),
             ("ui.note_card.list", &["project_id"][..]),
+            (
+                "knowledge.obsidian_export_note",
+                &["project_id", "card_id"][..],
+            ),
+            (
+                "knowledge.obsidian_import_preview",
+                &["project_id", "markdown"][..],
+            ),
             (
                 "writing.section_history",
                 &["project_id", "manuscript_id", "section"][..],
@@ -366,6 +375,10 @@ impl EvidenceHandler {
             ("ui.notebook.save", &["project_id", "notebook"][..]),
             ("ui.note_card.save", &["project_id"][..]),
             (
+                "knowledge.obsidian_import",
+                &["project_id", "markdown", "approved_preview_sha256"][..],
+            ),
+            (
                 "qualitative.add_code",
                 &[
                     "project_id",
@@ -633,6 +646,15 @@ impl EvidenceHandler {
         if operation == "ui.note_card.list" {
             return quick_notes::list(&store, args);
         }
+        if operation == "knowledge.obsidian_export_note" {
+            return obsidian_roundtrip::export(&store, args, ctx);
+        }
+        if operation == "knowledge.obsidian_import_preview" {
+            return obsidian_roundtrip::preview(&store, args, ctx);
+        }
+        if operation == "knowledge.obsidian_import" {
+            return obsidian_roundtrip::apply(&mut store, args, ctx);
+        }
         if operation == "ui.notebook.save" {
             return notebook_save(&mut store, args, ctx);
         }
@@ -828,6 +850,7 @@ impl EvidenceHandler {
             }
             "ui.notebook.save" => notebook_save(&mut shadow, args, ctx)?,
             "ui.note_card.save" => quick_notes::save(&mut shadow, args, ctx)?,
+            "knowledge.obsidian_import" => obsidian_roundtrip::apply(&mut shadow, args, ctx)?,
             "evidence.anchor" => anchor_mutate(&mut shadow, args, ctx)?,
             "evidence.highlight_create" | "evidence.highlight_relocate" => {
                 highlights::write(&mut shadow, operation, args, ctx)?
@@ -2158,6 +2181,7 @@ impl OperationHandler for EvidenceHandler {
                 | "evidence.note_delete"
                 | "ui.notebook.save"
                 | "ui.note_card.save"
+                | "knowledge.obsidian_import"
                 | "evidence.anchor"
                 | "evidence.highlight_create"
                 | "evidence.highlight_relocate"
