@@ -1371,19 +1371,34 @@ def main() -> int:
     ):
         raise RuntimeError("Frozen protocol summary does not expose its readable local provenance")
     print("LOCAL_PROTOCOL_FREEZE_ACCESSIBLE_SUMMARY_OK")
-    # Summary is deliberately shown first in the long scrollable Protocol
-    # workspace. Verify the detailed JSON only after scrolling to it.
-    scroll_protocol(True, 3)
-    frozen_status = "\n".join((n.name or "") for n in nodes_named(
-        app, "Protocol local freeze status"
-    ))
-    if (
-        '"frozen": true' not in frozen_status
-        or '"frozen_version": 1' not in frozen_status
-        or '"external_registration_verified": false' not in frozen_status
-        or '"local_only": true' not in frozen_status
-    ):
-        raise RuntimeError("Local protocol baseline receipt is not explicit and inspectable")
+    # Preserve the independent legacy Text/accessible-label receipt check in
+    # addition to the new read-only native TextEdit. The editor can intercept
+    # wheel input at the earlier x=1100 protocol scroll target; use the *outer*
+    # Protocol ScrollView's right margin, which the isolated 1280x800 runner
+    # screenshot confirms is in-app, to reveal the lower legacy label. Stop
+    # after bounded attempts; inaccessible/mismatched real UI still fails.
+    frozen_status = ""
+    for scroll_attempt in range(25):
+        frozen_status = "\n".join((n.name or "") for n in nodes_named(
+            app, "Protocol local freeze status"
+        ))
+        if all(token in frozen_status for token in (
+            '"frozen": true',
+            '"frozen_version": 1',
+            '"external_registration_verified": false',
+            '"local_only": true',
+        )):
+            break
+        if scroll_attempt == 24:
+            print("AT_SPI_LEGACY_PROTOCOL_STATUS_DIAGNOSTIC=" + repr(frozen_status[:1800]))
+            audit(app, "protocol-legacy-json-viewport-failure", output)
+            raise RuntimeError("Local protocol baseline receipt is not explicit and inspectable")
+        subprocess.run(
+            ["xdotool", "mousemove", "1266", "470", "click", "--repeat", "2",
+             "--delay", "60", "5"],
+            check=True, timeout=8,
+        )
+        time.sleep(0.12)
     if f'"snapshot_sha256": "{freeze_hash}"' not in frozen_status:
         raise RuntimeError("Detailed native freeze receipt disagrees with the readable digest")
     if inspected_frozen.get("snapshot_sha256") != freeze_hash or inspected_frozen.get("frozen_version") != 1:
