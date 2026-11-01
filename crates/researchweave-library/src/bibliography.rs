@@ -38,12 +38,18 @@ fn normalize_doi(value: Option<&str>) -> Option<String> {
         "https://dx.doi.org/",
         "http://dx.doi.org/",
     ] {
-        if text.len() >= prefix.len() && text[..prefix.len()].eq_ignore_ascii_case(prefix) {
+        if text
+            .get(..prefix.len())
+            .is_some_and(|head| head.eq_ignore_ascii_case(prefix))
+        {
             text = &text[prefix.len()..];
             break;
         }
     }
-    if text.len() >= 4 && text[..4].eq_ignore_ascii_case("doi:") {
+    if text
+        .get(..4)
+        .is_some_and(|head| head.eq_ignore_ascii_case("doi:"))
+    {
         text = text[4..].trim();
     }
     let (prefix, suffix) = text.split_once('/')?;
@@ -165,6 +171,20 @@ fn parse_ris(text: &str) -> Result<Vec<ParsedReference>, String> {
             .push(value.to_owned());
         raw.push_str(chunk);
         if tag == "ER" {
+            // The stored raw entry is lossless. Explain which source fields do not
+            // participate in the small normalized reference projection.
+            let projection_omitted_fields: Vec<String> = fields
+                .keys()
+                .filter(|key| {
+                    !matches!(
+                        key.as_str(),
+                        "TY" | "ER" | "TI" | "T1" | "AU" | "A1" | "PY" | "Y1" | "DO"
+                    ) || (key.as_str() == "T1" && fields.contains_key("TI"))
+                        || (key.as_str() == "A1" && fields.contains_key("AU"))
+                        || (key.as_str() == "Y1" && fields.contains_key("PY"))
+                })
+                .cloned()
+                .collect();
             let title = fields
                 .get("TI")
                 .or_else(|| fields.get("T1"))
@@ -199,7 +219,7 @@ fn parse_ris(text: &str) -> Result<Vec<ParsedReference>, String> {
                     .unwrap_or_else(|| "unknown".into()),
                 format: "ris".into(),
                 raw: std::mem::take(&mut raw),
-                metadata: json!({}),
+                metadata: json!({"projection_omitted_fields":projection_omitted_fields,"raw_preserved":true}),
             };
             validate_record(&record)?;
             records.push(record);
@@ -311,6 +331,9 @@ fn split_csl_entries(text: &str) -> Result<Vec<&str>, String> {
 }
 
 fn parse_csl_json(text: &str) -> Result<Vec<ParsedReference>, String> {
+    // Splitting records preserves their exact source bytes. Validate the entire
+    // document too: the entry scanner alone accepts invalid trailing commas.
+    let _: Value = serde_json::from_str(text).map_err(|_| "invalid CSL JSON syntax")?;
     let entries = split_csl_entries(text)?;
     let mut records = Vec::with_capacity(entries.len());
     for raw in entries {
@@ -361,6 +384,11 @@ fn parse_csl_json(text: &str) -> Result<Vec<ParsedReference>, String> {
             .and_then(|part| part.first())
             .and_then(Value::as_i64)
             .filter(|year| (1000..=3000).contains(year));
+        let projection_omitted_fields: Vec<String> = object
+            .keys()
+            .filter(|key| !matches!(key.as_str(), "title" | "author" | "issued" | "DOI" | "type"))
+            .cloned()
+            .collect();
         let record = ParsedReference {
             title,
             authors,
@@ -373,7 +401,7 @@ fn parse_csl_json(text: &str) -> Result<Vec<ParsedReference>, String> {
                 .to_owned(),
             format: "csl-json".into(),
             raw: raw.to_owned(),
-            metadata: json!({}),
+            metadata: json!({"projection_omitted_fields":projection_omitted_fields,"raw_preserved":true}),
         };
         validate_record(&record)?;
         records.push(record);
@@ -528,9 +556,15 @@ fn parse_bibtex(text: &str) -> Result<Vec<ParsedReference>, String> {
             return Err("invalid BibTeX citation key".into());
         }
         let fields = parse_bibtex_fields(&inside[comma + 1..])?;
+        let projection_omitted_fields: Vec<String> = fields
+            .keys()
+            .filter(|key| !matches!(key.as_str(), "title" | "author" | "year" | "doi"))
+            .cloned()
+            .collect();
         let title = fields
             .get("title")
-            .map(|value| value.trim_matches('{').trim_matches('}').to_owned())
+            // Braces inside a BibTeX title protect meaningful capitalization.
+            .cloned()
             .unwrap_or_default();
         let authors = fields
             .get("author")
@@ -551,7 +585,7 @@ fn parse_bibtex(text: &str) -> Result<Vec<ParsedReference>, String> {
             kind,
             format: "bibtex".into(),
             raw,
-            metadata: json!({"key":key}),
+            metadata: json!({"key":key,"projection_omitted_fields":projection_omitted_fields,"raw_preserved":true}),
         };
         validate_record(&record)?;
         records.push(record);

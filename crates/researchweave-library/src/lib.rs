@@ -810,6 +810,167 @@ mod tests {
     }
 
     #[test]
+    fn bibliography_format_roundtrips_preserve_stable_ids_unicode_and_original_bytes() {
+        let (temp, handler, mut ctx, _) = fixture();
+        let project_id = ctx.project_id.to_string();
+        let path = temp.path().join(&project_id);
+        // Independent native format fixtures, with fields that cannot be
+        // represented by the intentionally small normalized reference view.
+        let cases = [
+            (
+                "ris",
+                "TY  - JOUR\r\nTI  - شناخت و حافظه 🧠\r\nAU  - Zoë Chen\r\nAU  - José Pérez\r\nPY  - 2025\r\nDO  - https://doi.org/10.5555/Neuro\r\nAB  - محفوظ و قابل بازیابی\r\nER  - \r\n",
+                "شناخت و حافظه 🧠",
+                "AB",
+            ),
+            (
+                "bibtex",
+                "@article{neuro-2025,title={The {NLP} \\{escaped\\} روش},author={Zoë Chen and José Pérez},year={2025},doi={doi:10.5555/Neuro},note={Extra {nested} content}}",
+                "The {NLP} \\{escaped\\} روش",
+                "note",
+            ),
+            (
+                "csl-json",
+                r#"{"id":"csl-record-42","title":"Étude حافظه 🧠","author":[{"given":"Zoë","family":"Chen"},{"given":"José","family":"Pérez"}],"issued":{"date-parts":[[2025]]},"DOI":"10.5555/NEURO","type":"article-journal","URL":"https://example.org/étude","abstract":"Escaped \"quote\" and \u03b1"}"#,
+                "Étude حافظه 🧠",
+                "URL",
+            ),
+        ];
+        let mut ids = Vec::new();
+        for (index, (format, raw, expected_title, omitted)) in cases.iter().enumerate() {
+            ctx.expected_revision = Some(index as u64);
+            ctx.request_id = Uuid::new_v4();
+            let args = json!({"project_id":project_id,"format":format,"data_base64":STANDARD.encode(raw.as_bytes())});
+            let preview = handler.execute("library.bibliography_preview", &args, &ctx);
+            assert_eq!(preview["status"], "ok", "{format}: {preview}");
+            let projected = &preview["data"]["records"][0];
+            assert_eq!(projected["title"], *expected_title);
+            assert_eq!(projected["authors"], json!(["Zoë Chen", "José Pérez"]));
+            assert_eq!(projected["year"], 2025);
+            assert_eq!(projected["doi"], "10.5555/neuro");
+            assert_eq!(projected["metadata"]["raw_preserved"], true);
+            assert!(projected["metadata"]["projection_omitted_fields"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(omitted)));
+            assert_eq!(projected["raw"], *raw);
+
+            let imported = handler.execute("library.bibliography_import", &args, &ctx);
+            assert_eq!(imported["status"], "ok", "{format}: {imported}");
+            assert_eq!(imported["data"]["project_revision"], (index + 1) as u64);
+            if index > 0 {
+                let matches = imported["data"]["duplicate_suggestions"][0]["candidates"]
+                    .as_array()
+                    .unwrap();
+                assert_eq!(matches.len(), index);
+                assert!(matches
+                    .iter()
+                    .all(|candidate| candidate["same_doi"] == true
+                        && candidate["needs_review"] == true));
+            }
+            let id = imported["data"]["references"][0]["reference_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            assert!(Uuid::parse_str(&id).is_ok());
+            assert!(!ids.contains(&id));
+            ids.push(id.clone());
+
+            let restored = LibraryHandler::new(temp.path().to_path_buf());
+            let exported = restored.execute(
+                "library.reference_export",
+                &json!({"project_id":project_id,"reference_id":id}),
+                &ctx,
+            );
+            assert_eq!(exported["status"], "ok", "{format}: {exported}");
+            assert_eq!(exported["data"]["reference_id"], id);
+            assert_eq!(exported["data"]["raw"], *raw);
+            assert_eq!(exported["data"]["raw_sha256"], projected["raw_sha256"]);
+            assert_eq!(exported["data"]["format"], *format);
+
+            let reparsed = restored.execute(
+                "library.bibliography_preview",
+                &json!({"project_id":project_id,"format":format,"data_base64":STANDARD.encode(exported["data"]["raw"].as_str().unwrap().as_bytes())}),
+                &ctx,
+            );
+            assert_eq!(reparsed["status"], "ok", "{format}: {reparsed}");
+            assert_eq!(reparsed["data"]["records"][0], *projected);
+        }
+        let reopened = LibraryHandler::new(temp.path().to_path_buf());
+        let listing = reopened.execute(
+            "library.references",
+            &json!({"project_id":project_id}),
+            &ctx,
+        );
+        assert_eq!(listing["data"]["count"], 3);
+        let stored_ids: Vec<&str> = listing["data"]["references"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|record| record["reference_id"].as_str().unwrap())
+            .collect();
+        assert!(ids.iter().all(|id| stored_ids.contains(&id.as_str())));
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 3);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+    }
+
+    #[test]
+    fn malformed_bibliography_documents_fail_without_committing_partial_records() {
+        let (temp, handler, ctx, _) = fixture();
+        let project_id = ctx.project_id.to_string();
+        let malformed = [
+            (
+                "ris",
+                "TY  - JOUR\nTI  - Valid\nER  - \nTY  - JOUR\nTI  - Truncated",
+            ),
+            (
+                "bibtex",
+                "@article{valid,title={Good}}\n@article{bad,title={Truncated}",
+            ),
+            (
+                "csl-json",
+                r#"[{"title":"Valid","type":"article-journal"},]"#,
+            ),
+            ("csl-json", r#"[{"title":"Valid"},{"title":"Truncated""#),
+        ];
+        for (format, raw) in malformed {
+            let args = json!({"project_id":project_id,"format":format,"data_base64":STANDARD.encode(raw.as_bytes())});
+            let result = handler.execute("library.bibliography_import", &args, &ctx);
+            assert_eq!(result["status"], "failed", "{format}: {result}");
+        }
+        // Previously this could panic on a UTF-8 byte boundary while checking
+        // whether an invalid DOI starts with the ASCII `doi:` prefix.
+        let ris_unicode_doi =
+            "TY  - JOUR\nTI  - Unicode identifier\nDO  - 한글10.5555/Invalid\nER  - \n";
+        let parsed = handler.execute(
+            "library.bibliography_preview",
+            &json!({"project_id":project_id,"format":"ris","data_base64":STANDARD.encode(ris_unicode_doi.as_bytes())}),
+            &ctx,
+        );
+        assert_eq!(parsed["status"], "ok", "{parsed}");
+        assert!(parsed["data"]["records"][0]["doi"].is_null());
+
+        let store = ProjectStore::open(temp.path().join(&project_id)).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM reference", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[test]
     fn collections_tags_search_export_and_membership_are_revision_guarded() {
         let (temp, handler, mut ctx, _) = fixture();
         let path = temp.path().join(ctx.project_id.to_string());
