@@ -869,6 +869,118 @@ function Assert-F14SingleEvent(
         }
     }
 }
+
+# F37 uses an independently generated, disposable real PDF. The PDF object
+# offsets, stream length and xref are computed from ASCII bytes, not supplied
+# by a mocked native API or by a previously captured source hash.
+function Write-F37CaptionPdf([string]$Path, [string]$FirstCaption) {
+    if ($FirstCaption -cnotmatch '^Figure 1: (Study flow|Other flow)$') {
+        throw 'F37 fixture generator accepts only two fixed trusted caption strings'
+    }
+    $contents = "BT`n/F1 18 Tf`n50 220 Td`n($FirstCaption) Tj`nET`n" +
+        "BT`n/F1 18 Tf`n50 140 Td`n(Table 2: Results) Tj`nET`n"
+    $objects = @(
+        '<< /Type /Catalog /Pages 2 0 R >>',
+        '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 420 260] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+        ('<< /Length ' + [Text.Encoding]::ASCII.GetByteCount($contents) + " >>`nstream`n" + $contents + "endstream"),
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'
+    )
+    $body = [Text.StringBuilder]::new('%PDF-1.4' + "`n")
+    $offsets = New-Object 'System.Collections.Generic.List[int]'
+    for ($index = 0; $index -lt $objects.Count; $index++) {
+        $offsets.Add($body.Length)
+        [void]$body.Append(($index + 1).ToString() + " 0 obj`n" + $objects[$index] + "`nendobj`n")
+    }
+    $xref = $body.Length
+    [void]$body.Append("xref`n0 6`n0000000000 65535 f `n")
+    foreach ($offset in $offsets) {
+        [void]$body.Append($offset.ToString('D10') + " 00000 n `n")
+    }
+    [void]$body.Append("trailer`n<< /Size 6 /Root 1 0 R >>`nstartxref`n" + $xref + "`n%%EOF`n")
+    $bytes = [Text.Encoding]::ASCII.GetBytes($body.ToString())
+    [IO.File]::WriteAllBytes($Path, $bytes)
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Read-F37CaptionStatus([System.Windows.Automation.AutomationElement]$Window, [string]$Pattern) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        if ($script:p -and $script:p.HasExited) { throw 'F37 native PDF process exited during caption inspection' }
+        try {
+            foreach ($node in (Children $Window ([System.Windows.Automation.ControlType]::Text))) {
+                $name = [string]$node.Current.Name
+                if ($name.StartsWith('PDF caption anchor preview status ') -and $name -like $Pattern) {
+                    return $name
+                }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+        Start-Sleep -Milliseconds 75
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "F37 required native caption status is absent: $Pattern"
+}
+
+function Focus-F37CaptionAction(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [System.Windows.Automation.AutomationElement]$Anchor,
+    [string]$Name,
+    [int]$MaxTabs = 14
+) {
+    $button = FocusByTab $Anchor ([System.Windows.Automation.ControlType]::Button) $Name $MaxTabs
+    $windowBounds = $Window.Current.BoundingRectangle
+    $bounds = $button.Current.BoundingRectangle
+    if (-not $button.Current.IsEnabled -or $button.Current.IsOffscreen -or
+        $bounds.Width -lt 30 -or $bounds.Height -lt 12 -or
+        $bounds.Left -lt $windowBounds.Left -or $bounds.Top -lt $windowBounds.Top -or
+        $bounds.Right -gt $windowBounds.Right -or $bounds.Bottom -gt $windowBounds.Bottom) {
+        throw "F37 native caption action is not visibly reachable: $Name"
+    }
+    return $button
+}
+
+function Get-F37CanvasSample([System.Windows.Automation.AutomationElement]$Window) {
+    # Sample the *real installed screen pixels* of the accessible PDF Image,
+    # not an app state field or mocked bitmap. Require the image inside the
+    # viewport; inaccessible/offscreen PDF pixels cannot prove clearing.
+    $images = @(Children $Window ([System.Windows.Automation.ControlType]::Image) |
+        Where-Object { $_.Current.Name -eq 'Rendered PDF page' })
+    if ($images.Count -ne 1 -or $images[0].Current.IsOffscreen) {
+        throw 'F37 cannot locate exactly one visible native PDF page image'
+    }
+    $rect = $images[0].Current.BoundingRectangle
+    $win = $Window.Current.BoundingRectangle
+    if ($rect.Width -lt 180 -or $rect.Height -lt 90 -or
+        $rect.Left -lt $win.Left -or $rect.Top -lt $win.Top -or
+        $rect.Right -gt $win.Right -or $rect.Bottom -gt $win.Bottom) {
+        throw 'F37 native PDF canvas is clipped or outside the installed viewport'
+    }
+    $screen = [Windows.Forms.Screen]::FromPoint(
+        [Drawing.Point]::new([int]($rect.Left + $rect.Width / 2), [int]($rect.Top + $rect.Height / 2))
+    ).Bounds
+    if ($rect.Left -lt $screen.Left -or $rect.Right -gt $screen.Right -or
+        $rect.Top -lt $screen.Top -or $rect.Bottom -gt $screen.Bottom) {
+        throw 'F37 native PDF canvas extends outside the capture screen'
+    }
+    [Windows.Forms.Cursor]::Position = [Drawing.Point]::new([int]($win.Left + 8), [int]($win.Top + 8))
+    Start-Sleep -Milliseconds 100
+    $bitmap = [Drawing.Bitmap]::new([int]$rect.Width, [int]$rect.Height)
+    $graphics = [Drawing.Graphics]::FromImage($bitmap)
+    try {
+        $graphics.CopyFromScreen([int]$rect.Left, [int]$rect.Top, 0, 0, $bitmap.Size)
+        $samples = New-Object 'System.Collections.Generic.List[string]'
+        foreach ($yPercent in @(20, 35, 50, 65, 80)) {
+            foreach ($xPercent in @(20, 35, 50, 65, 80)) {
+                $x = [int][Math]::Floor(($bitmap.Width - 1) * $xPercent / 100.0)
+                $y = [int][Math]::Floor(($bitmap.Height - 1) * $yPercent / 100.0)
+                $samples.Add($bitmap.GetPixel($x, $y).ToArgb().ToString('X8'))
+            }
+        }
+        return [string]::Join(',', $samples)
+    } finally {
+        $graphics.Dispose()
+        $bitmap.Dispose()
+    }
+}
 try {
     $p = Start-Process -FilePath $Exe -PassThru
     $window = WindowFor $p 'Native window missing from UIA tree'
@@ -1263,6 +1375,95 @@ try {
         throw 'PDF reader Previous button did not disable at first page'
     }
     Write-Output 'PASS: installed native PDFium reader finds matches across pages, preserves current page on miss, navigates bounds and exposes accessible controls'
+
+    # F37: real installed PDFium + Slint/UIA caption scan and source-identity
+    # navigation, not a source-only assertion. Keep both revisions of the PDF
+    # entirely inside the disposable host root; no project import or approval.
+    $f37Before = Get-F14ProjectSnapshot $temporary
+    $f37Source = Join-Path $hostData 'uia-trusted-f37-caption.pdf'
+    $f37ExpectedSha = Write-F37CaptionPdf $f37Source 'Figure 1: Study flow'
+    $f37OriginalSize = (Get-Item -LiteralPath $f37Source).Length
+    Select-FileThroughNativeDialog $window 'Choose local PDF with native file picker' $f37Source $p.Id
+    $f37Selected = $false
+    for ($attempt = 0; $attempt -lt 80; $attempt++) {
+        $selectedPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF file path'
+        $current = ([System.Windows.Automation.ValuePattern]$selectedPath.GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern
+        )).Current.Value
+        if (Test-SelectedFixturePath $current $f37Source) {
+            $f37Selected = $true
+            break
+        }
+        Start-Sleep -Milliseconds 75
+    }
+    if (-not $f37Selected) { throw 'F37 native PDF chooser did not select its disposable caption source' }
+    WaitForNameLike $window '*No PDF page loaded*' 10000
+    $f37BlankCanvas = Get-F37CanvasSample $window
+    $f37Search = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF search query'
+    $f37ScanName = 'Preview unverified local PDF figure and table caption anchors'
+    $f37Scan = Focus-F37CaptionAction $window $f37Search $f37ScanName 16
+    $f37Scan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f37Scanned = Read-F37CaptionStatus $window '*Read-only PDF caption scan: 2 candidates*'
+    $f37Digest = [regex]::Match($f37Scanned, 'source SHA-256 ([0-9a-f]{64})(?:\.|\s)')
+    if (-not $f37Digest.Success -or $f37Digest.Groups[1].Value -cne $f37ExpectedSha -or
+        -not $f37Scanned.Contains('unverified PDF text-layer caption anchors only') -or
+        -not $f37Scanned.Contains('No figure pixels or table cells were extracted')) {
+        throw 'F37 native caption scan did not expose exact PDF source SHA-256 and honest extraction limits'
+    }
+    Assert-F14Unchanged $f37Before (Get-F14ProjectSnapshot $temporary) $window 'F37 scanned source-only caption anchors'
+    $f37FigureName = 'Inspect unverified PDF caption Figure: Figure 1: Study flow page 1'
+    $f37TableName = 'Inspect unverified PDF caption Table: Table 2: Results page 1'
+    $f37Candidates = @(Children $window ([System.Windows.Automation.ControlType]::Button) |
+        Where-Object { $_.Current.Name -in @($f37FigureName, $f37TableName) })
+    if ($f37Candidates.Count -ne 2) {
+        throw 'F37 did not expose both actual synthetic PDF Figure/Table caption anchors as native UIA buttons'
+    }
+    $f37Scan = Named $window ([System.Windows.Automation.ControlType]::Button) $f37ScanName
+    $f37Figure = Focus-F37CaptionAction $window $f37Scan $f37FigureName 8
+    $f37Figure.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f37Verified = Read-F37CaptionStatus $window '*SOURCE SHA-256 VERIFIED against scanned bytes*'
+    if (-not $f37Verified.Contains($f37ExpectedSha) -or
+        -not $f37Verified.Contains('Caption bounds are unverified') -or
+        -not $f37Verified.Contains('no figure pixels or table cells')) {
+        throw 'F37 native caption navigation did not verify the scanned source without inventing figure/table extraction'
+    }
+    WaitForNameLike $window '*PDF page 1 of 1*' 15000
+    WaitForNameLike $window '*PDF search status: Rendered page 1 of 1*' 15000
+    $f37RenderedCanvas = Get-F37CanvasSample $window
+    if ($f37RenderedCanvas -ceq $f37BlankCanvas) {
+        throw 'F37 valid caption navigation did not visibly render the synthetic PDF page'
+    }
+    Assert-F14Unchanged $f37Before (Get-F14ProjectSnapshot $temporary) $window 'F37 source-SHA verified native page navigation'
+
+    # Deliberately swap bytes at the SAME path while the old caption button is
+    # still on screen. It remains a valid, equally sized PDF, so path, length
+    # and PDF parseability cannot substitute for the exact source hash.
+    $f37ReplacementSha = Write-F37CaptionPdf $f37Source 'Figure 1: Other flow'
+    $f37ReplacementSize = (Get-Item -LiteralPath $f37Source).Length
+    if ($f37ReplacementSize -ne $f37OriginalSize -or
+        $f37ReplacementSha -ceq $f37ExpectedSha) {
+        throw 'F37 fixture substitution did not preserve the source path/size while changing source bytes'
+    }
+    $f37Scan = Named $window ([System.Windows.Automation.ControlType]::Button) $f37ScanName
+    $f37Figure = Focus-F37CaptionAction $window $f37Scan $f37FigureName 8
+    $f37Figure.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f37Refused = Read-F37CaptionStatus $window '*Caption navigation refused: PDF source bytes changed since the caption scan*'
+    if (-not $f37Refused.Contains('Rescan the PDF before inspecting captions')) {
+        throw 'F37 changed-source refusal did not request a new scan'
+    }
+    WaitForNameLike $window '*PDF search status: PDF error: PDF source bytes changed since the caption scan*matches: 0*' 15000
+    WaitForNameLike $window '*No PDF page loaded*' 10000
+    $f37RefusedCanvas = Get-F37CanvasSample $window
+    if ($f37RefusedCanvas -cne $f37BlankCanvas) {
+        throw 'F37 same-path substitution refusal left stale PDF pixels in the native viewport'
+    }
+    $f37StillPresent = @(Children $window ([System.Windows.Automation.ControlType]::Button) |
+        Where-Object { $_.Current.Name -in @($f37FigureName, $f37TableName) })
+    if ($f37StillPresent.Count -ne 0) {
+        throw 'F37 failed source verification left stale caption candidate buttons available'
+    }
+    Assert-F14Unchanged $f37Before (Get-F14ProjectSnapshot $temporary) $window 'F37 same-path PDF substitution refused without project writes'
+    Write-Output 'UIA_F37_NATIVE_CAPTION_SOURCE_SHA_VERIFIED_SAME_PATH_SUBSTITUTION_REFUSED_STALE_PIXELS_CLEARED_NO_PROJECT_WRITE_OK'
 
     # Register a real project reference, then carry its generated ID into the
     # systematic-review workflow. This proves the redesigned References and

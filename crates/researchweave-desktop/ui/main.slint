@@ -2389,6 +2389,11 @@ export component MainWindow inherits Window {
                                             }
                                             Text {
                                                 text: root.notebook-cell-total == 0 ? "No saved arithmetic cells on this project." : "Saved arithmetic cells: " + root.notebook-cell-total + " total; this page begins at record " + (root.notebook-cell-offset + 1) + ".";
+                                                accessible-label: root.notebook-cell-total == 0
+                                                    ? "Arithmetic notebook: no saved cells in this project"
+                                                    : "Arithmetic notebook page: record " + (root.notebook-cell-offset + 1)
+                                                        + " of " + root.notebook-cell-total
+                                                        + " saved cells. Project snapshot revision " + root.notebook-cell-snapshot-revision;
                                                 color: Theme.muted-ink;
                                                 wrap: word-wrap;
                                             }

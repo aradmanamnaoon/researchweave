@@ -82,3 +82,23 @@ runs for source `1096f62` are historical relative to this patchset and cannot
 certify these repairs. Do not advance any F01–F45 ledger row to
 `RELEASE_VERIFIED` on source contracts alone. The separate Liara CAS and
 encrypted restore gates remain unresolved.
+
+## Follow-up: bounded find-next and installed native regression harness
+
+The `find_next_matching_page` path was additionally changed from the default
+PDFium text extraction to `text_with_limit(MAX_PAGE_GLYPHS)`, sharing the
+120,000-character preallocation ceiling with page rendering. The pinned
+`firecrawl-pdfium` 0.1.0 implementation returns `TextTooLarge` **before**
+allocating positioned glyphs when the page exceeds the limit; this is a
+refusal, not silent truncation or a false claim that the page lacks a match.
+
+The Windows installed UIA smoke script now also *attempts* a deterministic
+real native F37 scan/navigation test: a disposable valid PDF with both figure
+and table captions is generated on the host, independently hashed, opened
+through the real picker, scanned and clicked. The test then substitutes a
+same-length distinct PDF at the exact same path and demands a source mismatch
+refusal, no stale page pixels, cleared caption controls and an unchanged
+project database snapshot. The fixture/parser and source-contract checks
+pass. **It has not yet passed on an installed application**, and its native
+canvas/caption visibility observations must be checked against actual CI
+results. F37 remains partial.

@@ -107,6 +107,10 @@ pub fn render_search(pdf_path: &Path, query: &str) -> Result<PdfRender, String> 
 }
 
 const MAX_NATIVE_PDF_BYTES: u64 = 128 * 1024 * 1024;
+// PDFium creates per-character geometry while extracting a text page, so
+// checking the length only after `.text()` returns is not a memory budget.
+// The pinned PDFium wrapper refuses oversized pages BEFORE glyph allocation.
+const MAX_PAGE_GLYPHS: usize = 120_000;
 
 fn read_bounded_pdf(pdf_path: &Path) -> Result<Vec<u8>, String> {
     // Use one open handle for metadata and content. A path could otherwise be
@@ -154,7 +158,7 @@ pub fn find_next_matching_page(
         let text = doc
             .page(page_index)
             .map_err(|e| e.to_string())?
-            .text()
+            .text_with_limit(MAX_PAGE_GLYPHS)
             .map_err(|e| e.to_string())?;
         total_bytes = total_bytes.saturating_add(text.text().len());
         if total_bytes > MAX_TOTAL_TEXT_BYTES {
@@ -353,7 +357,9 @@ fn render_search_at_bytes(
         )
         .map_err(|e| e.to_string())?;
     // Bound the native per-glyph allocation before extracting a hostile page.
-    let text = page.text_with_limit(120_000).map_err(|e| e.to_string())?;
+    let text = page
+        .text_with_limit(MAX_PAGE_GLYPHS)
+        .map_err(|e| e.to_string())?;
     const MAX_PAGE_TEXT_BYTES: usize = 16 * 1024 * 1024;
     if text.text().len() > MAX_PAGE_TEXT_BYTES {
         return Err("PDF text layer exceeds the bounded per-page budget".into());

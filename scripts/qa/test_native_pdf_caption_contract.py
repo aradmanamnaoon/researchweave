@@ -67,6 +67,13 @@ class CaptionPreviewContract(unittest.TestCase):
         self.assertIn("stride_bytes > render.pixels().len()", self.engine)
         self.assertIn("oversized_sparse_pdf_is_rejected_before_loading_native_pdfium", self.engine)
 
+    def test_pdf_search_and_find_next_bound_native_text_geometry_before_allocating(self) -> None:
+        self.assertIn("const MAX_PAGE_GLYPHS: usize = 120_000;", self.engine)
+        self.assertIn(".text_with_limit(MAX_PAGE_GLYPHS)", self.engine)
+        self.assertNotIn(".text()\n", self.engine)
+        self.assertIn("fn matched_glyph_bounds(", self.engine)
+        self.assertIn("fn valid_page_rect(", self.engine)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -2255,6 +2255,88 @@ mod tests {
     }
 
     #[test]
+    fn v7_archive_restores_immutable_reference_decision_rows_and_triggers() {
+        // This tests portable schema and row preservation, NOT the library's
+        // approved decision/event chain (which is tested by its own handler).
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("v7-source");
+        let store = ProjectStore::create(&root, &info()).unwrap();
+        let left = "12345678-1234-4123-8123-123456789abc";
+        let right = "12345678-1234-4123-8123-123456789abd";
+        for id in [left, right] {
+            store
+                .connection()
+                .execute(
+                    "INSERT INTO reference
+                     (id,title,authors_json,year,doi,kind,format,raw,metadata_json,status,imported_at)
+                     VALUES (?1,'Memory and cognition','[\"Reviewer\"]',2026,NULL,
+                             'article','bibtex','@article{memory}','{}','unverified','2026-11-01')",
+                    [id],
+                )
+                .unwrap();
+        }
+        store
+            .connection()
+            .execute(
+                "INSERT INTO reference_dedup_decisions
+                 (id,left_id,right_id,decision,reviewed_candidate_sha256,stable_pair_sha256,
+                  review_revision,project_revision,rationale,actor,recorded_at,request_id)
+                 VALUES ('synthetic-review',?1,?2,'keep_separate',?3,?4,0,1,
+                         'Two independently inspected sources','human','2026-11-01','synthetic-request')",
+                params![left, right, "a".repeat(64), "b".repeat(64)],
+            )
+            .unwrap();
+        let archive = base.path().join("v7-review.rwproj");
+        let verified = archive_project(&store, &archive).unwrap();
+        assert_eq!(verify_archive(&archive).unwrap(), verified);
+        drop(store);
+
+        let destination = base.path().join("v7-restored");
+        restore_archive(&archive, &destination).unwrap();
+        let reopened = ProjectStore::open(&destination).unwrap();
+        let row: (String, String, String, i64) = reopened
+            .connection()
+            .query_row(
+                "SELECT decision,rationale,stable_pair_sha256,project_revision
+                 FROM reference_dedup_decisions WHERE id='synthetic-review'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            row,
+            (
+                "keep_separate".to_owned(),
+                "Two independently inspected sources".to_owned(),
+                "b".repeat(64),
+                1
+            )
+        );
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row::<i64, _, _>("SELECT COUNT(*) FROM reference_alias", [], |row| row
+                    .get(0))
+                .unwrap(),
+            0
+        );
+        assert!(reopened
+            .connection()
+            .execute(
+                "UPDATE reference_dedup_decisions SET rationale='rewritten' WHERE id='synthetic-review'",
+                [],
+            )
+            .is_err());
+        assert!(reopened
+            .connection()
+            .execute(
+                "DELETE FROM reference_dedup_decisions WHERE id='synthetic-review'",
+                []
+            )
+            .is_err());
+    }
+
+    #[test]
     fn v7_reference_decision_immutability_triggers_cannot_be_silently_removed() {
         let base = tempfile::tempdir().unwrap();
         let root = base.path().join("tampered-v7-project");

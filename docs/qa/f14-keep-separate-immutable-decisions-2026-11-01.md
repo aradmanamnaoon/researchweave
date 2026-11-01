@@ -90,3 +90,30 @@ separate (binding)** source decision without adding an event. Both platforms
 fail closed if native accessibility/readback, provenance or persistence is
 missing. Their source test scripts are not evidence that the installed GUI has
 already passed; retain F14 PARTIAL until exact hosted run markers succeed.
+
+## 2026-11-01 follow-up: transactional decision/merge guard
+
+Subsequent source review identified a narrower time-of-check/time-of-use gap.
+Human keep-separate decision preparation verified its source-pair fingerprints
+before entering the event transaction, and the legacy direct `reference.merge`
+entrypoint rejected binding decisions before entering its alias transaction.
+Another local connection could change sources or record a decision between
+those reads and the irrevocable event/alias write.
+
+The follow-up adds **same-transaction** source-pair, alias state, candidate
+SHA, stable source SHA and previous-decision rechecks before inserting a
+decision row. The event records the exact inserted immutable decision row ID,
+while the rationale is retained only in that row and identified in the event
+by SHA-256. The direct `reference.merge` transaction independently rechecks
+the binding keep-separate decision immediately before inserting the alias,
+including after the existing preflight UI check. Reconsideration remains an
+explicit separate approved decision. No schema bump, new mutation to source
+records, or automatic alias was introduced.
+
+Additional **authored but not yet execution-verified** Rust tests exercise
+same-transaction guards, source/alias tampering without a project revision
+increase, persisted decision-event association, unrelated revision changes,
+and v7 portable archive restoration with immutable SQL triggers. The local
+Python native source contracts, formatter, whitespace and PowerShell parser
+checks were run separately. Installed Windows/Linux/macOS GUI acceptance is
+still required before changing F14 from `PARTIAL`.

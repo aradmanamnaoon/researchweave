@@ -51,6 +51,9 @@ class ArithmeticNotebookContract(unittest.TestCase):
         ):
             self.assertIn(label, self.ui)
         self.assertIn('root.load-arithmetic-cells(root.notebook-cell-offset + 100);', self.ui)
+        self.assertIn('accessible-label: root.notebook-cell-total == 0', self.ui)
+        self.assertIn('"Arithmetic notebook page: record " + (root.notebook-cell-offset + 1)', self.ui)
+        self.assertIn('" saved cells. Project snapshot revision " + root.notebook-cell-snapshot-revision', self.ui)
         self.assertIn('ui.set_notebook_cell_offset(0);', self.desktop)
         self.assertIn('ui.set_notebook_cell_snapshot_revision(-1);', self.desktop)
         self.assertIn('ui.set_notebook_cell_snapshot_revision(snapshot);', self.desktop)

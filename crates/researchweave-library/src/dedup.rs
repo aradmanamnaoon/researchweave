@@ -226,7 +226,7 @@ fn pair_ids(args: &Value) -> Result<(String, String), String> {
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, PartialEq, Eq)]
 struct RecordedDecision {
     decision: String,
     stable_pair_sha256: String,
@@ -266,8 +266,11 @@ fn decision_state(record: Option<&RecordedDecision>, stable: &str) -> &'static s
 }
 
 fn source_reference(store: &ProjectStore, id: &str) -> Result<Reference, String> {
-    let source = store
-        .connection()
+    source_reference_on(store.connection(), id)
+}
+
+fn source_reference_on(conn: &Connection, id: &str) -> Result<Reference, String> {
+    let source = conn
         .query_row(
             "SELECT title,authors_json,year,doi,raw FROM reference WHERE id=?1",
             [id],
@@ -299,20 +302,68 @@ fn source_reference(store: &ProjectStore, id: &str) -> Result<Reference, String>
     })
 }
 
+/// Source inspection before an approval is not a transactional snapshot: an
+/// external connection could alter a source row or its alias mapping before
+/// the project revision/event transaction starts. Recheck all approved source
+/// identities *inside* the same transaction that inserts the immutable row.
+/// This does not modify, merge or alias any bibliography records.
+fn verify_decision_snapshot(
+    conn: &Connection,
+    left_id: &str,
+    right_id: &str,
+    revision: i64,
+    reviewed_candidate_sha256: &str,
+    reviewed_pair_sha256: &str,
+) -> Result<(), String> {
+    let total: i64 = conn
+        .query_row("SELECT COUNT(*) FROM reference", [], |row| row.get(0))
+        .map_err(|_| "reference count unavailable during decision commit")?;
+    if total > MAX_SCAN {
+        return Err("candidate scan incomplete during decision commit".into());
+    }
+    let alias_count: i64 = conn
+        .query_row(
+            "SELECT COUNT(*) FROM reference_alias WHERE original_id IN (?1,?2)",
+            params![left_id, right_id],
+            |row| row.get(0),
+        )
+        .map_err(|_| "reference aliases unavailable during decision commit")?;
+    if alias_count != 0 {
+        return Err("reference alias changed before decision commit".into());
+    }
+    let first = source_reference_on(conn, left_id)?;
+    let second = source_reference_on(conn, right_id)?;
+    let current = candidate(&first, &second, revision)
+        .ok_or("reference pair no longer matches the reviewed candidate")?;
+    if current["candidate_sha256"] != reviewed_candidate_sha256
+        || stable_pair_sha256(&first, &second) != reviewed_pair_sha256
+    {
+        return Err("reference source snapshot changed before decision commit".into());
+    }
+    Ok(())
+}
+
 /// Guard BOTH the human F14 approval path and the older explicit reference.merge
 /// operation; otherwise a retained keep-separate decision could be overridden
 /// through the legacy merge button without a fresh reconsideration.
 pub(super) fn guard_direct_merge(store: &ProjectStore, args: &Value) -> Result<(), String> {
+    guard_direct_merge_on(store.connection(), args)
+}
+
+/// Re-run the binding identity-decision check under the same SQLite write
+/// transaction that inserts the alias. A preflight-only guard can race with
+/// a concurrently approved immutable keep-separate decision.
+pub(super) fn guard_direct_merge_on(conn: &Connection, args: &Value) -> Result<(), String> {
     let canonical = required(args, "canonical_id", 128)?;
     let duplicate = required(args, "duplicate_id", 128)?;
     if canonical == duplicate {
         return Err("cannot merge a reference into itself".into());
     }
-    let first = source_reference(store, canonical)?;
-    let second = source_reference(store, duplicate)?;
+    let first = source_reference_on(conn, canonical)?;
+    let second = source_reference_on(conn, duplicate)?;
     let (left, right) = sorted_pair(&first, &second);
     let stable = stable_pair_sha256(left, right);
-    let prior = latest_decision(store.connection(), &left.id, &right.id)?;
+    let prior = latest_decision(conn, &left.id, &right.id)?;
     if decision_state(prior.as_ref(), &stable) == "kept_separate" {
         return Err(
             "reviewer kept these source records separate; a new explicit reconsideration is required"
@@ -413,8 +464,9 @@ fn record_decision(
         "keep_separate" | "reconsider" => {}
         _ => return Err("unsupported reference decision".into()),
     }
+    let id = Uuid::new_v4().to_string();
     let event_payload = json!({
-        "left_id":left_id,"right_id":right_id,"decision":decision,
+        "decision_id":id,"left_id":left_id,"right_id":right_id,"decision":decision,
         "reviewed_candidate_sha256":fingerprint,"stable_pair_sha256":stable,
         // The full human rationale is retained in the immutable decision row,
         // but not duplicated into the append-only project event / exports.
@@ -434,17 +486,15 @@ fn record_decision(
     }
     let actor = ctx.actor.to_string();
     let request_id = ctx.request_id.to_string();
-    let id = Uuid::new_v4().to_string();
     let op = if decision == "keep_separate" {
         "reference.dedup_keep_separate"
     } else {
         "reference.dedup_reconsider"
     };
     let ((), new_revision) = collections::mutate(store, op, &event_payload, ctx, |tx, now| {
+        verify_decision_snapshot(tx, &left_id, &right_id, revision, fingerprint, &stable)?;
         let refreshed = latest_decision(tx, &left_id, &right_id)?;
-        if refreshed.as_ref().map(|item| item.project_revision)
-            != prior.as_ref().map(|item| item.project_revision)
-        {
+        if refreshed != prior {
             return Err("reference decision history changed during approval".into());
         }
         tx.execute(
@@ -778,6 +828,35 @@ mod tests {
             accepted["impact"]["local_writes"],
             json!(["reference_dedup_decisions", "events", "project"])
         );
+        let committed = ProjectStore::open(&path).unwrap();
+        let payload_json: String = committed
+            .connection()
+            .query_row(
+                "SELECT payload_json FROM events WHERE sequence=3",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        let event_payload: Value = serde_json::from_str(&payload_json).unwrap();
+        let (stored_id, stored_rationale, stored_revision): (String, String, i64) = committed
+            .connection()
+            .query_row(
+                "SELECT id,rationale,project_revision FROM reference_dedup_decisions",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(event_payload["decision_id"], stored_id);
+        assert_eq!(accepted["data"]["id"], stored_id);
+        assert_eq!(event_payload["stable_pair_sha256"], source_hash);
+        assert_eq!(event_payload["review_revision"], 2);
+        assert_eq!(stored_revision, 3);
+        assert_eq!(
+            event_payload["rationale_sha256"],
+            hash(stored_rationale.as_bytes())
+        );
+        assert_eq!(stored_rationale, keep["rationale"].as_str().unwrap());
+        drop(committed);
         assert_eq!(
             handler.execute("reference.dedup_keep_separate", &keep, &ctx)["status"],
             "failed"
@@ -803,6 +882,12 @@ mod tests {
         );
         let merge = json!({"project_id":ctx.project_id.to_string(),
             "canonical_id":first,"duplicate_id":second,"rationale":"wrongly merging kept sources"});
+        let scoped = ProjectStore::open(&path).unwrap();
+        let transaction = scoped.connection().unchecked_transaction().unwrap();
+        let denied = guard_direct_merge_on(&transaction, &merge).unwrap_err();
+        assert!(denied.contains("kept these source records separate"));
+        transaction.rollback().unwrap();
+        drop(scoped);
         assert_eq!(
             reopened.preview("reference.merge", &merge, &ctx)["status"],
             "failed"
@@ -826,6 +911,11 @@ mod tests {
         let reconsidered = reopened.execute("reference.dedup_decision_history", &history, &ctx);
         assert_eq!(reconsidered["data"]["decision_state"], "reconsidered");
         assert_eq!(reconsidered["data"]["rows"].as_array().unwrap().len(), 2);
+        let scoped = ProjectStore::open(&path).unwrap();
+        let transaction = scoped.connection().unchecked_transaction().unwrap();
+        assert!(guard_direct_merge_on(&transaction, &merge).is_ok());
+        transaction.rollback().unwrap();
+        drop(scoped);
         let merged = reopened.execute("reference.merge", &merge, &ctx);
         assert_eq!(merged["status"], "ok", "{merged}");
         let store = ProjectStore::open(&path).unwrap();
@@ -861,6 +951,206 @@ mod tests {
             .connection()
             .execute("DELETE FROM reference_dedup_decisions", [])
             .is_err());
+    }
+
+    #[test]
+    fn source_snapshot_rechecked_in_commit_transaction_and_unrelated_revision_does_not_erase_review(
+    ) {
+        let (folder, handler, mut ctx) = fixture();
+        let first = add(
+            &handler,
+            &mut ctx,
+            "Same article",
+            "Researcher One",
+            2024,
+            Some("10.1234/first"),
+        );
+        let second = add(
+            &handler,
+            &mut ctx,
+            "Same article",
+            "Researcher One",
+            2024,
+            Some("10.1234/second"),
+        );
+        let request = json!({"project_id":ctx.project_id.to_string()});
+        let scanned = handler.execute("reference.dedup_candidates", &request, &ctx);
+        let candidate = &scanned["data"]["candidates"][0];
+        let fingerprint = candidate["candidate_sha256"].as_str().unwrap().to_owned();
+        let stable = candidate["stable_pair_sha256"].as_str().unwrap().to_owned();
+        let revision = i64::try_from(ctx.expected_revision.unwrap()).unwrap();
+        let path = folder.path().join(ctx.project_id.to_string());
+        let store = ProjectStore::open(&path).unwrap();
+        let (left, right) = if first < second {
+            (&first, &second)
+        } else {
+            (&second, &first)
+        };
+        let tx = store.connection().unchecked_transaction().unwrap();
+        assert!(
+            verify_decision_snapshot(&tx, left, right, revision, &fingerprint, &stable).is_ok()
+        );
+        tx.rollback().unwrap();
+        drop(store);
+
+        let keep = json!({"project_id":ctx.project_id.to_string(),
+            "left_id":first,"right_id":second,
+            "candidate_sha256":fingerprint,
+            "rationale":"Two independent DOI registrations; keep sources distinct"});
+        assert_eq!(
+            handler.execute("reference.dedup_keep_separate", &keep, &ctx)["status"],
+            "ok"
+        );
+        ctx.expected_revision = Some(ctx.expected_revision.unwrap() + 1);
+        ctx.request_id = Uuid::new_v4();
+
+        // Unrelated writes invalidate candidate_sha256 but do not invalidate
+        // the decision over the unchanged pair's stable bibliographic sources.
+        let _third = add(
+            &handler,
+            &mut ctx,
+            "Another independent article",
+            "Other Author",
+            2023,
+            None,
+        );
+        let rescanned = handler.execute("reference.dedup_candidates", &request, &ctx);
+        let current = &rescanned["data"]["candidates"][0];
+        assert_eq!(current["decision_state"], "kept_separate");
+        assert_eq!(current["stable_pair_sha256"], stable);
+        assert_ne!(current["candidate_sha256"], fingerprint);
+        let history = handler.execute(
+            "reference.dedup_decision_history",
+            &json!({"project_id":ctx.project_id.to_string(),
+                "left_id":first,"right_id":second}),
+            &ctx,
+        );
+        assert_eq!(history["data"]["rows"].as_array().unwrap().len(), 1);
+        assert_eq!(history["data"]["decision_state"], "kept_separate");
+    }
+
+    #[test]
+    fn transaction_source_snapshot_rejects_direct_edits_or_alias_without_project_revision_bump() {
+        let (folder, handler, mut ctx) = fixture();
+        let first = add(
+            &handler,
+            &mut ctx,
+            "Identical title",
+            "Author One",
+            2025,
+            None,
+        );
+        let second = add(
+            &handler,
+            &mut ctx,
+            "Identical title",
+            "Author One",
+            2025,
+            None,
+        );
+        let path = folder.path().join(ctx.project_id.to_string());
+        let scan = handler.execute(
+            "reference.dedup_candidates",
+            &json!({"project_id":ctx.project_id.to_string()}),
+            &ctx,
+        );
+        let candidate = &scan["data"]["candidates"][0];
+        let fingerprint = candidate["candidate_sha256"].as_str().unwrap().to_owned();
+        let stable = candidate["stable_pair_sha256"].as_str().unwrap().to_owned();
+        let revision = i64::try_from(ctx.expected_revision.unwrap()).unwrap();
+        let (left, right) = if first < second {
+            (&first, &second)
+        } else {
+            (&second, &first)
+        };
+        let store = ProjectStore::open(&path).unwrap();
+        assert!(verify_decision_snapshot(
+            store.connection(),
+            left,
+            right,
+            revision,
+            &fingerprint,
+            &stable
+        )
+        .is_ok());
+        let original_raw: String = store
+            .connection()
+            .query_row("SELECT raw FROM reference WHERE id=?1", [left], |row| {
+                row.get(0)
+            })
+            .unwrap();
+        store
+            .connection()
+            .execute(
+                "UPDATE reference SET raw=?1 WHERE id=?2",
+                params!["@article{tampered}", left],
+            )
+            .unwrap();
+        assert_eq!(store.info().unwrap().revision, revision);
+        assert!(verify_decision_snapshot(
+            store.connection(),
+            left,
+            right,
+            revision,
+            &fingerprint,
+            &stable
+        )
+        .is_err());
+        let attempted = handler.execute(
+            "reference.dedup_keep_separate",
+            &json!({"project_id":ctx.project_id.to_string(),
+                "left_id":first,"right_id":second,
+                "candidate_sha256":fingerprint,
+                "rationale":"Reviewed pair before unexpected source edit"}),
+            &ctx,
+        );
+        assert_eq!(attempted["status"], "failed", "{attempted}");
+
+        // Restore exactly the source text to distinguish alias changes from
+        // changes to the candidate fingerprint itself.
+        store
+            .connection()
+            .execute(
+                "UPDATE reference SET raw=?1 WHERE id=?2",
+                params![original_raw, left],
+            )
+            .unwrap();
+        assert!(verify_decision_snapshot(
+            store.connection(),
+            left,
+            right,
+            revision,
+            &fingerprint,
+            &stable
+        )
+        .is_ok());
+        store
+            .connection()
+            .execute(
+                "INSERT INTO reference_alias(original_id,canonical_id,reason) VALUES (?1,?2,'synthetic alias')",
+                params![left, right],
+            )
+            .unwrap();
+        assert!(verify_decision_snapshot(
+            store.connection(),
+            left,
+            right,
+            revision,
+            &fingerprint,
+            &stable
+        )
+        .is_err());
+        assert_eq!(
+            store
+                .connection()
+                .query_row::<i64, _, _>(
+                    "SELECT COUNT(*) FROM reference_dedup_decisions",
+                    [],
+                    |row| row.get(0)
+                )
+                .unwrap(),
+            0
+        );
     }
 
     #[test]
