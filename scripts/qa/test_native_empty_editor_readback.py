@@ -104,6 +104,38 @@ class ClipboardReadbackTests(unittest.TestCase):
             self.readback(None, "Analysis dataset ID", allow_empty=True, force_clipboard=True)
         self.assertFalse(self.calls)
 
+    def test_f05_citation_reads_require_actual_native_field_not_database_value(self) -> None:
+        source = pathlib.Path(__file__).with_name("mission-atspi-navigation.py")
+        tree = ast.parse(source.read_text(encoding="utf-8"))
+        procedure = next(
+            statement for statement in tree.body
+            if isinstance(statement, ast.FunctionDef)
+            and statement.name == "exercise_f05_project_citation"
+        )
+        native_reads = [
+            call for call in ast.walk(procedure)
+            if isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "read_visible_field_keyboard"
+            and len(call.args) >= 2
+            and isinstance(call.args[1], ast.Constant)
+            and call.args[1].value == "Manuscript citations"
+        ]
+        self.assertEqual(len(native_reads), 2)
+        self.assertTrue(any(
+            any(keyword.arg == "force_clipboard" for keyword in call.keywords)
+            for call in native_reads
+        ))
+        self.assertFalse(any(
+            isinstance(call, ast.Call)
+            and isinstance(call.func, ast.Name)
+            and call.func.id == "read_field"
+            and len(call.args) >= 2
+            and isinstance(call.args[1], ast.Constant)
+            and call.args[1].value == "Manuscript citations"
+            for call in ast.walk(procedure)
+        ))
+
 
 if __name__ == "__main__":
     unittest.main()

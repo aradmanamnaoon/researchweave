@@ -405,7 +405,13 @@ def exercise_f05_project_citation(app: Any, project: pathlib.Path, output: pathl
         raise RuntimeError("F05 persisted citation metadata must be a JSON list")
     reveal_bounded_control(app, "Manuscript citations", down=False)
     visible_citations_before = [
-        part.strip() for part in read_field(app, "Manuscript citations").split(",")
+        # Slint can expose a visible, focused LineEdit without AT-SPI Text.
+        # For an expected-empty list, force the fresh-sentinel clipboard path
+        # so an unsupported Text interface cannot masquerade as empty state.
+        part.strip() for part in read_visible_field_keyboard(
+            app, "Manuscript citations", allow_empty=not existing_citations,
+            force_clipboard=not existing_citations,
+        ).split(",")
         if part.strip()
     ]
     if visible_citations_before != existing_citations:
@@ -479,7 +485,9 @@ def exercise_f05_project_citation(app: Any, project: pathlib.Path, output: pathl
         raise RuntimeError("F05 Apply inserted a wrong marker or changed existing Unicode/body content")
     reveal_bounded_control(app, "Manuscript citations", down=False)
     applied_ids = [
-        part.strip() for part in read_field(app, "Manuscript citations").split(",")
+        part.strip() for part in read_visible_field_keyboard(
+            app, "Manuscript citations",
+        ).split(",")
         if part.strip()
     ]
     if applied_ids != expected_citation_ids:
