@@ -5292,6 +5292,44 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_load_reference_dedup_history({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_library = pending_library.clone();
+        move |first, second| {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_library.borrow_mut().take();
+            let result = active_project
+                .borrow()
+                .as_ref()
+                .ok_or_else(|| "Open a project first".to_owned())
+                .and_then(|path| {
+                    library_read_at(
+                        path,
+                        "reference.dedup_decision_history",
+                        serde_json::json!({
+                            "left_id":first.as_str().trim(),
+                            "right_id":second.as_str().trim(),
+                            "limit":50,
+                        }),
+                        &host_data_root()?,
+                    )
+                });
+            match result {
+                Ok(history) => {
+                    ui.set_reference_dedup_results(format!(
+                        "READ-ONLY IMMUTABLE REFERENCE DECISION HISTORY. No revision, alias or reference record was changed.\n{}",
+                        pretty_result_data(&history),
+                    ).into());
+                    ui.set_status("Immutable reference decision history loaded locally".into());
+                }
+                Err(error) => {
+                    ui.set_reference_dedup_results(format!("Decision history unavailable: {error}").into());
+                    ui.set_status("Reference decision history rejected".into());
+                }
+            }
+        }
+    });
     app.on_preview_reference_dedup({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -5303,14 +5341,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 let operation = match action.as_str() {
                     "approve" => "reference.dedup_approve",
                     "restore" => "reference.dedup_restore",
+                    "keep" => "reference.dedup_keep_separate",
+                    "reconsider" => "reference.dedup_reconsider",
                     _ => return Err("Unsupported duplicate review decision".into()),
                 };
-                let mut args = serde_json::json!({
-                    "canonical_id":canonical_id.as_str().trim(),
-                    "duplicate_id":duplicate_id.as_str().trim(),
-                    "rationale":rationale.as_str().trim(),
-                });
-                if action.as_str() == "approve" {
+                let is_separate = matches!(action.as_str(), "keep" | "reconsider");
+                let mut args = if is_separate {
+                    serde_json::json!({
+                        "left_id":canonical_id.as_str().trim(),
+                        "right_id":duplicate_id.as_str().trim(),
+                        "rationale":rationale.as_str().trim(),
+                    })
+                } else {
+                    serde_json::json!({
+                        "canonical_id":canonical_id.as_str().trim(),
+                        "duplicate_id":duplicate_id.as_str().trim(),
+                        "rationale":rationale.as_str().trim(),
+                    })
+                };
+                if action.as_str() != "restore" {
                     args["candidate_sha256"] = serde_json::json!(candidate_sha256.as_str().trim());
                 }
                 let project = active_project.borrow().clone().ok_or("Open a project first")?;
@@ -5325,7 +5374,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             match result {
                 Ok((pending, receipt)) => {
                     *pending_library.borrow_mut() = Some(pending);
-                    ui.set_reference_dedup_results(format!("PREVIEW ONLY. Nothing recorded. Confirm IDs, original source metadata and exact planned alias before clicking Record reviewed decision.\n{}", pretty_result_data(&receipt)).into());
+                    ui.set_reference_dedup_results(format!("PREVIEW ONLY. Nothing recorded. Confirm the two original source records, decision type and exact rationale before clicking Record reviewed decision. Keep-separate and reconsideration create immutable audit entries; an alias is NEVER automatic.\n{}", pretty_result_data(&receipt)).into());
                     ui.set_status("Reference dedup decision previewed; no changes recorded".into());
                 }
                 Err(error) => {
@@ -5345,11 +5394,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
                 (Some(path), Some(action))
                     if action.surface == "reference_dedup"
-                        && matches!(action.operation.as_str(), "reference.dedup_approve" | "reference.dedup_restore") => {
-                    if action.arguments["canonical_id"] != ui.get_reference_dedup_canonical_id().as_str().trim()
-                        || action.arguments["duplicate_id"] != ui.get_reference_dedup_duplicate_id().as_str().trim()
+                        && matches!(action.operation.as_str(), "reference.dedup_approve" | "reference.dedup_restore" | "reference.dedup_keep_separate" | "reference.dedup_reconsider") => {
+                    let pair_decision = matches!(action.operation.as_str(), "reference.dedup_keep_separate" | "reference.dedup_reconsider");
+                    let first = if pair_decision { "left_id" } else { "canonical_id" };
+                    let second = if pair_decision { "right_id" } else { "duplicate_id" };
+                    if action.arguments[first] != ui.get_reference_dedup_canonical_id().as_str().trim()
+                        || action.arguments[second] != ui.get_reference_dedup_duplicate_id().as_str().trim()
                         || action.arguments["rationale"] != ui.get_reference_dedup_rationale().as_str().trim()
-                        || (action.operation == "reference.dedup_approve"
+                        || (action.operation != "reference.dedup_restore"
                             && action.arguments["candidate_sha256"] != ui.get_reference_dedup_fingerprint().as_str().trim())
                     {
                         Err("Review decision inputs changed after preview; preview again".into())
@@ -5358,13 +5410,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     }
                 }
                 (None, _) => Err("Open a project first".into()),
-                _ => Err("Preview a specific duplicate merge or undo before recording".into()),
+                _ => Err("Preview a specific merge, undo, keep-separate or reconsideration before recording".into()),
             };
             match result {
                 Ok((recorded, revision)) => {
                     pending_library.borrow_mut().take();
                     ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
-                    ui.set_reference_dedup_results(format!("AUDITED HUMAN DECISION RECORDED. Reference and source rows remain intact; undo requires another explicit preview.\n{}", pretty_result_data(&recorded)).into());
+                    ui.set_reference_dedup_results(format!("AUDITED HUMAN DECISION RECORDED. Original reference and source rows remain intact. Reconsideration, undo or a subsequent alias requires a separate explicit preview and approval.\n{}", pretty_result_data(&recorded)).into());
                     ui.set_status("Reviewed reference identity decision recorded locally".into());
                 }
                 Err(error) => {

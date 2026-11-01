@@ -85,6 +85,9 @@ impl LibraryHandler {
             ("reference.merge", Effect::LocalWrite),
             ("reference.unmerge", Effect::LocalWrite),
             ("reference.dedup_candidates", Effect::Read),
+            ("reference.dedup_decision_history", Effect::Read),
+            ("reference.dedup_keep_separate", Effect::LocalWrite),
+            ("reference.dedup_reconsider", Effect::LocalWrite),
             ("reference.dedup_approve", Effect::LocalWrite),
             ("reference.dedup_restore", Effect::LocalWrite),
             ("reference.identity_record", Effect::LocalWrite),
@@ -160,7 +163,12 @@ impl LibraryHandler {
         let mut store = self.store(args, ctx).map_err(str::to_owned)?;
         if matches!(
             operation,
-            "reference.dedup_candidates" | "reference.dedup_approve" | "reference.dedup_restore"
+            "reference.dedup_candidates"
+                | "reference.dedup_decision_history"
+                | "reference.dedup_keep_separate"
+                | "reference.dedup_reconsider"
+                | "reference.dedup_approve"
+                | "reference.dedup_restore"
         ) {
             return dedup::run(&mut store, operation, args, ctx, preview);
         }
@@ -202,6 +210,9 @@ impl LibraryHandler {
                 | "reference.citation_graph"
                 | "reference.citation_graphml"
         ) {
+            if operation == "reference.merge" {
+                dedup::guard_direct_merge(&store, args)?;
+            }
             return relations::run(&mut store, operation, args, ctx, preview);
         }
         match operation {
@@ -523,6 +534,9 @@ impl LibraryHandler {
                         | "reference.dedup_approve"
                         | "reference.dedup_restore" => {
                             vec!["reference_alias", "events", "project"]
+                        }
+                        "reference.dedup_keep_separate" | "reference.dedup_reconsider" => {
+                            vec!["reference_dedup_decisions", "events", "project"]
                         }
                         "reference.identity_record" => {
                             vec!["reference_identity_checks", "events", "project"]

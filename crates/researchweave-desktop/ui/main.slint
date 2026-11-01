@@ -387,6 +387,7 @@ export component MainWindow inherits Window {
     callback refresh-references();
     callback scan-reference-duplicates();
     callback preview-reference-dedup(string, string, string, string, string);
+    callback load-reference-dedup-history(string, string);
     callback record-reference-dedup();
     callback invalidate-reference-dedup-preview();
     callback preview-review-record(string, string);
@@ -1555,6 +1556,14 @@ export component MainWindow inherits Window {
                                             clicked => { root.record-protocol-freeze(); }
                                         }
                                     }
+                                    TextEdit {
+                                        min-height: 64px;
+                                        preferred-height: 76px;
+                                        max-height: 90px;
+                                        text: root.protocol-results;
+                                        read-only: true;
+                                        accessible-label: "Read-only local protocol freeze preview outcome";
+                                    }
                                     Button {
                                         text: "Inspect frozen baseline";
                                         accessible-label: "Inspect local protocol freeze receipt";
@@ -1701,15 +1710,21 @@ export component MainWindow inherits Window {
                                             }
                                         }
                                     }
-                                    dedup-canonical := LineEdit { placeholder-text: "Canonical reference ID to retain"; accessible-label: "Duplicate review canonical reference ID"; text <=> root.reference-dedup-canonical-id; edited(text) => { root.invalidate-reference-dedup-preview(); } }
-                                    dedup-duplicate := LineEdit { placeholder-text: "Duplicate reference ID to alias or restore"; accessible-label: "Duplicate review duplicate reference ID"; text <=> root.reference-dedup-duplicate-id; edited(text) => { root.invalidate-reference-dedup-preview(); } }
-                                    dedup-fingerprint := LineEdit { placeholder-text: "Candidate SHA-256 from scan (approval only)"; accessible-label: "Duplicate review candidate SHA256"; text <=> root.reference-dedup-fingerprint; edited(text) => { root.invalidate-reference-dedup-preview(); } }
+                                    dedup-canonical := LineEdit { placeholder-text: "First reference ID (canonical for alias)"; accessible-label: "Duplicate review canonical reference ID"; text <=> root.reference-dedup-canonical-id; edited(text) => { root.invalidate-reference-dedup-preview(); } }
+                                    dedup-duplicate := LineEdit { placeholder-text: "Second reference ID"; accessible-label: "Duplicate review duplicate reference ID"; text <=> root.reference-dedup-duplicate-id; edited(text) => { root.invalidate-reference-dedup-preview(); } }
+                                    dedup-fingerprint := LineEdit { placeholder-text: "Candidate SHA-256 from latest source scan"; accessible-label: "Duplicate review candidate SHA256"; text <=> root.reference-dedup-fingerprint; edited(text) => { root.invalidate-reference-dedup-preview(); } }
                                     dedup-rationale := LineEdit { placeholder-text: "Reason for this human decision"; accessible-label: "Duplicate review rationale"; text <=> root.reference-dedup-rationale; edited(text) => { root.invalidate-reference-dedup-preview(); } }
                                     HorizontalLayout {
                                         spacing: 8px;
                                         Button { text: "Preview merge"; accessible-label: "Preview reviewed reference alias without changes"; clicked => { root.preview-reference-dedup("approve", dedup-canonical.text, dedup-duplicate.text, dedup-fingerprint.text, dedup-rationale.text); } }
                                         Button { text: "Preview undo"; accessible-label: "Preview restoring independent references"; clicked => { root.preview-reference-dedup("restore", dedup-canonical.text, dedup-duplicate.text, dedup-fingerprint.text, dedup-rationale.text); } }
                                     }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { text: "Preview keep separate"; accessible-label: "Preview immutable keep separate reference decision"; clicked => { root.preview-reference-dedup("keep", dedup-canonical.text, dedup-duplicate.text, dedup-fingerprint.text, dedup-rationale.text); } }
+                                        Button { text: "Preview reconsider"; accessible-label: "Preview explicit reconsideration of keep separate decision"; clicked => { root.preview-reference-dedup("reconsider", dedup-canonical.text, dedup-duplicate.text, dedup-fingerprint.text, dedup-rationale.text); } }
+                                    }
+                                    Button { text: "Load pair decision history"; accessible-label: "Load immutable reference pair decision history without changing project"; clicked => { root.load-reference-dedup-history(dedup-canonical.text, dedup-duplicate.text); } }
                                     Button { text: "Record reviewed decision"; accessible-label: "Record explicitly approved reference dedup decision"; clicked => { root.record-reference-dedup(); } }
                                     TextEdit {
                                         min-height: 110px;

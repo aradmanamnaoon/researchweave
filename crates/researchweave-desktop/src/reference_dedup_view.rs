@@ -83,6 +83,26 @@ pub(crate) fn candidates(
         {
             return Err("candidate eligibility contradicts review status".into());
         }
+        let decision = row["decision_state"]
+            .as_str()
+            .ok_or("source-scoped reviewer decision status missing")?;
+        let decision_label = match decision {
+            "unreviewed" => "Not yet decided",
+            "kept_separate" => "Previously kept separate (binding)",
+            "reconsidered" => "Previous keep decision explicitly reconsidered",
+            "source_changed_re_review_required" => "Source changed — re-review needed",
+            _ => return Err("invalid reviewer decision status".into()),
+        };
+        let stable = row["stable_pair_sha256"]
+            .as_str()
+            .ok_or("stable reference source-pair digest missing")?;
+        if stable.len() != 64
+            || !stable
+                .bytes()
+                .all(|byte| byte.is_ascii_hexdigit() && !byte.is_ascii_uppercase())
+        {
+            return Err("stable reference source-pair digest invalid".into());
+        }
         let left_title = title(
             row["left_title"]
                 .as_str()
@@ -94,7 +114,7 @@ pub(crate) fn candidates(
                 .ok_or("candidate title missing")?,
         );
         let label = format!(
-            "Score {score}/100 · {} · {} / {}",
+            "Score {score}/100 · {} · {decision_label} · {} / {}",
             if eligible {
                 "Needs human source review"
             } else {
@@ -132,6 +152,7 @@ mod tests {
                 "right_id":"12345678-1234-4123-8123-123456789abd",
                 "left_title":"Study A\u{202e}spoof","right_title":"Study B",
                 "candidate_sha256":"a".repeat(64),"score":100,
+                "stable_pair_sha256":"b".repeat(64),"decision_state":"unreviewed",
                 "eligible_for_approval":true,"review_status":"review_required"
             }]
         }})
@@ -143,6 +164,7 @@ mod tests {
         assert_eq!(items.len(), 1);
         assert_eq!(items[0].left_title, "Study A spoof");
         assert!(items[0].label.contains("Needs human source review"));
+        assert!(items[0].label.contains("Not yet decided"));
         assert!(items[0].eligible);
         assert_eq!(items[0].candidate_sha256.len(), 64);
     }
@@ -169,6 +191,8 @@ mod tests {
             ("candidate_sha256", json!("not-a-digest")),
             ("score", json!(110)),
             ("review_status", json!("verified")),
+            ("decision_state", json!("fake")),
+            ("stable_pair_sha256", json!("short")),
         ] {
             let mut response = valid();
             response["data"]["candidates"][0][path] = value;

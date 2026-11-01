@@ -759,7 +759,7 @@ def exercise_f14_positive_dedup(app: Any, project: pathlib.Path, output: pathlib
     # Do not accept any offscreen JSON/status-only substitute for selection.
     expected_title = "Synthetic offline citation for native F05 QA"
     expected_accessible_row = (
-        "Select unapproved reference candidate Score 80/100 · Needs human source review · "
+        "Select unapproved reference candidate Score 80/100 · Needs human source review · Not yet decided · "
         f"{expected_title} / {expected_title}"
     )
     # Exact semantic label is independently determined from real persisted

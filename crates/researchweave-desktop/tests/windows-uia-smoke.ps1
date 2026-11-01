@@ -560,6 +560,36 @@ function Read-VisibleProtocolFreezeReceipt(
     Write-Host "UIA_PROTOCOL_FREEZE_JSON_READ: protocol=$ExpectedProtocolId frozen=$($receipt.frozen) via read-only native Protocol inspector"
     return $receipt
 }
+function Read-VisibleProtocolFreezePreviewOutcome(
+    [System.Windows.Automation.AutomationElement]$Window
+) {
+    # At 200% hosted Windows scaling the original Protocol operation Text
+    # label is below the ScrollView. Slint exposes its *same Rust-host value*
+    # in a dedicated real read-only TextEdit immediately after Preview/Record.
+    # Do not fabricate a preview from project metadata or the button label.
+    $anchor = Named $Window ([System.Windows.Automation.ControlType]::Button) 'Preview local protocol baseline freeze'
+    EnsureLiveFocus $anchor
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if (-not $focused -or
+        $focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button -or
+        $focused.Current.Name -ne 'Preview local protocol baseline freeze') {
+        throw 'Native Protocol freeze Preview focus anchor is unavailable'
+    }
+    $viewer = FocusByTab $focused ([System.Windows.Automation.ControlType]::Edit) 'Read-only local protocol freeze preview outcome' 8
+    $valuePattern = $null
+    if (-not $viewer.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+        throw 'Native Protocol freeze preview outcome lacks a real UIA ValuePattern'
+    }
+    if (-not $valuePattern.Current.IsReadOnly) {
+        throw 'Native Protocol freeze preview outcome can be modified by the user'
+    }
+    $value = [string]$valuePattern.Current.Value
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        throw 'Native Protocol freeze preview outcome is empty'
+    }
+    Write-Output ('UIA_NATIVE_PROTOCOL_FREEZE_OUTCOME_READ_CHARS=' + $value.Length)
+    return $value
+}
 # F14's independent persistence oracle opens only the disposable project's
 # SQLite file, with WinSQLite's READONLY flag. It cannot create tables, write
 # aliases, or substitute direct SQL mutation for real installed UIA gestures.
@@ -967,11 +997,8 @@ try {
     }
     Invoke-ProtocolFreezeButton $window 'Preview local protocol baseline freeze'
     Start-Sleep -Milliseconds 180
-    $freezePreview = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($freezePreview | Where-Object { $_ -like '*LOCAL FREEZE PREVIEW ONLY*' })) {
+    $freezePreview = Read-VisibleProtocolFreezePreviewOutcome $window
+    if ($freezePreview -notlike '*LOCAL FREEZE PREVIEW ONLY*') {
         throw 'Local protocol freeze did not provide a separate non-mutating preview'
     }
     Invoke-ProtocolFreezeButton $window 'Record previewed local protocol baseline freeze'
@@ -988,11 +1015,8 @@ try {
     }
     Invoke-ProtocolFreezeButton $window 'Preview local protocol baseline freeze'
     Start-Sleep -Milliseconds 180
-    $duplicateFreeze = @($window.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.Name })
-    if (-not ($duplicateFreeze | Where-Object { $_ -like '*already has an immutable local freeze baseline*' })) {
+    $duplicateFreeze = Read-VisibleProtocolFreezePreviewOutcome $window
+    if ($duplicateFreeze -notlike '*already has an immutable local freeze baseline*') {
         throw 'Existing local protocol freeze was not protected from duplicate recording'
     }
     Write-Output 'PASS: approved immutable local protocol baseline freeze, SHA-256 receipt and one-time enforcement'
@@ -3007,7 +3031,8 @@ try {
     # Build the Unicode middle dot explicitly: PowerShell 5.1 can decode an
     # unmarked UTF-8 .ps1 as ANSI, but its native UIA label is actual Unicode.
     $f14CandidateLabel = 'Select unapproved reference candidate Score 80/100 ' + [char]0x00b7 +
-        ' Needs human source review ' + [char]0x00b7 + ' UIA memory evidence / UIA memory evidence'
+        ' Needs human source review ' + [char]0x00b7 + ' Not yet decided ' + [char]0x00b7 +
+        ' UIA memory evidence / UIA memory evidence'
     $f14CandidateButton = FocusByShiftTab $f14ReceiptEditor ([System.Windows.Automation.ControlType]::Button) $f14CandidateLabel 16
     $f14CandidateButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $f14CanonicalEdit = FocusByTab $f14CandidateButton ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review canonical reference ID' 4
@@ -3044,14 +3069,14 @@ try {
     $f14RationaleEdit = FocusByShiftTab $f14ValidPreview ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review rationale' 3
     $f14Rationale = 'UIA explicit reviewed identity; preserve two independent raw source records'
     $f14RationaleEdit.GetCurrentPattern($f14ReferenceValue).SetValue($f14Rationale)
-    $f14StaleRecord = FocusByTab $f14RationaleEdit ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved reference dedup decision' 5
+    $f14StaleRecord = FocusByTab $f14RationaleEdit ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved reference dedup decision' 7
     $f14StaleRecord.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*Reference decision rejected; preview again*' 10000
     Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'stale rationale Record refusal'
 
     # Only the second explicit valid Preview + Record is permitted to change
     # the durable project, and the exact project event must be reference.merge.
-    $f14Preview = FocusByShiftTab $f14StaleRecord ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 4
+    $f14Preview = FocusByShiftTab $f14StaleRecord ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 7
     $f14Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
     Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'final approved alias preview'

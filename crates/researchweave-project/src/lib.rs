@@ -21,7 +21,7 @@ use zip::{write::SimpleFileOptions, CompressionMethod, ZipArchive, ZipWriter};
 mod handler;
 pub use handler::ProjectHandler;
 
-pub const SCHEMA_VERSION: u32 = 6;
+pub const SCHEMA_VERSION: u32 = 7;
 pub const ARCHIVE_VERSION: &str = "1.0.0";
 pub const MAX_ARCHIVE_BYTES: u64 = 256 * 1024 * 1024;
 pub const MAX_ENTRIES: usize = 4096;
@@ -405,6 +405,33 @@ CREATE TRIGGER manuscript_comments_no_delete BEFORE DELETE ON manuscript_comment
  BEGIN SELECT RAISE(ABORT,'reviewer comments are immutable'); END;
 "#;
 
+// F14: immutable human decisions about *separate* bibliographic identities.
+// A global project revision invalidates a preview, but never identifies a
+// durable pair: stable_pair_sha256 fingerprints both source records instead.
+// Reconsideration is a new row/event, not an UPDATE or silent override.
+const REFERENCE_DEDUP_SCHEMA_V7_SQL: &str = r#"
+CREATE TABLE reference_dedup_decisions (
+ id TEXT PRIMARY KEY,
+ left_id TEXT NOT NULL REFERENCES reference(id),
+ right_id TEXT NOT NULL REFERENCES reference(id),
+ decision TEXT NOT NULL CHECK(decision IN ('keep_separate','reconsider')),
+ reviewed_candidate_sha256 TEXT NOT NULL CHECK(length(reviewed_candidate_sha256)=64),
+ stable_pair_sha256 TEXT NOT NULL CHECK(length(stable_pair_sha256)=64),
+ review_revision INTEGER NOT NULL CHECK(review_revision>=0),
+ project_revision INTEGER NOT NULL CHECK(project_revision>0),
+ rationale TEXT NOT NULL CHECK(length(rationale)>0 AND length(rationale)<=2000),
+ actor TEXT NOT NULL CHECK(length(actor)>0),
+ recorded_at TEXT NOT NULL,
+ request_id TEXT UNIQUE NOT NULL,
+ CHECK(left_id<right_id)
+);
+CREATE INDEX reference_dedup_decision_pair ON reference_dedup_decisions(left_id,right_id,project_revision);
+CREATE TRIGGER reference_dedup_decision_no_update BEFORE UPDATE ON reference_dedup_decisions
+ BEGIN SELECT RAISE(ABORT,'reference dedup decisions are immutable'); END;
+CREATE TRIGGER reference_dedup_decision_no_delete BEFORE DELETE ON reference_dedup_decisions
+ BEGIN SELECT RAISE(ABORT,'reference dedup decisions are immutable'); END;
+"#;
+
 const LEGACY_REQUIRED_TABLES: &[&str] = &[
     "project",
     "events",
@@ -501,6 +528,7 @@ impl ProjectStore {
         if let Err(error) = (|| -> Result<(), ProjectError> {
             conn.execute_batch(SCHEMA_SQL)?;
             conn.execute_batch(TRANSCRIPT_SCHEMA_V5_SQL)?;
+            conn.execute_batch(REFERENCE_DEDUP_SCHEMA_V7_SQL)?;
             conn.pragma_update(None, "user_version", SCHEMA_VERSION)?;
             conn.execute(
                 "INSERT INTO migrations(version, installed_at) VALUES (?1, ?2)",
@@ -536,6 +564,7 @@ impl ProjectStore {
         }
         verify_connection(&conn)?;
         verify_comment_schema(&conn)?;
+        verify_dedup_decision_schema(&conn)?;
         Ok(Self {
             root: root.to_path_buf(),
             conn,
@@ -670,6 +699,27 @@ fn verify_comment_schema(conn: &Connection) -> Result<(), ProjectError> {
     Ok(())
 }
 
+fn verify_dedup_decision_schema(conn: &Connection) -> Result<(), ProjectError> {
+    for (name, kind) in [
+        ("reference_dedup_decisions", "table"),
+        ("reference_dedup_decision_pair", "index"),
+        ("reference_dedup_decision_no_update", "trigger"),
+        ("reference_dedup_decision_no_delete", "trigger"),
+    ] {
+        let count: i64 = conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE name=?1 AND type=?2",
+            params![name, kind],
+            |row| row.get(0),
+        )?;
+        if count != 1 {
+            return Err(ProjectError::Integrity(
+                "immutable reference decision schema incomplete".into(),
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn validate_info(info: &ProjectInfo) -> Result<(), ProjectError> {
     const DESIGNS: &[&str] = &[
         "exploratory",
@@ -749,12 +799,29 @@ pub fn inspect_schema(root: impl AsRef<Path>) -> Result<SchemaInspection, Projec
             }
         }
     }
+    if current_version >= 7 {
+        for (name, kind) in [
+            ("reference_dedup_decisions", "table"),
+            ("reference_dedup_decision_pair", "index"),
+            ("reference_dedup_decision_no_update", "trigger"),
+            ("reference_dedup_decision_no_delete", "trigger"),
+        ] {
+            let exists: i64 = conn.query_row(
+                "SELECT count(*) FROM sqlite_master WHERE type=?1 AND name=?2",
+                params![kind, name],
+                |row| row.get(0),
+            )?;
+            if exists != 1 {
+                missing_required_tables.push(name.into());
+            }
+        }
+    }
     missing_required_tables.sort_unstable();
     let compatibility = if current_version > SCHEMA_VERSION {
         SchemaCompatibility::FutureUnsupported
     } else if current_version == SCHEMA_VERSION && missing_required_tables.is_empty() {
         SchemaCompatibility::Current
-    } else if matches!(current_version, 0..=5) && missing_required_tables.is_empty() {
+    } else if matches!(current_version, 0..=6) && missing_required_tables.is_empty() {
         SchemaCompatibility::UpgradeAvailable
     } else {
         SchemaCompatibility::UnsupportedLegacy
@@ -899,6 +966,17 @@ pub fn migrate_project(root: impl AsRef<Path>) -> Result<MigrationReceipt, Proje
         )?;
         transaction.pragma_update(None, "user_version", 6_u32)?;
         installed_versions.push(6);
+    }
+    if preview.current_version <= 6 {
+        // Trusted static trigger DDL contains semicolons inside BEGIN/END.
+        // Use execute_batch within the same backed-up IMMEDIATE transaction.
+        transaction.execute_batch(REFERENCE_DEDUP_SCHEMA_V7_SQL)?;
+        transaction.execute(
+            "INSERT OR IGNORE INTO migrations(version,installed_at) VALUES (7,?1)",
+            [&timestamp],
+        )?;
+        transaction.pragma_update(None, "user_version", 7_u32)?;
+        installed_versions.push(7);
     }
     verify_connection(&transaction)?;
     transaction.commit()?;
@@ -1744,6 +1822,11 @@ mod tests {
         let id = project.info().unwrap().id;
         drop(project);
         let connection = Connection::open(root.join("data/project.sqlite")).unwrap();
+        if version <= 6 {
+            connection
+                .execute("DROP TABLE reference_dedup_decisions", [])
+                .unwrap();
+        }
         if version <= 5 {
             connection
                 .execute("DROP TABLE manuscript_comments", [])
@@ -1854,7 +1937,7 @@ mod tests {
     }
 
     #[test]
-    fn v5_to_v6_comment_schema_is_additive_backed_up_and_immutable() {
+    fn v5_to_v7_comment_and_dedup_schemas_are_additive_backed_up_and_immutable() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("synthetic-v5");
         let id = downgrade_for_migration(&root, 5);
@@ -1872,10 +1955,10 @@ mod tests {
         ));
         let plan = inspect_schema(&root).unwrap();
         assert_eq!(plan.compatibility, SchemaCompatibility::UpgradeAvailable);
-        assert_eq!(plan.migration_path, vec![6]);
+        assert_eq!(plan.migration_path, vec![6, 7]);
         assert_eq!(plan.writes, 0);
         let receipt = migrate_project(&root).unwrap();
-        assert_eq!((receipt.from_version, receipt.to_version), (5, 6));
+        assert_eq!((receipt.from_version, receipt.to_version), (5, 7));
         assert!(receipt.changed);
         let backup = Connection::open(receipt.backup.unwrap()).unwrap();
         assert_eq!(
@@ -1950,6 +2033,147 @@ mod tests {
     }
 
     #[test]
+    fn v6_to_v7_dedup_decision_migration_preserves_records_and_rejects_mutation() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("historical-v6-project");
+        let project_id = downgrade_for_migration(&root, 6);
+        let left = "12345678-1234-4123-8123-123456789abc";
+        let right = "12345678-1234-4123-8123-123456789abd";
+        let source_raw = "@article{source, title={آزمایش 🧠}}";
+        let connection = Connection::open(root.join("data/project.sqlite")).unwrap();
+        for (id, doi) in [(left, "10.1234/first"), (right, "10.1234/second")] {
+            connection
+                .execute(
+                    "INSERT INTO reference
+                 (id,title,authors_json,year,doi,kind,format,raw,metadata_json,status,imported_at)
+                 VALUES (?1,'آزمایش 🧠','[\"A. Reviewer\"]',2025,?2,'article','bibtex',
+                         ?3,'{}','unverified','2026-10-01')",
+                    params![id, doi, source_raw],
+                )
+                .unwrap();
+        }
+        drop(connection);
+        assert!(matches!(
+            ProjectStore::open(&root),
+            Err(ProjectError::SchemaMismatch)
+        ));
+        let inspection = inspect_schema(&root).unwrap();
+        assert_eq!(
+            inspection.compatibility,
+            SchemaCompatibility::UpgradeAvailable
+        );
+        assert_eq!(inspection.migration_path, vec![7]);
+        let receipt = migrate_project(&root).unwrap();
+        assert_eq!((receipt.from_version, receipt.to_version), (6, 7));
+        assert_eq!(receipt.installed_versions, vec![7]);
+        let backup_path = receipt.backup.unwrap();
+        let backup = Connection::open(&backup_path).unwrap();
+        assert_eq!(
+            backup
+                .pragma_query_value::<u32, _>(None, "user_version", |r| r.get(0))
+                .unwrap(),
+            6
+        );
+        assert_eq!(
+            backup
+                .query_row::<i64, _, _>(
+                    "SELECT count(*) FROM sqlite_master WHERE name='reference_dedup_decisions'",
+                    [],
+                    |r| r.get(0)
+                )
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            backup
+                .query_row::<i64, _, _>("SELECT count(*) FROM reference", [], |r| r.get(0))
+                .unwrap(),
+            2
+        );
+        drop(backup);
+        let reopened = ProjectStore::open(&root).unwrap();
+        assert_eq!(reopened.info().unwrap().id, project_id);
+        assert_eq!(reopened.info().unwrap().revision, 0);
+        for id in [left, right] {
+            let raw: String = reopened
+                .connection()
+                .query_row("SELECT raw FROM reference WHERE id=?1", [id], |r| r.get(0))
+                .unwrap();
+            assert_eq!(raw, source_raw);
+        }
+        assert_eq!(
+            reopened
+                .connection()
+                .query_row::<i64, _, _>("SELECT count(*) FROM reference_dedup_decisions", [], |r| r
+                    .get(0))
+                .unwrap(),
+            0
+        );
+        reopened
+            .connection()
+            .execute(
+                "INSERT INTO reference_dedup_decisions
+             (id,left_id,right_id,decision,reviewed_candidate_sha256,stable_pair_sha256,
+              review_revision,project_revision,rationale,actor,recorded_at,request_id)
+             VALUES ('first-review',?1,?2,'keep_separate',?3,?4,0,1,
+                     'Synthetic human reviewer distinction','reviewer','2026-11-01','request-1')",
+                params![left, right, "a".repeat(64), "b".repeat(64)],
+            )
+            .unwrap();
+        assert!(reopened
+            .connection()
+            .execute(
+                "UPDATE reference_dedup_decisions SET rationale='overwritten'",
+                []
+            )
+            .is_err());
+        assert!(reopened
+            .connection()
+            .execute("DELETE FROM reference_dedup_decisions", [])
+            .is_err());
+        let preserved: String = reopened
+            .connection()
+            .query_row(
+                "SELECT rationale FROM reference_dedup_decisions WHERE id='first-review'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(preserved, "Synthetic human reviewer distinction");
+        drop(reopened);
+        assert!(!migrate_project(&root).unwrap().changed);
+    }
+
+    #[test]
+    fn v7_reference_decision_immutability_triggers_cannot_be_silently_removed() {
+        let base = tempfile::tempdir().unwrap();
+        let root = base.path().join("tampered-v7-project");
+        drop(ProjectStore::create(&root, &info()).unwrap());
+        let db = root.join("data/project.sqlite");
+        let connection = Connection::open(&db).unwrap();
+        connection
+            .execute("DROP TRIGGER reference_dedup_decision_no_delete", [])
+            .unwrap();
+        drop(connection);
+        let inspected = inspect_schema(&root).unwrap();
+        assert_eq!(
+            inspected.compatibility,
+            SchemaCompatibility::UnsupportedLegacy
+        );
+        assert!(inspected
+            .missing_required_tables
+            .contains(&"reference_dedup_decision_no_delete".to_owned()));
+        assert!(matches!(
+            ProjectStore::open(&root),
+            Err(ProjectError::Integrity(_))
+        ));
+        assert!(matches!(
+            migrate_project(&root),
+            Err(ProjectError::SchemaMismatch)
+        ));
+    }
+
+    #[test]
     fn comment_immutability_triggers_cannot_be_silently_stripped() {
         let temp = tempfile::tempdir().unwrap();
         let root = temp.path().join("tampered-v6");
@@ -2015,7 +2239,7 @@ mod tests {
         };
         drop(connection);
         let receipt = migrate_project(&root).unwrap();
-        assert_eq!((receipt.from_version, receipt.to_version), (4, 6));
+        assert_eq!((receipt.from_version, receipt.to_version), (4, 7));
         let backup = Connection::open(receipt.backup.as_ref().unwrap()).unwrap();
         let old_version: u32 = backup
             .pragma_query_value(None, "user_version", |r| r.get(0))
