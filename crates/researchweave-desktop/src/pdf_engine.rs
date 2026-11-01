@@ -105,21 +105,21 @@ pub fn render_search(pdf_path: &Path, query: &str) -> Result<PdfRender, String> 
     render_search_at(pdf_path, query, 0)
 }
 
-const MAX_FIND_NEXT_PDF_BYTES: u64 = 128 * 1024 * 1024;
+const MAX_NATIVE_PDF_BYTES: u64 = 128 * 1024 * 1024;
 
-fn read_bounded_find_next_pdf(pdf_path: &Path) -> Result<Vec<u8>, String> {
+fn read_bounded_pdf(pdf_path: &Path) -> Result<Vec<u8>, String> {
     // Use one open handle for metadata and content. A path could otherwise be
     // swapped or the file could grow between metadata(path) and read(path).
     let file = std::fs::File::open(pdf_path).map_err(|e| e.to_string())?;
-    if file.metadata().map_err(|e| e.to_string())?.len() > MAX_FIND_NEXT_PDF_BYTES {
-        return Err("PDF exceeds the bounded find-next file budget".into());
+    if file.metadata().map_err(|e| e.to_string())?.len() > MAX_NATIVE_PDF_BYTES {
+        return Err("PDF exceeds the bounded native file budget".into());
     }
     let mut contents = Vec::new();
-    file.take(MAX_FIND_NEXT_PDF_BYTES + 1)
+    file.take(MAX_NATIVE_PDF_BYTES + 1)
         .read_to_end(&mut contents)
         .map_err(|e| e.to_string())?;
-    if contents.len() as u64 > MAX_FIND_NEXT_PDF_BYTES {
-        return Err("PDF exceeds the bounded find-next file budget".into());
+    if contents.len() as u64 > MAX_NATIVE_PDF_BYTES {
+        return Err("PDF exceeds the bounded native file budget".into());
     }
     Ok(contents)
 }
@@ -137,7 +137,7 @@ pub fn find_next_matching_page(
     }
     const MAX_SCAN_PAGES: usize = 512;
     const MAX_TOTAL_TEXT_BYTES: usize = 16 * 1024 * 1024;
-    let contents = read_bounded_find_next_pdf(pdf_path)?;
+    let contents = read_bounded_pdf(pdf_path)?;
     let runtime = runtime_library()?;
     let pdfium = Pdfium::load_from_path(runtime).map_err(|e| e.to_string())?;
     let doc = pdfium
@@ -174,9 +174,12 @@ pub fn render_search_at(
     query: &str,
     page_index: usize,
 ) -> Result<PdfRender, String> {
+    // Bound the complete input file on a single open handle before loading
+    // PDFium or allocating a render. The previous direct fs::read could
+    // allocate arbitrarily large attacker-supplied PDFs.
+    let contents = read_bounded_pdf(pdf_path)?;
     let runtime = runtime_library()?;
     let pdfium = Pdfium::load_from_path(runtime).map_err(|e| e.to_string())?;
-    let contents = std::fs::read(pdf_path).map_err(|e| e.to_string())?;
     let doc = pdfium
         .load_document(contents, None)
         .map_err(|e| e.to_string())?;
@@ -200,6 +203,10 @@ pub fn render_search_at(
         )
         .map_err(|e| e.to_string())?;
     let text = page.text().map_err(|e| e.to_string())?;
+    const MAX_PAGE_TEXT_BYTES: usize = 16 * 1024 * 1024;
+    if text.text().len() > MAX_PAGE_TEXT_BYTES {
+        return Err("PDF text layer exceeds the bounded per-page budget".into());
+    }
     let mut hits = Vec::new();
     let mut match_count = 0_usize;
     let mut previous_byte_end = 0_usize;
@@ -245,19 +252,33 @@ pub fn render_search_at(
     if bpp != 4 {
         return Err(format!("Expected four-channel render, got {bpp}"));
     }
-    let mut rgba = vec![0; width as usize * height as usize * 4];
-    for y in 0..height as usize {
-        for x in 0..width as usize {
+    let width = usize::try_from(width).map_err(|_| "PDF render width out of range")?;
+    let height = usize::try_from(height).map_err(|_| "PDF render height out of range")?;
+    let required = width
+        .checked_mul(height)
+        .and_then(|pixels| pixels.checked_mul(4))
+        .filter(|bytes| *bytes > 0 && *bytes <= 64 * 1024 * 1024)
+        .ok_or("PDF render exceeds the bounded RGBA image budget")?;
+    let min_stride = width.checked_mul(4).ok_or("PDF render stride overflow")?;
+    let stride_bytes = stride
+        .checked_mul(height)
+        .ok_or("PDF render buffer overflow")?;
+    if stride < min_stride || stride_bytes > render.pixels().len() {
+        return Err("PDF render pixel buffer layout is inconsistent".into());
+    }
+    let mut rgba = vec![0; required];
+    for y in 0..height {
+        for x in 0..width {
             let src = &render.pixels()[y * stride + x * 4..][..4];
-            let out = &mut rgba[(y * width as usize + x) * 4..][..4];
+            let out = &mut rgba[(y * width + x) * 4..][..4];
             out.copy_from_slice(src);
         }
     }
     Ok(PdfRender {
         page_index,
         page_count,
-        width,
-        height,
+        width: u32::try_from(width).map_err(|_| "PDF render width invalid")?,
+        height: u32::try_from(height).map_err(|_| "PDF render height invalid")?,
         rgba,
         extracted_text: text.text().to_owned(),
         match_count,
@@ -337,6 +358,18 @@ mod tests {
         assert!(candidates.iter().all(|candidate| candidate
             .file_name()
             .is_some_and(|name| name == PDFIUM_LIBRARY)));
+    }
+
+    #[test]
+    fn oversized_sparse_pdf_is_rejected_before_loading_native_pdfium() {
+        let directory = tempfile::tempdir().unwrap();
+        let source = directory.path().join("oversized.pdf");
+        let file = std::fs::File::create(&source).unwrap();
+        file.set_len(MAX_NATIVE_PDF_BYTES + 1).unwrap();
+        drop(file);
+        let error = render_search_at(&source, "", 0).unwrap_err();
+        assert!(error.contains("bounded native file budget"), "{error}");
+        assert!(read_bounded_pdf(&source).is_err());
     }
     #[test]
     fn native_pdfium_renders_and_maps_text() {
@@ -443,14 +476,14 @@ mod tests {
         let input =
             std::env::temp_dir().join(format!("rw-bounded-find-{}.pdf", uuid::Uuid::new_v4()));
         std::fs::write(&input, b"PDF").unwrap();
-        assert_eq!(read_bounded_find_next_pdf(&input).unwrap(), b"PDF");
+        assert_eq!(read_bounded_pdf(&input).unwrap(), b"PDF");
         std::fs::OpenOptions::new()
             .write(true)
             .open(&input)
             .unwrap()
-            .set_len(MAX_FIND_NEXT_PDF_BYTES + 1)
+            .set_len(MAX_NATIVE_PDF_BYTES + 1)
             .unwrap();
-        assert!(read_bounded_find_next_pdf(&input)
+        assert!(read_bounded_pdf(&input)
             .unwrap_err()
             .contains("bounded find-next file budget"));
         std::fs::remove_file(input).unwrap();

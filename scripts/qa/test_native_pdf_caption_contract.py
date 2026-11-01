@@ -12,6 +12,7 @@ class CaptionPreviewContract(unittest.TestCase):
         cls.ui = (ROOT / "crates/researchweave-desktop/ui/main.slint").read_text(encoding="utf-8")
         cls.desktop = (ROOT / "crates/researchweave-desktop/src/main.rs").read_text(encoding="utf-8")
         cls.preview = (ROOT / "crates/researchweave-desktop/src/pdf_figure_candidates.rs").read_text(encoding="utf-8")
+        cls.engine = (ROOT / "crates/researchweave-desktop/src/pdf_engine.rs").read_text(encoding="utf-8")
 
     def test_source_bound_caption_only_results_require_human_verification(self) -> None:
         self.assertIn("preview_pdf_figure_table_candidates", self.desktop)
@@ -36,6 +37,17 @@ class CaptionPreviewContract(unittest.TestCase):
         self.assertIn("root.pdf-caption-status = \"PDF path changed.", self.ui)
         self.assertIn("A different PDF was selected. Prior caption anchors were cleared", self.desktop)
         self.assertNotIn("INSERT INTO", self.preview)
+
+    def test_native_pdf_render_has_bounded_input_text_pixels_and_overflow_guards(self) -> None:
+        self.assertIn("const MAX_NATIVE_PDF_BYTES: u64 = 128 * 1024 * 1024", self.engine)
+        self.assertIn("fn read_bounded_pdf(", self.engine)
+        self.assertIn("let contents = read_bounded_pdf(pdf_path)?;", self.engine)
+        self.assertNotIn("std::fs::read(pdf_path)", self.engine)
+        self.assertIn("const MAX_PAGE_TEXT_BYTES: usize = 16 * 1024 * 1024", self.engine)
+        self.assertIn("let required = width", self.engine)
+        self.assertIn(".checked_mul(height)", self.engine)
+        self.assertIn("stride_bytes > render.pixels().len()", self.engine)
+        self.assertIn("oversized_sparse_pdf_is_rejected_before_loading_native_pdfium", self.engine)
 
 
 if __name__ == "__main__":
