@@ -244,6 +244,8 @@ export component MainWindow inherits Window {
     in-out property <string> protocol-freeze-summary: "No local baseline inspected yet.";
     in-out property <string> protocol-freeze-export-receipt: "";
     in-out property <string> reference-results: "Register or inspect project references.";
+    in-out property <bool> reference-dedup-open: false;
+    in-out property <string> reference-dedup-results: "Scan local records, inspect source metadata, and explicitly preview a reversible decision. No automatic merge.";
     in-out property <string> review-results: "Use persisted references to build and screen a review.";
     in-out property <bool> review-search-builder-open: false;
     in-out property <string> review-search-results: "Specify PICO concepts to draft a database-specific search strategy. No search has been executed.";
@@ -352,6 +354,9 @@ export component MainWindow inherits Window {
     callback preview-reference(string, string, string, string, string, string, string);
     callback apply-library-preview();
     callback refresh-references();
+    callback scan-reference-duplicates();
+    callback preview-reference-dedup(string, string, string, string, string);
+    callback record-reference-dedup();
     callback preview-review-record(string, string);
     callback preview-review-screen(string, string, string, string, string, string);
     callback refresh-review(string);
@@ -1567,6 +1572,7 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 20: Rectangle {
                         background: Theme.raised;
+                        ScrollView {
                         VerticalLayout {
                             padding: 24px;
                             spacing: 9px;
@@ -1597,7 +1603,48 @@ export component MainWindow inherits Window {
                                 Button { text: "Refresh references"; accessible-label: "Refresh project references"; clicked => { root.refresh-references(); } }
                             }
                             Text { text: root.reference-results; accessible-label: "Reference operation result " + root.reference-results; wrap: word-wrap; color: Theme.ink; }
+                            Button {
+                                text: root.reference-dedup-open ? "Hide duplicate review" : "Review possible duplicates";
+                                accessible-label: "Toggle reviewable reference duplicate finder";
+                                clicked => { root.reference-dedup-open = !root.reference-dedup-open; }
+                            }
+                            if root.reference-dedup-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 8px;
+                                    Text { text: "REVIEWABLE · REVERSIBLE · OFFLINE"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "A candidate score is not proof of scholarly identity. Compare original records before acting. Every approved decision preserves the original references and creates a revision."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    Button {
+                                        text: "Scan for possible duplicates";
+                                        accessible-label: "Scan local reference duplicate candidates without changing data";
+                                        clicked => { root.scan-reference-duplicates(); }
+                                    }
+                                    dedup-canonical := LineEdit { placeholder-text: "Canonical reference ID to retain"; accessible-label: "Duplicate review canonical reference ID"; }
+                                    dedup-duplicate := LineEdit { placeholder-text: "Duplicate reference ID to alias or restore"; accessible-label: "Duplicate review duplicate reference ID"; }
+                                    dedup-fingerprint := LineEdit { placeholder-text: "Candidate SHA-256 from scan (approval only)"; accessible-label: "Duplicate review candidate SHA256"; }
+                                    dedup-rationale := LineEdit { placeholder-text: "Reason for this human decision"; accessible-label: "Duplicate review rationale"; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { text: "Preview merge"; accessible-label: "Preview reviewed reference alias without changes"; clicked => { root.preview-reference-dedup("approve", dedup-canonical.text, dedup-duplicate.text, dedup-fingerprint.text, dedup-rationale.text); } }
+                                        Button { text: "Preview undo"; accessible-label: "Preview restoring independent references"; clicked => { root.preview-reference-dedup("restore", dedup-canonical.text, dedup-duplicate.text, dedup-fingerprint.text, dedup-rationale.text); } }
+                                    }
+                                    Button { text: "Record reviewed decision"; accessible-label: "Record explicitly approved reference dedup decision"; clicked => { root.record-reference-dedup(); } }
+                                    TextEdit {
+                                        min-height: 110px;
+                                        preferred-height: 180px;
+                                        max-height: 260px;
+                                        text: root.reference-dedup-results;
+                                        read-only: true;
+                                        accessible-label: "Copyable reference duplicate candidate or decision details";
+                                    }
+                                }
+                            }
                             Rectangle { vertical-stretch: 1; }
+                        }
                         }
                     }
                     if root.page == 21: Rectangle {

@@ -12,6 +12,7 @@ use std::{
 use uuid::Uuid;
 mod bibliography;
 mod collections;
+mod dedup;
 mod references;
 mod relations;
 
@@ -83,6 +84,9 @@ impl LibraryHandler {
             ("reference.validate", Effect::Read),
             ("reference.merge", Effect::LocalWrite),
             ("reference.unmerge", Effect::LocalWrite),
+            ("reference.dedup_candidates", Effect::Read),
+            ("reference.dedup_approve", Effect::LocalWrite),
+            ("reference.dedup_restore", Effect::LocalWrite),
             ("reference.identity_record", Effect::LocalWrite),
             ("reference.identity_history", Effect::Read),
             ("reference.citation_add", Effect::LocalWrite),
@@ -154,6 +158,12 @@ impl LibraryHandler {
         preview: bool,
     ) -> Result<Value, String> {
         let mut store = self.store(args, ctx).map_err(str::to_owned)?;
+        if matches!(
+            operation,
+            "reference.dedup_candidates" | "reference.dedup_approve" | "reference.dedup_restore"
+        ) {
+            return dedup::run(&mut store, operation, args, ctx, preview);
+        }
         if matches!(
             operation,
             "library.bibliography_preview" | "library.bibliography_import"
@@ -508,7 +518,10 @@ impl LibraryHandler {
                             vec!["collection_members", "events", "project"]
                         }
                         "library.reference_tag" => vec!["reference_tags", "events", "project"],
-                        "reference.merge" | "reference.unmerge" => {
+                        "reference.merge"
+                        | "reference.unmerge"
+                        | "reference.dedup_approve"
+                        | "reference.dedup_restore" => {
                             vec!["reference_alias", "events", "project"]
                         }
                         "reference.identity_record" => {

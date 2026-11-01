@@ -178,6 +178,7 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_protocol_freeze_summary("No local baseline inspected yet.".into());
     ui.set_protocol_freeze_export_receipt("".into());
     ui.set_reference_results("Register or inspect project references.".into());
+    ui.set_reference_dedup_results("Scan local records, inspect source metadata, and explicitly preview a reversible decision. No automatic merge.".into());
     ui.set_review_results("Use persisted references to build and screen a review.".into());
     ui.set_review_search_results(
         "Specify PICO concepts to draft a database-specific search strategy. No search has been executed.".into(),
@@ -4823,6 +4824,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ui) = weak.upgrade() {
                 let pending = pending_library.borrow().clone();
                 let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                    (_, Some(pending)) if pending.surface == "reference_dedup" => Err(
+                        "Use Record reviewed decision for a previewed deduplication; this registration action cannot apply it".into()
+                    ),
                     (Some(path), Some(pending)) => host_data_root()
                         .and_then(|root| library_execute_pending(pending, path, &root)),
                     (None, _) => Err("Open a project first".into()),
@@ -4888,6 +4892,111 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_reference_results(error.clone().into());
                         ui.set_status(error.into());
                     }
+                }
+            }
+        }
+    });
+    app.on_scan_reference_duplicates({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_library = pending_library.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_library.borrow_mut().take();
+            let result = active_project
+                .borrow()
+                .as_ref()
+                .ok_or_else(|| "Open a project first".to_string())
+                .and_then(|path| {
+                    library_read_at(
+                        path,
+                        "reference.dedup_candidates",
+                        serde_json::json!({"limit":50}),
+                        &host_data_root()?,
+                    )
+                });
+            match result {
+                Ok(receipt) => {
+                    ui.set_reference_dedup_results(format!("READ-ONLY CANDIDATE SCAN. No merge, revision or event was recorded. Compare source records before selecting IDs and copying the candidate_sha256.\n{}", pretty_result_data(&receipt)).into());
+                    ui.set_status("Reference candidates scanned locally; no changes recorded".into());
+                }
+                Err(error) => {
+                    ui.set_reference_dedup_results(format!("Duplicate scan refused: {error}").into());
+                    ui.set_status("Duplicate scan unavailable".into());
+                }
+            }
+        }
+    });
+    app.on_preview_reference_dedup({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_library = pending_library.clone();
+        move |action, canonical_id, duplicate_id, candidate_sha256, rationale| {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_library.borrow_mut().take();
+            let result = (|| -> Result<(PendingLibraryAction, serde_json::Value), String> {
+                let operation = match action.as_str() {
+                    "approve" => "reference.dedup_approve",
+                    "restore" => "reference.dedup_restore",
+                    _ => return Err("Unsupported duplicate review decision".into()),
+                };
+                let mut args = serde_json::json!({
+                    "canonical_id":canonical_id.as_str().trim(),
+                    "duplicate_id":duplicate_id.as_str().trim(),
+                    "rationale":rationale.as_str().trim(),
+                });
+                if action.as_str() == "approve" {
+                    args["candidate_sha256"] = serde_json::json!(candidate_sha256.as_str().trim());
+                }
+                let project = active_project.borrow().clone().ok_or("Open a project first")?;
+                library_preview_at(
+                    &project,
+                    operation,
+                    "reference_dedup",
+                    args,
+                    &host_data_root()?,
+                )
+            })();
+            match result {
+                Ok((pending, receipt)) => {
+                    *pending_library.borrow_mut() = Some(pending);
+                    ui.set_reference_dedup_results(format!("PREVIEW ONLY. Nothing recorded. Confirm IDs, original source metadata and exact planned alias before clicking Record reviewed decision.\n{}", pretty_result_data(&receipt)).into());
+                    ui.set_status("Reference dedup decision previewed; no changes recorded".into());
+                }
+                Err(error) => {
+                    ui.set_reference_dedup_results(format!("Dedup review rejected: {error}").into());
+                    ui.set_status("Reference dedup preview rejected".into());
+                }
+            }
+        }
+    });
+    app.on_record_reference_dedup({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_library = pending_library.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let pending = pending_library.borrow().clone();
+            let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                (Some(path), Some(action))
+                    if action.surface == "reference_dedup"
+                        && matches!(action.operation.as_str(), "reference.dedup_approve" | "reference.dedup_restore") => {
+                    host_data_root().and_then(|root| library_execute_pending(action, path, &root))
+                }
+                (None, _) => Err("Open a project first".into()),
+                _ => Err("Preview a specific duplicate merge or undo before recording".into()),
+            };
+            match result {
+                Ok((recorded, revision)) => {
+                    pending_library.borrow_mut().take();
+                    ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                    ui.set_reference_dedup_results(format!("AUDITED HUMAN DECISION RECORDED. Reference and source rows remain intact; undo requires another explicit preview.\n{}", pretty_result_data(&recorded)).into());
+                    ui.set_status("Reviewed reference identity decision recorded locally".into());
+                }
+                Err(error) => {
+                    pending_library.borrow_mut().take();
+                    ui.set_reference_dedup_results(format!("Decision NOT recorded: {error}").into());
+                    ui.set_status("Reference decision rejected; preview again".into());
                 }
             }
         }
