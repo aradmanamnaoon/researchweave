@@ -696,6 +696,18 @@ export component MainWindow inherits Window {
                             color: Theme.muted-ink;
                             font-size: 12px * Theme.ui-scale / 100;
                         }
+                        // Sidebar is visible in the true 886px installed
+                        // Windows viewport even when wide/header strip content
+                        // is clipped by child minimum layout widths. Keep the
+                        // durable project revision readable independent of
+                        // reported root.width and theme-scale thresholds.
+                        Text {
+                            text: "Project · r" + root.project-revision;
+                            visible: root.project-title != "";
+                            color: Theme.muted-ink;
+                            font-size: 11px * Theme.ui-scale / 100;
+                            accessible-label: "Project · r" + root.project-revision;
+                        }
                         Rectangle { height: 6px; }
 
                         if root.activity == 0: VerticalLayout {
@@ -867,21 +879,6 @@ export component MainWindow inherits Window {
                                     font-size: 12px * Theme.ui-scale / 100;
                                     wrap: word-wrap;
                                 }
-                            }
-                            // The full title+revision is intentionally hidden
-                            // at narrow window widths. Keep the trusted
-                            // revision independently visible in the less
-                            // crowded object strip, including the installed
-                            // Windows 886px native acceptance viewport.
-                            Rectangle { horizontal-stretch: 1; }
-                            Text {
-                                text: "Project · r" + root.project-revision;
-                                visible: Theme.ui-scale <= 150 && root.width < 1100px && root.project-title != "";
-                                vertical-alignment: center;
-                                horizontal-alignment: right;
-                                color: Theme.muted-ink;
-                                font-size: 11px * Theme.ui-scale / 100;
-                                accessible-label: "Project · r" + root.project-revision;
                             }
                         }
                     }

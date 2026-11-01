@@ -309,14 +309,35 @@ function WaitForNameLike(
 }
 function Get-VisibleProjectRevision([System.Windows.Automation.AutomationElement]$Window) {
     # The workbench header exposes the actual revision from the native project
-    # store, not the last operation's self-reported writes=0 field.
+    # store, not the last operation's self-reported writes=0 field. Require a
+    # physically visible accessible Text node in the real window, not a
+    # horizontally clipped descendant from a wider layout tree.
     for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $windowBounds = $Window.Current.BoundingRectangle
         foreach ($item in (Children $Window ([System.Windows.Automation.ControlType]::Text))) {
             $match = [regex]::Match($item.Current.Name, ' · r([0-9]+)$')
-            if ($match.Success) { return [long]::Parse($match.Groups[1].Value) }
+            if (-not $match.Success) { continue }
+            $bounds = $item.Current.BoundingRectangle
+            if ($bounds.Width -ge 5 -and $bounds.Height -ge 5 -and
+                $bounds.Left -ge $windowBounds.Left -and $bounds.Top -ge $windowBounds.Top -and
+                $bounds.Right -le $windowBounds.Right -and $bounds.Bottom -le $windowBounds.Bottom) {
+                return [long]::Parse($match.Groups[1].Value)
+            }
         }
         Start-Sleep -Milliseconds 50
     }
+    $revisionCandidates = @(
+        Children $Window ([System.Windows.Automation.ControlType]::Text) | Where-Object {
+            $_.Current.Name -match '(Project|Revision| · r[0-9]+)'
+        } | Select-Object -First 12 | ForEach-Object {
+            $box = $_.Current.BoundingRectangle
+            $_.Current.Name + ' [x=' + [int]$box.X + ',y=' + [int]$box.Y +
+                ',width=' + [int]$box.Width + ',height=' + [int]$box.Height + ']'
+        }
+    )
+    # This is diagnostic output, not a function result; Write-Output would
+    # contaminate the PowerShell return pipeline (previous UIA regression).
+    Write-Host ('UIA_REVISION_VISIBILITY_DIAGNOSTIC: ' + ($revisionCandidates -join ' | '))
     throw 'Project revision was not exposed by the native workbench header'
 }
 function AssertImplementedPageHasNoFallback(
