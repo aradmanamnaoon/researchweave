@@ -307,6 +307,21 @@ function WaitForNameLike(
     }
     throw "UIA result missing: $Pattern"
 }
+function Parse-NativeTitlePagePreview([string]$Preview) {
+    # PowerShell 5.1 can interpret UTF-8 source without BOM as ANSI. Do not
+    # embed the U+00B7 literal in a source regex: it may become U+00C2 U+00B7.
+    # Accept only those two precisely identified separator encodings; never
+    # relax the 64-digit digest, the full unsaved marker or the body boundary.
+    $middleDot = ([char]0x00B7).ToString()
+    $legacyMojibake = ([char]0x00C2).ToString() + $middleDot
+    $separator = '(?:' + [regex]::Escape($middleDot) + '|' +
+        [regex]::Escape($legacyMojibake) + ')'
+    $pattern = '(?s)^UNSAVED TITLE PAGE ' + $separator +
+        ' SHA-256 ([0-9a-f]{64})\r?\n(.+?)\r?\n\r?\n(.+)$'
+    $match = [regex]::Match($Preview, $pattern)
+    if (-not $match.Success) { return $null }
+    return $match
+}
 function Parse-NativeProjectRevision([string]$Label) {
     # PowerShell 5.1 reads UTF-8 without BOM with legacy ANSI decoding in
     # some hosted environments: U+00B7 may become the two chars U+00C2 U+00B7.
@@ -1813,8 +1828,12 @@ try {
     $titlePagePreviewText = ([System.Windows.Automation.ValuePattern]$titlePagePreviewControl.GetCurrentPattern(
         [System.Windows.Automation.ValuePattern]::Pattern
     )).Current.Value
-    $previewMatch = [regex]::Match($titlePagePreviewText, '(?s)^UNSAVED TITLE PAGE · SHA-256 ([0-9a-f]{64})\r?\n(.+?)\r?\n\r?\n(.+)$')
-    if (-not $previewMatch.Success) {
+    $previewMatch = Parse-NativeTitlePagePreview $titlePagePreviewText
+    if ($null -eq $previewMatch) {
+        $firstLine = ([string]$titlePagePreviewText -split '\r?\n', 2)[0]
+        Write-Host ('UIA_F04_PREVIEW_HEADER_CODEPOINTS=' +
+            (($firstLine.ToCharArray() | Select-Object -First 42 |
+                ForEach-Object { [int][char]$_ }) -join ','))
         throw 'F04 title page preview lacks the unsaved marker, content or 64-character digest'
     }
     $titlePageNotice = $previewMatch.Groups[2].Value
