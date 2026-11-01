@@ -186,6 +186,13 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_reference_pdf_metadata_results(
         "Choose an already indexed PDF source ID. Suggestions are unverified and never change bibliography records.".into(),
     );
+    ui.set_reference_crossref_open(false);
+    ui.set_reference_crossref_ready(false);
+    ui.set_reference_crossref_busy(false);
+    ui.set_reference_crossref_request_id(ui.get_reference_crossref_request_id().wrapping_add(1));
+    ui.set_reference_crossref_results(
+        "Enter a DOI. Preview is offline; a separate approved Fetch contacts Crossref only. Suggested metadata is unverified and no reference is automatically changed.".into(),
+    );
     ui.set_reference_dedup_results("Scan local records, inspect source metadata, and explicitly preview a reversible decision. No automatic merge.".into());
     ui.set_reference_dedup_candidates(
         Rc::new(slint::VecModel::from(
@@ -4242,6 +4249,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let pending_physical_export: Rc<RefCell<Option<physical_export::PreparedPhysicalExport>>> =
         Rc::new(RefCell::new(None));
     let pending_library: Rc<RefCell<Option<PendingLibraryAction>>> = Rc::new(RefCell::new(None));
+    let pending_crossref: Rc<RefCell<Option<PendingLibraryAction>>> = Rc::new(RefCell::new(None));
     let pending_analysis: Rc<RefCell<Option<PendingAnalysisAction>>> = Rc::new(RefCell::new(None));
     let pending_analysis_command: Rc<RefCell<Option<PendingAnalysisCommand>>> =
         Rc::new(RefCell::new(None));
@@ -4257,6 +4265,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let pending_manuscript_restore = pending_manuscript_restore.clone();
         let pending_physical_export = pending_physical_export.clone();
         let pending_library = pending_library.clone();
+        let pending_crossref = pending_crossref.clone();
         let pending_analysis = pending_analysis.clone();
         let pending_analysis_command = pending_analysis_command.clone();
         let pending_ai = pending_ai.clone();
@@ -4270,6 +4279,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             pending_manuscript_restore.borrow_mut().take();
             pending_physical_export.borrow_mut().take();
             pending_library.borrow_mut().take();
+            pending_crossref.borrow_mut().take();
             pending_analysis.borrow_mut().take();
             pending_analysis_command.borrow_mut().take();
             pending_ai.borrow_mut().take();
@@ -5291,6 +5301,127 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     ui.set_status("PDF metadata suggestions unavailable; no changes recorded".into());
                 }
             }
+        }
+    });
+    app.on_invalidate_crossref_doi({
+        let weak = app.as_weak();
+        let pending_crossref = pending_crossref.clone();
+        move || {
+            pending_crossref.borrow_mut().take();
+            if let Some(ui) = weak.upgrade() {
+                ui.set_reference_crossref_ready(false);
+                ui.set_reference_crossref_request_id(
+                    ui.get_reference_crossref_request_id().wrapping_add(1),
+                );
+                ui.set_reference_crossref_results(
+                    "DOI changed. Preview again offline before explicitly approving a single Crossref network request. No references changed.".into(),
+                );
+            }
+        }
+    });
+    app.on_preview_crossref_doi({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_crossref = pending_crossref.clone();
+        move |doi| {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_crossref.borrow_mut().take();
+            ui.set_reference_crossref_ready(false);
+            let preview = (|| -> Result<(PendingLibraryAction, serde_json::Value), String> {
+                let path = active_project.borrow().as_ref().cloned()
+                    .ok_or("Open a local project before previewing external metadata")?;
+                library_preview_at(
+                    &path,
+                    "reference.crossref_doi_lookup",
+                    "reference_crossref",
+                    serde_json::json!({"doi":doi.as_str(),"allow_network":true}),
+                    &host_data_root()?,
+                )
+            })();
+            match preview {
+                Ok((action, receipt)) => {
+                    *pending_crossref.borrow_mut() = Some(action);
+                    ui.set_reference_crossref_ready(true);
+                    ui.set_reference_crossref_results(format!(
+                        "OFFLINE PREVIEW ONLY. No network request or reference mutation. Fetch requires a separate explicit user click and one-time external-network approval.\n{}",
+                        pretty_result_data(&receipt),
+                    ).into());
+                    ui.set_status("Crossref request previewed locally; zero network requests".into());
+                }
+                Err(error) => {
+                    ui.set_reference_crossref_results(format!(
+                        "Crossref request refused before any network: {error}. No changes recorded."
+                    ).into());
+                    ui.set_status("Crossref offline preview rejected; no network request".into());
+                }
+            }
+        }
+    });
+    app.on_fetch_crossref_doi({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_crossref = pending_crossref.clone();
+        move |current_doi| {
+            let Some(ui) = weak.upgrade() else { return };
+            let pending = pending_crossref.borrow_mut().take();
+            ui.set_reference_crossref_ready(false);
+            if ui.get_reference_crossref_busy() {
+                ui.set_status("Crossref lookup already active; no duplicate request".into());
+                return;
+            }
+            let Some(action) = pending.filter(|action| {
+                action.surface == "reference_crossref"
+                    && action.operation == "reference.crossref_doi_lookup"
+                    && action.arguments.get("allow_network") == Some(&serde_json::Value::Bool(true))
+                    && action.arguments.get("doi").and_then(serde_json::Value::as_str)
+                        == Some(current_doi.as_str())
+            }) else {
+                ui.set_status("Preview this DOI offline before approving a network request".into());
+                return;
+            };
+            let Some(path) = active_project.borrow().as_ref().cloned() else {
+                ui.set_status("Open the previewed project before fetching metadata".into());
+                return;
+            };
+            let data_root = match host_data_root() {
+                Ok(root) => root,
+                Err(error) => {
+                    ui.set_status(format!("Crossref request refused: {error}").into());
+                    return;
+                }
+            };
+            let job_id = ui.get_reference_crossref_request_id().wrapping_add(1);
+            ui.set_reference_crossref_request_id(job_id);
+            ui.set_reference_crossref_busy(true);
+            ui.set_reference_crossref_results("One approved HTTPS request to api.crossref.org in progress. No automatic reference or project changes are permitted.".into());
+            ui.set_status("Fetching approved Crossref metadata (one request, no retries)".into());
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                // Blocking TLS request stays off the Slint UI thread. Existing
+                // one-use router approval and source/revision CAS guard run on
+                // this worker; no arbitrary URL or background retry exists.
+                let receipt = library_execute_pending(&action, &path, &data_root);
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak.upgrade() else { return };
+                    if ui.get_reference_crossref_request_id() != job_id { return }
+                    ui.set_reference_crossref_busy(false);
+                    match receipt {
+                        Ok((result, _)) => {
+                            ui.set_reference_crossref_results(format!(
+                                "EXTERNAL CROSSREF METADATA — UNVERIFIED CANDIDATES ONLY. No reference was registered, merged, or modified. Compare fields with the original publication before entering them manually.\n{}",
+                                pretty_result_data(&result),
+                            ).into());
+                            ui.set_status("Crossref metadata received; project references unchanged".into());
+                        }
+                        Err(error) => {
+                            ui.set_reference_crossref_results(format!(
+                                "Crossref request refused or failed: {error}. No bibliography reference was automatically changed. Preview again before retrying."
+                            ).into());
+                            ui.set_status("Crossref request unavailable; no automatic reference updates".into());
+                        }
+                    }
+                });
+            });
         }
     });
     app.on_scan_reference_duplicates({

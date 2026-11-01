@@ -257,6 +257,11 @@ export component MainWindow inherits Window {
     in-out property <string> reference-results: "Register or inspect project references.";
     in-out property <bool> reference-pdf-metadata-open: false;
     in-out property <string> reference-pdf-metadata-results: "Choose an already indexed PDF source ID. Suggestions are unverified and never change bibliography records.";
+    in-out property <bool> reference-crossref-open: false;
+    in-out property <bool> reference-crossref-ready: false;
+    in-out property <bool> reference-crossref-busy: false;
+    in-out property <int> reference-crossref-request-id: 0;
+    in-out property <string> reference-crossref-results: "Enter a DOI. Offline preview makes no network request; a separate explicitly approved fetch contacts Crossref. Metadata is unverified and never automatically saved.";
     in-out property <bool> reference-dedup-open: false;
     in-out property <string> reference-dedup-results: "Scan local records, inspect source metadata, and explicitly preview a reversible decision. No automatic merge.";
     in-out property <[ReferenceDuplicateCandidate]> reference-dedup-candidates: [];
@@ -388,6 +393,9 @@ export component MainWindow inherits Window {
     callback apply-library-preview();
     callback refresh-references();
     callback preview-reference-pdf-metadata(string);
+    callback preview-crossref-doi(string);
+    callback fetch-crossref-doi(string);
+    callback invalidate-crossref-doi();
     callback scan-reference-duplicates();
     callback preview-reference-dedup(string, string, string, string, string);
     callback load-reference-dedup-history(string, string);
@@ -1813,6 +1821,66 @@ export component MainWindow inherits Window {
                                     }
                                     Text {
                                         text: "No Apply button exists. Independently verify the original PDF and each proposed field before entering metadata through the normal human-approved reference workflow.";
+                                        wrap: word-wrap;
+                                        color: Theme.warning;
+                                    }
+                                }
+                            }
+                            Button {
+                                text: root.reference-crossref-open ? "Hide DOI metadata lookup" : "Review DOI metadata via Crossref";
+                                accessible-label: "Toggle consent-gated DOI Crossref lookup";
+                                clicked => { root.reference-crossref-open = !root.reference-crossref-open; }
+                            }
+                            if root.reference-crossref-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text {
+                                        text: "EXTERNAL CROSSREF — OPT-IN AND UNVERIFIED";
+                                        color: Theme.ink;
+                                        font-weight: 700;
+                                        accessible-label: "Crossref external network consent information";
+                                    }
+                                    Text {
+                                        text: "Preview is offline. Only clicking Fetch after Preview permits one HTTPS request to api.crossref.org. No DOI, author, reference or project record is automatically changed. Confirm each result against the original publication.";
+                                        wrap: word-wrap;
+                                        color: Theme.muted-ink;
+                                    }
+                                    crossref-doi-entry := LineEdit {
+                                        placeholder-text: "10.1038/nphys1170";
+                                        accessible-label: "DOI for explicit Crossref lookup";
+                                        enabled: !root.reference-crossref-busy;
+                                        edited(text) => { root.invalidate-crossref-doi(); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Preview without network";
+                                            accessible-label: "Preview Crossref DOI lookup offline without network";
+                                            enabled: !root.reference-crossref-busy;
+                                            clicked => { root.preview-crossref-doi(crossref-doi-entry.text); }
+                                        }
+                                        Button {
+                                            text: root.reference-crossref-busy ? "Fetching metadata..." : "Fetch once (external network)";
+                                            accessible-label: "Approve and fetch one Crossref DOI metadata record";
+                                            enabled: root.reference-crossref-ready && !root.reference-crossref-busy;
+                                            clicked => { root.fetch-crossref-doi(crossref-doi-entry.text); }
+                                        }
+                                    }
+                                    TextEdit {
+                                        min-height: 100px;
+                                        preferred-height: 165px;
+                                        max-height: 240px;
+                                        read-only: true;
+                                        text: root.reference-crossref-results;
+                                        accessible-label: "Read-only unverified Crossref DOI response";
+                                    }
+                                    Text {
+                                        text: "No automated Apply or Merge action. Crossref registration metadata and its publisher-supplied fields are unverified; human comparison and separately approved reference registration remain required.";
                                         wrap: word-wrap;
                                         color: Theme.warning;
                                     }
