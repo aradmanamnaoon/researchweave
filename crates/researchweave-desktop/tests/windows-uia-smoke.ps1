@@ -472,6 +472,87 @@ function FocusByShiftTab(
     }
     throw "UIA element was not reachable by reverse keyboard traversal: $Type '$Name'"
 }
+function Reveal-ManuscriptIdAfterNativeScroll(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [System.Windows.Automation.AutomationElement]$CitationAnchor
+) {
+    # An actual installed 886x567 Windows UIA screenshot at run 41330902805
+    # shows the outer Manuscript ScrollView scrolled below the ID/section
+    # fields after F04 closes. Slint's focus traversal skips off-viewport
+    # editable nodes, so more Shift+Tab attempts do not prove reachability.
+    $idType = [System.Windows.Automation.ControlType]::Edit
+    $area = Named $Window ([System.Windows.Automation.ControlType]::Group) 'Manuscript work area'
+    $areaRect = $area.Current.BoundingRectangle
+    $findId = {
+        foreach ($item in (Children $Window $idType)) {
+            if ($item.Current.Name -ne 'Manuscript ID' -or $item.Current.IsOffscreen) { continue }
+            $visibleRect = $item.Current.BoundingRectangle
+            if ($visibleRect.Width -ge 8 -and $visibleRect.Height -ge 8 -and
+                $visibleRect.Bottom -gt $areaRect.Top -and
+                $visibleRect.Top -lt $areaRect.Bottom) {
+                return $item
+            }
+        }
+        return $null
+    }
+    $found = & $findId
+    if ($found) { return $found }
+
+    EnsureLiveFocus $CitationAnchor
+    # Prefer the platform's own ScrollPattern if Slint exposes it; always
+    # verify the resulting real native editor appears in the live UIA tree.
+    foreach ($container in @($area) + @($area.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ))) {
+        $pattern = $null
+        try {
+            if ($container.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$pattern)) {
+                $nativeScroll = [System.Windows.Automation.ScrollPattern]$pattern
+                if ($nativeScroll.Current.VerticallyScrollable) {
+                    $nativeScroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 0)
+                    Start-Sleep -Milliseconds 250
+                    $found = & $findId
+                    if ($found) { return $found }
+                }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+    }
+
+    # Some Slint/AccessKit builds do not implement UIA ScrollPattern. Use
+    # genuine user32 wheel input confined to the *installed window's own*
+    # Manuscript work area, with a strict finite budget and tree readback.
+    if (-not ('ResearchWeaveNativeWheel' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ResearchWeaveNativeWheel {
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint flags, uint x, uint y, int data, UIntPtr extraInfo);
+}
+'@
+    }
+    $rect = $area.Current.BoundingRectangle
+    $x = [int]($rect.Left + [Math]::Min(420, [Math]::Max(30, $rect.Width * 0.75)))
+    $y = [int]($rect.Top + [Math]::Min(330, [Math]::Max(40, $rect.Height * 0.58)))
+    $windowRect = $Window.Current.BoundingRectangle
+    if ($rect.Width -lt 120 -or $rect.Height -lt 120 -or
+        $x -le ($windowRect.Left + 20) -or $x -ge ($windowRect.Right - 16) -or
+        $y -le ($windowRect.Top + 80) -or $y -ge ($windowRect.Bottom - 20)) {
+        throw "Manuscript native scroll target outside bounded installed window: ($x,$y)"
+    }
+    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
+    for ($attempt = 0; $attempt -lt 12; $attempt++) {
+        [ResearchWeaveNativeWheel]::mouse_event(0x0800, 0, 0, 360, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 140
+        $found = & $findId
+        if ($found) {
+            Write-Output "UIA_MANUSCRIPT_ID_NATIVE_SCROLL_REVEAL_OK wheel_steps=$($attempt + 1)"
+            return $found
+        }
+    }
+    throw 'Installed Manuscript ID remains inaccessible after bounded native UIA/wheel scrolling'
+}
 function Read-F05ManuscriptDraft([System.Windows.Automation.AutomationElement]$Window) {
     # The new F05 row can push the manuscript editor out of the AccessKit
     # viewport. Traverse the actual native focus order in both directions.
@@ -1877,7 +1958,7 @@ try {
     # visible F05 citation editor back to that exact native control rather
     # than assuming a clipped AccessKit node remains in the UIA tree.
     $manuscriptReferenceAfterF04 = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
-    $null = FocusByShiftTab $manuscriptReferenceAfterF04 ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID' 12
+    $null = Reveal-ManuscriptIdAfterNativeScroll $window $manuscriptReferenceAfterF04
 
     foreach ($pair in @(
         @('Manuscript ID','uia-paper'),
@@ -2040,6 +2121,51 @@ try {
     if ($docxBytes.Length -lt 4 -or $docxBytes[0] -ne 80 -or $docxBytes[1] -ne 75) {
         throw 'Saved manuscript DOCX has no ZIP/OOXML signature'
     }
+    # F31: the real persisted manuscript sections are converted to a bounded,
+    # loss-disclosed, inert Quarto AST, then only saved after an explicit native
+    # sensitive-export approval. This is source export, NOT Quarto execution.
+    $f31Before = Get-F14ProjectSnapshot $temporary
+    $f31Prepare = FocusByTab $markdownPath ([System.Windows.Automation.ControlType]::Button) 'Prepare source bound inert Quarto document from persisted manuscript sections' 8
+    $f31Prepare.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Quarto source prepared offline*' 10000
+    $f31Result = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($f31Result | Where-Object {
+        $_ -like '*Quarto .qmd source prepared*NOT SAVED*'
+    })) { throw 'Native F31 preparation did not disclose unsaved, lossy Quarto source' }
+    $f31Destination = Join-Path $hostData ('uia-quarto-' + [guid]::NewGuid().ToString('N') + '.qmd')
+    $f31Input = FocusByShiftTab $f31Prepare ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path' 8
+    $f31Input.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($f31Destination)
+    $f31Save = FocusByTab $f31Input ([System.Windows.Automation.ControlType]::Button) 'Explicitly save verified Quarto source without overwriting files' 7
+    $f31Save.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 250
+    if (-not (Test-Path -LiteralPath $f31Destination -PathType Leaf)) {
+        throw 'F31 explicit native Save did not create the real Quarto .qmd file'
+    }
+    $f31Source = [System.IO.File]::ReadAllText($f31Destination)
+    if (-not $f31Source.StartsWith("---`ntitle: ") -or
+        -not $f31Source.Contains("execute:`n  enabled: false") -or
+        -not $f31Source.Contains('Persisted UIA result supported by the registered reference.') -or
+        $f31Source.Contains('<script>')) {
+        throw 'Saved Quarto source failed title, persisted text, inert execution or safety validation'
+    }
+    $f31Hash = (Get-FileHash -LiteralPath $f31Destination -Algorithm SHA256).Hash.ToLowerInvariant()
+    $f31Names = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($f31Names | Where-Object { $_ -like "*$f31Hash*" })) {
+        throw 'F31 actual saved Quarto SHA-256 was not in the native verified receipt'
+    }
+    $f31Save.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 120
+    if ([System.IO.File]::ReadAllText($f31Destination) -cne $f31Source) {
+        throw 'F31 repeated Save overwrote or changed the prior .qmd file'
+    }
+    Assert-F14Unchanged $f31Before (Get-F14ProjectSnapshot $temporary) $window 'F31 native Quarto source no-write to project'
+    Write-Output 'UIA_F31_BOUND_INERT_QUARTO_PHYSICAL_QMD_SHA_NO_OVERWRITE_NO_PROJECT_WRITE_OK'
     Write-Output 'PASS: Markdown and structured DOCX were physically saved through the native manuscript UI with verified digest and no overwrite'
     Write-Output 'PASS: Manuscript preview -> approved save -> inspect -> Markdown + structured DOCX export works through native UI'
 
@@ -2141,7 +2267,7 @@ try {
     # Reuse the same disposable project and persisted $referenceId registered
     # through the real References native UI. Only UIA controls may mutate it.
     $f05ManuscriptAnchor = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
-    $f05ManuscriptId = FocusByShiftTab $f05ManuscriptAnchor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID' 12
+    $f05ManuscriptId = Reveal-ManuscriptIdAfterNativeScroll $window $f05ManuscriptAnchor
     $f05Section = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section'
     $f05Value = [System.Windows.Automation.ValuePattern]::Pattern
     if ($f05ManuscriptId.GetCurrentPattern($f05Value).Current.Value -ne 'uia-paper' -or
