@@ -225,7 +225,19 @@ def reveal_bounded_control(
             check=True, timeout=8,
         )
         time.sleep(0.12)
-    raise RuntimeError(f"Control remained outside bounded native viewport: {accessible_name}")
+    final_bounds = []
+    for node in nodes_named(app, accessible_name):
+        try:
+            rect = node.queryComponent().getExtents(pyatspi.DESKTOP_COORDS)
+            final_bounds.append(
+                f"{rect.x},{rect.y},{rect.width},{rect.height}"
+            )
+        except Exception as error:
+            final_bounds.append(type(error).__name__)
+    raise RuntimeError(
+        f"Control remained outside bounded native viewport: {accessible_name}; "
+        f"actual_ATSPI_bounds={final_bounds[:4]}"
+    )
 
 
 def activate_bounded_control(app: Any, accessible_name: str, *, down: bool) -> None:

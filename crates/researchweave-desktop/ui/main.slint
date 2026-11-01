@@ -1679,7 +1679,18 @@ export component MainWindow inherits Window {
                                 reference-kind := LineEdit { placeholder-text: "Kind, e.g. article"; accessible-label: "Reference kind"; }
                                 reference-format := LineEdit { placeholder-text: "Format: bibtex, ris, csl-json"; accessible-label: "Reference format"; }
                             }
-                            reference-raw := TextEdit { accessible-label: "Raw reference record"; text: ""; }
+                            // A TextEdit without an explicit minimum can be
+                            // squeezed to zero height by the long References
+                            // page (previously confirmed on Protocol). Keep
+                            // the human-entered raw provenance visibly
+                            // selectable and usable at native narrow sizes.
+                            reference-raw := TextEdit {
+                                accessible-label: "Raw reference record";
+                                text: "";
+                                min-height: 100px;
+                                preferred-height: 140px;
+                                max-height: 220px;
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
                                 Button {
