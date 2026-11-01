@@ -39,6 +39,7 @@ export struct PdfCaptionCandidate {
     label: string,
     page-number: int,
     provenance: string,
+    source-sha256: string,
 }
 
 export struct ManuscriptSection {
@@ -248,6 +249,8 @@ export component MainWindow inherits Window {
     in-out property <image> pdf-image;
     in-out property <string> pdf-status: "Choose a local PDF file";
     in-out property <string> pdf-local-path: "";
+    // Bound to one explicit caption-anchor navigation, not ordinary PDF opens.
+    in-out property <string> pdf-verified-caption-sha: "";
     in-out property <string> data-local-path: "";
     // A successful import establishes a project-scoped immutable dataset
     // context for the next variable inspection or statistical analysis.
@@ -421,6 +424,7 @@ export component MainWindow inherits Window {
     in-out property <int> recent-project-index: 0;
 
     callback load-pdf(string, string, int);
+    callback invalidate-pdf-view();
     callback find-next-pdf(string, string, int);
     callback choose-local-file(string);
     callback create-project(string, string);
@@ -1249,6 +1253,8 @@ export component MainWindow inherits Window {
                                         accessible-description: "Absolute path to the PDF file to display";
                                         edited(value) => {
                                             root.pdf-local-path = value;
+                                            root.pdf-verified-caption-sha = "";
+                                            root.invalidate-pdf-view();
                                             root.pdf-caption-request-id += 1;
                                             root.pdf-caption-busy = false;
                                             root.pdf-caption-candidates = [];
@@ -1274,6 +1280,7 @@ export component MainWindow inherits Window {
                                         primary: true;
                                         accessible-label: "Open PDF";
                                         clicked => {
+                                            root.pdf-verified-caption-sha = "";
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering PDF…";
                                             root.pdf-page-number = 1;
@@ -1286,6 +1293,7 @@ export component MainWindow inherits Window {
                                         text: "Search";
                                         accessible-label: "Search PDF";
                                         clicked => {
+                                            root.pdf-verified-caption-sha = "";
                                             root.pdf-job += 1;
                                             root.pdf-status = "Searching PDF…";
                                             root.pdf-highlight-visible = false;
@@ -1297,6 +1305,7 @@ export component MainWindow inherits Window {
                                         accessible-label: "Find next PDF matching page";
                                         enabled: root.pdf-page-count > 0 && pdf-query.text != "";
                                         clicked => {
+                                            root.pdf-verified-caption-sha = "";
                                             root.pdf-job += 1;
                                             root.pdf-status = "Finding next matching PDF page…";
                                             root.pdf-highlight-visible = false;
@@ -1311,6 +1320,7 @@ export component MainWindow inherits Window {
                                         accessible-label: "Previous PDF page";
                                         enabled: root.pdf-page-number > 1;
                                         clicked => {
+                                            root.pdf-verified-caption-sha = "";
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering previous PDF page…";
                                             root.pdf-highlight-visible = false;
@@ -1327,6 +1337,7 @@ export component MainWindow inherits Window {
                                         accessible-label: "Next PDF page";
                                         enabled: root.pdf-page-count > 0 && root.pdf-page-number < root.pdf-page-count;
                                         clicked => {
+                                            root.pdf-verified-caption-sha = "";
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering next PDF page…";
                                             root.pdf-highlight-visible = false;
@@ -1372,10 +1383,13 @@ export component MainWindow inherits Window {
                                             text: caption.label + " · page " + caption.page-number;
                                             accessible-label: "Inspect unverified PDF caption " + caption.label + " page " + caption.page-number;
                                             clicked => {
-                                                root.pdf-job += 1;
-                                                root.pdf-highlight-visible = false;
-                                                root.load-pdf(pdf-path.text, pdf-query.text, caption.page-number);
-                                                root.pdf-caption-status = caption.provenance;
+                                                // Clear the previous page before checking the exact
+                                                // source SHA; a same-path replacement must not show
+                                                // stale pixels with old caption provenance.
+                                                root.invalidate-pdf-view();
+                                                root.pdf-verified-caption-sha = caption.source-sha256;
+                                                root.pdf-caption-status = "Verifying the scanned PDF source bytes before opening this unverified caption anchor. " + caption.provenance;
+                                                root.load-pdf(pdf-path.text, "", caption.page-number);
                                             }
                                         }
                                     }

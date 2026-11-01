@@ -471,6 +471,9 @@ mod tests {
         let expected_sha = hex::encode(Sha256::digest(std::fs::read(&path).unwrap()));
         let preview = preview_pdf_figure_table_candidates(&path).unwrap();
         assert_eq!(preview.source_sha256, expected_sha);
+        let inspected =
+            super::super::render_search_at_verified(&path, "", 0, &preview.source_sha256).unwrap();
+        assert_eq!((inspected.page_index, inspected.page_count), (0, 1));
         assert_eq!((preview.page_count, preview.pages_inspected), (1, 1));
         assert!(!preview.scan_truncated);
         assert_eq!(preview.candidates.len(), 2);

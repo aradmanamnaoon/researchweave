@@ -230,6 +230,9 @@ jobs:
           if (-not ($log | Where-Object { $_ -match '^PACKAGED_QA_OK pdfium_sha256=[A-F0-9]{64} exe_sha256=[A-F0-9]{64}$' })) {
             throw 'Installed native UIA candidate did not complete verification and cleanup'
           }
+          if (-not ($log | Where-Object { $_ -match '^UIA_F31_BOUND_INERT_QUARTO_PHYSICAL_QMD_SHA_NO_OVERWRITE_NO_PROJECT_WRITE_OK$' })) {
+            throw 'Installed Windows UIA did not verify source-bound no-overwrite Quarto export'
+          }
       - name: Archive Windows native smoke diagnostics
         if: ${{ always() && runner.os == 'Windows' }}
         uses: actions/upload-artifact@v4

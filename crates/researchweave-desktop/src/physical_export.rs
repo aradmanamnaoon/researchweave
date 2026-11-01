@@ -1,6 +1,8 @@
 //! Explicit, non-overwriting desktop file delivery for read-only, revision-bound
 //! manuscript and draft submission artifacts. This never submits data to a journal.
-use super::{analysis_read_at, evidence_read_at, now_seconds, ProjectStore};
+use super::{
+    analysis_read_at, evidence_read_at, manuscript_quarto_source, now_seconds, ProjectStore,
+};
 use base64::{engine::general_purpose::STANDARD, Engine as _};
 use researchweave_core::{
     AuditStore, Authority, Capability, Command, CommandRouter, DispatchContext, Effect,
@@ -32,6 +34,9 @@ pub(super) struct PreparedPhysicalExport {
     sha256: String,
     extension: String,
     length: usize,
+    /// Present only for F31. Compare the independently inspected section
+    /// revisions and content digests again immediately before a physical save.
+    source_manifest: Option<manuscript_quarto_source::SourceManifest>,
     /// Every clone of this prepared artifact shares one process-local use
     /// reservation; separate host approvals cannot replay a prepared payload
     /// to multiple filenames or race to write simultaneously.
@@ -61,7 +66,7 @@ fn render_artifact(
     operation: &str,
     arguments: Value,
     root: &Path,
-) -> Result<Value, String> {
+) -> Result<(Value, Option<manuscript_quarto_source::SourceManifest>), String> {
     let mut result = if operation == "analysis.report.render" {
         analysis_read_at(project, operation, arguments.clone(), root)?
     } else {
@@ -79,6 +84,30 @@ fn render_artifact(
         if current.revision != expected_revision {
             return Err("Inspected manuscript changed before Quarto source preparation".into());
         }
+        // `writing.quarto_source_preview` accepts any validated AST. Its
+        // project ID, document SHA and inert flags do not certify provenance.
+        // Re-read the authoritative persisted sections, reconstruct the one
+        // canonical AST this desktop supports, and reject ALL other inputs.
+        let manuscript_id =
+            manuscript_quarto_source::manuscript_id_from_document(&arguments["document"])?;
+        let inspected = evidence_read_at(
+            project,
+            "writing.inspect",
+            json!({"manuscript_id":manuscript_id}),
+            root,
+        )?;
+        let source_manifest = manuscript_quarto_source::attest_source(
+            &inspected,
+            &arguments["document"],
+            expected_revision,
+        )?;
+        let after_inspection = ProjectStore::open(project)
+            .map_err(|error| error.to_string())?
+            .info()
+            .map_err(|error| error.to_string())?;
+        if after_inspection.id != current.id || after_inspection.revision != expected_revision {
+            return Err("Manuscript changed during independent source verification".into());
+        }
         let data = result
             .get("data")
             .ok_or("Quarto source receipt unavailable")?;
@@ -89,6 +118,7 @@ fn render_artifact(
             || data["executable_cells_present"] != false
             || data["citations_resolved"] != false
             || data["persisted"] != false
+            || data["project_id"].as_str() != Some(current.id.as_str())
             || data["project_revision"] != expected_revision
         {
             return Err("Quarto source lacks inert, current-project provenance".into());
@@ -99,9 +129,8 @@ fn render_artifact(
             .ok_or("Quarto source is empty or exceeds 1 MiB")?;
         let digest = hex::encode(Sha256::digest(qmd.as_bytes()));
         if data["qmd_sha256"].as_str() != Some(digest.as_str())
-            || !data["source_document_sha256"].as_str().is_some_and(|sha| {
-                sha.len() == 64 && sha.bytes().all(|byte| byte.is_ascii_hexdigit())
-            })
+            || data["source_document_sha256"].as_str()
+                != Some(source_manifest.source_document_sha256.as_str())
         {
             return Err("Quarto projection failed its source or output SHA-256 receipt".into());
         }
@@ -117,7 +146,7 @@ fn render_artifact(
         object.insert("byte_length".into(), json!(len));
         object.insert("written_to_disk".into(), Value::Bool(false));
         object.insert("submission_performed".into(), Value::Bool(false));
-        return Ok(result);
+        return Ok((result, Some(source_manifest)));
     }
     if matches!(
         operation,
@@ -191,7 +220,7 @@ fn render_artifact(
         object.insert("written_to_disk".into(), Value::Bool(false));
         object.insert("submission_performed".into(), Value::Bool(false));
     }
-    Ok(result)
+    Ok((result, None))
 }
 
 fn checked_bytes(receipt: &Value) -> Result<(Vec<u8>, String), String> {
@@ -234,7 +263,7 @@ pub(super) fn prepare(
         .map_err(|error| error.to_string())?
         .info()
         .map_err(|error| error.to_string())?;
-    let result = render_artifact(project, operation, arguments.clone(), root)?;
+    let (result, source_manifest) = render_artifact(project, operation, arguments.clone(), root)?;
     let after = ProjectStore::open(project)
         .map_err(|error| error.to_string())?
         .info()
@@ -253,6 +282,7 @@ pub(super) fn prepare(
             sha256,
             extension: extension.to_owned(),
             length: bytes.len(),
+            source_manifest,
             usage: Arc::new(AtomicU8::new(EXPORT_UNUSED)),
         },
         result,
@@ -409,12 +439,17 @@ fn write_verified(
     }
     // Re-read the authoritative persisted content at the same project revision.
     // The prepared bytes themselves are never written without this revalidation.
-    let receipt = render_artifact(
+    let (receipt, source_manifest) = render_artifact(
         active_project,
         &pending.operation,
         pending.arguments.clone(),
         root,
     )?;
+    if source_manifest != pending.source_manifest {
+        return Err(
+            "Persisted manuscript section manifest changed since Quarto preparation".into(),
+        );
+    }
     let (bytes, sha256) = checked_bytes(&receipt)?;
     let after = ProjectStore::open(active_project)
         .map_err(|error| error.to_string())?
@@ -500,6 +535,109 @@ mod tests {
         load_project_with_audit,
     };
     use uuid::Uuid;
+
+    #[test]
+    fn quarto_physical_export_refuses_forged_ast_and_in_place_source_tampering() {
+        let root = std::env::temp_dir().join(format!("rw-quarto-forgery-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let project = root.join("study");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Quarto provenance negative cases",
+            true,
+            &root.join("create-audit.sqlite"),
+        )
+        .unwrap();
+        let host = root.join("host");
+        let (section, _) = evidence_preview_at(
+            &project,
+            "writing.section_save",
+            "writing",
+            json!({"manuscript_id":"authentic-paper","section":"Results",
+                "body":"Persisted result 12 mm","citations":[]}),
+            &host,
+        )
+        .unwrap();
+        evidence_execute_pending(&section, &project, &host).unwrap();
+        let inspected = evidence_read_at(
+            &project,
+            "writing.inspect",
+            json!({"manuscript_id":"authentic-paper"}),
+            &host,
+        )
+        .unwrap();
+        let source =
+            crate::manuscript_quarto_source::from_inspect(&inspected, "authentic-paper").unwrap();
+        let revision = ProjectStore::open(&project)
+            .unwrap()
+            .info()
+            .unwrap()
+            .revision;
+        let args = json!({"document":source.document,"source_project_revision":revision});
+
+        // The generic evidence API would accept this valid but fabricated AST.
+        // The physical host must not misrepresent it as persisted F31 source.
+        let mut forged = args.clone();
+        forged["document"]["blocks"][1]["content"][0]["text"] = json!("Fabricated result 99 mm");
+        let forged_preview = evidence_read_at(
+            &project,
+            "writing.quarto_source_preview",
+            forged.clone(),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(forged_preview["status"], "ok");
+        assert!(prepare(&project, "writing.quarto_source_preview", forged, &host).is_err());
+        let mut forged_title = args.clone();
+        forged_title["document"]["title"] = json!("Author-asserted source-bound paper");
+        assert!(prepare(
+            &project,
+            "writing.quarto_source_preview",
+            forged_title,
+            &host
+        )
+        .is_err());
+
+        let (prepared, _) = prepare(
+            &project,
+            "writing.quarto_source_preview",
+            args.clone(),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(
+            prepared.source_manifest.as_ref().unwrap().manuscript_id,
+            "authentic-paper"
+        );
+
+        // Simulate a damaged local database with the same project revision.
+        // A revision-only CAS or second render of the CALLER'S AST would miss
+        // this change; independent manuscript reinspection must refuse Save.
+        ProjectStore::open(&project)
+            .unwrap()
+            .connection()
+            .execute(
+                "UPDATE manuscripts SET body=?1 WHERE id=?2 AND section=?3 AND revision=1",
+                ["Tampered in-place result", "authentic-paper", "Results"],
+            )
+            .unwrap();
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            revision
+        );
+        let destination = root.join("forged-source.qmd");
+        assert!(save(&prepared, &project, destination.to_str().unwrap(), &host,).is_err());
+        assert!(
+            !destination.exists(),
+            "stale source must not create a physical file"
+        );
+        assert!(prepare(&project, "writing.quarto_source_preview", args, &host).is_err());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn persisted_plain_manuscript_quarto_source_requires_one_use_no_overwrite_and_current_revision()

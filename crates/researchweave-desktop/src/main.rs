@@ -353,8 +353,13 @@ fn reset_project_visible_state(ui: &MainWindow) {
     );
     ui.set_backup_results("Open a project, then choose an absolute archive path.".into());
     ui.set_recovery_results("Restore always creates a new project directory.".into());
+    // A previous project's asynchronous PDF render may still be completing.
+    // Even if the next project chooses an identical source path, never display
+    // an old job's pixels after the project boundary.
+    ui.set_pdf_job(ui.get_pdf_job().wrapping_add(1));
     ui.set_pdf_image(Image::default());
     ui.set_pdf_local_path("".into());
+    ui.set_pdf_verified_caption_sha("".into());
     ui.set_pdf_status("Choose a local PDF file".into());
     ui.set_pdf_matches(0);
     ui.set_pdf_page_number(1);
@@ -3728,6 +3733,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(selected) = selected {
                         match chosen_local_file_path(selected.path()) {
                             Ok(path) if kind == "pdf" => {
+                                // A native picker changes the path without a user
+                                // LineEdit `edited` event. Invalidate any in-flight
+                                // render and clear pixels from the previous source.
+                                ui.set_pdf_job(ui.get_pdf_job().wrapping_add(1));
+                                ui.set_pdf_verified_caption_sha("".into());
+                                ui.set_pdf_image(Image::default());
+                                ui.set_pdf_page_number(1);
+                                ui.set_pdf_page_count(0);
+                                ui.set_pdf_render_width(0.0);
+                                ui.set_pdf_render_height(0.0);
+                                ui.set_pdf_highlight_visible(false);
+                                ui.set_pdf_matches(0);
+                                ui.set_pdf_status("Source selected; open the new PDF to render".into());
                                 ui.set_pdf_caption_request_id(
                                     ui.get_pdf_caption_request_id().wrapping_add(1),
                                 );
@@ -9781,6 +9799,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                         page_number: i32::try_from(candidate.page_number)
                                             .unwrap_or(i32::MAX),
                                         provenance: provenance.into(),
+                                        source_sha256: source.clone().into(),
                                     });
                                 }
                                 ui.set_pdf_caption_candidates(
@@ -9808,6 +9827,22 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             });
         }
     });
+    app.on_invalidate_pdf_view({
+        let weak = app.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_pdf_job(ui.get_pdf_job().wrapping_add(1));
+                ui.set_pdf_image(Image::default());
+                ui.set_pdf_page_number(1);
+                ui.set_pdf_page_count(0);
+                ui.set_pdf_render_width(0.0);
+                ui.set_pdf_render_height(0.0);
+                ui.set_pdf_highlight_visible(false);
+                ui.set_pdf_matches(0);
+                ui.set_pdf_status("PDF source changed; open the selected file to render".into());
+            }
+        }
+    });
     app.on_load_pdf({
         let weak = app.as_weak();
         let activity = activity.clone();
@@ -9819,6 +9854,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "PDF search"
             };
             let job_id = weak.upgrade().map(|ui| ui.get_pdf_job()).unwrap_or_default();
+            let expected_source_sha = weak
+                .upgrade()
+                .map(|ui| ui.get_pdf_verified_caption_sha().to_string())
+                .unwrap_or_default();
             let kind = kind.to_owned();
             let weak = weak.clone();
             let activity = activity.clone();
@@ -9829,11 +9868,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .filter(|number| *number > 0)
                     .ok_or_else(|| "PDF page must be a positive number".to_string())
                     .and_then(|number| {
-                        pdf_engine::render_search_at(
-                            Path::new(path.as_str()),
-                            query.as_str(),
-                            number - 1,
-                        )
+                        if expected_source_sha.is_empty() {
+                            pdf_engine::render_search_at(
+                                Path::new(path.as_str()),
+                                query.as_str(),
+                                number - 1,
+                            )
+                        } else {
+                            // The PDFium renderer must verify the SAME bounded
+                            // bytes it loads, rather than hashing and reopening
+                            // a potentially replaced filesystem path.
+                            pdf_engine::render_search_at_verified(
+                                Path::new(path.as_str()),
+                                query.as_str(),
+                                number - 1,
+                                expected_source_sha.as_str(),
+                            )
+                        }
                     });
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak.upgrade() {
@@ -9849,11 +9900,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         // Every completed job is recorded, but a superseded
                         // request must not replace the latest displayed page.
-                        if ui.get_pdf_job() != job_id {
+                        if ui.get_pdf_job() != job_id || ui.get_pdf_local_path() != path {
                             return;
                         }
                         match result {
                             Ok(rendered) => {
+                                if !expected_source_sha.is_empty() {
+                                    ui.set_pdf_caption_status(
+                                        format!(
+                                            "SOURCE SHA-256 VERIFIED against scanned bytes ({}). Caption bounds are unverified; no figure pixels or table cells were extracted.",
+                                            expected_source_sha
+                                        )
+                                        .into(),
+                                    );
+                                }
                                 ui.set_pdf_page_number(
                                     i32::try_from(rendered.page_index.saturating_add(1))
                                         .unwrap_or(i32::MAX),
@@ -9902,6 +9962,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                             }
                             Err(e) => {
+                                if !expected_source_sha.is_empty() {
+                                    ui.set_pdf_verified_caption_sha("".into());
+                                    ui.set_pdf_caption_candidates(
+                                        Rc::new(slint::VecModel::from(
+                                            Vec::<PdfCaptionCandidate>::new(),
+                                        ))
+                                        .into(),
+                                    );
+                                    ui.set_pdf_caption_status(
+                                        format!("Caption navigation refused: {e}. Source or render could not be verified. Rescan the PDF before inspecting captions.").into(),
+                                    );
+                                }
                                 ui.set_pdf_status(format!("PDF error: {}", e).into());
                                 ui.set_pdf_page_number(1);
                                 ui.set_pdf_page_count(0);

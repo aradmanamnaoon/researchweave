@@ -64,6 +64,25 @@ class NativeQuartoPhysicalContract(unittest.TestCase):
         ):
             self.assertIn(expected, self.export)
 
+    def test_physical_save_reinspects_source_instead_of_trusting_supplied_ast(self) -> None:
+        for expected in (
+            'pub(super) struct SourceManifest',
+            'pub(super) fn attest_source(',
+            'let projection = from_inspect(inspected, manuscript_id)?;',
+            'if projection.document != *supplied_document',
+            'source_document_sha256',
+            'citations_sha256',
+            'canonical_source_manifest_rejects_forged_ast_and_stale_body_hash',
+        ):
+            self.assertIn(expected, self.adapter)
+        for expected in (
+            '"writing.inspect"',
+            'manuscript_quarto_source::attest_source(',
+            'if source_manifest != pending.source_manifest',
+            'quarto_physical_export_refuses_forged_ast_and_in_place_source_tampering',
+        ):
+            self.assertIn(expected, self.export)
+
     def test_native_controls_read_real_inspection_and_save_only_after_approval(self) -> None:
         self.assertIn("mod manuscript_quarto_source;", self.desktop)
         self.assertIn("app.on_prepare_quarto_source({", self.desktop)
@@ -92,6 +111,12 @@ class NativeQuartoPhysicalContract(unittest.TestCase):
         ):
             # Button text appears in Slint; the action target in Windows UIA.
             self.assertIn(exact, self.slint + self.windows)
+        marker = 'UIA_F31_BOUND_INERT_QUARTO_PHYSICAL_QMD_SHA_NO_OVERWRITE_NO_PROJECT_WRITE_OK'
+        for workflow in (
+            '.github/workflows/rust-release-candidate.yml',
+            '.github/workflows/release.yml',
+        ):
+            self.assertIn(marker, (ROOT / workflow).read_text(encoding='utf-8'))
 
 
 if __name__ == "__main__":
