@@ -1895,6 +1895,106 @@ def main() -> int:
             raise RuntimeError("Checklist completion did not update the card's checked item control")
         print("QUICK_NOTE_CHECKLIST_PERSISTED_COMPLETION_OK")
         audit(app, "quick-note-checklist-completed", output)
+        # F41: use the actual saved native card, open the local Markdown
+        # exchange, read its visible Slint TextEdit with native X11 clipboard,
+        # edit the export, preview zero writes, and explicitly approve an
+        # append-only version. No SQL seeding, external vault or network.
+        before_external_note = project_event_snapshot(original_project)
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            prior_card_rows = db.execute(
+                "SELECT id,revision,body FROM notebook_entries "
+                "WHERE id LIKE 'card:%' ORDER BY revision"
+            ).fetchall()
+        if not prior_card_rows:
+            raise RuntimeError("F41 cannot begin without the UI-created source note")
+        source_card_id = prior_card_rows[-1][0]
+        source_card_revision = prior_card_rows[-1][1]
+        source_card_json = prior_card_rows[-1][2]
+        if not activate(app, "Edit quick note Synthetic MRI memo"):
+            raise RuntimeError("F41 cannot select the saved source quick note")
+        activate_bounded_control(
+            app, "Toggle local Obsidian Markdown note exchange", down=False
+        )
+        activate_bounded_control(
+            app,
+            "Export selected quick note as local Obsidian Markdown text",
+            down=True,
+        )
+        reveal_bounded_control(
+            app, "Editable Obsidian Markdown note exchange", down=True
+        )
+        exported_markdown = read_visible_field_keyboard(
+            app, "Editable Obsidian Markdown note exchange", force_clipboard=True
+        )
+        card_sha = hashlib.sha256(source_card_json.encode("utf-8")).hexdigest()
+        if (
+            not exported_markdown.startswith("<!-- ResearchWeave-Obsidian-v1 ")
+            or f"card={source_card_id}" not in exported_markdown.split("\n", 1)[0]
+            or f"revision={source_card_revision}" not in exported_markdown.split("\n", 1)[0]
+            or f"sha256={card_sha}" not in exported_markdown.split("\n", 1)[0]
+        ):
+            raise RuntimeError("F41 native Markdown did not identify the immutable source card")
+        if project_event_snapshot(original_project) != before_external_note:
+            raise RuntimeError("F41 native Markdown export wrote to the project")
+        print("F41_NATIVE_MARKDOWN_SOURCE_SHA_READBACK_AND_EXPORT_NO_WRITE_OK")
+        changed_markdown = exported_markdown + "\n\nHuman-reviewed Obsidian roundtrip note."
+        edit_text(
+            app,
+            "Editable Obsidian Markdown note exchange",
+            changed_markdown,
+            allow_unreadable=True,
+        )
+        activate_bounded_control(
+            app, "Preview edited Obsidian Markdown without changing project", down=True
+        )
+        if not nodes_named(app, "Local Obsidian Markdown exchange status PREVIEW ONLY"):
+            raise RuntimeError("F41 native import preview did not acknowledge no-write status")
+        if project_event_snapshot(original_project) != before_external_note:
+            raise RuntimeError("F41 native Markdown import preview unexpectedly changed events")
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            rows_after_preview = db.execute(
+                "SELECT id,revision,body FROM notebook_entries WHERE id LIKE 'card:%' "
+                "ORDER BY revision"
+            ).fetchall()
+        if rows_after_preview != prior_card_rows:
+            raise RuntimeError("F41 preview silently changed source note history")
+        print("F41_NATIVE_MARKDOWN_IMPORT_PREVIEW_NO_WRITE_OK")
+        activate_bounded_control(
+            app,
+            "Approve previewed Obsidian Markdown as a new immutable note revision",
+            down=True,
+        )
+        time.sleep(0.35)
+        with sqlite3.connect(original_project / "data/project.sqlite") as db:
+            imported_card_rows = db.execute(
+                "SELECT id,revision,body FROM notebook_entries WHERE id LIKE 'card:%' "
+                "ORDER BY revision"
+            ).fetchall()
+            imported_event = db.execute(
+                "SELECT operation FROM events ORDER BY sequence DESC LIMIT 1"
+            ).fetchone()
+        if (
+            imported_card_rows[:-1] != prior_card_rows
+            or len(imported_card_rows) != len(prior_card_rows) + 1
+            or imported_card_rows[-1][0] != source_card_id
+            or imported_card_rows[-1][1] != source_card_revision + 1
+            or imported_event != ("knowledge.obsidian_import",)
+            or project_event_snapshot(original_project)[0] != before_external_note[0] + 1
+        ):
+            raise RuntimeError("F41 native approved import failed immutable CAS/event validation")
+        imported_note = json.loads(imported_card_rows[-1][2])
+        original_note = json.loads(source_card_json)
+        if (
+            imported_note["body"] != original_note["body"] + "\n\nHuman-reviewed Obsidian roundtrip note."
+            or imported_note["title"] != original_note["title"]
+            or any(
+                imported_note[field] != original_note[field]
+                for field in ("tags", "color", "pinned", "archived")
+            )
+        ):
+            raise RuntimeError("F41 native import changed unrelated source fields or exact text")
+        print("F41_NATIVE_OBSIDIAN_APPROVED_APPEND_PRESERVES_HISTORY_AND_METADATA_OK")
+        audit(app, "quick-note-obsidian-approved-import", output)
         if not activate(app, "Show long form project notebook"):
             raise RuntimeError("Long form project notebook view cannot be opened")
         time.sleep(0.25)

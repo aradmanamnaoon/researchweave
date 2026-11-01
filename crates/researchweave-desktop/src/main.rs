@@ -134,6 +134,13 @@ fn restore_writing_drafts(
 /// the previously active project.  Switching projects must never leave results
 /// from one project looking like they were computed for another.
 fn reset_project_visible_state(ui: &MainWindow) {
+    ui.set_quick_note_obsidian_open(false);
+    ui.set_quick_note_obsidian_markdown("".into());
+    ui.set_quick_note_obsidian_approval("".into());
+    ui.set_quick_note_obsidian_status(
+        "Select a saved card and explicitly export it to begin a new local Markdown exchange."
+            .into(),
+    );
     ui.set_data_local_path("".into());
     ui.set_recent_dataset_id("".into());
     ui.set_recent_dataset_revision("".into());
@@ -3779,6 +3786,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })();
                 match result {
                     Ok((card_id, revision)) => {
+                        ui.set_quick_note_obsidian_approval("".into());
+                        ui.set_quick_note_obsidian_status(
+                            "A project note changed. Export its latest saved revision again before importing external Markdown.".into(),
+                        );
                         ui.set_project_revision(revision as i32);
                         // Row-level pin/archive/checklist actions can complete
                         // while this same card has unsaved edits in the composer.
@@ -3818,6 +3829,174 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_quick_note_results(format!("Quick note not saved: {error}").into());
                         ui.set_status("Quick note not saved; edit remains available".into());
                     }
+                }
+            }
+        }
+    });
+    app.on_export_quick_note_obsidian({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |selected| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_quick_note_obsidian_approval("".into());
+                let result = (|| -> Result<(String, String), String> {
+                    if selected.is_empty() {
+                        return Err("Select an existing saved quick note first".into());
+                    }
+                    let project = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let response = evidence_read_at(
+                        &project,
+                        "knowledge.obsidian_export_note",
+                        serde_json::json!({"card_id":selected.as_str()}),
+                        &host_data_root()?,
+                    )?;
+                    let data = &response["data"];
+                    if data["format"] != "researchweave-obsidian-markdown-note-v1"
+                        || data["physical_file_written"] != false
+                        || data["vault_accessed"] != false
+                        || data["card_id"] != selected.as_str()
+                    {
+                        return Err("Unexpected Markdown export identity or side effects".into());
+                    }
+                    let markdown = data["markdown"]
+                        .as_str()
+                        .ok_or("Native Markdown text unavailable")?
+                        .to_owned();
+                    let hash = data["markdown_sha256"]
+                        .as_str()
+                        .ok_or("Markdown source digest unavailable")?
+                        .to_owned();
+                    if hash.len() != 64
+                        || hex::encode(Sha256::digest(markdown.as_bytes())) != hash
+                    {
+                        return Err("Markdown export content hash mismatch".into());
+                    }
+                    Ok((markdown, hash))
+                })();
+                match result {
+                    Ok((markdown, hash)) => {
+                        ui.set_quick_note_obsidian_markdown(markdown.into());
+                        ui.set_quick_note_obsidian_status(
+                            format!("Source-bound Markdown exported to the native editor (SHA-256 {hash}). No physical file or cloud write. Edit and preview any changes before approval.").into(),
+                        );
+                    }
+                    Err(error) => ui.set_quick_note_obsidian_status(
+                        format!("Markdown export refused: {error}").into()
+                    ),
+                }
+            }
+        }
+    });
+    app.on_preview_quick_note_obsidian({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |markdown| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_quick_note_obsidian_approval("".into());
+                let result = (|| -> Result<(String, String), String> {
+                    let project = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let response = evidence_read_at(
+                        &project,
+                        "knowledge.obsidian_import_preview",
+                        serde_json::json!({"markdown":markdown.as_str()}),
+                        &host_data_root()?,
+                    )?;
+                    let data = &response["data"];
+                    if data["preview_only"] != true || data["writes"] != 0 {
+                        return Err("Markdown preview unexpectedly permits writes".into());
+                    }
+                    let approval = data["approved_preview_sha256"]
+                        .as_str()
+                        .filter(|hash| hash.len() == 64
+                            && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                        .ok_or("Markdown preview digest unavailable")?;
+                    let note_id = data["card_id"]
+                        .as_str()
+                        .ok_or("Markdown card identity unavailable")?;
+                    let flags = format!(
+                        "Title changed: {}; body changed: {}",
+                        data["title_changed"] == true,
+                        data["body_changed"] == true,
+                    );
+                    Ok((approval.to_owned(), format!(
+                        "PREVIEW ONLY. Verified existing project note {note_id}; {flags}. Original note history unchanged. Review Markdown above before approving one immutable revision."
+                    )))
+                })();
+                match result {
+                    Ok((approval, message)) => {
+                        ui.set_quick_note_obsidian_approval(approval.into());
+                        ui.set_quick_note_obsidian_status(message.into());
+                    }
+                    Err(error) => ui.set_quick_note_obsidian_status(
+                        format!("Markdown import preview refused: {error}").into()
+                    ),
+                }
+            }
+        }
+    });
+    app.on_import_quick_note_obsidian({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |markdown, approval| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_quick_note_obsidian_approval("".into());
+                let result = (|| -> Result<i64, String> {
+                    if approval.is_empty() {
+                        return Err("Fresh human-reviewed preview approval is required".into());
+                    }
+                    let project = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let root = host_data_root()?;
+                    let (pending, preview) = evidence_preview_at(
+                        &project,
+                        "knowledge.obsidian_import",
+                        "quick-note-obsidian",
+                        serde_json::json!({
+                            "markdown":markdown.as_str(),
+                            "approved_preview_sha256":approval.as_str()
+                        }),
+                        &root,
+                    )?;
+                    if preview["data"]["writes"] != 1
+                        || preview["data"]["simulated_result"]["approved_preview_sha256"]
+                            != approval.as_str()
+                    {
+                        return Err("Immutable Markdown import did not produce the exact approved one-revision preview".into());
+                    }
+                    let (result, revision) = evidence_execute_pending(&pending, &project, &root)?;
+                    if result["data"]["approved_preview_sha256"] != approval.as_str()
+                        || result["data"]["source_preserved"] != true
+                        || result["data"]["external_file_written"] != false
+                    {
+                        return Err("Approved Markdown import receipt failed validation; inspect project history before retrying".into());
+                    }
+                    refresh_quick_note_cards(
+                        &ui, &project,
+                        ui.get_quick_note_query().as_str(),
+                        ui.get_quick_note_filter().as_str(),
+                        &root,
+                    )?;
+                    Ok(revision)
+                })();
+                match result {
+                    Ok(revision) => {
+                        ui.set_project_revision(revision as i32);
+                        ui.set_quick_note_obsidian_status(
+                            "Imported approved Markdown as a new immutable note revision. Existing note editor draft was not overwritten; choose the saved card again to reload it.".into(),
+                        );
+                        ui.set_status("Approved local Obsidian Markdown import recorded in project history".into());
+                    }
+                    Err(error) => ui.set_quick_note_obsidian_status(
+                        format!("Markdown import refused: {error}. No retry without a new preview; inspect project history if a receipt was unavailable.").into(),
+                    ),
                 }
             }
         }

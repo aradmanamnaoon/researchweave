@@ -34,3 +34,11 @@ cargo clippy --offline --locked -p researchweave-evidence --all-targets --all-fe
 ```
 
 These focused tests and source contracts are not a substitute for full installed GUI testing, a physical Obsidian vault round trip, or Notion integration.
+
+## Native quick-note interface (later source addition)
+
+The native Synthesize/Notebook quick-card workspace now has a collapsed, keyboard-targetable **Obsidian Markdown exchange** panel. It only exports an explicitly selected saved card; the returned source-bound Markdown appears in an editable native `TextEdit` and is never written to a vault. Editing invalidates the prior approval, Preview invokes the read-only operation with a source/version digest, and **Approve import** is enabled only with the fresh preview token. The actual local write is submitted through the desktop's central `evidence_preview_at` / one-use `evidence_execute_pending` command approval, not a raw SQLite update.
+
+Project switching clears panel content and approval tokens. Saving another quick note invalidates a staged import. A successful import refreshes saved cards without overwriting an unsaved composer draft, and prompts the user to reload the updated card. The panel reports that external file identity and Obsidian/Notion connectivity are unverified.
+
+Local Windows `cargo check --offline --locked -p researchweave-desktop -j 1` compiled the native Rust/Slint panel. The Linux private Xvfb/AT-SPI suite includes an opt-in-free positive F41 scenario using real accessible controls: export; native focused-TextEdit keyboard/clipboard readback; exact source/card/revision/JSON SHA receipt; user-entered modified Markdown; read-only preview with event/history invariants; explicit approval; independently checked append-only SQL/event history, unchanged original source and preserved metadata. This source-level addition is **not** a passing installed Linux scenario until its exact-source hosted job completes.
