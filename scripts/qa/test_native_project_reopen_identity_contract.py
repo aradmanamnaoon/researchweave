@@ -34,6 +34,10 @@ class ReopenAndXvfbContract(unittest.TestCase):
 
     def test_card_still_requires_real_accessibility_and_checklist(self) -> None:
         self.assertIn('nodes_named(app, "Edit quick note Synthetic MRI memo")', self.reopen)
+        self.assertIn(
+            'reveal_bounded_control(app, "Edit quick note Synthetic MRI memo", down=True)',
+            self.reopen,
+        )
         self.assertIn('audit(app, "project-a-quick-note-reopen-missing", output)', self.reopen)
         self.assertIn('nodes_named(app, "Mark unfinished Research MRI note', self.reopen)
         self.assertIn("QUICK_NOTE_CHECKLIST_REOPEN_PERSISTENCE_OK", self.reopen)
@@ -41,11 +45,15 @@ class ReopenAndXvfbContract(unittest.TestCase):
         self.assertIn("time.monotonic() + 4.0", self.reopen)
 
     def test_disposable_xvfb_teardown_is_bounded_without_faking_success(self) -> None:
-        self.assertIn("timeout --signal=TERM --kill-after=10s 12m", self.host)
+        self.assertIn("timeout --signal=TERM --kill-after=10s 5m", self.host)
         self.assertIn('kill -KILL "$pid"', self.host)
         self.assertIn('wait "$pid"', self.host)
         self.assertIn('wait "$watchdog"', self.host)
         self.assertIn('python3 "$probe"', self.host)
+        self.assertIn('> "$output/atspi-navigation.txt" 2>&1', self.host)
+        self.assertIn('probe_status=$?', self.host)
+        self.assertIn('if (( probe_status != 0 )); then', self.host)
+        self.assertIn('exit "$probe_status"', self.host)
         self.assertIn('set -euo pipefail', self.host)
         self.assertIn('ISOLATED_XVFB_TEST_DONE', self.host)
 

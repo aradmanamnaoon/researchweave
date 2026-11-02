@@ -2835,6 +2835,12 @@ def main() -> int:
         time.sleep(0.35)
         if not activate(app, "Show quick note cards"):
             raise RuntimeError("Original project's quick-note view unavailable")
+        # The restored card is visibly present in the 1440×1000 installed
+        # screenshot, but its Edit action sits below the persistent Jobs tray
+        # and is omitted from the initial AT-SPI viewport subtree. Reveal the
+        # real control by bounded private-Xvfb wheel scrolling before readback.
+        # Never treat the backend's "1 notes" receipt as native card evidence.
+        reveal_bounded_control(app, "Edit quick note Synthetic MRI memo", down=True)
         # Require the real restored AT-SPI row, allowing bounded model-update
         # latency. SQLite is only an independent diagnostic, not a substitute
         # for the physically accessible card and checklist assertions below.

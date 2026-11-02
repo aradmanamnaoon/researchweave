@@ -24,7 +24,7 @@ cleanup() {
 }
 trap cleanup EXIT
 
-    timeout --signal=TERM --kill-after=10s 12m \
+    timeout --signal=TERM --kill-after=10s 5m \
     dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' \
     bash -c '
         set -euo pipefail
@@ -67,7 +67,20 @@ trap cleanup EXIT
         dbus-send --session --print-reply --dest=org.a11y.Bus \
             /org/a11y/bus org.freedesktop.DBus.Properties.Set \
             string:org.a11y.Status string:IsEnabled variant:boolean:true >/dev/null
-        python3 "$probe" "$output" "$RESEARCHWEAVE_HOST_DATA_DIR/measurements.csv" | tee "$output/atspi-navigation.txt"
+        # A background toolkit/clipboard child can inherit a tee pipe after
+        # Python has already raised, preventing pipe EOF and trapping cleanup
+        # for minutes. Write the diagnostic file directly and replay it after
+        # the exact Python process exits; preserve its real nonzero status.
+        set +e
+        python3 "$probe" "$output" "$RESEARCHWEAVE_HOST_DATA_DIR/measurements.csv" \
+            > "$output/atspi-navigation.txt" 2>&1
+        probe_status=$?
+        set -e
+        cat "$output/atspi-navigation.txt"
+        if (( probe_status != 0 )); then
+            echo "ISOLATED_ATSPI_PROBE_FAILED exit=$probe_status"
+            exit "$probe_status"
+        fi
         if ! kill -0 "$pid" >/dev/null 2>&1; then
             echo GUI_DIED_AFTER_INTERACTION
             exit 21

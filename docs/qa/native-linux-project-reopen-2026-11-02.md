@@ -19,3 +19,13 @@
 
 - Python native source-contract suite and Rust formatting passed locally (re-run before committing). The corrected installed Linux project-reopen flow **has not yet been exercised against a fresh source-matched installed candidate**. It may surface an actual application project-open or notebook-model defect; inspect that evidence rather than inferring a pass from static assertions.
 - No personal project was touched; test project roots are disposable. This does not complete F01–F45 acceptance or authorize public release.
+
+## Installed `c59d679` evidence and follow-up
+
+The subsequent exact-source installed run `41391362262` establishes that project A **did reopen successfully** (`PROJECT_A_NATIVE_REOPEN_REVISION_VERIFIED=21`). The native read-only result states **`1 notes match the current filter`**, and screenshot `project-a-quick-note-reopen-missing.png` physically shows the correct pinned card `Synthetic MRI memo` with its checked checklist item. The AT-SPI tree exposes the card title and checked-item action but omits the `Edit quick note Synthetic MRI memo` button, which sits below the persistent Jobs tray and outside the accessible viewport. The failure is **not** project data loss or a bad filter. It is a real native viewport/reveal issue.
+
+The corrected script now scrolls the actual private Xvfb Notebook pane to expose the exact card **Edit** control using the existing bounded `reveal_bounded_control` routine before asserting the real AT-SPI card identity and restored checklist. The independent project-revision/SQLite checks remain, but they do not substitute for accessible user-facing Edit controls. The pre-fix `c59d679` trace failed at 05:24:00 UTC and then exhausted an outer 12-minute process timeout at 05:34:27 UTC.
+
+The shell additionally removes an unreliable `python3 | tee` pipeline: child toolkit processes may inherit the writer's stdout and keep `tee` waiting after the Python traceback. It instead records Python's stdout/stderr directly to the durable artifact file, replays that file to CI and exits with the actual Python status. The disposable process has a shorter five-minute hard upper bound and retains the existing SIGTERM/SIGKILL cleanup. A failure remains a failure; source regression guards the exact status propagation and native visual assertions.
+
+These later edits require a fresh installed Linux acceptance candidate. The `c59d679` failure is retained as evidence rather than reclassified as success.
