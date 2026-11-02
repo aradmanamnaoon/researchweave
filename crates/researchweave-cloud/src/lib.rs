@@ -1005,6 +1005,18 @@ impl CloudOperationHandler {
                             // OS keyring during an offline metadata review.
                             return Err(CloudError::InvalidConfiguration);
                         }
+                    } else if !preview {
+                        // A previous installation or disconnected profile
+                        // may have left a keyring entry for this ID. Never
+                        // silently bind an unknown credential to a newly
+                        // configured endpoint, even across process restarts.
+                        // The preview remains offline and side-effect-free;
+                        // the actual local write fails closed on keyring
+                        // unavailability or an orphaned credential.
+                        match self.secrets.get(&profile.profile_id) {
+                            Err(CloudError::MissingCredential) => {}
+                            _ => return Err(CloudError::InvalidConfiguration),
+                        }
                     }
                     if !preview {
                         let mut updated = profiles.clone();
@@ -1026,6 +1038,13 @@ impl CloudOperationHandler {
                 if !preview {
                     self.verified.lock().revoke(id);
                     let mut profiles = self.profiles.lock();
+                    // Disconnect is deliberately not a secret-deletion
+                    // operation. Require an independently approved keyring
+                    // delete first, so an orphan cannot later be rebound.
+                    match self.secrets.get(id) {
+                        Err(CloudError::MissingCredential) => {}
+                        _ => return Err(CloudError::InvalidConfiguration),
+                    }
                     let mut updated = profiles.clone();
                     updated.remove(id);
                     self.save_profiles(&updated)?;
@@ -1044,6 +1063,9 @@ impl CloudOperationHandler {
                     .filter(|id| safe_token(id, 96))
                     .ok_or(CloudError::InvalidConfiguration)?;
                 if operation == "cloud.credentials.store" {
+                    if !self.profiles.lock().contains_key(id) {
+                        return Err(CloudError::InvalidConfiguration);
+                    }
                     let access = arguments
                         .get("access_key")
                         .and_then(Value::as_str)
@@ -2039,6 +2061,22 @@ mod tests {
         );
         assert_eq!(listed["result"]["profiles"][0]["credentials_present"], true);
 
+        // A disconnected profile must never leave a credential-bearing ID
+        // available for silent rebinding to another storage destination.
+        let rejected_disconnect = handler.execute(
+            "cloud.profile.disconnect",
+            &json!({"profile_id":"profile"}),
+            &context,
+        );
+        assert_eq!(rejected_disconnect["status"], "failed");
+        assert_eq!(
+            handler.execute("cloud.profile.list", &json!({}), &context)["result"]["profiles"]
+                .as_array()
+                .unwrap()
+                .len(),
+            1
+        );
+
         assert_eq!(
             handler.execute(
                 "cloud.credentials.delete",
@@ -2048,7 +2086,7 @@ mod tests {
             "ok"
         );
         // Changing destination requires an explicitly separate disconnect;
-        // neither preview nor configure reads from the credential store.
+        // preview never reads secrets, and execute rejects orphaned entries.
         assert_eq!(
             handler.execute("cloud.profile.configure", &changed_args, &context)["status"],
             "failed"
@@ -2074,6 +2112,78 @@ mod tests {
             listed["result"]["profiles"][0]["credentials_present"],
             false
         );
+    }
+
+    #[test]
+    fn orphaned_keyring_credentials_cannot_bind_to_a_new_profile_destination() {
+        let secrets = Arc::new(MemorySecretStore::default());
+        secrets
+            .put(
+                "orphan",
+                &CredentialBundle {
+                    access_key: "orphan-access-SECRET".into(),
+                    secret_key: "orphan-secret-SECRET".into(),
+                    session_token: None,
+                },
+            )
+            .unwrap();
+        let handler = CloudOperationHandler::new(secrets.clone());
+        let context = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            actor: "test".into(),
+            expected_revision: None,
+        };
+        let target = serde_json::to_value(S3Profile::liara(
+            "orphan",
+            "https://storage.c3.liara.site",
+            "another-bucket",
+        ))
+        .unwrap();
+        // Metadata-only preview must remain nonmutating and should not need
+        // access to any OS keyring; the actual approved write refuses.
+        assert_eq!(
+            handler.preview("cloud.profile.configure", &target, &context)["status"],
+            "ok"
+        );
+        let denied = handler.execute("cloud.profile.configure", &target, &context);
+        assert_eq!(denied["status"], "failed");
+        assert!(!denied.to_string().contains("SECRET"));
+        assert!(handler.profiles.lock().is_empty());
+        assert!(secrets.get("orphan").is_ok());
+
+        let denied_store = handler.execute(
+            "cloud.credentials.store",
+            &json!({
+                "profile_id":"unconfigured",
+                "access_key":"another-SECRET",
+                "secret_key":"another-secret-SECRET"
+            }),
+            &context,
+        );
+        assert_eq!(denied_store["status"], "failed");
+        assert!(!denied_store.to_string().contains("SECRET"));
+        assert!(matches!(
+            secrets.get("unconfigured"),
+            Err(CloudError::MissingCredential)
+        ));
+
+        assert_eq!(
+            handler.execute(
+                "cloud.credentials.delete",
+                &json!({"profile_id":"orphan"}),
+                &context,
+            )["status"],
+            "ok"
+        );
+        assert_eq!(
+            handler.execute("cloud.profile.configure", &target, &context)["status"],
+            "ok"
+        );
+        assert!(matches!(
+            secrets.get("orphan"),
+            Err(CloudError::MissingCredential)
+        ));
     }
 
     #[test]
@@ -2149,13 +2259,28 @@ mod tests {
                 .len(),
             1
         );
+        let rejected = restarted.execute(
+            "cloud.profile.disconnect",
+            &json!({"profile_id":"persisted"}),
+            &context,
+        );
+        assert_eq!(rejected["status"], "failed");
+        assert!(credentials.get("persisted").is_ok());
+        assert_eq!(
+            restarted.execute(
+                "cloud.credentials.delete",
+                &json!({"profile_id":"persisted"}),
+                &context,
+            )["status"],
+            "ok"
+        );
         let disconnected = restarted.execute(
             "cloud.profile.disconnect",
             &json!({"profile_id":"persisted"}),
             &context,
         );
         assert_eq!(disconnected["result"]["credentials_deleted"], false);
-        assert!(credentials.get("persisted").is_ok());
+        assert!(credentials.get("persisted").is_err());
         drop(restarted);
 
         let after_restart = CloudOperationHandler::with_profile_path(
