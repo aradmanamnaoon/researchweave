@@ -143,13 +143,8 @@ def read_visible_field_keyboard(
     raise RuntimeError(f"Native accessible and keyboard readback both failed: {accessible_name}")
 
 
-def read_native_protocol_inspector(app: Any, protocol_id: str, *, frozen: bool) -> dict[str, Any]:
-    """Read the actual read-only Protocol JSON editor, not a generated receipt.
-
-    The native UI must expose the persisted JSON through AT-SPI. An inaccessible
-    editor is a release QA failure, never a reason to use a database substitute.
-    """
-    raw = wait_field(app, "Read-only inspected protocol freeze JSON")
+def parse_native_protocol_receipt(raw: str, protocol_id: str, *, frozen: bool) -> dict[str, Any]:
+    """Validate JSON read from the real GUI; never synthesize a project receipt."""
     try:
         receipt = json.loads(raw)
     except (ValueError, TypeError) as error:
@@ -161,7 +156,36 @@ def read_native_protocol_inspector(app: Any, protocol_id: str, *, frozen: bool) 
         or receipt.get("external_registration_verified") is not False
     ):
         raise RuntimeError("Native read-only Protocol JSON identity/state differs from persisted receipt")
-    print(f"AT_SPI_NATIVE_PROTOCOL_INSPECTOR_READ=frozen:{str(frozen).lower()}")
+    return receipt
+
+
+def read_native_protocol_inspector(app: Any, protocol_id: str, *, frozen: bool) -> dict[str, Any]:
+    """Read exact visible Protocol JSON with bounded AT-SPI and X11 fallback.
+
+    Slint's accessible Text interface can expose an empty or stale editor value
+    immediately after a successful inspect action. Retry the actual native
+    editor, then require a physical copy from that same focused widget on the
+    private Xvfb display. The persisted database is only an identity oracle;
+    it must never supply or replace the GUI's inspected JSON.
+    """
+    name = "Read-only inspected protocol freeze JSON"
+    deadline = time.monotonic() + 3.0
+    while time.monotonic() < deadline:
+        try:
+            raw = read_field(app, name)
+            receipt = parse_native_protocol_receipt(raw, protocol_id, frozen=frozen)
+        except RuntimeError:
+            time.sleep(0.15)
+            continue
+        print(f"AT_SPI_NATIVE_PROTOCOL_INSPECTOR_READ=frozen:{str(frozen).lower()}")
+        return receipt
+
+    # Never fall back to a DB-derived JSON fixture: the read-only, selectable
+    # TextEdit must be physically visible and focused for Ctrl+A/Ctrl+C.
+    reveal_bounded_control(app, name, down=True)
+    raw = read_visible_field_keyboard(app, name, force_clipboard=True)
+    receipt = parse_native_protocol_receipt(raw, protocol_id, frozen=frozen)
+    print(f"XVFB_NATIVE_PROTOCOL_INSPECTOR_READ=frozen:{str(frozen).lower()}")
     return receipt
 
 
