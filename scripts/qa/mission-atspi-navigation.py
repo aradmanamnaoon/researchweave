@@ -17,6 +17,7 @@ import sys
 import time
 import uuid
 from collections.abc import Iterator
+from contextlib import closing
 from typing import Any
 
 import pyatspi
@@ -1492,6 +1493,72 @@ def audit(app: Any, label: str, output: pathlib.Path) -> None:
     screenshot(output, label)
 
 
+def wait_quick_note_revision(
+    project: pathlib.Path, card_id: str, previous_revision: int, *,
+    pinned: bool, archived: bool, timeout: float = 4.0,
+) -> int:
+    """Verify a row action appended exactly one persisted card revision.
+
+    An accepted AT-SPI doAction only proves the accessibility request was
+    dispatched. It does not establish that Slint executed the save callback.
+    Only the disposable project's latest SQLite row can prove the write.
+    """
+    deadline = time.monotonic() + timeout
+    last_state = "missing card"
+    while True:
+        # sqlite3's transaction context does NOT close the connection. On
+        # Windows, an unclosed read handle prevents disposal of test projects.
+        with closing(sqlite3.connect(project / "data/project.sqlite")) as db:
+            row = db.execute(
+                "SELECT revision,body FROM notebook_entries WHERE id=? "
+                "ORDER BY revision DESC LIMIT 1", (card_id,),
+            ).fetchone()
+        if row is not None:
+            revision, raw_body = row
+            state = json.loads(raw_body)
+            last_state = (
+                f"revision={revision} pinned={state.get('pinned')!r} "
+                f"archived={state.get('archived')!r}"
+            )
+            if revision > previous_revision:
+                if (
+                    revision != previous_revision + 1
+                    or state.get("pinned") is not pinned
+                    or state.get("archived") is not archived
+                ):
+                    raise RuntimeError(
+                        f"Quick note row action wrote an unexpected revision: {last_state}"
+                    )
+                print(f"QUICK_NOTE_PERSISTED_REVISION={revision} pinned={pinned} archived={archived}")
+                return revision
+        if time.monotonic() >= deadline:
+            raise RuntimeError(
+                "Quick note AT-SPI action did not append the requested persisted "
+                f"revision after r{previous_revision}: {last_state}"
+            )
+        time.sleep(0.12)
+
+
+def wait_quick_note_removed_from_filter(
+    app: Any, title: str, output: pathlib.Path, *,
+    filter_name: str, timeout: float = 4.0,
+) -> None:
+    """Require the changed card to disappear from its former AT-SPI list."""
+    target = f"Edit quick note {title}"
+    deadline = time.monotonic() + timeout
+    while True:
+        if not any((node.name or "") == target for node in nodes_named(app, target)):
+            print(f"QUICK_NOTE_NATIVE_FILTER_REMOVAL_VERIFIED={filter_name}")
+            return
+        if time.monotonic() >= deadline:
+            audit(app, f"quick-note-stale-{filter_name}-filter", output)
+            raise RuntimeError(
+                f"Quick note changed in persisted storage, but native {filter_name} "
+                "view still exposes its Edit control"
+            )
+        time.sleep(0.12)
+
+
 def main() -> int:
     output = pathlib.Path(sys.argv[1])
     fixture = pathlib.Path(sys.argv[2]) if len(sys.argv) > 2 else None
@@ -1818,15 +1885,19 @@ def main() -> int:
             raise RuntimeError("Quick note persistence requires the disposable project")
         with sqlite3.connect(original_project / "data/project.sqlite") as db:
             saved_notes = db.execute(
-                "SELECT body FROM notebook_entries WHERE id LIKE 'card:%'"
+                "SELECT id,revision,body FROM notebook_entries WHERE id LIKE 'card:%'"
             ).fetchall()
         if len(saved_notes) != 1:
             raise RuntimeError("Quick note native save did not persist exactly one card")
-        saved_note = json.loads(saved_notes[0][0])
+        card_id, card_revision, raw_note = saved_notes[0]
+        saved_note = json.loads(raw_note)
         if (
-            saved_note.get("title") != "Synthetic MRI memo"
+            card_revision != 1
+            or saved_note.get("title") != "Synthetic MRI memo"
             or saved_note.get("body") != "Research MRI note about a synthetic brain."
             or saved_note.get("tags") != ["imaging", "anatomy"]
+            or saved_note.get("pinned") is not False
+            or saved_note.get("archived") is not False
         ):
             raise RuntimeError("Quick note native persistence differed from user input")
         print("QUICK_NOTE_SQLITE_CONTENT_VERIFIED")
@@ -1845,29 +1916,42 @@ def main() -> int:
             raise RuntimeError("Real saved quick-note card did not appear in project")
         print("QUICK_NOTE_SAVED_AS_CARD")
         audit(app, "quick-note-created", output)
-        if not activate(app, "Pin Synthetic MRI memo"):
-            raise RuntimeError("Cannot pin saved quick note")
-        time.sleep(0.3)
-        if not activate(app, "Show pinned quick notes"):
-            raise RuntimeError("Cannot filter pinned quick notes")
+        # The card appears below the persistent Jobs tray on 1280x800 Xvfb.
+        # AT-SPI may accept an action on an occluded control without delivering
+        # the requested mutation. Reveal the real row action before dispatch.
+        activate_bounded_control(app, "Pin Synthetic MRI memo", down=True)
+        card_revision = wait_quick_note_revision(
+            original_project, card_id, card_revision, pinned=True, archived=False,
+        )
+        activate_bounded_control(app, "Show pinned quick notes", down=False)
         time.sleep(0.2)
         if not nodes_named(app, "Unpin Synthetic MRI memo"):
             raise RuntimeError("Pinned quick note absent from pinned filter")
-        if not activate(app, "Archive Synthetic MRI memo"):
-            raise RuntimeError("Cannot archive saved quick note")
-        time.sleep(0.25)
-        if nodes_named(app, "Edit quick note Synthetic MRI memo"):
-            raise RuntimeError("Archived note still visible in pinned/active view")
-        if not activate(app, "Show archived quick notes"):
-            raise RuntimeError("Cannot open archived notes")
+        activate_bounded_control(app, "Archive Synthetic MRI memo", down=True)
+        try:
+            card_revision = wait_quick_note_revision(
+                original_project, card_id, card_revision, pinned=True, archived=True,
+            )
+        except RuntimeError:
+            audit(app, "quick-note-archive-action-not-persisted", output)
+            raise
+        wait_quick_note_removed_from_filter(
+            app, "Synthetic MRI memo", output, filter_name="pinned",
+        )
+        audit(app, "quick-note-archived-from-pinned", output)
+        activate_bounded_control(app, "Show archived quick notes", down=False)
         time.sleep(0.2)
         if not nodes_named(app, "Restore Synthetic MRI memo"):
             raise RuntimeError("Archived quick note did not persist")
-        if not activate(app, "Restore Synthetic MRI memo"):
-            raise RuntimeError("Cannot restore archived quick note")
-        if not activate(app, "Show active quick notes"):
-            raise RuntimeError("Cannot return to active note view")
-        time.sleep(0.2)
+        activate_bounded_control(app, "Restore Synthetic MRI memo", down=True)
+        card_revision = wait_quick_note_revision(
+            original_project, card_id, card_revision, pinned=True, archived=False,
+        )
+        wait_quick_note_removed_from_filter(
+            app, "Synthetic MRI memo", output, filter_name="archived",
+        )
+        audit(app, "quick-note-restored-from-archive", output)
+        activate_bounded_control(app, "Show active quick notes", down=False)
         edit_text(app, "Search quick notes", "anatomy")
         time.sleep(0.2)
         if not nodes_named(app, "Edit quick note Synthetic MRI memo"):

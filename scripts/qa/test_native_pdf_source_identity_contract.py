@@ -65,6 +65,17 @@ class PdfSourceIdentityContract(unittest.TestCase):
 
     def test_actual_windows_native_qa_has_no_mock_or_skipped_gate(self) -> None:
         qa = self.native_qa
+        # The F37 snapshot executes before the F14 end-of-script journey.
+        # A C# type declared in a here-string is NOT registered until Add-Type.
+        self.assertEqual(
+            qa.count("Add-Type -TypeDefinition $f14ReadonlySqliteSource -ErrorAction Stop"),
+            1,
+        )
+        self.assertLess(
+            qa.index("Add-Type -TypeDefinition $f14ReadonlySqliteSource -ErrorAction Stop"),
+            qa.index("function Get-F14ProjectSnapshot("),
+        )
+        self.assertLess(qa.index("function Get-F14ProjectSnapshot("), qa.index("$f37Before = Get-F14ProjectSnapshot $temporary"))
         self.assertIn("function Write-F37CaptionPdf(", qa)
         self.assertIn("[IO.File]::WriteAllBytes($Path, $bytes)", qa)
         self.assertIn("function Get-F37CanvasSample(", qa)

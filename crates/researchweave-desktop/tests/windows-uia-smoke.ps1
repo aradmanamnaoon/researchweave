@@ -806,6 +806,10 @@ public static class RwUiaReadOnlySqlite {
     }
 }
 '@
+# The F37 caption scan below snapshots the unchanged project before F14's
+# later reviewer journey. Compile its WinSQLite read-only oracle BEFORE the
+# first snapshot, not only near the end of the UIA scenario.
+Add-Type -TypeDefinition $f14ReadonlySqliteSource -ErrorAction Stop
 function Get-F14ProjectSnapshot([string]$ProjectPath) {
     $database = Join-Path $ProjectPath 'data/project.sqlite'
     if (-not (Test-Path -LiteralPath $database -PathType Leaf)) {
@@ -3325,7 +3329,6 @@ try {
     # installed GUI; a separate READONLY WinSQLite connection independently
     # proves exact source bytes, project revision and append-only event history.
     # The outer catch still captures a failure screenshot for this new gate.
-    Add-Type -TypeDefinition $f14ReadonlySqliteSource -ErrorAction Stop
     $f14Baseline = Get-F14ProjectSnapshot $temporary
     if ($f14Baseline.References.Count -ne 1 -or $f14Baseline.Aliases.Count -ne 0 -or
         (Get-VisibleProjectRevision $window) -ne $f14Baseline.Revision) {
