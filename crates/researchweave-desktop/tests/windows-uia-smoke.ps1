@@ -472,6 +472,110 @@ function FocusByShiftTab(
     }
     throw "UIA element was not reachable by reverse keyboard traversal: $Type '$Name'"
 }
+function Reveal-ManuscriptExportPath(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [System.Windows.Automation.AutomationElement]$ExportAnchor
+) {
+    # Native 41390351211 found the export buttons in the UIA Tab order, but
+    # skipped the destination LineEdit altogether on a compact installed
+    # window. Do not invent an offscreen ValuePattern write: first reveal and
+    # physically focus the actual Edit in the hosted Windows UIA viewport.
+    $name = 'Manuscript export destination path'
+    $type = [System.Windows.Automation.ControlType]::Edit
+    $area = Named $Window ([System.Windows.Automation.ControlType]::Group) 'Manuscript work area'
+    $windowRect = $Window.Current.BoundingRectangle
+    $areaRect = $area.Current.BoundingRectangle
+    $monitor = [System.Windows.Forms.Screen]::FromPoint(
+        (New-Object System.Drawing.Point([int]$windowRect.Left, [int]$windowRect.Top))
+    ).WorkingArea
+    $visibleArea = [System.Drawing.Rectangle]::Intersect(
+        [System.Drawing.Rectangle]::Intersect(
+            [System.Drawing.Rectangle]::FromLTRB(
+                [int]$areaRect.Left, [int]$areaRect.Top, [int]$areaRect.Right, [int]$areaRect.Bottom
+            ),
+            [System.Drawing.Rectangle]::FromLTRB(
+                [int]$windowRect.Left, [int]$windowRect.Top,
+                [int]$windowRect.Right, [int]$windowRect.Bottom
+            )
+        ), $monitor
+    )
+    if ($visibleArea.Width -lt 100 -or $visibleArea.Height -lt 80) {
+        throw "Native manuscript viewport lacks visible screen area: area=$areaRect window=$windowRect monitor=$monitor"
+    }
+    $findVisible = {
+        foreach ($item in (Children $Window $type)) {
+            if ($item.Current.Name -ne $name -or $item.Current.IsOffscreen) { continue }
+            $rect = $item.Current.BoundingRectangle
+            if ($rect.Width -lt 100 -or $rect.Height -lt 18) { continue }
+            $pixel = [System.Drawing.Rectangle]::Intersect(
+                [System.Drawing.Rectangle]::FromLTRB(
+                    [int]$rect.Left, [int]$rect.Top, [int]$rect.Right, [int]$rect.Bottom
+                ), $visibleArea
+            )
+            if ($pixel.Width -ge 100 -and $pixel.Height -ge 18) { return $item }
+        }
+        return $null
+    }
+    $found = & $findVisible
+    if ($found) {
+        EnsureLiveFocus $found
+        Write-Output 'UIA_MANUSCRIPT_EXPORT_PATH_VISIBLE_AND_FOCUSED'
+        return $found
+    }
+    EnsureLiveFocus $ExportAnchor
+    foreach ($container in @($area) + @($area.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ))) {
+        $pattern = $null
+        try {
+            if ($container.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$pattern)) {
+                $scroll = [System.Windows.Automation.ScrollPattern]$pattern
+                if ($scroll.Current.VerticallyScrollable) {
+                    $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
+                    Start-Sleep -Milliseconds 200
+                    $found = & $findVisible
+                    if ($found) {
+                        EnsureLiveFocus $found
+                        Write-Output 'UIA_MANUSCRIPT_EXPORT_PATH_NATIVE_SCROLL_PATTERN_OK'
+                        return $found
+                    }
+                }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+    }
+    if (-not ('ResearchWeaveNativeWheel' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ResearchWeaveNativeWheel {
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint flags, uint x, uint y, int data, UIntPtr extraInfo);
+}
+'@
+    }
+    # Wheel input remains confined to the hosted installed application's
+    # visible manuscript pane, never the user's interactive Windows desktop.
+    $x = [int]($visibleArea.Right - 20)
+    $y = [int]($visibleArea.Top + [Math]::Min(170, $visibleArea.Height / 2))
+    if ($x -le $visibleArea.Left + 30 -or $y -ge $visibleArea.Bottom - 12) {
+        throw "Native manuscript export wheel position outside viewport: ($x,$y)"
+    }
+    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
+    for ($attempt = 0; $attempt -lt 16; $attempt++) {
+        [ResearchWeaveNativeWheel]::mouse_event(0x0800, 0, 0, -240, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 135
+        $found = & $findVisible
+        if ($found) {
+            EnsureLiveFocus $found
+            Write-Output "UIA_MANUSCRIPT_EXPORT_PATH_NATIVE_WHEEL_REVEAL_OK steps=$($attempt + 1)"
+            return $found
+        }
+    }
+    $bounds = @((Children $Window $type) | Where-Object { $_.Current.Name -eq $name } |
+        ForEach-Object { $_.Current.BoundingRectangle.ToString() })
+    throw "Manuscript destination Edit was not visible and focusable after bounded native scroll: bounds=$($bounds -join ',') viewport=$visibleArea"
+}
 function Reveal-ManuscriptIdAfterNativeScroll(
     [System.Windows.Automation.AutomationElement]$Window,
     [System.Windows.Automation.AutomationElement]$CitationAnchor
@@ -2343,7 +2447,7 @@ try {
     # scrolls the field into view instead of treating an offscreen node as
     # missing or skipping the physical file-save assertion.
     $exportAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown'
-    $markdownPath = FocusByTab $exportAnchor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path' 9
+    $markdownPath = Reveal-ManuscriptExportPath $window $exportAnchor
     ([System.Windows.Automation.ValuePattern]$markdownPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($physicalMarkdown)
     Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
     Start-Sleep -Milliseconds 220
