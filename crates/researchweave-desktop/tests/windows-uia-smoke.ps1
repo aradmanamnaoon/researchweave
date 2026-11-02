@@ -523,6 +523,26 @@ function Reveal-ManuscriptExportPath(
         return $found
     }
     EnsureLiveFocus $ExportAnchor
+    # Some UIA providers implement ScrollItem even when their surrounding
+    # Slint ScrollView does not expose ScrollPattern. The native operation is
+    # only a reveal request: the same actual pixel/onscreen-focus test below
+    # remains mandatory before any ValuePattern write.
+    foreach ($item in (Children $Window $type)) {
+        if ($item.Current.Name -ne $name) { continue }
+        $itemPattern = $null
+        try {
+            if ($item.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$itemPattern)) {
+                ([System.Windows.Automation.ScrollItemPattern]$itemPattern).ScrollIntoView()
+                Start-Sleep -Milliseconds 220
+                $found = & $findVisible
+                if ($found) {
+                    EnsureLiveFocus $found
+                    Write-Output 'UIA_MANUSCRIPT_EXPORT_PATH_NATIVE_SCROLL_ITEM_OK'
+                    return $found
+                }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+    }
     foreach ($container in @($area) + @($area.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
@@ -556,19 +576,39 @@ public static class ResearchWeaveNativeWheel {
     }
     # Wheel input remains confined to the hosted installed application's
     # visible manuscript pane, never the user's interactive Windows desktop.
-    $x = [int]($visibleArea.Right - 20)
+    # The former right-edge point (right-20) did not move the native Slint
+    # export field in installed 41395135031. First wheel over the blank outer
+    # ScrollView padding gutter, then over its main content; neither location
+    # is an assumed click on the hidden destination field.
+    $gutterX = [int]($visibleArea.Left + 12)
+    $contentX = [int]($visibleArea.Left + [Math]::Min(420, $visibleArea.Width * 0.62))
     $y = [int]($visibleArea.Top + [Math]::Min(170, $visibleArea.Height / 2))
-    if ($x -le $visibleArea.Left + 30 -or $y -ge $visibleArea.Bottom - 12) {
-        throw "Native manuscript export wheel position outside viewport: ($x,$y)"
+    if ($gutterX -le $visibleArea.Left -or $contentX -ge $visibleArea.Right - 20 -or
+        $y -le $visibleArea.Top + 20 -or $y -ge $visibleArea.Bottom - 12) {
+        throw "Native manuscript export wheel position outside viewport: ($gutterX,$contentX,$y)"
     }
-    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
     for ($attempt = 0; $attempt -lt 16; $attempt++) {
+        $x = if ($attempt -lt 8) { $gutterX } else { $contentX }
+        [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
         [ResearchWeaveNativeWheel]::mouse_event(0x0800, 0, 0, -240, [UIntPtr]::Zero)
         Start-Sleep -Milliseconds 135
         $found = & $findVisible
         if ($found) {
             EnsureLiveFocus $found
             Write-Output "UIA_MANUSCRIPT_EXPORT_PATH_NATIVE_WHEEL_REVEAL_OK steps=$($attempt + 1)"
+            return $found
+        }
+    }
+    # A real keyboard PageDown is a final bounded alternative for Slint
+    # versions that route keyboard scrolling but not Windows wheel messages.
+    EnsureLiveFocus $ExportAnchor
+    for ($attempt = 0; $attempt -lt 5; $attempt++) {
+        [System.Windows.Forms.SendKeys]::SendWait('{PGDN}')
+        Start-Sleep -Milliseconds 150
+        $found = & $findVisible
+        if ($found) {
+            EnsureLiveFocus $found
+            Write-Output "UIA_MANUSCRIPT_EXPORT_PATH_NATIVE_PAGEDOWN_REVEAL_OK steps=$($attempt + 1)"
             return $found
         }
     }

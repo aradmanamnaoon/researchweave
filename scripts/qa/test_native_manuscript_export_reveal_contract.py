@@ -25,9 +25,13 @@ class NativeManuscriptExportRevealContract(unittest.TestCase):
         self.assertIn("$item.Current.IsOffscreen", self.reveal)
         self.assertIn("$pixel.Width -ge 100 -and $pixel.Height -ge 18", self.reveal)
         self.assertIn("EnsureLiveFocus $found", self.reveal)
+        self.assertIn("[System.Windows.Automation.ScrollItemPattern]::Pattern", self.reveal)
         self.assertIn("[System.Windows.Automation.ScrollPattern]::Pattern", self.reveal)
         self.assertIn("[ResearchWeaveNativeWheel]::mouse_event", self.reveal)
+        self.assertIn("$gutterX = [int]($visibleArea.Left + 12)", self.reveal)
+        self.assertIn("$contentX = [int]($visibleArea.Left +", self.reveal)
         self.assertIn("$attempt -lt 16", self.reveal)
+        self.assertIn("[System.Windows.Forms.SendKeys]::SendWait('{PGDN}')", self.reveal)
         self.assertIn("throw \"Manuscript destination Edit was not visible", self.reveal)
         self.assertNotIn("SetValue(", self.reveal)
 
