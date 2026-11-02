@@ -2800,17 +2800,57 @@ def main() -> int:
             raise RuntimeError("Cannot open start center to reopen original project")
         time.sleep(0.35)
         edit_text(app, "Project path", str(original_project))
-        if not activate(app, "Open project"):
-            raise RuntimeError("Could not activate original project open")
-        time.sleep(0.4)
+        # The Start Center's custom-path Open control can be exposed in the
+        # AT-SPI tree below the usable Jobs tray. An accepted action or blind
+        # X11 fallback click is not proof that the open callback ran.
+        activate_bounded_control(app, "Open project", down=True)
+        # A successful AT-SPI/X11 click does not prove the project-open
+        # callback succeeded. Confirm a new native success receipt and the
+        # exact revision of the original disposable project, rather than
+        # misclassifying a still-active project B as lost notebook data.
+        with closing(sqlite3.connect(original_project / "data/project.sqlite")) as db:
+            original_revision = db.execute("SELECT revision FROM project").fetchone()[0]
+        reopen_deadline = time.monotonic() + 4.0
+        while True:
+            if (
+                nodes_named(app, "Status: Project opened")
+                and nodes_named(app, f"Project · r{original_revision}")
+            ):
+                print(f"PROJECT_A_NATIVE_REOPEN_REVISION_VERIFIED={original_revision}")
+                break
+            if time.monotonic() >= reopen_deadline:
+                audit(app, "project-a-reopen-not-confirmed", output)
+                status = [
+                    (node.name or "")[:220]
+                    for node in nodes_named(app, "Status:")[:3]
+                ]
+                raise RuntimeError(
+                    "Original project reopen was not independently confirmed "
+                    f"by native status and revision: expected r{original_revision}; "
+                    f"visible status={status}"
+                )
+            time.sleep(0.12)
         if not activate(app, "Synthesize activity"):
             raise RuntimeError("Cannot return to previous project's notes")
         time.sleep(0.35)
         if not activate(app, "Show quick note cards"):
             raise RuntimeError("Original project's quick-note view unavailable")
-        time.sleep(0.3)
-        if not nodes_named(app, "Edit quick note Synthetic MRI memo"):
-            raise RuntimeError("Saved quick-note card missing after reopening project A")
+        # Require the real restored AT-SPI row, allowing bounded model-update
+        # latency. SQLite is only an independent diagnostic, not a substitute
+        # for the physically accessible card and checklist assertions below.
+        card_deadline = time.monotonic() + 4.0
+        while not nodes_named(app, "Edit quick note Synthetic MRI memo"):
+            if time.monotonic() >= card_deadline:
+                audit(app, "project-a-quick-note-reopen-missing", output)
+                receipts = [
+                    (node.name or "")[:220]
+                    for node in nodes_named(app, "Quick note operation result")[:3]
+                ]
+                raise RuntimeError(
+                    "Saved quick-note card missing from reopened project's "
+                    f"native accessibility view: list receipts={receipts}"
+                )
+            time.sleep(0.12)
         if not nodes_named(app, "Mark unfinished Research MRI note about a synthetic brain. in note Synthetic MRI memo"):
             raise RuntimeError("Checklist completion was not restored from project history")
         if nodes_named(app, "Complete next item in quick note Synthetic MRI memo"):

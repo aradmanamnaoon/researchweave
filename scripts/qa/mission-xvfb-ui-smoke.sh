@@ -24,7 +24,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' \
+    timeout --signal=TERM --kill-after=10s 12m \
+    dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' \
     bash -c '
         set -euo pipefail
         binary="$1"
@@ -37,7 +38,20 @@ dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' \
         pid=$!
         cleanup_app() {
             kill "$pid" >/dev/null 2>&1 || true
+            # An unresponsive GUI must not strand the Xvfb/D-Bus job for the
+            # entire 20-minute Actions step timeout after a Python traceback.
+            # This watchdog only affects disposable native QA processes.
+            (
+                sleep 5
+                if kill -0 "$pid" >/dev/null 2>&1; then
+                    echo GUI_CLEANUP_ESCALATED_TO_SIGKILL
+                    kill -KILL "$pid" >/dev/null 2>&1 || true
+                fi
+            ) &
+            watchdog=$!
             wait "$pid" >/dev/null 2>&1 || true
+            kill "$watchdog" >/dev/null 2>&1 || true
+            wait "$watchdog" >/dev/null 2>&1 || true
         }
         trap cleanup_app EXIT
         sleep 2
