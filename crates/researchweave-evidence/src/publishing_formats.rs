@@ -5,7 +5,15 @@ use sha2::{Digest, Sha256};
 fn escape_xml(text: &str) -> String {
     let sanitized: String = text
         .chars()
-        .filter(|character| matches!(*character, '\t' | '\n' | '\r') || *character >= '\u{20}')
+        // XML 1.0 characters, not merely non-C0 Unicode code points. In
+        // particular U+FFFE/U+FFFF cannot appear in well-formed OOXML.
+        .filter(|character| {
+            matches!(
+                *character,
+                '\t' | '\n' | '\r' | '\u{20}'..='\u{D7FF}'
+                    | '\u{E000}'..='\u{FFFD}' | '\u{10000}'..='\u{10FFFF}'
+            )
+        })
         .collect();
     sanitized
         .replace('&', "&amp;")
@@ -127,10 +135,26 @@ pub(super) fn docx(sections: &[(String, String)]) -> Result<Vec<u8>, String> {
     if sections.is_empty() {
         return Err("DOCX requires at least one manuscript section".into());
     }
+    // Bound the work before constructing XML or allocating an archive. Final
+    // archive length remains checked by the export layer as well.
+    if sections.len() > 512
+        || sections
+            .iter()
+            .try_fold(0usize, |total, (heading, body)| {
+                total.checked_add(heading.len())?.checked_add(body.len())
+            })
+            .is_none_or(|bytes| bytes > 8 * 1024 * 1024)
+    {
+        return Err("DOCX sections exceed bounded export limits".into());
+    }
     let mut xml = String::from(
         r#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?><w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"><w:body>"#,
     );
     for (title, body) in sections {
+        // Different host OS line endings must create the same logical Word
+        // paragraphs and soft line breaks. Preserve all other Unicode text.
+        let title = title.replace("\r\n", "\n").replace('\r', "\n");
+        let body = body.replace("\r\n", "\n").replace('\r', "\n");
         let style =
             if title.eq_ignore_ascii_case("title") || title.eq_ignore_ascii_case("title page") {
                 "Title"
@@ -139,21 +163,29 @@ pub(super) fn docx(sections: &[(String, String)]) -> Result<Vec<u8>, String> {
             };
         xml.push_str(&format!(
             "<w:p><w:pPr><w:pStyle w:val=\"{style}\"/><w:keepNext/></w:pPr>{}</w:p>",
-            word_runs(title)
+            word_runs(&title)
         ));
-        for paragraph in body
-            .split("\n\n")
-            .filter(|paragraph| !paragraph.trim().is_empty())
-        {
-            xml.push_str(&format!(
-                "<w:p><w:pPr><w:pStyle w:val=\"Normal\"/></w:pPr>{}</w:p>",
-                word_runs(paragraph)
-            ));
+        if !body.is_empty() {
+            // Empty *internal* paragraphs are intentional Word paragraph
+            // boundaries, not whitespace to discard. An empty section body
+            // remains a heading-only section, with no fabricated content.
+            for paragraph in body.split("\n\n") {
+                xml.push_str(&format!(
+                    "<w:p><w:pPr><w:pStyle w:val=\"Normal\"/></w:pPr>{}</w:p>",
+                    word_runs(paragraph)
+                ));
+            }
         }
     }
     xml.push_str(
         r#"<w:sectPr><w:headerReference w:type="default" r:id="rId3"/><w:footerReference w:type="default" r:id="rId4"/><w:pgSz w:w="11906" w:h="16838"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr></w:body></w:document>"#,
     );
+    // The remaining fixed OOXML parts and ZIP metadata occupy under 64 KiB.
+    // This also protects callers that invoke docx() without export()'s
+    // independent final 16 MiB package check.
+    if xml.len() > 16 * 1024 * 1024 - 64 * 1024 {
+        return Err("DOCX XML exceeds bounded export size".into());
+    }
     let styles = br#"<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
   <w:docDefaults><w:rPrDefault><w:rPr><w:rFonts w:ascii="Times New Roman" w:hAnsi="Times New Roman" w:cs="Times New Roman"/><w:sz w:val="24"/><w:szCs w:val="24"/></w:rPr></w:rPrDefault><w:pPrDefault><w:pPr><w:spacing w:after="160" w:line="360" w:lineRule="auto"/></w:pPr></w:pPrDefault></w:docDefaults>
@@ -445,5 +477,86 @@ mod tests {
             String::from_utf8(sanitized_entries["word/document.xml"].clone()).unwrap();
         assert!(sanitized_document.contains("beforeafter"));
         assert!(!sanitized_document.contains('\0'));
+    }
+
+    fn f22_fixture_sections() -> Vec<(String, String)> {
+        vec![
+            (
+                "Title Page".into(),
+                "Synthetic manuscript\r\nResearchWeave offline fixture".into(),
+            ),
+            (
+                "Methods".into(),
+                "First line\r\nSecond line\n\n\n\nCitation [local-ref-001] & <untrusted> \"quote\" 'apostrophe' \u{1F9E0} فارسی".into(),
+            ),
+            ("Empty conclusion".into(), String::new()),
+        ]
+    }
+
+    #[test]
+    fn docx_f22_paragraphs_unicode_escape_line_endings_and_literal_citations() {
+        let fixture = f22_fixture_sections();
+        let original = docx(&fixture).unwrap();
+        let normalized = fixture
+            .iter()
+            .map(|(title, body)| (title.replace("\r\n", "\n"), body.replace("\r\n", "\n")))
+            .collect::<Vec<_>>();
+        assert_eq!(original, docx(&normalized).unwrap());
+        assert_eq!(
+            original,
+            docx(&fixture).unwrap(),
+            "byte-for-byte deterministic"
+        );
+        let entries = stored_zip_entries(&original);
+        let document = String::from_utf8(entries["word/document.xml"].clone()).unwrap();
+        assert_eq!(document.matches("w:pStyle w:val=\"Title\"").count(), 1);
+        assert_eq!(document.matches("w:pStyle w:val=\"Heading1\"").count(), 2);
+        // First section has one paragraph, Methods has three (including a
+        // blank one), empty Conclusion has no made-up normal paragraph.
+        assert_eq!(document.matches("w:pStyle w:val=\"Normal\"").count(), 4);
+        assert!(document.contains("Synthetic manuscript</w:t></w:r><w:r><w:br/></w:r>"));
+        assert!(document.contains("First line</w:t></w:r><w:r><w:br/></w:r>"));
+        assert!(document.contains("<w:t xml:space=\"preserve\"></w:t>"));
+        assert!(document.contains("Citation [local-ref-001] &amp; &lt;untrusted&gt; &quot;quote&quot; &apos;apostrophe&apos; \u{1F9E0} فارسی"));
+        assert!(!document.contains("<untrusted>"));
+        assert!(document.contains("w:keepNext"));
+        assert!(document.contains("w:headerReference"));
+        assert!(document.contains("w:footerReference"));
+        let first_hash = hex::encode(Sha256::digest(&original));
+        assert_eq!(
+            first_hash, "f68b6337bbf8be6ea1e8d94a1604ed502736d0a67da56fada3e70f2c190b4cb0",
+            "F22 DOCX byte fixture changed; independently re-parse ZIP/OOXML before updating"
+        );
+        let exported = export("docx", &fixture, "").unwrap();
+        assert_eq!(exported["sha256"], first_hash);
+        assert_eq!(exported["byte_length"], original.len());
+        assert_eq!(exported["submission_performed"], false);
+        assert_eq!(exported["scientific_claims_verified"], false);
+
+        // Opt-in local integration fixture for independent Python zipfile and
+        // ElementTree parsing; normally tests create no file. A caller can
+        // select a disposable OS-temp path without changing repository files.
+        if let Some(path) = std::env::var_os("RW_F22_DOCX_FIXTURE") {
+            std::fs::write(path, original).expect("write optional local DOCX parse fixture");
+        }
+    }
+
+    #[test]
+    fn docx_f22_rejects_unbounded_sections_and_sanitizes_invalid_xml_codepoints() {
+        assert!(docx(&[]).is_err());
+        assert!(docx(&vec![("Section".into(), String::new()); 513]).is_err());
+        assert!(docx(&[("Large".into(), "x".repeat(8 * 1024 * 1024 + 1))]).is_err());
+        // Expansion from legal text to XML entities is bounded independently
+        // of the raw-input limit, including the direct docx() call path.
+        assert!(docx(&[("Entity expansion".into(), "&".repeat(3_400_000))]).is_err());
+        let source = "keep\u{0000}\u{000B}\u{FFFE}\u{FFFF}end \u{1F9E0} <> & \" '";
+        let bytes = docx(&[("".into(), source.into())]).unwrap();
+        let entries = stored_zip_entries(&bytes);
+        let document = String::from_utf8(entries["word/document.xml"].clone()).unwrap();
+        assert!(document.contains("keepend \u{1F9E0} &lt;&gt; &amp; &quot; &apos;"));
+        for invalid in ['\u{0000}', '\u{000B}', '\u{FFFE}', '\u{FFFF}'] {
+            assert!(!document.contains(invalid));
+        }
+        assert!(document.contains("<w:pStyle w:val=\"Heading1\"/>"));
     }
 }

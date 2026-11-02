@@ -12,13 +12,23 @@ use std::{
     path::{Component, Path, PathBuf},
 };
 use uuid::Uuid;
+mod contradiction_overview;
 mod forms;
 mod highlights;
+mod manuscript_comments;
+pub mod manuscript_document;
+mod media_timeline;
+mod notebook_cells;
+mod obsidian_roundtrip;
+mod protocol_freeze;
 mod publishing;
 mod publishing_formats;
 mod qualitative;
+pub mod quarto_source;
 mod quick_notes;
 mod review;
+mod review_search_strategy;
+mod title_page;
 
 enum EvidenceLocation {
     WorkspaceRoot(PathBuf),
@@ -74,6 +84,11 @@ impl EvidenceHandler {
                 &["project_id", "protocol_id", "from_version", "to_version"][..],
             ),
             ("protocol.export", &["project_id", "protocol_id"][..]),
+            ("protocol.freeze_status", &["project_id", "protocol_id"][..]),
+            (
+                "protocol.freeze_receipt",
+                &["project_id", "protocol_id"][..],
+            ),
             ("question.history", &["project_id", "question_id"][..]),
             ("evidence.note_history", &["project_id", "note_id"][..]),
             ("evidence.notebook_export", &["project_id"][..]),
@@ -83,13 +98,56 @@ impl EvidenceHandler {
             ),
             ("evidence.notebook_history", &["project_id"][..]),
             ("ui.note_card.list", &["project_id"][..]),
+            ("notebook.cell_list", &["project_id"][..]),
+            (
+                "notebook.cell_preview",
+                &["project_id", "cell_id", "language", "code"][..],
+            ),
+            (
+                "knowledge.obsidian_export_note",
+                &["project_id", "card_id"][..],
+            ),
+            (
+                "knowledge.obsidian_import_preview",
+                &["project_id", "markdown"][..],
+            ),
             (
                 "writing.section_history",
                 &["project_id", "manuscript_id", "section"][..],
             ),
+            (
+                "writing.comment_list",
+                &["project_id", "manuscript_id", "section"][..],
+            ),
+            (
+                "writing.comment_preview",
+                &[
+                    "project_id",
+                    "manuscript_id",
+                    "section",
+                    "source_revision",
+                    "source_body_sha256",
+                    "start_scalar",
+                    "end_scalar",
+                    "quote",
+                    "reviewer",
+                    "comment",
+                ][..],
+            ),
             ("writing.inspect", &["project_id", "manuscript_id"][..]),
             ("writing.bibliography", &["project_id", "manuscript_id"][..]),
             ("writing.check", &["project_id", "manuscript_id"][..]),
+            (
+                "writing.title_page_preview",
+                &[
+                    "project_id",
+                    "manuscript_id",
+                    "title",
+                    "authors",
+                    "corresponding_email",
+                    "target_journal",
+                ][..],
+            ),
             (
                 "writing.submission_packet",
                 &["project_id", "manuscript_id", "journal"][..],
@@ -103,7 +161,29 @@ impl EvidenceHandler {
                 &["project_id", "manuscript_id"][..],
             ),
             ("writing.claim_check", &["project_id", "claim_id"][..]),
+            (
+                "evidence.media_timeline_preview",
+                &[
+                    "project_id",
+                    "media_source_id",
+                    "source_sha256",
+                    "duration_ms",
+                    "annotations",
+                ][..],
+            ),
+            (
+                "writing.quarto_source_preview",
+                &["project_id", "document"][..],
+            ),
+            (
+                "evidence.human_polarity_overview",
+                &["project_id", "claim_id", "claim", "evidence"][..],
+            ),
             ("review.records", &["project_id", "review_id"][..]),
+            (
+                "review.suggestion_source",
+                &["project_id", "review_id", "record_id"][..],
+            ),
             (
                 "review.adjudications",
                 &["project_id", "review_id", "record_id"][..],
@@ -121,6 +201,10 @@ impl EvidenceHandler {
                 &["project_id", "review_id", "record_id", "stage"][..],
             ),
             ("review.prisma", &["project_id", "review_id"][..]),
+            (
+                "review.search_strategy_build",
+                &["project_id", "concepts", "databases"][..],
+            ),
             ("review.form_history", &["project_id", "form_id"][..]),
             ("review.form_values", &["project_id", "form_id"][..]),
             ("qualitative.inspect", &["project_id"][..]),
@@ -149,6 +233,10 @@ impl EvidenceHandler {
             (
                 "protocol.amend",
                 &["project_id", "protocol_id", "author", "rationale", "body"],
+            ),
+            (
+                "protocol.freeze",
+                &["project_id", "protocol_id", "expected_version"],
             ),
             (
                 "question.create",
@@ -267,6 +355,22 @@ impl EvidenceHandler {
                 ][..],
             ),
             (
+                "writing.comment_record",
+                &[
+                    "project_id",
+                    "manuscript_id",
+                    "section",
+                    "source_revision",
+                    "source_body_sha256",
+                    "start_scalar",
+                    "end_scalar",
+                    "quote",
+                    "reviewer",
+                    "comment",
+                    "approved_preview_sha256",
+                ][..],
+            ),
+            (
                 "writing.section_restore",
                 &["project_id", "manuscript_id", "section", "source_revision"][..],
             ),
@@ -276,6 +380,21 @@ impl EvidenceHandler {
             ),
             ("ui.notebook.save", &["project_id", "notebook"][..]),
             ("ui.note_card.save", &["project_id"][..]),
+            (
+                "notebook.cell_execute",
+                &[
+                    "project_id",
+                    "cell_id",
+                    "expected_cell_revision",
+                    "language",
+                    "code",
+                    "approved_preview_sha256",
+                ][..],
+            ),
+            (
+                "knowledge.obsidian_import",
+                &["project_id", "markdown", "approved_preview_sha256"][..],
+            ),
             (
                 "qualitative.add_code",
                 &[
@@ -440,12 +559,85 @@ impl EvidenceHandler {
             return qualitative::kappa(args);
         }
         let mut store = self.store(args, ctx)?;
+        if operation == "evidence.media_timeline_preview" {
+            return media_timeline::preview(&store, args, ctx);
+        }
+        if operation == "writing.quarto_source_preview" {
+            let info = store
+                .info()
+                .map_err(|_| "project information unavailable")?;
+            if let Some(expected) = ctx.expected_revision {
+                if u64::try_from(info.revision).ok() != Some(expected) {
+                    return Err("stale project revision for Quarto source preview".into());
+                }
+            }
+            let document_value = args.get("document").ok_or("document AST required")?;
+            let document = manuscript_document::ManuscriptDocument::from_value(document_value)
+                .map_err(|error| error.to_string())?;
+            let preview = quarto_source::render_quarto_source(&document)
+                .map_err(|error| error.to_string())?;
+            return Ok(json!({
+                "project_id":ctx.project_id.to_string(),
+                "project_revision":info.revision,
+                "format":preview.format,
+                "media_type":preview.media_type,
+                "filename_suffix":preview.filename_suffix,
+                "source_document_sha256":preview.source_document_sha256,
+                "qmd_sha256":preview.qmd_sha256,
+                "qmd":preview.qmd,
+                "loss_codes":preview.loss_codes,
+                "renderer_invoked":preview.renderer_invoked,
+                "executable_cells_present":preview.executable_cells_present,
+                "citations_resolved":preview.citations_resolved,
+                "persisted":false,
+                "warning":"Inert Quarto HTML source preview only. No PDF/DOCX render, external toolchain, citation resolver, executable notebook, or physical save is performed."
+            }));
+        }
+        if operation == "evidence.human_polarity_overview" {
+            let info = store
+                .info()
+                .map_err(|_| "project information unavailable")?;
+            if let Some(expected) = ctx.expected_revision {
+                if u64::try_from(info.revision).ok() != Some(expected) {
+                    return Err("stale project revision for evidence comparison".into());
+                }
+            }
+            return contradiction_overview::overview(
+                args,
+                &ctx.project_id.to_string(),
+                info.revision,
+            );
+        }
+        if operation == "review.search_strategy_build" {
+            return review_search_strategy::build(args, &ctx.project_id.to_string());
+        }
+        if operation == "writing.title_page_preview" {
+            return title_page::preview(args, &ctx.project_id.to_string());
+        }
+        if operation == "writing.comment_preview" {
+            return manuscript_comments::preview(&store, args, ctx);
+        }
+        if operation == "writing.comment_record" {
+            return manuscript_comments::record(&mut store, args, ctx);
+        }
+        if operation == "writing.comment_list" {
+            return manuscript_comments::list(&store, args);
+        }
         if operation == "project.open" {
             return serde_json::to_value(store.info().map_err(|_| "invalid project")?)
                 .map_err(|_| "serialization failure".into());
         }
         if matches!(operation, "protocol.create" | "protocol.amend") {
             return protocol_mutate(&mut store, operation, args, ctx);
+        }
+        if operation == "protocol.freeze" {
+            return protocol_freeze::write(&mut store, args, ctx);
+        }
+        if operation == "protocol.freeze_status" {
+            return protocol_freeze::status(&store, args);
+        }
+        if operation == "protocol.freeze_receipt" {
+            return protocol_freeze::receipt(&store, args);
         }
         if matches!(operation, "question.create" | "question.amend") {
             return question_mutate(&mut store, operation, args, ctx);
@@ -470,6 +662,24 @@ impl EvidenceHandler {
         }
         if operation == "ui.note_card.list" {
             return quick_notes::list(&store, args);
+        }
+        if operation == "notebook.cell_list" {
+            return notebook_cells::list(&store, args);
+        }
+        if operation == "notebook.cell_preview" {
+            return notebook_cells::preview(args, ctx, &store);
+        }
+        if operation == "notebook.cell_execute" {
+            return notebook_cells::execute(&mut store, args, ctx);
+        }
+        if operation == "knowledge.obsidian_export_note" {
+            return obsidian_roundtrip::export(&store, args, ctx);
+        }
+        if operation == "knowledge.obsidian_import_preview" {
+            return obsidian_roundtrip::preview(&store, args, ctx);
+        }
+        if operation == "knowledge.obsidian_import" {
+            return obsidian_roundtrip::apply(&mut store, args, ctx);
         }
         if operation == "ui.notebook.save" {
             return notebook_save(&mut store, args, ctx);
@@ -559,6 +769,7 @@ impl EvidenceHandler {
         if matches!(
             operation,
             "review.records"
+                | "review.suggestion_source"
                 | "review.votes"
                 | "review.status"
                 | "review.prisma"
@@ -656,6 +867,7 @@ impl EvidenceHandler {
             "protocol.create" | "protocol.amend" => {
                 protocol_mutate(&mut shadow, operation, args, ctx)?
             }
+            "protocol.freeze" => protocol_freeze::write(&mut shadow, args, ctx)?,
             "question.create" | "question.amend" => {
                 question_mutate(&mut shadow, operation, args, ctx)?
             }
@@ -664,6 +876,8 @@ impl EvidenceHandler {
             }
             "ui.notebook.save" => notebook_save(&mut shadow, args, ctx)?,
             "ui.note_card.save" => quick_notes::save(&mut shadow, args, ctx)?,
+            "notebook.cell_execute" => notebook_cells::execute(&mut shadow, args, ctx)?,
+            "knowledge.obsidian_import" => obsidian_roundtrip::apply(&mut shadow, args, ctx)?,
             "evidence.anchor" => anchor_mutate(&mut shadow, args, ctx)?,
             "evidence.highlight_create" | "evidence.highlight_relocate" => {
                 highlights::write(&mut shadow, operation, args, ctx)?
@@ -1980,10 +2194,13 @@ fn writing_read(store: &ProjectStore, operation: &str, args: &Value) -> Result<V
 
 impl OperationHandler for EvidenceHandler {
     fn preview(&self, operation: &str, arguments: &Value, context: &DispatchContext) -> Value {
-        let result = if matches!(
+        let result = if operation == "writing.comment_record" {
+            self.run("writing.comment_preview", arguments, context)
+        } else if matches!(
             operation,
             "protocol.create"
                 | "protocol.amend"
+                | "protocol.freeze"
                 | "question.create"
                 | "question.amend"
                 | "evidence.note"
@@ -1991,6 +2208,8 @@ impl OperationHandler for EvidenceHandler {
                 | "evidence.note_delete"
                 | "ui.notebook.save"
                 | "ui.note_card.save"
+                | "notebook.cell_execute"
+                | "knowledge.obsidian_import"
                 | "evidence.anchor"
                 | "evidence.highlight_create"
                 | "evidence.highlight_relocate"
@@ -2039,6 +2258,427 @@ mod tests {
     use super::*;
     use researchweave_project::ProjectInfo;
     use uuid::Uuid;
+
+    #[test]
+    fn review_suggestion_source_is_scoped_versioned_and_leaves_blinded_votes_unread() {
+        let folder = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let reference_id = Uuid::new_v4();
+        let path = folder.path().join("pico-project");
+        let store = ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Scoped PICO".into(),
+                question: "Question".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        store.connection().execute(
+            "INSERT INTO reference(id,title,authors_json,year,doi,kind,format,raw,metadata_json,status,imported_at)
+             VALUES (?1,'Older adults','[]',2025,NULL,'article','bibtex','',?2,'unverified',?3)",
+            params![reference_id.to_string(), json!({"abstract":"Mindfulness and sleep quality."}).to_string(), timestamp()],
+        ).unwrap();
+        drop(store);
+        let handler = EvidenceHandler::bound(project_id, &path).unwrap();
+        let mut ctx = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "screening-tester".into(),
+            expected_revision: Some(0),
+        };
+        let created = handler.execute("review.record_add", &json!({
+            "project_id":project_id.to_string(),"review_id":"review-a","reference_id":reference_id.to_string()
+        }), &ctx);
+        assert_eq!(created["status"], "ok", "{created}");
+        let record_id = created["data"]["record_id"].as_str().unwrap();
+        let args = json!({"project_id":project_id.to_string(),"review_id":"review-a","record_id":record_id});
+        let first = handler.execute("review.suggestion_source", &args, &ctx);
+        assert_eq!(first["status"], "ok", "{first}");
+        assert_eq!(first["data"]["project_revision"], 1);
+        assert_eq!(first["data"]["stage"], "title_abstract");
+        assert_eq!(first["data"]["project_database_verified"], true);
+        assert_eq!(first["data"]["contains_review_votes"], false);
+        assert_eq!(
+            first["data"]["abstract_text"],
+            "Mindfulness and sleep quality."
+        );
+        let source_hash = digest(
+            &serde_json::to_vec(&json!({
+                "title":"Older adults","abstract_text":"Mindfulness and sleep quality."
+            }))
+            .unwrap(),
+        );
+        assert_eq!(first["data"]["source_sha256"], source_hash);
+        assert!(first["data"].get("votes").is_none());
+        assert_eq!(
+            handler.execute(
+                "review.suggestion_source",
+                &json!({
+                    "project_id":project_id.to_string(),"review_id":"review-b","record_id":record_id
+                }),
+                &ctx
+            )["status"],
+            "error"
+        );
+        assert_eq!(handler.execute("review.suggestion_source", &json!({
+            "project_id":Uuid::new_v4().to_string(),"review_id":"review-a","record_id":record_id
+        }), &ctx)["status"], "error");
+        ctx.expected_revision = Some(1);
+        ctx.request_id = Uuid::new_v4();
+        assert_eq!(handler.execute("review.vote", &json!({
+            "project_id":project_id.to_string(),"review_id":"review-a", "record_id":record_id,
+            "reviewer":"blind-reviewer","stage":"title_abstract","decision":"include","reason":"Independent judgment"
+        }), &ctx)["status"], "ok");
+        let second = handler.execute("review.suggestion_source", &args, &ctx);
+        assert_eq!(second["status"], "ok", "{second}");
+        assert_eq!(second["data"]["project_revision"], 2);
+        assert_eq!(second["data"]["source_sha256"], source_hash);
+        assert!(!second.to_string().contains("blind-reviewer"));
+        assert!(!second.to_string().contains("Independent judgment"));
+        assert_eq!(
+            ProjectStore::open(&path).unwrap().info().unwrap().revision,
+            2
+        );
+    }
+
+    #[test]
+    fn title_page_is_read_only_project_scoped_and_does_not_claim_journal_compliance() {
+        let folder = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = folder.path().join("Draft title page project");
+        ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Study title".into(),
+                question: "Study question".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        let handler = EvidenceHandler::bound(project_id, &path).unwrap();
+        let context = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "author".into(),
+            expected_revision: Some(0),
+        };
+        let args = json!({
+            "project_id":project_id.to_string(),
+            "manuscript_id":"manuscript-1",
+            "title":"Neuron — connectivity",
+            "authors":"李明 | Institute A; Dr. Marie | Institute B",
+            "corresponding_email":"marie@example.org",
+            "target_journal":"Example (unverified)"
+        });
+        let preview = handler.preview("writing.title_page_preview", &args, &context);
+        assert_eq!(preview["status"], "ok", "{preview}");
+        assert_eq!(preview["data"]["draft_only"], true);
+        assert_eq!(preview["data"]["journal_requirements_verified"], false);
+        assert_eq!(preview["data"]["persisted"], false);
+        assert_eq!(
+            preview,
+            handler.execute("writing.title_page_preview", &args, &context)
+        );
+        assert_eq!(
+            preview,
+            EvidenceHandler::bound(project_id, &path).unwrap().execute(
+                "writing.title_page_preview",
+                &args,
+                &context
+            )
+        );
+        let other_id = Uuid::new_v4();
+        let mut invalid_scope = args.clone();
+        invalid_scope["project_id"] = json!(other_id.to_string());
+        assert_eq!(
+            handler.execute("writing.title_page_preview", &invalid_scope, &context)["status"],
+            "error"
+        );
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        let events: i64 = store
+            .connection()
+            .query_row("SELECT count(*) FROM events", [], |row| row.get(0))
+            .unwrap();
+        assert_eq!(events, 0);
+        assert!(EvidenceHandler::capabilities().iter().any(|capability| {
+            capability.operation == "writing.title_page_preview"
+                && capability.effect == Effect::Read
+        }));
+    }
+
+    #[test]
+    fn quarto_preview_is_revision_bound_read_only_and_deterministic() {
+        let folder = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = folder.path().join("Quarto preview synthetic project");
+        ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Source-only renderer test".into(),
+                question: "Synthetic question".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        let handler = EvidenceHandler::bound(project_id, &path).unwrap();
+        let ctx = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "synthetic-author".into(),
+            expected_revision: Some(0),
+        };
+        let document = manuscript_document::ManuscriptDocument {
+            title: "Persian عنوان: Quarto".into(),
+            blocks: vec![manuscript_document::Block::Paragraph {
+                content: vec![manuscript_document::Inline::Text(
+                    "Literal <script> content only".into(),
+                )],
+            }],
+        };
+        let args = json!({
+            "project_id":project_id.to_string(),
+            "document":document.to_value().unwrap()
+        });
+        let executed = handler.execute("writing.quarto_source_preview", &args, &ctx);
+        assert_eq!(executed["status"], "ok", "{executed}");
+        assert_eq!(
+            executed,
+            handler.preview("writing.quarto_source_preview", &args, &ctx)
+        );
+        assert_eq!(executed["data"]["renderer_invoked"], false);
+        assert_eq!(executed["data"]["persisted"], false);
+        assert_eq!(executed["data"]["project_revision"], 0);
+        assert!(executed["data"]["qmd"]
+            .as_str()
+            .unwrap()
+            .contains("execute:\n  enabled: false"));
+        assert!(!executed["data"]["qmd"]
+            .as_str()
+            .unwrap()
+            .contains("<script>"));
+        assert_eq!(
+            EvidenceHandler::bound(project_id, &path).unwrap().execute(
+                "writing.quarto_source_preview",
+                &args,
+                &ctx
+            ),
+            executed
+        );
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        let stale = DispatchContext {
+            expected_revision: Some(1),
+            ..ctx.clone()
+        };
+        assert_eq!(
+            handler.execute("writing.quarto_source_preview", &args, &stale)["status"],
+            "error"
+        );
+        let mut wrong = args.clone();
+        wrong["project_id"] = json!(Uuid::new_v4().to_string());
+        assert_eq!(
+            handler.execute("writing.quarto_source_preview", &wrong, &ctx)["status"],
+            "error"
+        );
+        wrong = args.clone();
+        wrong["document"]["blocks"][0]["content"][0]["text"] = json!("\u{202e}spoof");
+        assert_eq!(
+            handler.execute("writing.quarto_source_preview", &wrong, &ctx)["status"],
+            "error"
+        );
+        assert!(EvidenceHandler::capabilities().iter().any(|c| {
+            c.operation == "writing.quarto_source_preview" && c.effect == Effect::Read
+        }));
+    }
+
+    #[test]
+    fn human_polarity_overview_is_project_scoped_revision_bound_and_zero_write() {
+        let folder = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = folder.path().join("Evidence comparison fixture");
+        ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Human-annotated comparison".into(),
+                question: "What do reviewers label?".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        let handler = EvidenceHandler::bound(project_id, &path).unwrap();
+        let context = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "human-reviewer".into(),
+            expected_revision: Some(0),
+        };
+        let args = json!({
+            "project_id":project_id.to_string(),
+            "claim_id":Uuid::new_v4().to_string(),
+            "claim":"Synthetic review claim (not an observed finding)",
+            "evidence":[{
+                "record_id":Uuid::new_v4().to_string(),
+                "source_id":Uuid::new_v4().to_string(),
+                "declared_source_sha256":"f".repeat(64),
+                "excerpt":"Synthetic source text only",
+                "polarity":"uncertain",
+                "uncertainty":"high",
+                "rationale":"No source validated in this synthetic fixture"
+            }]
+        });
+        let preview = handler.preview("evidence.human_polarity_overview", &args, &context);
+        let executed = handler.execute("evidence.human_polarity_overview", &args, &context);
+        assert_eq!(preview, executed);
+        assert_eq!(executed["status"], "ok", "{executed}");
+        assert_eq!(executed["data"]["independently_source_verified"], false);
+        assert_eq!(executed["data"]["machine_inferred_contradiction"], false);
+        assert_eq!(executed["data"]["persisted"], false);
+        assert_eq!(
+            EvidenceHandler::bound(project_id, &path).unwrap().execute(
+                "evidence.human_polarity_overview",
+                &args,
+                &context
+            ),
+            executed
+        );
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(EvidenceHandler::capabilities().iter().any(|c| {
+            c.operation == "evidence.human_polarity_overview" && c.effect == Effect::Read
+        }));
+        let stale = DispatchContext {
+            expected_revision: Some(1),
+            ..context.clone()
+        };
+        assert_eq!(
+            handler.execute("evidence.human_polarity_overview", &args, &stale)["status"],
+            "error"
+        );
+        let mut wrong_scope = args.clone();
+        wrong_scope["project_id"] = json!(Uuid::new_v4().to_string());
+        assert_eq!(
+            handler.execute("evidence.human_polarity_overview", &wrong_scope, &context)["status"],
+            "error"
+        );
+        assert_eq!(
+            ProjectStore::open(&path).unwrap().info().unwrap().revision,
+            0
+        );
+    }
+
+    #[test]
+    fn review_search_builder_is_scoped_read_only_and_restart_deterministic() {
+        let folder = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = folder.path().join("Selected Review Project");
+        ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Search strategy".into(),
+                question: "How does treatment influence sleep?".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: timestamp(),
+            },
+        )
+        .unwrap();
+        let handler = EvidenceHandler::bound(project_id, &path).unwrap();
+        let context = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "reviewer".into(),
+            expected_revision: Some(0),
+        };
+        let args = json!({"project_id":project_id.to_string(),"concepts":{
+            "population":["older adults", "geriatrics"],
+            "intervention":["mindfulness"],
+            "outcome":["sleep quality"]
+        },"databases":["pubmed","scopus","web_of_science"]});
+        let preview = handler.preview("review.search_strategy_build", &args, &context);
+        let executed = handler.execute("review.search_strategy_build", &args, &context);
+        assert_eq!(preview, executed);
+        assert_eq!(executed["status"], "ok", "{executed}");
+        assert_eq!(executed["data"]["queries"].as_array().unwrap().len(), 3);
+        assert_eq!(executed["data"]["provenance"]["generated_offline"], true);
+        assert_eq!(executed["data"]["provenance"]["query_executed"], false);
+        assert_eq!(
+            EvidenceHandler::bound(project_id, &path).unwrap().execute(
+                "review.search_strategy_build",
+                &args,
+                &context
+            ),
+            executed
+        );
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(EvidenceHandler::capabilities().iter().any(|capability| {
+            capability.operation == "review.search_strategy_build"
+                && capability.effect == Effect::Read
+        }));
+        let different_id = Uuid::new_v4();
+        let wrong_scope = handler.execute(
+            "review.search_strategy_build",
+            &json!({"project_id":different_id.to_string(),"concepts":{"population":["older adults"]},"databases":["pubmed"]}),
+            &context,
+        );
+        assert_eq!(wrong_scope["status"], "error");
+        let alternate_context = DispatchContext {
+            project_id: different_id,
+            ..context
+        };
+        assert_eq!(
+            handler.execute("review.search_strategy_build", &args, &alternate_context)["status"],
+            "error"
+        );
+    }
 
     #[test]
     fn host_bound_handler_preserves_exact_project_path_and_preview_is_read_only() {

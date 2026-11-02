@@ -9,7 +9,7 @@ Source: original dirty root `c84cdf1`, published local-only `origin/main` `97665
 | F03 | Navigation with six activity areas / Ctrl+K and dozens of nested destinations | PARTIAL | unassigned | Beginner task routing, keyboard semantics, no clipping |
 | F04 | Semantic palette/theme/icon foundation | PARTIAL | unassigned | New original palette; no inconsistent default native accents; light/dark/high contrast |
 | F05 | Dataset import, immutable variable/dataset revisions | PARTIAL UX | unassigned | Import → inspect → transform → analyze with safe preview and source provenance |
-| F06 | Native statistical kernels, results, plots and persistence | PARTIAL UX | unassigned | Accurate method guidance, clear estimates/assumptions/uncertainty, accessible plots |
+| F06 | Native statistical kernels, results, plots and persistence | PARTIAL UX; native physical analysis report Markdown now source-built GUI verified | prime | Accurate method guidance, clear estimates/assumptions/uncertainty, accessible plots. Verified result → deterministic provenance report → explicit non-overwriting physical .md Save and checksum; `docs/qa/analysis-report-physical-export-2026-10-31.md` |
 | F07 | Notebook and evidence note tools | PARTIAL UX; real clickable checklist items and composer-draft preservation now source-built GUI verified | prime | Verified project-scoped quick cards, pin/archive/restore, Unicode/tag search, checklist item toggle/undo after reopen and preservation of unsaved composer edits during card actions. Grid/list, quick-note autosave, reordering and drag/drop still pending; `docs/qa/quick-note-per-item-2026-10-31.md` |
 | F08 | Manuscript editing, autosave and DOCX/PDF export | PARTIAL UX; source-built Linux GUI verifies real saved section outline navigation, exact Find/Replace preview, version recording, zoom, counts and reopen | prime | Stable persisted section navigation is now working; rich styles/print pages, caret/scroll restoration, Word fidelity and native installed-platform acceptance remain; see `docs/qa/manuscript-preview-revision-2026-10-31.md` and `docs/qa/manuscript-outline-integration-2026-10-31.md` |
 | F09 | PDF reader, source linking and anchored evidence | PARTIAL UX | unassigned | Preserve location/selection and verified source hash |
@@ -26,8 +26,8 @@ These are 35 UX opportunities originally identified from source/research. Items 
 | # | Priority | Improvement opportunity | Required proof |
 | --- | --- | --- | --- |
 | 01 | H | Task-first first-run entry | Beginner finds research start without 39 view names |
-| 02 | H | Recent project cards | Reopen a project directly |
-| 03 | H | Native project folder selection | No absolute-path memorization, accessible typed fallback |
+| 02 | H | Recent project cards | PARTIAL IMPLEMENTED: bounded durable recent-project selector, one-click reopen and private Linux Xvfb/AT-SPI verification at 1280×800 and 850×600; source and digest receipts in `docs/qa/recent-projects-2026-10-31.md`. Rich cards, absent-path recovery controls and new native installed-package QA remain. |
+| 03 | H | Native project folder selection | PARTIAL IMPLEMENTED: portable async native folder picker bound to the Start Center's project path, cancellation retains the typed value, Unicode/directory validation and a shared chooser busy gate. Rust/unit/real GUI and Windows installed package verification tracked in `docs/qa/project-folder-picker-2026-10-31.md`. |
 | 04 | H | Durable selected source/dataset context | Activity change preserves selected research object |
 | 05 | H | Command center action hints | Search explains action and disabled reason |
 | 06 | M | Navigation history with focus return | Back/forward restores object and caret |

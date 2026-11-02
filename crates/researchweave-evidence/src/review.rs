@@ -465,7 +465,71 @@ fn prisma(store: &ProjectStore, review: &str) -> Result<Value, String> {
 
 pub(super) fn read(store: &ProjectStore, operation: &str, args: &Value) -> Result<Value, String> {
     let review = required_text(args, "review_id")?;
-    if operation == "review.records" {
+    if operation == "review.suggestion_source" {
+        let record = required_text(args, "record_id")?;
+        if !uuid::Uuid::parse_str(record).is_ok_and(|id| id.to_string() == record) {
+            return Err("canonical review record ID required".into());
+        }
+        // The project is the only trusted source of the record, reference and
+        // snapshot revision. No vote, peer reviewer, or adjudication is read.
+        let before = store.info().map_err(|_| "project unavailable")?;
+        if before.revision <= 0 {
+            return Err("review source has no positive project revision".into());
+        }
+        let (reference_id, stage, title, metadata): (String, String, String, String) = store
+            .connection()
+            .query_row(
+                "SELECT ref.id, rr.stage, ref.title, ref.metadata_json
+                 FROM review_records rr JOIN reference ref ON rr.reference_id=ref.id
+                 WHERE rr.id=?1 AND rr.review_id=?2",
+                params![record, review],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?)),
+            )
+            .map_err(|_| "review record not found in the active project")?;
+        if stage != "title_abstract" {
+            return Err("PICO lexical suggestions apply only to title/abstract screening".into());
+        }
+        let metadata: Value = serde_json::from_str(&metadata)
+            .map_err(|_| "persisted reference metadata is invalid")?;
+        let metadata = metadata
+            .as_object()
+            .ok_or("persisted reference metadata must be an object")?;
+        // Abstracts may be absent; never fabricate one from an unparsed RIS or
+        // BibTeX blob. Reject ambiguous dual fields and malformed types.
+        let abstract_field = |key: &str| -> Result<Option<&str>, String> {
+            match metadata.get(key) {
+                None | Some(Value::Null) => Ok(None),
+                Some(Value::String(value)) => Ok(Some(value)),
+                _ => Err(format!("persisted {key} is not text")),
+            }
+        };
+        let first = abstract_field("abstract")?;
+        let second = abstract_field("abstract_text")?;
+        if first.is_some() && second.is_some() && first != second {
+            return Err("persisted abstract fields disagree".into());
+        }
+        let abstract_text = first.or(second);
+        let wire = json!({"title":title,"abstract_text":abstract_text});
+        let source_sha256 =
+            super::digest(&serde_json::to_vec(&wire).map_err(|_| "source digest encoding failed")?);
+        let after = store.info().map_err(|_| "project unavailable")?;
+        if before.id != after.id || before.revision != after.revision {
+            return Err("project revision changed while inspecting review source".into());
+        }
+        Ok(json!({
+            "project_id":before.id,
+            "project_revision":before.revision,
+            "review_id":review,
+            "record_id":record,
+            "reference_id":reference_id,
+            "stage":stage,
+            "title":title,
+            "abstract_text":abstract_text,
+            "source_sha256":source_sha256,
+            "project_database_verified":true,
+            "contains_review_votes":false,
+        }))
+    } else if operation == "review.records" {
         let mut stmt=store.connection().prepare("SELECT id,reference_id,study_id,stage FROM review_records WHERE review_id=? ORDER BY id LIMIT 500").map_err(|_|"review query failed")?;
         let rows=stmt.query_map([review],|r|Ok(json!({"record_id":r.get::<_,String>(0)?,"reference_id":r.get::<_,String>(1)?,"study_id":r.get::<_,Option<String>>(2)?,"stage":r.get::<_,String>(3)?}))).map_err(|_|"review query failed")?;
         Ok(json!({"records":rows.collect::<Result<Vec<_>,_>>().map_err(|_|"review read failed")?}))

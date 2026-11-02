@@ -1,0 +1,58 @@
+0:application:researchweave-desktop
+1:frame:ResearchWeave · Research workbench
+2:landmark:Activity rail
+3:label:WORKBENCH
+3:button:Home activity
+3:button:Sources activity
+3:button:Analyze activity
+3:button:Synthesize activity
+3:button:Automate activity
+3:button:Manage activity
+2:landmark:Synthesize navigation
+3:label:Synthesize
+3:button:Synthesize navigation start
+3:label:My Research
+3:button:Notebook workspace screen
+3:button:Manuscript workspace screen
+3:button:Publishing workspace screen
+3:button:Exports workspace screen
+2:landmark:Manuscript work area
+3:label:Synthesize  /  Manuscript
+3:label:Manuscript
+3:entry:Command palette
+3:label:Ctrl+K
+3:label:My Research · r12
+3:label:Document
+3:label:Manuscript · Document
+3:label:Manuscript
+3:label:Write a research section on the spacious paper canvas. Draft edits autosave; recording a version and exporting require an explicit action.
+3:entry:Manuscript ID
+3:entry:Manuscript section
+3:entry:Manuscript citations
+3:button:Toggle saved manuscript sections outline
+3:label:Load saved sections to navigate this manuscript.
+3:button:Preview manuscript section
+3:button:Record previewed manuscript section
+3:button:Inspect manuscript
+3:button:Toggle manuscript operation details
+3:label:Writing operation result Recorded through approved local-write command: {   "autosave_safe": true,   "body_sha256": "f0caf2e1bfcd9e8622bc61ed9721e025baaa8e74803
+3:label:6 words · 50 characters
+3:button:Toggle manuscript find and replace
+3:button:Decrease manuscript editor display zoom
+3:label:100% editor zoom
+3:button:Increase manuscript editor display zoom
+3:label:Find and replace in this section
+3:label:Manuscript replacement status Applied 1 replacements to this draft. Autosave is pending; exported document is unchanged until saved.
+3:entry:Manuscript find text
+3:entry:Manuscript replace with
+3:button:Preview manuscript replace all
+3:button:Apply previewed manuscript replacement
+3:label:Exact, case-sensitive matching. Review before applying; editor zoom never alters export formatting.
+2:landmark:Bottom job tray
+3:button:Open jobs
+3:label:No active local jobs
+3:button:Open notifications
+2:landmark:Workbench status
+3:label:Status: Previewed evidence operation recorded and audited
+3:label:LOCAL FIRST
+3:label:Synthesize · Manuscript

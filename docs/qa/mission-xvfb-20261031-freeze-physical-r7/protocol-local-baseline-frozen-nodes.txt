@@ -1,0 +1,44 @@
+0:application:researchweave-desktop
+1:frame:ResearchWeave · Research workbench
+2:landmark:Activity rail
+3:label:WORKBENCH
+3:button:Home activity
+3:button:Sources activity
+3:button:Analyze activity
+3:button:Synthesize activity
+3:button:Automate activity
+3:button:Manage activity
+2:landmark:Home navigation
+3:label:Home
+3:button:Home navigation start
+3:label:My Research
+3:button:Welcome workspace screen
+3:button:Dashboard workspace screen
+3:button:Question workspace screen
+3:button:Protocol workspace screen
+2:landmark:Protocol work area
+3:label:Home  /  Protocol
+3:label:Protocol
+3:entry:Command palette
+3:label:Ctrl+K
+3:label:My Research · r2
+3:label:Project
+3:label:Protocol · Project
+3:label:Protocol freeze summary Frozen locally · baseline v1 · 0 post-baseline amendment version(s). Snapshot SHA-256: ba404012c875744e316d2d96a92b7e54a26760b909ac54c85
+3:button:Preview local protocol baseline freeze
+3:button:Record previewed local protocol baseline freeze
+3:button:Inspect local protocol freeze receipt
+3:button:Prepare local protocol baseline receipt Markdown
+3:entry:Local protocol baseline receipt destination path
+3:button:Save verified local baseline receipt without overwrite
+3:label:Prepare and review the persisted baseline first. File Save is separately approval-audited, revalidates the current project revision, and never overwrites an exi
+3:label:Protocol local freeze status {   "actor_unverified": "desktop-user",   "current_version": 1,   "event_hash": "d83f4d22d5d006f1c65e560cdb4758b8e5cab6be4286c24a92
+3:label:Protocol operation result {   "actor_unverified": "desktop-user",   "external_registration_verified": false,   "frozen": true,   "frozen_version": 1,   "local_o
+2:landmark:Bottom job tray
+3:button:Open jobs
+3:label:No active local jobs
+3:button:Open notifications
+2:landmark:Workbench status
+3:label:Status: Local protocol baseline status verified against persisted history
+3:label:LOCAL FIRST
+3:label:Home · Protocol

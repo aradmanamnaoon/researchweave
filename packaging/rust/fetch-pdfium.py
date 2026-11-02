@@ -11,6 +11,8 @@ from pathlib import Path, PurePosixPath
 import shutil
 import tarfile
 import tempfile
+import time
+from urllib.error import HTTPError, URLError
 from urllib.request import urlopen
 
 VERSION = "native-v7988"
@@ -24,6 +26,7 @@ MAX_ARCHIVE_BYTES = 150_000_000
 MAX_EXPANDED_BYTES = 500_000_000
 MAX_MEMBER_BYTES = 250_000_000
 MAX_MEMBERS = 10_000
+MAX_DOWNLOAD_ATTEMPTS = 4
 
 
 def _safe_extract(contents: tarfile.TarFile, destination: Path) -> None:
@@ -81,17 +84,29 @@ def fetch(platform: str, expected: str, destination: Path) -> None:
     destination.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory() as temporary:
         archive = Path(temporary) / name
-        digest = hashlib.sha256()
-        with urlopen(url, timeout=45) as response, archive.open("wb") as output:
-            if response.geturl() != url and not response.geturl().startswith("https://release-assets.githubusercontent.com/"):
-                raise ValueError("Unexpected PDFium download redirect")
-            while chunk := response.read(1024 * 1024):
-                digest.update(chunk)
-                if output.tell() + len(chunk) > MAX_ARCHIVE_BYTES:
-                    raise ValueError("PDFium archive exceeds size budget")
-                output.write(chunk)
-        if digest.hexdigest() != expected.lower():
-            raise ValueError("PDFium archive SHA-256 mismatch")
+        for attempt in range(MAX_DOWNLOAD_ATTEMPTS):
+            digest = hashlib.sha256()
+            try:
+                # Retry only transient transport errors. Each attempt starts a
+                # fresh archive and hashes all downloaded bytes. A mismatched
+                # hash, unexpected redirect or unsafe tar is always terminal.
+                with urlopen(url, timeout=45) as response, archive.open("wb") as output:
+                    if response.geturl() != url and not response.geturl().startswith("https://release-assets.githubusercontent.com/"):
+                        raise ValueError("Unexpected PDFium download redirect")
+                    while chunk := response.read(1024 * 1024):
+                        digest.update(chunk)
+                        if output.tell() + len(chunk) > MAX_ARCHIVE_BYTES:
+                            raise ValueError("PDFium archive exceeds size budget")
+                        output.write(chunk)
+                if digest.hexdigest() != expected.lower():
+                    raise ValueError("PDFium archive SHA-256 mismatch")
+                break
+            except (URLError, TimeoutError) as error:
+                if isinstance(error, HTTPError) and error.code not in (408, 429, 500, 502, 503, 504):
+                    raise
+                if attempt == MAX_DOWNLOAD_ATTEMPTS - 1:
+                    raise
+                time.sleep(min(2 ** attempt, 8))
         with tarfile.open(archive, "r:gz") as contents:
             _safe_extract(contents, destination)
     library = "pdfium.dll" if platform == "windows-x64" else "libpdfium.dylib" if platform.startswith("macos") else "libpdfium.so"

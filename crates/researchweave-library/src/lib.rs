@@ -12,6 +12,9 @@ use std::{
 use uuid::Uuid;
 mod bibliography;
 mod collections;
+mod crossref_doi;
+mod dedup;
+mod pdf_metadata_suggestions;
 mod references;
 mod relations;
 
@@ -83,6 +86,14 @@ impl LibraryHandler {
             ("reference.validate", Effect::Read),
             ("reference.merge", Effect::LocalWrite),
             ("reference.unmerge", Effect::LocalWrite),
+            ("reference.dedup_candidates", Effect::Read),
+            ("reference.pdf_metadata_preview", Effect::Read),
+            ("reference.crossref_doi_lookup", Effect::ExternalNetwork),
+            ("reference.dedup_decision_history", Effect::Read),
+            ("reference.dedup_keep_separate", Effect::LocalWrite),
+            ("reference.dedup_reconsider", Effect::LocalWrite),
+            ("reference.dedup_approve", Effect::LocalWrite),
+            ("reference.dedup_restore", Effect::LocalWrite),
             ("reference.identity_record", Effect::LocalWrite),
             ("reference.identity_history", Effect::Read),
             ("reference.citation_add", Effect::LocalWrite),
@@ -154,6 +165,23 @@ impl LibraryHandler {
         preview: bool,
     ) -> Result<Value, String> {
         let mut store = self.store(args, ctx).map_err(str::to_owned)?;
+        if operation == "reference.crossref_doi_lookup" {
+            return crossref_doi::run(&store, args, ctx, preview);
+        }
+        if operation == "reference.pdf_metadata_preview" {
+            return pdf_metadata_suggestions::preview(&store, args, ctx);
+        }
+        if matches!(
+            operation,
+            "reference.dedup_candidates"
+                | "reference.dedup_decision_history"
+                | "reference.dedup_keep_separate"
+                | "reference.dedup_reconsider"
+                | "reference.dedup_approve"
+                | "reference.dedup_restore"
+        ) {
+            return dedup::run(&mut store, operation, args, ctx, preview);
+        }
         if matches!(
             operation,
             "library.bibliography_preview" | "library.bibliography_import"
@@ -192,6 +220,9 @@ impl LibraryHandler {
                 | "reference.citation_graph"
                 | "reference.citation_graphml"
         ) {
+            if operation == "reference.merge" {
+                dedup::guard_direct_merge(&store, args)?;
+            }
             return relations::run(&mut store, operation, args, ctx, preview);
         }
         match operation {
@@ -508,8 +539,14 @@ impl LibraryHandler {
                             vec!["collection_members", "events", "project"]
                         }
                         "library.reference_tag" => vec!["reference_tags", "events", "project"],
-                        "reference.merge" | "reference.unmerge" => {
+                        "reference.merge"
+                        | "reference.unmerge"
+                        | "reference.dedup_approve"
+                        | "reference.dedup_restore" => {
                             vec!["reference_alias", "events", "project"]
+                        }
+                        "reference.dedup_keep_separate" | "reference.dedup_reconsider" => {
+                            vec!["reference_dedup_decisions", "events", "project"]
                         }
                         "reference.identity_record" => {
                             vec!["reference_identity_checks", "events", "project"]
@@ -523,7 +560,13 @@ impl LibraryHandler {
                         _ => vec![],
                     }
                 };
-                json!({"status":"ok","data":data,"artifacts":[],"provenance":[],"impact":{"local_writes":local_writes,"network_hosts":[],"irreversible":false}})
+                let network_hosts: Vec<&str> = if !preview && op == "reference.crossref_doi_lookup"
+                {
+                    vec!["api.crossref.org"]
+                } else {
+                    vec![]
+                };
+                json!({"status":"ok","data":data,"artifacts":[],"provenance":[],"impact":{"local_writes":local_writes,"network_hosts":network_hosts,"irreversible":false}})
             }
             Err(message) => {
                 json!({"status":"failed","error":{"code":"LIBRARY_ERROR","message":message},"data":{}})
@@ -538,6 +581,205 @@ mod tests {
     use base64::{engine::general_purpose::STANDARD, Engine};
     use researchweave_project::ProjectInfo;
     use tempfile::TempDir;
+
+    #[test]
+    fn crossref_preview_is_offline_scope_guarded_and_external_network_requires_approval() {
+        let temp = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = temp.path().join("Crossref preview synthetic project");
+        ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Network consent contract".into(),
+                question: "Can preview remain offline?".into(),
+                design: "systematic_review".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: Utc::now().to_rfc3339(),
+            },
+        )
+        .unwrap();
+        let handler = LibraryHandler::bound(project_id, &path).unwrap();
+        let ctx = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "consenting author".into(),
+            expected_revision: Some(0),
+        };
+        let args = json!({"project_id":project_id.to_string(),"doi":"10.1038/nphys1170"});
+        let preview = handler.preview("reference.crossref_doi_lookup", &args, &ctx);
+        assert_eq!(preview["status"], "ok", "{preview}");
+        assert_eq!(preview["data"]["network_requests"], 0);
+        assert_eq!(preview["data"]["preview_only"], true);
+        assert_eq!(preview["data"]["automatic_reference_update"], false);
+        assert_eq!(preview["impact"]["network_hosts"], json!([]));
+        assert_eq!(
+            handler.execute("reference.crossref_doi_lookup", &args, &ctx)["status"],
+            "failed",
+            "network must not run without explicit allow_network=true"
+        );
+        let stale = DispatchContext {
+            expected_revision: Some(1),
+            ..ctx.clone()
+        };
+        assert_eq!(
+            handler.preview("reference.crossref_doi_lookup", &args, &stale)["status"],
+            "failed"
+        );
+        let mut wrong = args.clone();
+        wrong["project_id"] = json!(Uuid::new_v4().to_string());
+        assert_eq!(
+            handler.preview("reference.crossref_doi_lookup", &wrong, &ctx)["status"],
+            "failed"
+        );
+        assert_eq!(
+            ProjectStore::open(&path).unwrap().info().unwrap().revision,
+            0
+        );
+        assert_eq!(
+            ProjectStore::open(&path)
+                .unwrap()
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        assert!(LibraryHandler::capabilities().iter().any(|capability| {
+            capability.operation == "reference.crossref_doi_lookup"
+                && capability.effect == Effect::ExternalNetwork
+                && capability.effect.requires_approval()
+        }));
+    }
+
+    #[test]
+    fn pdf_metadata_suggestions_are_bound_source_checked_and_nonmutating() {
+        let temp = tempfile::tempdir().unwrap();
+        let project_id = Uuid::new_v4();
+        let path = temp.path().join("PDF local metadata suggestion");
+        let store = ProjectStore::create(
+            &path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "PDF suggestions".into(),
+                question: "Synthetic fixture only".into(),
+                design: "observational".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: Utc::now().to_rfc3339(),
+            },
+        )
+        .unwrap();
+        // Unit-test fixture simulates already indexed PDF text; it is not a
+        // real PDF parser test or evidence of metadata accuracy.
+        let source_id = Uuid::new_v4().to_string();
+        let pdf_sha = store
+            .put_object(b"%PDF-1.4 synthetic fixture bytes")
+            .unwrap();
+        let body = "A Synthetic Research Paper\nDOI: 10.1234/fixture.2026.1\n";
+        let body_hash = hex::encode(Sha256::digest(body.as_bytes()));
+        store.connection().execute(
+            "INSERT INTO sources(id,title,media_type,digest,imported_at,origin,deleted) VALUES(?1,'fixture.pdf','application/pdf',?2,'2026-01-01','synthetic',0)",
+            params![source_id, pdf_sha],
+        ).unwrap();
+        store.connection().execute(
+            "INSERT INTO document_text(source_id,body,extraction_version,body_hash) VALUES(?1,?2,'synthetic-fixture',?3)",
+            params![source_id,body,body_hash],
+        ).unwrap();
+        let handler = LibraryHandler::bound(project_id, &path).unwrap();
+        let ctx = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id,
+            actor: "tester".into(),
+            expected_revision: Some(0),
+        };
+        let args = json!({"project_id":project_id.to_string(),"source_id":source_id});
+        let preview = handler.preview("reference.pdf_metadata_preview", &args, &ctx);
+        let executed = handler.execute("reference.pdf_metadata_preview", &args, &ctx);
+        assert_eq!(preview, executed);
+        assert_eq!(executed["status"], "ok", "{executed}");
+        assert_eq!(executed["data"]["preview_only"], true);
+        assert_eq!(executed["data"]["external_doi_verified"], false);
+        assert_eq!(
+            executed["data"]["doi_candidates"][0]["value"],
+            "10.1234/fixture.2026.1"
+        );
+        assert_eq!(executed["data"]["automatic_reference_update"], false);
+        assert_eq!(
+            executed["data"]["indexed_source_object_sha256_verified"],
+            true
+        );
+        assert_eq!(
+            executed["data"]["source_pdf_object_bytes_reverified"],
+            false
+        );
+        assert_eq!(executed["data"]["extracted_text_sha256"], body_hash);
+        assert_eq!(executed["data"]["truncated"], false);
+        assert_eq!(
+            LibraryHandler::bound(project_id, &path).unwrap().execute(
+                "reference.pdf_metadata_preview",
+                &args,
+                &ctx
+            ),
+            executed
+        );
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |r| r.get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+        let mut wrong = args.clone();
+        wrong["project_id"] = json!(Uuid::new_v4().to_string());
+        assert_eq!(
+            handler.execute("reference.pdf_metadata_preview", &wrong, &ctx)["status"],
+            "failed"
+        );
+        let stale = DispatchContext {
+            expected_revision: Some(1),
+            ..ctx.clone()
+        };
+        assert_eq!(
+            handler.execute("reference.pdf_metadata_preview", &args, &stale)["status"],
+            "failed"
+        );
+        let object_path = store
+            .root()
+            .join("objects")
+            .join(&pdf_sha[..2])
+            .join(&pdf_sha);
+        let original_object_bytes = std::fs::read(&object_path).unwrap();
+        std::fs::write(&object_path, b"tampered synthetic PDF object").unwrap();
+        assert_eq!(
+            handler.execute("reference.pdf_metadata_preview", &args, &ctx)["status"],
+            "failed"
+        );
+        std::fs::write(&object_path, original_object_bytes).unwrap();
+        assert_eq!(
+            handler.execute("reference.pdf_metadata_preview", &args, &ctx)["status"],
+            "ok"
+        );
+        store
+            .connection()
+            .execute(
+                "UPDATE document_text SET body_hash=?1 WHERE source_id=?2",
+                params!["0".repeat(64), source_id],
+            )
+            .unwrap();
+        assert_eq!(
+            handler.execute("reference.pdf_metadata_preview", &args, &ctx)["status"],
+            "failed"
+        );
+        assert!(LibraryHandler::capabilities()
+            .iter()
+            .any(|c| c.operation == "reference.pdf_metadata_preview" && c.effect == Effect::Read));
+    }
 
     #[test]
     fn host_bound_handler_supports_arbitrary_project_folder_without_path_arguments() {
@@ -806,6 +1048,167 @@ mod tests {
                     .get::<_, i64>(0))
                 .unwrap(),
             2
+        );
+    }
+
+    #[test]
+    fn bibliography_format_roundtrips_preserve_stable_ids_unicode_and_original_bytes() {
+        let (temp, handler, mut ctx, _) = fixture();
+        let project_id = ctx.project_id.to_string();
+        let path = temp.path().join(&project_id);
+        // Independent native format fixtures, with fields that cannot be
+        // represented by the intentionally small normalized reference view.
+        let cases = [
+            (
+                "ris",
+                "TY  - JOUR\r\nTI  - شناخت و حافظه 🧠\r\nAU  - Zoë Chen\r\nAU  - José Pérez\r\nPY  - 2025\r\nDO  - https://doi.org/10.5555/Neuro\r\nAB  - محفوظ و قابل بازیابی\r\nER  - \r\n",
+                "شناخت و حافظه 🧠",
+                "AB",
+            ),
+            (
+                "bibtex",
+                "@article{neuro-2025,title={The {NLP} \\{escaped\\} روش},author={Zoë Chen and José Pérez},year={2025},doi={doi:10.5555/Neuro},note={Extra {nested} content}}",
+                "The {NLP} \\{escaped\\} روش",
+                "note",
+            ),
+            (
+                "csl-json",
+                r#"{"id":"csl-record-42","title":"Étude حافظه 🧠","author":[{"given":"Zoë","family":"Chen"},{"given":"José","family":"Pérez"}],"issued":{"date-parts":[[2025]]},"DOI":"10.5555/NEURO","type":"article-journal","URL":"https://example.org/étude","abstract":"Escaped \"quote\" and \u03b1"}"#,
+                "Étude حافظه 🧠",
+                "URL",
+            ),
+        ];
+        let mut ids = Vec::new();
+        for (index, (format, raw, expected_title, omitted)) in cases.iter().enumerate() {
+            ctx.expected_revision = Some(index as u64);
+            ctx.request_id = Uuid::new_v4();
+            let args = json!({"project_id":project_id,"format":format,"data_base64":STANDARD.encode(raw.as_bytes())});
+            let preview = handler.execute("library.bibliography_preview", &args, &ctx);
+            assert_eq!(preview["status"], "ok", "{format}: {preview}");
+            let projected = &preview["data"]["records"][0];
+            assert_eq!(projected["title"], *expected_title);
+            assert_eq!(projected["authors"], json!(["Zoë Chen", "José Pérez"]));
+            assert_eq!(projected["year"], 2025);
+            assert_eq!(projected["doi"], "10.5555/neuro");
+            assert_eq!(projected["metadata"]["raw_preserved"], true);
+            assert!(projected["metadata"]["projection_omitted_fields"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(omitted)));
+            assert_eq!(projected["raw"], *raw);
+
+            let imported = handler.execute("library.bibliography_import", &args, &ctx);
+            assert_eq!(imported["status"], "ok", "{format}: {imported}");
+            assert_eq!(imported["data"]["project_revision"], (index + 1) as u64);
+            if index > 0 {
+                let matches = imported["data"]["duplicate_suggestions"][0]["candidates"]
+                    .as_array()
+                    .unwrap();
+                assert_eq!(matches.len(), index);
+                assert!(matches
+                    .iter()
+                    .all(|candidate| candidate["same_doi"] == true
+                        && candidate["needs_review"] == true));
+            }
+            let id = imported["data"]["references"][0]["reference_id"]
+                .as_str()
+                .unwrap()
+                .to_owned();
+            assert!(Uuid::parse_str(&id).is_ok());
+            assert!(!ids.contains(&id));
+            ids.push(id.clone());
+
+            let restored = LibraryHandler::new(temp.path().to_path_buf());
+            let exported = restored.execute(
+                "library.reference_export",
+                &json!({"project_id":project_id,"reference_id":id}),
+                &ctx,
+            );
+            assert_eq!(exported["status"], "ok", "{format}: {exported}");
+            assert_eq!(exported["data"]["reference_id"], id);
+            assert_eq!(exported["data"]["raw"], *raw);
+            assert_eq!(exported["data"]["raw_sha256"], projected["raw_sha256"]);
+            assert_eq!(exported["data"]["format"], *format);
+
+            let reparsed = restored.execute(
+                "library.bibliography_preview",
+                &json!({"project_id":project_id,"format":format,"data_base64":STANDARD.encode(exported["data"]["raw"].as_str().unwrap().as_bytes())}),
+                &ctx,
+            );
+            assert_eq!(reparsed["status"], "ok", "{format}: {reparsed}");
+            assert_eq!(reparsed["data"]["records"][0], *projected);
+        }
+        let reopened = LibraryHandler::new(temp.path().to_path_buf());
+        let listing = reopened.execute(
+            "library.references",
+            &json!({"project_id":project_id}),
+            &ctx,
+        );
+        assert_eq!(listing["data"]["count"], 3);
+        let stored_ids: Vec<&str> = listing["data"]["references"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|record| record["reference_id"].as_str().unwrap())
+            .collect();
+        assert!(ids.iter().all(|id| stored_ids.contains(&id.as_str())));
+        let store = ProjectStore::open(&path).unwrap();
+        assert_eq!(store.info().unwrap().revision, 3);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM events", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            3
+        );
+    }
+
+    #[test]
+    fn malformed_bibliography_documents_fail_without_committing_partial_records() {
+        let (temp, handler, ctx, _) = fixture();
+        let project_id = ctx.project_id.to_string();
+        let malformed = [
+            (
+                "ris",
+                "TY  - JOUR\nTI  - Valid\nER  - \nTY  - JOUR\nTI  - Truncated",
+            ),
+            (
+                "bibtex",
+                "@article{valid,title={Good}}\n@article{bad,title={Truncated}",
+            ),
+            (
+                "csl-json",
+                r#"[{"title":"Valid","type":"article-journal"},]"#,
+            ),
+            ("csl-json", r#"[{"title":"Valid"},{"title":"Truncated""#),
+        ];
+        for (format, raw) in malformed {
+            let args = json!({"project_id":project_id,"format":format,"data_base64":STANDARD.encode(raw.as_bytes())});
+            let result = handler.execute("library.bibliography_import", &args, &ctx);
+            assert_eq!(result["status"], "failed", "{format}: {result}");
+        }
+        // Previously this could panic on a UTF-8 byte boundary while checking
+        // whether an invalid DOI starts with the ASCII `doi:` prefix.
+        let ris_unicode_doi =
+            "TY  - JOUR\nTI  - Unicode identifier\nDO  - 한글10.5555/Invalid\nER  - \n";
+        let parsed = handler.execute(
+            "library.bibliography_preview",
+            &json!({"project_id":project_id,"format":"ris","data_base64":STANDARD.encode(ris_unicode_doi.as_bytes())}),
+            &ctx,
+        );
+        assert_eq!(parsed["status"], "ok", "{parsed}");
+        assert!(parsed["data"]["records"][0]["doi"].is_null());
+
+        let store = ProjectStore::open(temp.path().join(&project_id)).unwrap();
+        assert_eq!(store.info().unwrap().revision, 0);
+        assert_eq!(
+            store
+                .connection()
+                .query_row("SELECT count(*) FROM reference", [], |row| row
+                    .get::<_, i64>(0))
+                .unwrap(),
+            0
         );
     }
 

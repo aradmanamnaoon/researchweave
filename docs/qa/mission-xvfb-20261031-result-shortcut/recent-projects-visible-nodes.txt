@@ -1,0 +1,59 @@
+0:application:researchweave-desktop
+1:frame:ResearchWeave · Research workbench
+2:landmark:Activity rail
+3:label:WORKBENCH
+3:button:Home activity
+3:button:Sources activity
+3:button:Analyze activity
+3:button:Synthesize activity
+3:button:Automate activity
+3:button:Manage activity
+2:landmark:Home navigation
+3:label:Home
+3:button:Home navigation start
+3:label:My Research
+3:button:Welcome workspace screen
+3:button:Dashboard workspace screen
+3:button:Question workspace screen
+3:button:Protocol workspace screen
+2:landmark:Welcome work area
+3:label:Home  /  Welcome
+3:label:Welcome
+3:entry:Command palette
+3:label:Ctrl+K
+3:label:My Research · r13
+3:label:Project
+3:label:Welcome · Project
+3:label:Start a research project
+3:label:Private by default. Projects and portable backups stay on your device.
+3:button:Create default project
+3:label:CONTINUE A RECENT PROJECT
+3:combo box:Recent local projects
+3:button:Reopen selected recent project
+3:label:CUSTOM LOCATION
+3:label:PROJECT LOCATION
+3:entry:Project path
+3:button:Choose project folder with native dialog
+3:label:PROJECT TITLE
+3:entry:Project title
+3:button:Create project
+3:button:Open project
+3:label:Research note
+3:entry:Research note
+3:landmark:Start Center guidance
+4:label:ResearchWeave
+4:label:A traceable research workbench
+4:label:• Question and protocol
+4:label:• Sources and evidence
+4:label:• Data and analysis
+4:label:• Synthesis and publishing
+4:label:• Approval-bound automation
+4:label:No project selected yet.
+2:landmark:Bottom job tray
+3:button:Open jobs
+3:label:No active local jobs
+3:button:Open notifications
+2:landmark:Workbench status
+3:label:Status: Project opened
+3:label:LOCAL FIRST
+3:label:Home · Welcome

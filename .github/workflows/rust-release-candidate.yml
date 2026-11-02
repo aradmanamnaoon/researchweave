@@ -9,6 +9,7 @@ on:
         type: string
   pull_request:
     paths:
+      - 'README.md'
       - 'crates/**'
       - 'Cargo.toml'
       - 'Cargo.lock'
@@ -16,6 +17,8 @@ on:
       - '.gitleaksignore'
       - 'deny.toml'
       - 'packaging/rust/**'
+      - 'scripts/qa/**'
+      - '.github/workflows/release.yml'
       - '.github/workflows/rust-release-candidate.yml'
 
 permissions:
@@ -47,6 +50,12 @@ jobs:
         run: |
           rustup toolchain install 1.94.1 --profile minimal
           cargo +1.94.1 check --workspace --locked
+      - name: Offline pinned PDFium fetch security and retry contracts
+        run: python3 -m unittest discover -s packaging/rust/tests -p 'test_*.py' -v
+      - name: Fail-closed manual release preflight contracts
+        run: python3 -m unittest discover -s scripts/release -p 'test_*.py' -v
+      - name: Native AT-SPI push-button fallback contract
+        run: python3 -m unittest discover -s scripts/qa -p 'test_native_*.py' -v
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --locked --all-features
@@ -135,7 +144,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfuse2 xvfb xauth dbus-x11 at-spi2-core python3-pyatspi
+          sudo apt-get install -y pkg-config libfontconfig1-dev libdbus-1-dev libxkbcommon-dev libxkbcommon-x11-0 libwayland-dev libxcb-shape0-dev libxcb-xfixes0-dev libgl1-mesa-dev libfuse2 xvfb xauth dbus-x11 at-spi2-core python3-pyatspi xdotool xclip imagemagick
       - name: Resolve version and PDFium expected digest
         shell: bash
         run: |
@@ -221,6 +230,9 @@ jobs:
           if (-not ($log | Where-Object { $_ -match '^PACKAGED_QA_OK pdfium_sha256=[A-F0-9]{64} exe_sha256=[A-F0-9]{64}$' })) {
             throw 'Installed native UIA candidate did not complete verification and cleanup'
           }
+          if (-not ($log | Where-Object { $_ -match '^UIA_F31_BOUND_INERT_QUARTO_PHYSICAL_QMD_SHA_NO_OVERWRITE_NO_PROJECT_WRITE_OK$' })) {
+            throw 'Installed Windows UIA did not verify source-bound no-overwrite Quarto export'
+          }
       - name: Archive Windows native smoke diagnostics
         if: ${{ always() && runner.os == 'Windows' }}
         uses: actions/upload-artifact@v4
@@ -234,7 +246,18 @@ jobs:
       - name: macOS/Linux native packages
         if: runner.os != 'Windows'
         shell: bash
-        run: bash packaging/rust/package-unix.sh "$PLATFORM" "$RELEASE_VERSION"
+        run: |
+          set -euo pipefail
+          mkdir -p target/qa
+          bash packaging/rust/package-unix.sh "$PLATFORM" "$RELEASE_VERSION" 2>&1 | tee "target/qa/native-package-$PLATFORM.log"
+      - name: Archive macOS package diagnostics on failure
+        if: ${{ failure() && runner.os == 'macOS' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-${{ matrix.platform }}-package-diagnostics
+          path: target/qa/native-package-${{ matrix.platform }}.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Smoke actual macOS/Linux native packages
         if: runner.os != 'Windows'
         shell: bash
@@ -247,6 +270,48 @@ jobs:
         if: matrix.platform == 'linux-x64'
         shell: bash
         run: bash packaging/rust/linux-native-acceptance.sh "$RELEASE_VERSION"
+      - name: Full isolated Linux scientific GUI interaction regression
+        if: matrix.platform == 'linux-x64'
+        shell: bash
+        timeout-minutes: 20
+        env:
+          RW_QA_F14_POSITIVE: '1'
+        run: |
+          set -euo pipefail
+          mkdir -p target/qa/mission-full-native
+          bash scripts/qa/mission-xvfb-ui-smoke.sh \
+            "$PWD/target/native-package/linux-x64/researchweave-desktop" \
+            "$PWD/target/qa/mission-full-native" \
+            2>&1 | tee target/qa/mission-full-native-ci.log
+          grep -F 'ISOLATED_XVFB_TEST_DONE' target/qa/mission-full-native-ci.log
+          grep -F 'AT_SPI_NAVIGATION_PROBE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F03_REVIEWER_COMMENT_STALE_AND_INVALID_QUOTE_REFUSED_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F14_POSITIVE_EXPLICIT_UNDO_BOTH_REFERENCES_UNCHANGED_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F14_NATIVE_KEEP_SEPARATE_PREVIEW_RECORD_PERSISTED_HISTORY_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F26_NATIVE_SOURCEBOUND_PICO_SUGGESTION_PEER_BLIND_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F26_UNKNOWN_REVIEW_RECORD_REFUSED_WITH_NO_PROJECT_EVENTS_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F26_INVALID_PICO_REFUSED_AND_BLINDED_VOTE_UNCHANGED_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F07_NATIVE_INVALID_AND_VALID_DOI_PREVIEW_NO_NETWORK_NO_PROJECT_EVENTS_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F41_NATIVE_MARKDOWN_SOURCE_SHA_READBACK_AND_EXPORT_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F41_NATIVE_MARKDOWN_IMPORT_PREVIEW_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F41_NATIVE_OBSIDIAN_APPROVED_APPEND_PRESERVES_HISTORY_AND_METADATA_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F32_NATIVE_ARITHMETIC_PREVIEW_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F32_NATIVE_ARITHMETIC_EXECUTION_APPEND_SOURCE_PROVENANCE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F32_NATIVE_INVALID_EXPRESSION_REFUSED_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F34_NATIVE_REDACTED_PROJECT_INVENTORY_INTEGRITY_NO_WRITE_NO_DEPOSIT_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F44_NATIVE_SYNTHETIC_SHA_REDACTED_PREVIEW_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F44_NATIVE_INVALID_FIXTURE_REFUSED_NO_WRITE_OK' target/qa/mission-full-native/atspi-navigation.txt
+          grep -F 'F42_NATIVE_LIFECYCLE_SOURCE_BOUND_NAVIGATION_NO_COMPLETION_CLAIM_OK' target/qa/mission-full-native/atspi-navigation.txt
+      - name: Archive full Linux GUI source and accessibility receipts
+        if: ${{ always() && matrix.platform == 'linux-x64' }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: rust-linux-full-native-gui-evidence
+          path: |
+            target/qa/mission-full-native/
+            target/qa/mission-full-native-ci.log
+          if-no-files-found: warn
+          retention-days: 7
       - name: Verify candidate files
         shell: bash
         run: |

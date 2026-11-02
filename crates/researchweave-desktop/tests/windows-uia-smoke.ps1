@@ -22,7 +22,7 @@ $env:RESEARCHWEAVE_HOST_DATA_DIR = $hostData
 New-Item -ItemType Directory -Path $hostData -Force | Out-Null
 $analysisInput = Join-Path $hostData 'uia-analysis.csv'
 [System.IO.File]::WriteAllText($analysisInput, "score,aux,group`n1,10,A`n3,20,A`n5,30,B`n3,40,B`n", [System.Text.UTF8Encoding]::new($false))
-$p = Start-Process -FilePath $Exe -PassThru
+$p = $null
 function Children([System.Windows.Automation.AutomationElement]$parent, [System.Windows.Automation.ControlType]$type) {
     $condition = New-Object System.Windows.Automation.PropertyCondition([System.Windows.Automation.AutomationElement]::ControlTypeProperty, $type)
     return $parent.FindAll([System.Windows.Automation.TreeScope]::Descendants, $condition)
@@ -31,14 +31,29 @@ function Named([System.Windows.Automation.AutomationElement]$parent, [System.Win
     # Slint rebuilds accessibility nodes during navigation; allow one short
     # UIA tree refresh rather than racing the asynchronous Windows provider.
     for ($attempt = 0; $attempt -lt 50; $attempt++) {
-        foreach ($item in (Children $parent $type)) { if ($item.Current.Name -eq $name) { return $item } }
+        if ($script:p -and $script:p.HasExited) {
+            throw "UIA application exited while locating $type '$name' (exit code $($script:p.ExitCode))"
+        }
+        try {
+            foreach ($item in (Children $parent $type)) {
+                if ($item.Current.Name -eq $name) { return $item }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] {
+            # Navigation may replace a node during enumeration. Retry against
+            # the live tree; never treat a missing control as a pass.
+        }
         Start-Sleep -Milliseconds 100
     }
-    $available = @($parent.FindAll(
-        [System.Windows.Automation.TreeScope]::Descendants,
-        [System.Windows.Automation.Condition]::TrueCondition
-    ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName + ' :: ' + $_.Current.Name })
-    throw "UIA element missing: $type '$name'. Available: $($available -join ' | ')"
+    $available = @()
+    try {
+        $available = @($parent.FindAll(
+            [System.Windows.Automation.TreeScope]::Descendants,
+            [System.Windows.Automation.Condition]::TrueCondition
+        ) | ForEach-Object { $_.Current.ControlType.ProgrammaticName + ' :: ' + $_.Current.Name })
+    } catch [System.Windows.Automation.ElementNotAvailableException] {
+        $available = @('<accessibility tree changed during diagnostics>')
+    }
+    throw "UIA element missing after 5 seconds: $type '$name'. Live controls: $(($available | Select-Object -First 35) -join ' | ')"
 }
 function Invoke-AccessibleButton([System.Windows.Automation.AutomationElement]$parent, [string]$name) {
     $button = Named $parent ([System.Windows.Automation.ControlType]::Button) $name
@@ -261,10 +276,19 @@ function WaitForNameLike(
 ) {
     $deadline = [DateTime]::UtcNow.AddMilliseconds($TimeoutMilliseconds)
     do {
-        $names = @($Window.FindAll(
-            [System.Windows.Automation.TreeScope]::Descendants,
-            [System.Windows.Automation.Condition]::TrueCondition
-        ) | ForEach-Object { $_.Current.Name })
+        if ($script:p -and $script:p.HasExited) {
+            throw "UIA application exited while waiting for '$Pattern' (exit code $($script:p.ExitCode))"
+        }
+        try {
+            $names = @($Window.FindAll(
+                [System.Windows.Automation.TreeScope]::Descendants,
+                [System.Windows.Automation.Condition]::TrueCondition
+            ) | ForEach-Object { $_.Current.Name })
+        } catch [System.Windows.Automation.ElementNotAvailableException] {
+            # A transient Slint accessibility rebuild is neither success nor
+            # a verified absent state. The deadline still bounds the retry.
+            $names = @()
+        }
         if ($names | Where-Object { $_ -like $Pattern }) {
             return
         }
@@ -282,6 +306,63 @@ function WaitForNameLike(
         Write-Output ('UIA_WAIT_DIAGNOSTIC: ' + (($diagnosticNames | Select-Object -First 20) -join ' | '))
     }
     throw "UIA result missing: $Pattern"
+}
+function Parse-NativeTitlePagePreview([string]$Preview) {
+    # PowerShell 5.1 can interpret UTF-8 source without BOM as ANSI. Do not
+    # embed the U+00B7 literal in a source regex: it may become U+00C2 U+00B7.
+    # Accept only those two precisely identified separator encodings; never
+    # relax the 64-digit digest, the full unsaved marker or the body boundary.
+    $middleDot = ([char]0x00B7).ToString()
+    $legacyMojibake = ([char]0x00C2).ToString() + $middleDot
+    $separator = '(?:' + [regex]::Escape($middleDot) + '|' +
+        [regex]::Escape($legacyMojibake) + ')'
+    $pattern = '(?s)^UNSAVED TITLE PAGE ' + $separator +
+        ' SHA-256 ([0-9a-f]{64})\r?\n(.+?)\r?\n\r?\n(.+)$'
+    $match = [regex]::Match($Preview, $pattern)
+    if (-not $match.Success) { return $null }
+    return $match
+}
+function Parse-NativeProjectRevision([string]$Label) {
+    # PowerShell 5.1 reads UTF-8 without BOM with legacy ANSI decoding in
+    # some hosted environments: U+00B7 may become the two chars U+00C2 U+00B7.
+    # Use an ASCII-only, strictly scoped pattern for the exact native sidebar
+    # prefix, a 1-2 scalar separator, then `r` and decimal revision.
+    $match = [regex]::Match($Label, '^Project\s+\S{1,2}\s+r([0-9]+)$')
+    if (-not $match.Success) { return $null }
+    return [long]::Parse($match.Groups[1].Value)
+}
+function Get-VisibleProjectRevision([System.Windows.Automation.AutomationElement]$Window) {
+    # The workbench header exposes the actual revision from the native project
+    # store, not the last operation's self-reported writes=0 field. Require a
+    # physically visible accessible Text node in the real window, not a
+    # horizontally clipped descendant from a wider layout tree.
+    for ($attempt = 0; $attempt -lt 20; $attempt++) {
+        $windowBounds = $Window.Current.BoundingRectangle
+        foreach ($item in (Children $Window ([System.Windows.Automation.ControlType]::Text))) {
+            $revision = Parse-NativeProjectRevision ([string]$item.Current.Name)
+            if ($null -eq $revision) { continue }
+            $bounds = $item.Current.BoundingRectangle
+            if ($bounds.Width -ge 5 -and $bounds.Height -ge 5 -and
+                $bounds.Left -ge $windowBounds.Left -and $bounds.Top -ge $windowBounds.Top -and
+                $bounds.Right -le $windowBounds.Right -and $bounds.Bottom -le $windowBounds.Bottom) {
+                return [long]$revision
+            }
+        }
+        Start-Sleep -Milliseconds 50
+    }
+    $revisionCandidates = @(
+        Children $Window ([System.Windows.Automation.ControlType]::Text) | Where-Object {
+            $_.Current.Name -match '(Project|Revision|r[0-9]+)'
+        } | Select-Object -First 12 | ForEach-Object {
+            $box = $_.Current.BoundingRectangle
+            $_.Current.Name + ' [x=' + [int]$box.X + ',y=' + [int]$box.Y +
+                ',width=' + [int]$box.Width + ',height=' + [int]$box.Height + ']'
+        }
+    )
+    # This is diagnostic output, not a function result; Write-Output would
+    # contaminate the PowerShell return pipeline (previous UIA regression).
+    Write-Host ('UIA_REVISION_VISIBILITY_DIAGNOSTIC: ' + ($revisionCandidates -join ' | '))
+    throw 'Project revision was not exposed by the native workbench header'
 }
 function AssertImplementedPageHasNoFallback(
     [System.Windows.Automation.AutomationElement]$Window,
@@ -391,7 +472,746 @@ function FocusByShiftTab(
     }
     throw "UIA element was not reachable by reverse keyboard traversal: $Type '$Name'"
 }
+function Reveal-ManuscriptExportPath(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [System.Windows.Automation.AutomationElement]$ExportAnchor
+) {
+    # Native 41390351211 found the export buttons in the UIA Tab order, but
+    # skipped the destination LineEdit altogether on a compact installed
+    # window. Do not invent an offscreen ValuePattern write: first reveal and
+    # physically focus the actual Edit in the hosted Windows UIA viewport.
+    $name = 'Manuscript export destination path'
+    $type = [System.Windows.Automation.ControlType]::Edit
+    $area = Named $Window ([System.Windows.Automation.ControlType]::Group) 'Manuscript work area'
+    $windowRect = $Window.Current.BoundingRectangle
+    $areaRect = $area.Current.BoundingRectangle
+    $monitor = [System.Windows.Forms.Screen]::FromPoint(
+        (New-Object System.Drawing.Point([int]$windowRect.Left, [int]$windowRect.Top))
+    ).WorkingArea
+    $visibleArea = [System.Drawing.Rectangle]::Intersect(
+        [System.Drawing.Rectangle]::Intersect(
+            [System.Drawing.Rectangle]::FromLTRB(
+                [int]$areaRect.Left, [int]$areaRect.Top, [int]$areaRect.Right, [int]$areaRect.Bottom
+            ),
+            [System.Drawing.Rectangle]::FromLTRB(
+                [int]$windowRect.Left, [int]$windowRect.Top,
+                [int]$windowRect.Right, [int]$windowRect.Bottom
+            )
+        ), $monitor
+    )
+    if ($visibleArea.Width -lt 100 -or $visibleArea.Height -lt 80) {
+        throw "Native manuscript viewport lacks visible screen area: area=$areaRect window=$windowRect monitor=$monitor"
+    }
+    $findVisible = {
+        foreach ($item in (Children $Window $type)) {
+            if ($item.Current.Name -ne $name -or $item.Current.IsOffscreen) { continue }
+            $rect = $item.Current.BoundingRectangle
+            if ($rect.Width -lt 100 -or $rect.Height -lt 18) { continue }
+            $pixel = [System.Drawing.Rectangle]::Intersect(
+                [System.Drawing.Rectangle]::FromLTRB(
+                    [int]$rect.Left, [int]$rect.Top, [int]$rect.Right, [int]$rect.Bottom
+                ), $visibleArea
+            )
+            if ($pixel.Width -ge 100 -and $pixel.Height -ge 18) { return $item }
+        }
+        return $null
+    }
+    $found = & $findVisible
+    if ($found) {
+        EnsureLiveFocus $found
+        Write-Output 'UIA_MANUSCRIPT_EXPORT_PATH_VISIBLE_AND_FOCUSED'
+        return $found
+    }
+    EnsureLiveFocus $ExportAnchor
+    # Some UIA providers implement ScrollItem even when their surrounding
+    # Slint ScrollView does not expose ScrollPattern. The native operation is
+    # only a reveal request: the same actual pixel/onscreen-focus test below
+    # remains mandatory before any ValuePattern write.
+    foreach ($item in (Children $Window $type)) {
+        if ($item.Current.Name -ne $name) { continue }
+        $itemPattern = $null
+        try {
+            if ($item.TryGetCurrentPattern([System.Windows.Automation.ScrollItemPattern]::Pattern, [ref]$itemPattern)) {
+                ([System.Windows.Automation.ScrollItemPattern]$itemPattern).ScrollIntoView()
+                Start-Sleep -Milliseconds 220
+                $found = & $findVisible
+                if ($found) {
+                    EnsureLiveFocus $found
+                    Write-Output 'UIA_MANUSCRIPT_EXPORT_PATH_NATIVE_SCROLL_ITEM_OK'
+                    return $found
+                }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+    }
+    foreach ($container in @($area) + @($area.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ))) {
+        $pattern = $null
+        try {
+            if ($container.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$pattern)) {
+                $scroll = [System.Windows.Automation.ScrollPattern]$pattern
+                if ($scroll.Current.VerticallyScrollable) {
+                    $scroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 100)
+                    Start-Sleep -Milliseconds 200
+                    $found = & $findVisible
+                    if ($found) {
+                        EnsureLiveFocus $found
+                        Write-Output 'UIA_MANUSCRIPT_EXPORT_PATH_NATIVE_SCROLL_PATTERN_OK'
+                        return $found
+                    }
+                }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+    }
+    if (-not ('ResearchWeaveNativeWheel' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ResearchWeaveNativeWheel {
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint flags, uint x, uint y, int data, UIntPtr extraInfo);
+}
+'@
+    }
+    # Wheel input remains confined to the hosted installed application's
+    # visible manuscript pane, never the user's interactive Windows desktop.
+    # The former right-edge point (right-20) did not move the native Slint
+    # export field in installed 41395135031. First wheel over the blank outer
+    # ScrollView padding gutter, then over its main content; neither location
+    # is an assumed click on the hidden destination field.
+    $gutterX = [int]($visibleArea.Left + 12)
+    $contentX = [int]($visibleArea.Left + [Math]::Min(420, $visibleArea.Width * 0.62))
+    $y = [int]($visibleArea.Top + [Math]::Min(170, $visibleArea.Height / 2))
+    if ($gutterX -le $visibleArea.Left -or $contentX -ge $visibleArea.Right - 20 -or
+        $y -le $visibleArea.Top + 20 -or $y -ge $visibleArea.Bottom - 12) {
+        throw "Native manuscript export wheel position outside viewport: ($gutterX,$contentX,$y)"
+    }
+    for ($attempt = 0; $attempt -lt 16; $attempt++) {
+        $x = if ($attempt -lt 8) { $gutterX } else { $contentX }
+        [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
+        [ResearchWeaveNativeWheel]::mouse_event(0x0800, 0, 0, -240, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 135
+        $found = & $findVisible
+        if ($found) {
+            EnsureLiveFocus $found
+            Write-Output "UIA_MANUSCRIPT_EXPORT_PATH_NATIVE_WHEEL_REVEAL_OK steps=$($attempt + 1)"
+            return $found
+        }
+    }
+    # A real keyboard PageDown is a final bounded alternative for Slint
+    # versions that route keyboard scrolling but not Windows wheel messages.
+    EnsureLiveFocus $ExportAnchor
+    for ($attempt = 0; $attempt -lt 5; $attempt++) {
+        [System.Windows.Forms.SendKeys]::SendWait('{PGDN}')
+        Start-Sleep -Milliseconds 150
+        $found = & $findVisible
+        if ($found) {
+            EnsureLiveFocus $found
+            Write-Output "UIA_MANUSCRIPT_EXPORT_PATH_NATIVE_PAGEDOWN_REVEAL_OK steps=$($attempt + 1)"
+            return $found
+        }
+    }
+    $bounds = @((Children $Window $type) | Where-Object { $_.Current.Name -eq $name } |
+        ForEach-Object { $_.Current.BoundingRectangle.ToString() })
+    throw "Manuscript destination Edit was not visible and focusable after bounded native scroll: bounds=$($bounds -join ',') viewport=$visibleArea"
+}
+function Reveal-ManuscriptIdAfterNativeScroll(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [System.Windows.Automation.AutomationElement]$CitationAnchor
+) {
+    # An actual installed 886x567 Windows UIA screenshot at run 41330902805
+    # shows the outer Manuscript ScrollView scrolled below the ID/section
+    # fields after F04 closes. Slint's focus traversal skips off-viewport
+    # editable nodes, so more Shift+Tab attempts do not prove reachability.
+    $idType = [System.Windows.Automation.ControlType]::Edit
+    $area = Named $Window ([System.Windows.Automation.ControlType]::Group) 'Manuscript work area'
+    $areaRect = $area.Current.BoundingRectangle
+    $findId = {
+        foreach ($item in (Children $Window $idType)) {
+            if ($item.Current.Name -ne 'Manuscript ID' -or $item.Current.IsOffscreen) { continue }
+            $visibleRect = $item.Current.BoundingRectangle
+            if ($visibleRect.Width -ge 8 -and $visibleRect.Height -ge 8 -and
+                $visibleRect.Bottom -gt $areaRect.Top -and
+                $visibleRect.Top -lt $areaRect.Bottom) {
+                return $item
+            }
+        }
+        return $null
+    }
+    $found = & $findId
+    if ($found) { return $found }
+
+    EnsureLiveFocus $CitationAnchor
+    # Prefer the platform's own ScrollPattern if Slint exposes it; always
+    # verify the resulting real native editor appears in the live UIA tree.
+    foreach ($container in @($area) + @($area.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ))) {
+        $pattern = $null
+        try {
+            if ($container.TryGetCurrentPattern([System.Windows.Automation.ScrollPattern]::Pattern, [ref]$pattern)) {
+                $nativeScroll = [System.Windows.Automation.ScrollPattern]$pattern
+                if ($nativeScroll.Current.VerticallyScrollable) {
+                    $nativeScroll.SetScrollPercent([System.Windows.Automation.ScrollPattern]::NoScroll, 0)
+                    Start-Sleep -Milliseconds 250
+                    $found = & $findId
+                    if ($found) { return $found }
+                }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+    }
+
+    # Some Slint/AccessKit builds do not implement UIA ScrollPattern. Use
+    # genuine user32 wheel input confined to the *installed window's own*
+    # Manuscript work area, with a strict finite budget and tree readback.
+    if (-not ('ResearchWeaveNativeWheel' -as [type])) {
+        Add-Type -TypeDefinition @'
+using System;
+using System.Runtime.InteropServices;
+public static class ResearchWeaveNativeWheel {
+    [DllImport("user32.dll")]
+    public static extern void mouse_event(uint flags, uint x, uint y, int data, UIntPtr extraInfo);
+}
+'@
+    }
+    $rect = $area.Current.BoundingRectangle
+    $x = [int]($rect.Left + [Math]::Min(420, [Math]::Max(30, $rect.Width * 0.75)))
+    $y = [int]($rect.Top + [Math]::Min(330, [Math]::Max(40, $rect.Height * 0.58)))
+    $windowRect = $Window.Current.BoundingRectangle
+    if ($rect.Width -lt 120 -or $rect.Height -lt 120 -or
+        $x -le ($windowRect.Left + 20) -or $x -ge ($windowRect.Right - 16) -or
+        $y -le ($windowRect.Top + 80) -or $y -ge ($windowRect.Bottom - 20)) {
+        throw "Manuscript native scroll target outside bounded installed window: ($x,$y)"
+    }
+    [System.Windows.Forms.Cursor]::Position = New-Object System.Drawing.Point($x, $y)
+    for ($attempt = 0; $attempt -lt 12; $attempt++) {
+        [ResearchWeaveNativeWheel]::mouse_event(0x0800, 0, 0, 360, [UIntPtr]::Zero)
+        Start-Sleep -Milliseconds 140
+        $found = & $findId
+        if ($found) {
+            Write-Output "UIA_MANUSCRIPT_ID_NATIVE_SCROLL_REVEAL_OK wheel_steps=$($attempt + 1)"
+            return $found
+        }
+    }
+    throw 'Installed Manuscript ID remains inaccessible after bounded native UIA/wheel scrolling'
+}
+function Read-F05ManuscriptDraft([System.Windows.Automation.AutomationElement]$Window) {
+    # The new F05 row can push the manuscript editor out of the AccessKit
+    # viewport. Traverse the actual native focus order in both directions.
+    # No fallback to assumed editor values or a simulated/hidden draft.
+    $reference = Named $Window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $citations = FocusByShiftTab $reference ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citations' 3
+    $metadata = $citations.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    $editor = FocusByTab $citations ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body' 35
+    $body = $editor.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).Current.Value
+    $null = FocusByShiftTab $editor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID' 35
+    return @{ Body = $body; Citations = $metadata }
+}
+function Read-F03ManuscriptBody(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [System.Windows.Automation.AutomationElement]$ReviewResult
+) {
+    # The expanded F03 panel lives between citation controls and the editor.
+    # Return to the real source field by bounded Shift+Tab rather than Named
+    # while that source is offscreen, then use the proven native F05 reader.
+    $null = FocusByShiftTab $ReviewResult ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID' 16
+    return (Read-F05ManuscriptDraft $Window).Body
+}
+function Invoke-ProtocolFreezeButton(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Name
+) {
+    # Windows AccessKit only materializes the visible portion of the Protocol
+    # ScrollView. The freeze actions follow Preview amendment in actual keyboard
+    # order, even when none is yet visible in the UIA descendants tree. Use a
+    # live visible focus anchor and real Tab/Shift+Tab to scroll into that row.
+    $ordered = @(
+        'Preview protocol',
+        'Record previewed protocol',
+        'Load protocol history',
+        'View protocol Markdown export',
+        'Save prepared protocol Markdown without overwrite',
+        'Preview protocol amendment',
+        'Preview local protocol baseline freeze',
+        'Record previewed local protocol baseline freeze',
+        'Inspect local protocol freeze receipt',
+        'Prepare local protocol baseline receipt Markdown'
+    )
+    $destinationIndex = [Array]::IndexOf($ordered, $Name)
+    if ($destinationIndex -lt 6) { throw "Unexpected Protocol freeze action: $Name" }
+
+    $visible = @{}
+    foreach ($button in (Children $Window ([System.Windows.Automation.ControlType]::Button))) {
+        if ($ordered -contains $button.Current.Name) {
+            $visible[$button.Current.Name] = $button
+        }
+    }
+    if ($visible.ContainsKey($Name)) {
+        $action = $visible[$Name]
+    } else {
+        $anchorName = $null
+        $anchorIndex = -1
+        $nearest = [int]::MaxValue
+        for ($index = 0; $index -lt $ordered.Count; $index++) {
+            if (-not $visible.ContainsKey($ordered[$index])) { continue }
+            $distance = [Math]::Abs($destinationIndex - $index)
+            if ($distance -lt $nearest) {
+                $anchorName = $ordered[$index]
+                $anchorIndex = $index
+                $nearest = $distance
+            }
+        }
+        if (-not $anchorName) {
+            throw "Protocol freeze action '$Name' is outside UIA viewport and no visible Protocol work-area keyboard anchor is exposed"
+        }
+        Write-Output "UIA_VIEWPORT_RECOVERY: $anchorName -> $Name via keyboard focus"
+        $anchor = $visible[$anchorName]
+        if ($anchorIndex -lt $destinationIndex) {
+            $action = FocusByTab $anchor ([System.Windows.Automation.ControlType]::Button) $Name 20
+        } else {
+            $action = FocusByShiftTab $anchor ([System.Windows.Automation.ControlType]::Button) $Name 20
+        }
+    }
+    $action.SetFocus()
+    $action.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+}
+function Read-VisibleProtocolFreezeReceipt(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$ExpectedProtocolId
+) {
+    # Hosted installed Windows UIA 41281278706 proved that the full JSON Text
+    # at the bottom of the Protocol ScrollView is not necessarily exposed at
+    # 200% scale (886x600 viewport), even after focusing the native receipt
+    # Save button and sending bounded PageDown. Read the newly exposed
+    # *read-only* inspector's actual accessible value adjacent to Inspect.
+    # It binds directly to root.protocol-freeze-status, which the Rust host
+    # loads from persisted protocol history; no synthetic receipt is supplied.
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if (-not $focused -or
+        $focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button -or
+        $focused.Current.Name -ne 'Inspect local protocol freeze receipt') {
+        # The Rust-host inspection updates Slint properties and may recreate
+        # the focused AccessKit node. Re-anchor to the actual native button
+        # without invoking or mutating the inspection result.
+        $inspect = Named $Window ([System.Windows.Automation.ControlType]::Button) 'Inspect local protocol freeze receipt'
+        EnsureLiveFocus $inspect
+        $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+        if (-not $focused -or
+            $focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button -or
+            $focused.Current.Name -ne 'Inspect local protocol freeze receipt') {
+            throw 'Protocol receipt inspection cannot restore its real native Inspect focus anchor'
+        }
+    }
+    $viewer = FocusByTab $focused ([System.Windows.Automation.ControlType]::Edit) 'Read-only inspected protocol freeze JSON' 5
+    $valuePattern = $null
+    if (-not $viewer.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+        throw 'Native read-only Protocol JSON inspector does not expose the real UIA ValuePattern'
+    }
+    if (-not $valuePattern.Current.IsReadOnly) {
+        throw 'Native Protocol JSON inspector is unexpectedly editable'
+    }
+    $raw = [string]$valuePattern.Current.Value
+    if ([string]::IsNullOrWhiteSpace($raw) -or -not $raw.TrimStart().StartsWith('{')) {
+        throw 'Native Protocol JSON inspector did not expose the inspected persisted receipt'
+    }
+    try {
+        $receipt = $raw | ConvertFrom-Json -ErrorAction Stop
+    } catch {
+        throw "Native inspected Protocol freeze receipt is not valid JSON: $($_.Exception.Message)"
+    }
+    if ($receipt.protocol_id -cne $ExpectedProtocolId -or
+        $receipt.local_only -cne $true -or
+        $receipt.external_registration_verified -cne $false -or
+        $receipt.frozen -isnot [bool]) {
+        throw 'Persisted protocol freeze JSON failed exact identity, boolean state or local-only provenance validation'
+    }
+    Write-Host "UIA_PROTOCOL_FREEZE_JSON_READ: protocol=$ExpectedProtocolId frozen=$($receipt.frozen) via read-only native Protocol inspector"
+    return $receipt
+}
+function Read-VisibleProtocolFreezePreviewOutcome(
+    [System.Windows.Automation.AutomationElement]$Window
+) {
+    # At 200% hosted Windows scaling the original Protocol operation Text
+    # label is below the ScrollView. Slint exposes its *same Rust-host value*
+    # in a dedicated real read-only TextEdit immediately after Preview/Record.
+    # Do not fabricate a preview from project metadata or the button label.
+    $anchor = Named $Window ([System.Windows.Automation.ControlType]::Button) 'Preview local protocol baseline freeze'
+    EnsureLiveFocus $anchor
+    $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
+    if (-not $focused -or
+        $focused.Current.ControlType -ne [System.Windows.Automation.ControlType]::Button -or
+        $focused.Current.Name -ne 'Preview local protocol baseline freeze') {
+        throw 'Native Protocol freeze Preview focus anchor is unavailable'
+    }
+    $viewer = FocusByTab $focused ([System.Windows.Automation.ControlType]::Edit) 'Read-only local protocol freeze preview outcome' 8
+    $valuePattern = $null
+    if (-not $viewer.TryGetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern, [ref]$valuePattern)) {
+        throw 'Native Protocol freeze preview outcome lacks a real UIA ValuePattern'
+    }
+    if (-not $valuePattern.Current.IsReadOnly) {
+        throw 'Native Protocol freeze preview outcome can be modified by the user'
+    }
+    $value = [string]$valuePattern.Current.Value
+    if ([string]::IsNullOrWhiteSpace($value)) {
+        throw 'Native Protocol freeze preview outcome is empty'
+    }
+    # The caller assigns this function's return value to $freezePreview.
+    # Write-Output here polluted that return with a *second* diagnostic string:
+    # PowerShell's array -notlike then selected the nonmatching diagnostic,
+    # falsely failing even when the actual UIA ValuePattern displayed the
+    # correct LOCAL FREEZE PREVIEW ONLY text (hosted screenshot confirms it).
+    # Write-Host records the diagnostic without changing the data pipeline.
+    Write-Host ('UIA_NATIVE_PROTOCOL_FREEZE_OUTCOME_READ_CHARS=' + $value.Length)
+    return $value
+}
+# F14's independent persistence oracle opens only the disposable project's
+# SQLite file, with WinSQLite's READONLY flag. It cannot create tables, write
+# aliases, or substitute direct SQL mutation for real installed UIA gestures.
+# Windows supplies winsqlite3.dll; absence/incompatible APIs fail the gate.
+$f14ReadonlySqliteSource = @'
+using System;
+using System.Collections.Generic;
+using System.Runtime.InteropServices;
+using System.Text;
+
+public static class RwUiaReadOnlySqlite {
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_open_v2(byte[] path, out IntPtr db, int flags, IntPtr vfs);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_prepare_v2(IntPtr db, byte[] sql, int length, out IntPtr statement, IntPtr tail);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_step(IntPtr statement);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_column_count(IntPtr statement);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_column_type(IntPtr statement, int column);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern IntPtr sqlite3_column_text(IntPtr statement, int column);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_column_bytes(IntPtr statement, int column);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_finalize(IntPtr statement);
+    [DllImport("winsqlite3.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int sqlite3_close(IntPtr db);
+
+    public static string[] Rows(string databasePath, string query) {
+        if (!query.TrimStart().StartsWith("SELECT ", StringComparison.OrdinalIgnoreCase)) {
+            throw new InvalidOperationException("F14 SQLite oracle allows SELECT only");
+        }
+        IntPtr db = IntPtr.Zero;
+        IntPtr statement = IntPtr.Zero;
+        try {
+            byte[] path = Encoding.UTF8.GetBytes(databasePath + "\0");
+            if (sqlite3_open_v2(path, out db, 1, IntPtr.Zero) != 0) {
+                throw new InvalidOperationException("F14 SQLite read-only open failed");
+            }
+            byte[] sql = Encoding.UTF8.GetBytes(query + "\0");
+            if (sqlite3_prepare_v2(db, sql, -1, out statement, IntPtr.Zero) != 0 || statement == IntPtr.Zero) {
+                throw new InvalidOperationException("F14 SQLite read-only prepare failed");
+            }
+            var rows = new List<string>();
+            while (true) {
+                int state = sqlite3_step(statement);
+                if (state == 101) break; // SQLITE_DONE
+                if (state != 100) throw new InvalidOperationException("F14 SQLite read-only step failed: " + state);
+                if (rows.Count >= 5000) throw new InvalidOperationException("F14 SQLite snapshot exceeds bounded row limit");
+                int count = sqlite3_column_count(statement);
+                if (count < 1 || count > 32) throw new InvalidOperationException("F14 SQLite unexpected column count");
+                var columns = new string[count];
+                for (int i = 0; i < count; i++) {
+                    if (sqlite3_column_type(statement, i) == 5) { // SQL NULL
+                        columns[i] = "~";
+                        continue;
+                    }
+                    int length = sqlite3_column_bytes(statement, i);
+                    if (length < 0 || length > 4194304) throw new InvalidOperationException("F14 oversized SQLite column");
+                    byte[] bytes = new byte[length];
+                    if (length > 0) Marshal.Copy(sqlite3_column_text(statement, i), bytes, 0, length);
+                    columns[i] = Convert.ToBase64String(bytes);
+                }
+                // Base64 never contains '|', so this preserves NULL, raw UTF-8,
+                // field boundaries, and byte-exact source records for comparisons.
+                rows.Add(String.Join("|", columns));
+            }
+            return rows.ToArray();
+        } finally {
+            if (statement != IntPtr.Zero) sqlite3_finalize(statement);
+            if (db != IntPtr.Zero) sqlite3_close(db);
+        }
+    }
+    public static string Scalar(string databasePath, string query) {
+        string[] rows = Rows(databasePath, query);
+        if (rows.Length != 1) throw new InvalidOperationException("F14 scalar query requires exactly one row");
+        string[] columns = rows[0].Split('|');
+        if (columns.Length != 1 || columns[0] == "~") throw new InvalidOperationException("F14 scalar query returned NULL or multiple columns");
+        return Encoding.UTF8.GetString(Convert.FromBase64String(columns[0]));
+    }
+}
+'@
+# The F37 caption scan below snapshots the unchanged project before F14's
+# later reviewer journey. Compile its WinSQLite read-only oracle BEFORE the
+# first snapshot, not only near the end of the UIA scenario.
+Add-Type -TypeDefinition $f14ReadonlySqliteSource -ErrorAction Stop
+function Get-F14ProjectSnapshot([string]$ProjectPath) {
+    $database = Join-Path $ProjectPath 'data/project.sqlite'
+    if (-not (Test-Path -LiteralPath $database -PathType Leaf)) {
+        throw 'F14 disposable project SQLite database is absent'
+    }
+    $revision = [long][RwUiaReadOnlySqlite]::Scalar($database, 'SELECT revision FROM project')
+    $references = @([RwUiaReadOnlySqlite]::Rows($database, 'SELECT id,title,authors_json,year,doi,kind,format,raw,metadata_json,status,imported_at FROM reference ORDER BY id'))
+    $aliases = @([RwUiaReadOnlySqlite]::Rows($database, 'SELECT original_id,canonical_id,reason FROM reference_alias ORDER BY original_id'))
+    $decisions = @([RwUiaReadOnlySqlite]::Rows($database, 'SELECT id,left_id,right_id,decision,reviewed_candidate_sha256,stable_pair_sha256,review_revision,project_revision,rationale,actor,recorded_at,request_id FROM reference_dedup_decisions ORDER BY project_revision'))
+    $events = @([RwUiaReadOnlySqlite]::Rows($database, 'SELECT sequence,operation,payload_hash,event_hash FROM events ORDER BY sequence'))
+    if ($revision -ne $events.Count) {
+        throw "F14 persisted revision/event count mismatch: revision=$revision events=$($events.Count)"
+    }
+    return [pscustomobject]@{ Revision = $revision; References = $references; Aliases = $aliases; Decisions = $decisions; Events = $events }
+}
+function Assert-F14RowsEqual([string[]]$Before, [string[]]$After, [string]$Label) {
+    if ($Before.Count -ne $After.Count -or
+        [string]::Join("`n", $Before) -cne [string]::Join("`n", $After)) {
+        throw "F14 $Label changed unexpectedly"
+    }
+}
+function Assert-F14Unchanged(
+    [object]$Before,
+    [object]$After,
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Stage
+) {
+    if ($After.Revision -ne $Before.Revision -or (Get-VisibleProjectRevision $Window) -ne $Before.Revision) {
+        throw "F14 $Stage changed project revision without approved write"
+    }
+    Assert-F14RowsEqual $Before.References $After.References "$Stage source reference rows"
+    Assert-F14RowsEqual $Before.Aliases $After.Aliases "$Stage alias rows"
+    Assert-F14RowsEqual $Before.Decisions $After.Decisions "$Stage immutable reviewer decision rows"
+    Assert-F14RowsEqual $Before.Events $After.Events "$Stage append-only event chain"
+}
+function Assert-F14SingleEvent(
+    [object]$Before,
+    [object]$After,
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Operation
+) {
+    if ($After.Revision -ne ($Before.Revision + 1) -or
+        (Get-VisibleProjectRevision $Window) -ne $After.Revision -or
+        $After.Events.Count -ne ($Before.Events.Count + 1)) {
+        throw "F14 $Operation did not append exactly one persisted project revision/event"
+    }
+    for ($index = 0; $index -lt $Before.Events.Count; $index++) {
+        if ($Before.Events[$index] -cne $After.Events[$index]) {
+            throw "F14 $Operation modified earlier immutable event history"
+        }
+    }
+    $parts = $After.Events[$After.Events.Count - 1].Split('|')
+    if ($parts.Count -ne 4 -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[0])) -cne [string]$After.Revision -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($parts[1])) -cne $Operation) {
+        throw "F14 $Operation latest persisted event identity/sequence is incorrect"
+    }
+    foreach ($hashPart in @($parts[2], $parts[3])) {
+        if ([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($hashPart)) -cnotmatch '^[0-9a-f]{64}$') {
+            throw "F14 $Operation persisted event lacks a valid payload/event SHA-256"
+        }
+    }
+}
+
+# F37 uses an independently generated, disposable real PDF. The PDF object
+# offsets, stream length and xref are computed from ASCII bytes, not supplied
+# by a mocked native API or by a previously captured source hash.
+function Write-F37CaptionPdf([string]$Path, [string]$FirstCaption) {
+    if ($FirstCaption -cnotmatch '^Figure 1: (Study flow|Other flow)$') {
+        throw 'F37 fixture generator accepts only two fixed trusted caption strings'
+    }
+    $contents = "BT`n/F1 18 Tf`n50 220 Td`n($FirstCaption) Tj`nET`n" +
+        "BT`n/F1 18 Tf`n50 140 Td`n(Table 2: Results) Tj`nET`n"
+    $objects = @(
+        '<< /Type /Catalog /Pages 2 0 R >>',
+        '<< /Type /Pages /Kids [3 0 R] /Count 1 >>',
+        '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 420 260] /Resources << /Font << /F1 5 0 R >> >> /Contents 4 0 R >>',
+        ('<< /Length ' + [Text.Encoding]::ASCII.GetByteCount($contents) + " >>`nstream`n" + $contents + "endstream"),
+        '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica >>'
+    )
+    $body = [Text.StringBuilder]::new('%PDF-1.4' + "`n")
+    $offsets = New-Object 'System.Collections.Generic.List[int]'
+    for ($index = 0; $index -lt $objects.Count; $index++) {
+        $offsets.Add($body.Length)
+        [void]$body.Append(($index + 1).ToString() + " 0 obj`n" + $objects[$index] + "`nendobj`n")
+    }
+    $xref = $body.Length
+    [void]$body.Append("xref`n0 6`n0000000000 65535 f `n")
+    foreach ($offset in $offsets) {
+        [void]$body.Append($offset.ToString('D10') + " 00000 n `n")
+    }
+    [void]$body.Append("trailer`n<< /Size 6 /Root 1 0 R >>`nstartxref`n" + $xref + "`n%%EOF`n")
+    $bytes = [Text.Encoding]::ASCII.GetBytes($body.ToString())
+    [IO.File]::WriteAllBytes($Path, $bytes)
+    return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
+}
+
+function Read-F37CaptionStatus([System.Windows.Automation.AutomationElement]$Window, [string]$Pattern) {
+    $deadline = [DateTime]::UtcNow.AddSeconds(15)
+    do {
+        if ($script:p -and $script:p.HasExited) { throw 'F37 native PDF process exited during caption inspection' }
+        try {
+            foreach ($node in (Children $Window ([System.Windows.Automation.ControlType]::Text))) {
+                $name = [string]$node.Current.Name
+                if ($name.StartsWith('PDF caption anchor preview status ') -and $name -like $Pattern) {
+                    return $name
+                }
+            }
+        } catch [System.Windows.Automation.ElementNotAvailableException] { }
+        Start-Sleep -Milliseconds 75
+    } while ([DateTime]::UtcNow -lt $deadline)
+    throw "F37 required native caption status is absent: $Pattern"
+}
+
+function Get-F37ReaderViewport([System.Windows.Automation.AutomationElement]$Window) {
+    $matches = @($Window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | Where-Object { $_.Current.Name -eq 'Scrollable PDF captions and page' })
+    if ($matches.Count -ne 1) {
+        throw "F37 reader scroll viewport is not uniquely accessible: count=$($matches.Count)"
+    }
+    return $matches[0].Current.BoundingRectangle
+}
+function Get-F37PhysicalIntersection([object[]]$Bounds) {
+    # Round inward: never include desktop pixels outside a native UIA element.
+    $left = [double]::NegativeInfinity
+    $top = [double]::NegativeInfinity
+    $right = [double]::PositiveInfinity
+    $bottom = [double]::PositiveInfinity
+    foreach ($item in $Bounds) {
+        if ($null -eq $item -or [double]::IsNaN($item.Left) -or
+            [double]::IsNaN($item.Top) -or [double]::IsNaN($item.Right) -or
+            [double]::IsNaN($item.Bottom)) {
+            throw 'F37 native UIA geometry is invalid'
+        }
+        $left = [Math]::Max($left, [double]$item.Left)
+        $top = [Math]::Max($top, [double]$item.Top)
+        $right = [Math]::Min($right, [double]$item.Right)
+        $bottom = [Math]::Min($bottom, [double]$item.Bottom)
+    }
+    if ($right -le $left -or $bottom -le $top) {
+        return [Drawing.Rectangle]::Empty
+    }
+    $x1 = [int][Math]::Ceiling($left)
+    $y1 = [int][Math]::Ceiling($top)
+    $x2 = [int][Math]::Floor($right)
+    $y2 = [int][Math]::Floor($bottom)
+    if ($x2 -le $x1 -or $y2 -le $y1) { return [Drawing.Rectangle]::Empty }
+    return [Drawing.Rectangle]::FromLTRB($x1, $y1, $x2, $y2)
+}
+function Invoke-F37ReaderScroll(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Name
+) {
+    if ($Name -cnotin @('Scroll to rendered PDF page', 'Scroll back to PDF caption tools')) {
+        throw "F37 unexpected reader scroll action: $Name"
+    }
+    Invoke-AccessibleButton $Window $Name
+    Start-Sleep -Milliseconds 150
+}
+function Focus-F37CaptionAction(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [System.Windows.Automation.AutomationElement]$Anchor,
+    [string]$Name,
+    [int]$MaxTabs = 14
+) {
+    $button = FocusByTab $Anchor ([System.Windows.Automation.ControlType]::Button) $Name $MaxTabs
+    $viewport = Get-F37ReaderViewport $Window
+    $bounds = $button.Current.BoundingRectangle
+    $win = $Window.Current.BoundingRectangle
+    $screen = [Windows.Forms.Screen]::FromPoint(
+        [Drawing.Point]::new([int]($win.Left + 8), [int]($win.Top + 8))
+    ).WorkingArea
+    $visible = Get-F37PhysicalIntersection @($bounds, $viewport, $win, $screen)
+    if (-not $button.Current.IsEnabled -or $visible.Width -lt 30 -or $visible.Height -lt 12) {
+        throw "F37 caption action has no usable visible intersection: $Name button=$bounds viewport=$viewport visible=$visible"
+    }
+    $point = [System.Windows.Point]::new(
+        $visible.Left + $visible.Width / 2.0,
+        $visible.Top + $visible.Height / 2.0)
+    $hit = [System.Windows.Automation.AutomationElement]::FromPoint($point)
+    if (-not $hit -or -not [System.Windows.Automation.Automation]::Compare($hit, $button)) {
+        $hitName = if ($hit) { $hit.Current.Name } else { '<none>' }
+        throw "F37 caption action is occluded or not hit-testable: $Name hit=$hitName visible=$visible"
+    }
+    return $button
+}
+function Get-F37CanvasSample(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [object]$ExpectedRegion = $null
+) {
+    # Only real installed desktop pixels in the UIA Image AND ScrollView.
+    # Reuse identical desktop coordinates for blank, verified, and refusal.
+    $images = @(Children $Window ([System.Windows.Automation.ControlType]::Image) |
+        Where-Object { $_.Current.Name -eq 'Rendered PDF page' })
+    if ($images.Count -ne 1) {
+        throw "F37 must have exactly one native PDF page Image: count=$($images.Count)"
+    }
+    $imageRect = $images[0].Current.BoundingRectangle
+    $viewport = Get-F37ReaderViewport $Window
+    $win = $Window.Current.BoundingRectangle
+    $screen = [Windows.Forms.Screen]::FromPoint(
+        [Drawing.Point]::new([int]($win.Left + 8), [int]($win.Top + 8))
+    ).WorkingArea
+    $visible = Get-F37PhysicalIntersection @($imageRect, $viewport, $win, $screen)
+    if ($visible.Width -lt 116 -or $visible.Height -lt 56) {
+        throw "F37 PDF has no usable visible native screen ROI: image=$imageRect viewport=$viewport window=$win screen=$screen visible=$visible"
+    }
+    $region = if ($null -eq $ExpectedRegion) {
+        [Drawing.Rectangle]::FromLTRB($visible.Left + 8, $visible.Top + 8,
+            $visible.Right - 8, $visible.Bottom - 8)
+    } else {
+        [Drawing.Rectangle]$ExpectedRegion
+    }
+    $covered = [Drawing.Rectangle]::Intersect($region, $visible)
+    if ($region.Width -lt 100 -or $region.Height -lt 40 -or
+        -not $covered.Equals($region)) {
+        throw "F37 prior screen ROI is no longer wholly on visible PDF: wanted=$region image=$imageRect viewport=$viewport visible=$visible"
+    }
+    # An accessibility rectangle alone can lie beneath another window.
+    # Reject a sample unless its screen-center hit resolves to that Image.
+    $point = [System.Windows.Point]::new(
+        $region.Left + $region.Width / 2.0, $region.Top + $region.Height / 2.0)
+    $hit = [System.Windows.Automation.AutomationElement]::FromPoint($point)
+    if (-not $hit -or -not [System.Windows.Automation.Automation]::Compare($hit, $images[0])) {
+        $hitName = if ($hit) { $hit.Current.Name } else { '<none>' }
+        throw "F37 PDF ROI is occluded or is not the native Image: region=$region hit=$hitName"
+    }
+    [Windows.Forms.Cursor]::Position = [Drawing.Point]::new([int]($win.Left + 8), [int]($win.Top + 8))
+    $previousHash = $null
+    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        Start-Sleep -Milliseconds 120
+        $bitmap = [Drawing.Bitmap]::new($region.Width, $region.Height,
+            [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $memory = [IO.MemoryStream]::new()
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $graphics.CopyFromScreen($region.Left, $region.Top, 0, 0, $bitmap.Size)
+            $bitmap.Save($memory, [Drawing.Imaging.ImageFormat]::Png)
+            $digest = [BitConverter]::ToString($sha.ComputeHash($memory.ToArray())).Replace('-', '')
+            if ($null -ne $previousHash -and $digest -ceq $previousHash) {
+                Write-Host "F37_NATIVE_REAL_SCREEN_SAMPLE region=$region sha256=$digest"
+                return [pscustomobject]@{ Region = $region; Digest = $digest }
+            }
+            $previousHash = $digest
+        } finally {
+            $sha.Dispose()
+            $memory.Dispose()
+            $graphics.Dispose()
+            $bitmap.Dispose()
+        }
+    }
+    throw "F37 installed PDF screen pixels did not stabilize: region=$region last_sha256=$previousHash"
+}
 try {
+    $p = Start-Process -FilePath $Exe -PassThru
     $window = WindowFor $p 'Native window missing from UIA tree'
     $edits = Children $window ([System.Windows.Automation.ControlType]::Edit)
     foreach ($edit in $edits) {
@@ -421,6 +1241,49 @@ try {
     $title = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project title'
     ([System.Windows.Automation.ValuePattern]$path.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($temporary)
     ([System.Windows.Automation.ValuePattern]$title.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue("UIA Persian $persianWord")
+    $folderBrowse = Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose project folder with native dialog'
+    if (-not $folderBrowse.Current.IsEnabled) { throw 'Native project folder selection is disabled' }
+    $desktop = [System.Windows.Automation.AutomationElement]::RootElement
+    $beforeFolderDialog = @($desktop.FindAll(
+        [System.Windows.Automation.TreeScope]::Children,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.NativeWindowHandle })
+    Invoke-AccessibleButton $window 'Choose project folder with native dialog'
+    $folderDialog = $null
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        foreach ($candidate in $desktop.FindAll(
+            [System.Windows.Automation.TreeScope]::Children,
+            [System.Windows.Automation.Condition]::TrueCondition
+        )) {
+            $candidateInfo = $candidate.Current
+            if ($candidateInfo.ControlType -eq [System.Windows.Automation.ControlType]::Window -and
+                $candidateInfo.NativeWindowHandle -ne 0 -and
+                $beforeFolderDialog -notcontains $candidateInfo.NativeWindowHandle -and
+                ($candidateInfo.ProcessId -eq $p.Id -or $candidateInfo.ClassName -eq '#32770') -and
+                -not $candidateInfo.IsOffscreen) {
+                $folderDialog = $candidate
+                break
+            }
+        }
+        if ($folderDialog) { break }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $folderDialog) { throw 'Native project folder button did not open the real Windows folder chooser' }
+    $folderDialog.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ESC}')
+    $folderCanceledCleanly = $false
+    for ($attempt = 0; $attempt -lt 100; $attempt++) {
+        $path = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project path'
+        $value = ([System.Windows.Automation.ValuePattern]$path.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+        $ready = (Named $window ([System.Windows.Automation.ControlType]::Button) 'Choose project folder with native dialog').Current.IsEnabled
+        if ($ready -and $value -eq $temporary) {
+            $folderCanceledCleanly = $true
+            break
+        }
+        Start-Sleep -Milliseconds 100
+    }
+    if (-not $folderCanceledCleanly) { throw 'Canceling native project folder selection changed the typed path or left the dialog busy' }
+    Write-Output 'PASS: native project folder dialog opens, cancels and preserves the typed path'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Create project').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 600
     if (-not (Test-Path (Join-Path $temporary 'data/project.sqlite'))) { throw 'Create via UIA did not create SQLite project' }
@@ -444,8 +1307,12 @@ try {
     # Exercise the actual Ctrl+K shortcut and Enter activation.
     # Page transitions recreate Slint accessibility nodes; never retain a stale
     # element reference across navigation.
-    $path = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project path'
-    $path.SetFocus()
+    # Opening a project intentionally transitions from Welcome to Dashboard.
+    # The Welcome-only Project path input has been destroyed. Anchor the
+    # Ctrl+K shortcut on a real Dashboard button instead of querying a stale
+    # page; command palette focus must still be achieved by actual keyboard.
+    $dashboardAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Open Start Center to switch projects'
+    $dashboardAnchor.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('^k')
     $focused = $null
     for ($attempt = 0; $attempt -lt 12; $attempt++) {
@@ -453,13 +1320,17 @@ try {
         $focused = [System.Windows.Automation.AutomationElement]::FocusedElement
         if ($focused -and $focused.Current.Name -eq 'Command palette') { break }
         if ($attempt -eq 5) {
-            $path.SetFocus()
+            $dashboardAnchor.SetFocus()
             [System.Windows.Forms.SendKeys]::SendWait('^k')
         }
     }
     if (-not $focused -or $focused.Current.Name -ne 'Command palette') {
         throw "Ctrl+K did not focus Command palette (focused='$($focused.Current.Name)')"
     }
+    # Ctrl+K proved that this is the currently focused palette element. Use
+    # that live element; the previously cached palette may have been replaced
+    # during the Welcome -> Dashboard transition.
+    $command = $focused
     ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('About')
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
@@ -476,6 +1347,7 @@ try {
     # Return to Welcome using the same keyboard path and verify Unicode/Persian
     # text can be set and read through Windows UI Automation. This verifies
     # encoding/accessibility transport, not native IME composition behavior.
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('^k')
     Start-Sleep -Milliseconds 100
@@ -591,6 +1463,39 @@ try {
     }
     Write-Output 'PASS: Approved persisted Protocol -> physical Markdown with version history, digest and no overwrite'
 
+    Invoke-ProtocolFreezeButton $window 'Inspect local protocol freeze receipt'
+    WaitForNameLike $window '*Local protocol baseline status verified against persisted history*' 10000
+    $unfrozen = Read-VisibleProtocolFreezeReceipt $window $protocolId
+    if ($unfrozen.frozen -cne $false -or $unfrozen.current_version -ne 1 -or
+        $null -ne $unfrozen.frozen_version -or $null -ne $unfrozen.snapshot_sha256) {
+        throw 'Persisted protocol freeze JSON reported a frozen or inconsistent baseline before approval'
+    }
+    Invoke-ProtocolFreezeButton $window 'Preview local protocol baseline freeze'
+    Start-Sleep -Milliseconds 180
+    $freezePreview = Read-VisibleProtocolFreezePreviewOutcome $window
+    if ($freezePreview -notlike '*LOCAL FREEZE PREVIEW ONLY*') {
+        throw 'Local protocol freeze did not provide a separate non-mutating preview'
+    }
+    Invoke-ProtocolFreezeButton $window 'Record previewed local protocol baseline freeze'
+    Start-Sleep -Milliseconds 260
+    Invoke-ProtocolFreezeButton $window 'Inspect local protocol freeze receipt'
+    WaitForNameLike $window '*Local protocol baseline status verified against persisted history*' 10000
+    $frozen = Read-VisibleProtocolFreezeReceipt $window $protocolId
+    if ($frozen.frozen -cne $true -or $frozen.frozen_version -ne 1 -or
+        $frozen.current_version -ne 1 -or $frozen.post_freeze_amendment_versions -ne 0 -or
+        $frozen.event_sequence -le 0 -or
+        $frozen.snapshot_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        $frozen.event_hash -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'Persisted protocol freeze JSON lacks exact immutable baseline version, event/snapshot digests or audit sequence'
+    }
+    Invoke-ProtocolFreezeButton $window 'Preview local protocol baseline freeze'
+    Start-Sleep -Milliseconds 180
+    $duplicateFreeze = Read-VisibleProtocolFreezePreviewOutcome $window
+    if ($duplicateFreeze -notlike '*already has an immutable local freeze baseline*') {
+        throw 'Existing local protocol freeze was not protected from duplicate recording'
+    }
+    Write-Output 'PASS: approved immutable local protocol baseline freeze, SHA-256 receipt and one-time enforcement'
+
     # Use the installed native PDFium binary, not an in-process mock, to
     # navigate a deterministic two-page PDF with distinct searchable content.
     $twoPagePdf = (Resolve-Path (Join-Path $PSScriptRoot '../../../docs/verification/rust-rewrite/pdfium-two-page-ui-fixture.pdf')).Path
@@ -700,6 +1605,103 @@ try {
     }
     Write-Output 'PASS: installed native PDFium reader finds matches across pages, preserves current page on miss, navigates bounds and exposes accessible controls'
 
+    # F37: real installed PDFium + Slint/UIA caption scan and source-identity
+    # navigation, not a source-only assertion. Keep both revisions of the PDF
+    # entirely inside the disposable host root; no project import or approval.
+    $f37Before = Get-F14ProjectSnapshot $temporary
+    $f37Source = Join-Path $hostData 'uia-trusted-f37-caption.pdf'
+    $f37ExpectedSha = Write-F37CaptionPdf $f37Source 'Figure 1: Study flow'
+    $f37OriginalSize = (Get-Item -LiteralPath $f37Source).Length
+    Select-FileThroughNativeDialog $window 'Choose local PDF with native file picker' $f37Source $p.Id
+    $f37Selected = $false
+    for ($attempt = 0; $attempt -lt 80; $attempt++) {
+        $selectedPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF file path'
+        $current = ([System.Windows.Automation.ValuePattern]$selectedPath.GetCurrentPattern(
+            [System.Windows.Automation.ValuePattern]::Pattern
+        )).Current.Value
+        if (Test-SelectedFixturePath $current $f37Source) {
+            $f37Selected = $true
+            break
+        }
+        Start-Sleep -Milliseconds 75
+    }
+    if (-not $f37Selected) { throw 'F37 native PDF chooser did not select its disposable caption source' }
+    WaitForNameLike $window '*No PDF page loaded*' 10000
+    $f37Search = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF search query'
+    $f37ScanName = 'Preview unverified local PDF figure and table caption anchors'
+    Invoke-F37ReaderScroll $window 'Scroll back to PDF caption tools'
+    $f37Scan = Focus-F37CaptionAction $window $f37Search $f37ScanName 16
+    $f37Scan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f37Scanned = Read-F37CaptionStatus $window '*Read-only PDF caption scan: 2 candidates*'
+    $f37Digest = [regex]::Match($f37Scanned, 'source SHA-256 ([0-9a-f]{64})(?:\.|\s)')
+    if (-not $f37Digest.Success -or $f37Digest.Groups[1].Value -cne $f37ExpectedSha -or
+        -not $f37Scanned.Contains('unverified PDF text-layer caption anchors only') -or
+        -not $f37Scanned.Contains('No figure pixels or table cells were extracted')) {
+        throw 'F37 native caption scan did not expose exact PDF source SHA-256 and honest extraction limits'
+    }
+    Assert-F14Unchanged $f37Before (Get-F14ProjectSnapshot $temporary) $window 'F37 scanned source-only caption anchors'
+    $f37FigureName = 'Inspect unverified PDF caption Figure: Figure 1: Study flow page 1'
+    $f37TableName = 'Inspect unverified PDF caption Table: Table 2: Results page 1'
+    $f37Candidates = @(Children $window ([System.Windows.Automation.ControlType]::Button) |
+        Where-Object { $_.Current.Name -in @($f37FigureName, $f37TableName) })
+    if ($f37Candidates.Count -ne 2) {
+        throw 'F37 did not expose both actual synthetic PDF Figure/Table caption anchors as native UIA buttons'
+    }
+    # Capture blank native pixels AFTER scanning inserts the candidate list.
+    # The visible page jump aligns the same real monitor ROI for all 3 states.
+    Invoke-F37ReaderScroll $window 'Scroll to rendered PDF page'
+    $f37BlankCanvas = Get-F37CanvasSample $window
+    Invoke-F37ReaderScroll $window 'Scroll back to PDF caption tools'
+    $f37Scan = Named $window ([System.Windows.Automation.ControlType]::Button) $f37ScanName
+    $f37Figure = Focus-F37CaptionAction $window $f37Scan $f37FigureName 8
+    $f37Figure.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f37Verified = Read-F37CaptionStatus $window '*SOURCE SHA-256 VERIFIED against scanned bytes*'
+    if (-not $f37Verified.Contains($f37ExpectedSha) -or
+        -not $f37Verified.Contains('Caption bounds are unverified') -or
+        -not $f37Verified.Contains('no figure pixels or table cells')) {
+        throw 'F37 native caption navigation did not verify the scanned source without inventing figure/table extraction'
+    }
+    WaitForNameLike $window '*PDF page 1 of 1*' 15000
+    WaitForNameLike $window '*PDF search status: Rendered page 1 of 1*' 15000
+    Invoke-F37ReaderScroll $window 'Scroll to rendered PDF page'
+    $f37RenderedCanvas = Get-F37CanvasSample $window $f37BlankCanvas.Region
+    if ($f37RenderedCanvas.Digest -ceq $f37BlankCanvas.Digest) {
+        throw 'F37 valid caption navigation did not visibly render the synthetic PDF page'
+    }
+    Assert-F14Unchanged $f37Before (Get-F14ProjectSnapshot $temporary) $window 'F37 source-SHA verified native page navigation'
+
+    # Deliberately swap bytes at the SAME path while the old caption button is
+    # still on screen. It remains a valid, equally sized PDF, so path, length
+    # and PDF parseability cannot substitute for the exact source hash.
+    $f37ReplacementSha = Write-F37CaptionPdf $f37Source 'Figure 1: Other flow'
+    $f37ReplacementSize = (Get-Item -LiteralPath $f37Source).Length
+    if ($f37ReplacementSize -ne $f37OriginalSize -or
+        $f37ReplacementSha -ceq $f37ExpectedSha) {
+        throw 'F37 fixture substitution did not preserve the source path/size while changing source bytes'
+    }
+    Invoke-F37ReaderScroll $window 'Scroll back to PDF caption tools'
+    $f37Scan = Named $window ([System.Windows.Automation.ControlType]::Button) $f37ScanName
+    $f37Figure = Focus-F37CaptionAction $window $f37Scan $f37FigureName 8
+    $f37Figure.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f37Refused = Read-F37CaptionStatus $window '*Caption navigation refused: PDF source bytes changed since the caption scan*'
+    if (-not $f37Refused.Contains('Rescan the PDF before inspecting captions')) {
+        throw 'F37 changed-source refusal did not request a new scan'
+    }
+    WaitForNameLike $window '*PDF search status: PDF error: PDF source bytes changed since the caption scan*matches: 0*' 15000
+    WaitForNameLike $window '*No PDF page loaded*' 10000
+    Invoke-F37ReaderScroll $window 'Scroll to rendered PDF page'
+    $f37RefusedCanvas = Get-F37CanvasSample $window $f37BlankCanvas.Region
+    if ($f37RefusedCanvas.Digest -cne $f37BlankCanvas.Digest) {
+        throw 'F37 same-path substitution refusal left stale PDF pixels in the native viewport'
+    }
+    $f37StillPresent = @(Children $window ([System.Windows.Automation.ControlType]::Button) |
+        Where-Object { $_.Current.Name -in @($f37FigureName, $f37TableName) })
+    if ($f37StillPresent.Count -ne 0) {
+        throw 'F37 failed source verification left stale caption candidate buttons available'
+    }
+    Assert-F14Unchanged $f37Before (Get-F14ProjectSnapshot $temporary) $window 'F37 same-path PDF substitution refused without project writes'
+    Write-Output 'UIA_F37_NATIVE_CAPTION_SOURCE_SHA_VERIFIED_SAME_PATH_SUBSTITUTION_REFUSED_STALE_PIXELS_CLEARED_NO_PROJECT_WRITE_OK'
+
     # Register a real project reference, then carry its generated ID into the
     # systematic-review workflow. This proves the redesigned References and
     # Review screens are backed by the same persisted project state rather than
@@ -738,6 +1740,68 @@ try {
     $referenceResult = $referenceNames | Where-Object { $_ -like 'Reference operation result*' } | Select-Object -First 1
     $referenceId = [regex]::Match([string]$referenceResult, '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}').Value
     if ([string]::IsNullOrWhiteSpace($referenceId)) { throw 'Reference registration did not expose its generated reference ID' }
+
+    # F14: the disposable project has exactly one registered reference here,
+    # so the real scanner must return zero candidate pairs, write no decision,
+    # and leave the native project revision unchanged.
+    $dedupRevisionBefore = Get-VisibleProjectRevision $window
+    $registerAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Register previewed reference'
+    $dedupToggle = FocusByTab $registerAnchor ([System.Windows.Automation.ControlType]::Button) 'Toggle reviewable reference duplicate finder' 6
+    $dedupToggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $dedupScan = FocusByTab $dedupToggle ([System.Windows.Automation.ControlType]::Button) 'Scan local reference duplicate candidates without changing data' 4
+    $dedupScan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference candidates scanned locally; no changes recorded*' 10000
+    # The expanded F14 panel now has identity/rationale fields and six separate
+    # human decision controls before the read-only receipt. Twelve tabs stopped
+    # at Record in installed Windows 886x567, *before* reaching the receipt.
+    # Traverse at most 28 actual native keyboard stops; do not read hidden
+    # ValuePattern content without proving that the real editor got focus.
+    $dedupDetails = FocusByTab $dedupScan ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 28
+    $dedupText = ([System.Windows.Automation.ValuePattern]$dedupDetails.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+    )).Current.Value
+    if (-not $dedupText.StartsWith('READ-ONLY CANDIDATE SCAN. No merge, revision or event was recorded.')) {
+        throw 'F14 native scan did not expose the read-only candidate receipt'
+    }
+    $jsonStart = $dedupText.IndexOf('{')
+    if ($jsonStart -lt 0) { throw 'F14 candidate scan did not expose its structured result' }
+    $dedupResult = $dedupText.Substring($jsonStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($dedupResult.candidate_count_in_scan -ne 0 -or
+        @($dedupResult.candidates).Count -ne 0 -or
+        $dedupResult.writes -ne 0 -or
+        $dedupResult.automatic_merge -ne $false -or
+        $dedupResult.review_required -ne $true -or
+        $dedupResult.scan_truncated -ne $false -or
+        $dedupResult.project_revision -ne $dedupRevisionBefore) {
+        throw 'F14 single-reference scan returned candidates, an unexpected write or a revision mismatch'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $dedupRevisionBefore) {
+        throw 'F14 candidate scan unexpectedly changed the project revision'
+    }
+    # Explicitly invalid decision: an ID cannot alias itself. Preview must be
+    # rejected before a pending human-approved action can be recorded.
+    $dedupCanonical = FocusByTab $dedupScan ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review canonical reference ID' 4
+    ([System.Windows.Automation.ValuePattern]$dedupCanonical.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($referenceId)
+    $dedupDuplicate = FocusByTab $dedupCanonical ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review duplicate reference ID' 2
+    ([System.Windows.Automation.ValuePattern]$dedupDuplicate.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($referenceId)
+    $dedupFingerprint = FocusByTab $dedupDuplicate ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review candidate SHA256' 2
+    ([System.Windows.Automation.ValuePattern]$dedupFingerprint.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue(('0' * 64))
+    $dedupRationale = FocusByTab $dedupFingerprint ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review rationale' 2
+    ([System.Windows.Automation.ValuePattern]$dedupRationale.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('UIA invalid same-reference decision')
+    $invalidDedupPreview = FocusByTab $dedupRationale ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 3
+    $invalidDedupPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup preview rejected*' 10000
+    $rejectionDetails = FocusByTab $invalidDedupPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
+    $rejectionText = ([System.Windows.Automation.ValuePattern]$rejectionDetails.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+    )).Current.Value
+    if ($rejectionText -notlike '*Dedup review rejected: invalid reviewer approval or candidate digest*') {
+        throw 'F14 did not reject preview of a self-alias before human approval'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $dedupRevisionBefore) {
+        throw 'F14 rejected preview unexpectedly changed the project revision'
+    }
+    Write-Output 'PASS: F14 native duplicate scan returns zero candidates for one persisted reference, writes=0 and stable project revision; self-alias preview is rejected'
 
     $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
     ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Review')
@@ -1122,6 +2186,10 @@ try {
     if (-not $resultIdMatch.Success) { throw 'Recorded analysis result did not expose its immutable result ID' }
     $resultId = $resultIdMatch.Groups[1].Value
     $resultIdEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis Results result ID'
+    $selectedResult = ([System.Windows.Automation.ValuePattern]$resultIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($selectedResult -ne $resultId) {
+        throw 'Saved verified analysis result ID did not populate the inspect/replay control'
+    }
     ([System.Windows.Automation.ValuePattern]$resultIdEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($resultId)
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Load verified analysis result').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
@@ -1133,7 +2201,15 @@ try {
         throw 'Verified persisted analysis result did not reload its computed mean'
     }
     $reportIds = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis report result IDs'
-    ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($resultId)
+    $offeredId = ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($offeredId -ne $resultId) {
+        throw 'First verified analysis result was not offered for the report automatically'
+    }
+    ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('invalid')
+    Invoke-AccessibleButton $window 'Use selected immutable result in analysis report'
+    $reportIds = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis report result IDs'
+    $reselectedId = ([System.Windows.Automation.ValuePattern]$reportIds.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).Current.Value
+    if ($reselectedId -ne $resultId) { throw 'Use selected result failed to populate the report ID' }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Render verified analysis report').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $reportNames = @($window.FindAll(
@@ -1146,6 +2222,44 @@ try {
     if (-not ($reportNames | Where-Object { $_ -match '"report_sha256": "[0-9a-f]{64}"' })) {
         throw 'Analysis report did not expose a deterministic report digest'
     }
+    Invoke-AccessibleButton $window 'Prepare verified analysis report Markdown file'
+    Start-Sleep -Milliseconds 200
+    $preparedReportNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($preparedReportNames | Where-Object { $_ -like '*Verified analysis report prepared; no file saved yet*' })) {
+        throw 'Analysis report Markdown preparation did not present a distinct pending export state'
+    }
+    $reportDestination = Join-Path $hostData ('uia-analysis-report-' + [guid]::NewGuid().ToString('N') + '.md')
+    $reportPathEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Analysis report export destination path'
+    ([System.Windows.Automation.ValuePattern]$reportPathEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($reportDestination)
+    Invoke-AccessibleButton $window 'Save prepared analysis report without overwrite'
+    Start-Sleep -Milliseconds 220
+    if (-not (Test-Path -LiteralPath $reportDestination -PathType Leaf)) {
+        throw 'Physical analysis report Markdown was not created by the explicit Save control'
+    }
+    $reportBody = [System.IO.File]::ReadAllText($reportDestination)
+    if (-not $reportBody.Contains('# Analysis report') -or
+        -not $reportBody.Contains('statistics.describe') -or
+        -not $reportBody.Contains($resultId) -or
+        -not $reportBody.Contains($datasetRevision)) {
+        throw 'Physically exported analysis report omitted verified result or revision provenance'
+    }
+    $reportSha256 = (Get-FileHash -LiteralPath $reportDestination -Algorithm SHA256).Hash.ToLowerInvariant()
+    $reportSaveNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($reportSaveNames | Where-Object { $_ -like "*$reportSha256*" })) {
+        throw 'Physical analysis report checksum is absent from the verified save receipt'
+    }
+    Invoke-AccessibleButton $window 'Save prepared analysis report without overwrite'
+    Start-Sleep -Milliseconds 140
+    if ([System.IO.File]::ReadAllText($reportDestination) -cne $reportBody) {
+        throw 'Repeated analysis report Save mutated the existing file'
+    }
+    Write-Output 'PASS: verified analysis report saves physical Markdown with immutable result provenance and SHA-256 receipt'
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export analysis replay script').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $scriptNames = @($window.FindAll(
@@ -1200,13 +2314,105 @@ try {
     $command.SetFocus()
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 180
+    # F04: the Title Page builder is collapsed on entry. Exercise its actual
+    # accessible toggle, fields and preview, then close it before the existing
+    # manuscript approval/export workflow. Synthetic author data stays in this
+    # disposable project; a title-page preview must never create a revision.
+    $manuscriptIdForTitle = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID'
+    ([System.Windows.Automation.ValuePattern]$manuscriptIdForTitle.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+    )).SetValue('uia-paper')
+    # Manuscript draft autosave is an existing separate feature. Allow its
+    # debounce to complete BEFORE taking a baseline for preview-only behavior.
+    Start-Sleep -Milliseconds 1100
+    $titlePageRevisionBefore = Get-VisibleProjectRevision $window
+    $titlePageToggle = FocusByTab $manuscriptIdForTitle ([System.Windows.Automation.ControlType]::Button) 'Toggle offline manuscript title page builder' 12
+    $collapsedTitleInputs = @((Children $window ([System.Windows.Automation.ControlType]::Edit)) | ForEach-Object { $_.Current.Name })
+    if ($collapsedTitleInputs -contains 'Title page manuscript title') {
+        throw 'F04 title page builder was unexpectedly open before the user expanded it'
+    }
+    $titlePageToggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $titlePageTitle = FocusByTab $titlePageToggle ([System.Windows.Automation.ControlType]::Edit) 'Title page manuscript title' 3
+    ([System.Windows.Automation.ValuePattern]$titlePageTitle.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Cortical memory networks')
+    $titlePageAuthors = FocusByTab $titlePageTitle ([System.Windows.Automation.ControlType]::Edit) 'Title page authors and affiliations' 2
+    ([System.Windows.Automation.ValuePattern]$titlePageAuthors.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Alex Doe | Lab One; Bea Nguyen | Lab Two')
+    $titlePageEmail = FocusByTab $titlePageAuthors ([System.Windows.Automation.ControlType]::Edit) 'Title page corresponding email' 2
+    ([System.Windows.Automation.ValuePattern]$titlePageEmail.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('alex@example.org')
+    $titlePageJournal = FocusByTab $titlePageEmail ([System.Windows.Automation.ControlType]::Edit) 'Title page target journal' 2
+    ([System.Windows.Automation.ValuePattern]$titlePageJournal.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Unverified UIA Journal')
+    $titlePagePreviewAction = FocusByTab $titlePageJournal ([System.Windows.Automation.ControlType]::Button) 'Preview offline title page without saving' 3
+    $titlePagePreviewAction.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Title page previewed offline; nothing saved or submitted*' 10000
+    $titlePagePreviewControl = FocusByTab $titlePagePreviewAction ([System.Windows.Automation.ControlType]::Edit) 'Copyable unsaved title page preview' 4
+    $titlePagePreviewText = ([System.Windows.Automation.ValuePattern]$titlePagePreviewControl.GetCurrentPattern(
+        [System.Windows.Automation.ValuePattern]::Pattern
+    )).Current.Value
+    $previewMatch = Parse-NativeTitlePagePreview $titlePagePreviewText
+    if ($null -eq $previewMatch) {
+        $firstLine = ([string]$titlePagePreviewText -split '\r?\n', 2)[0]
+        Write-Host ('UIA_F04_PREVIEW_HEADER_CODEPOINTS=' +
+            (($firstLine.ToCharArray() | Select-Object -First 42 |
+                ForEach-Object { [int][char]$_ }) -join ','))
+        throw 'F04 title page preview lacks the unsaved marker, content or 64-character digest'
+    }
+    $titlePageNotice = $previewMatch.Groups[2].Value
+    $titlePageBody = $previewMatch.Groups[3].Value -replace '\r\n', [string][char]10
+    if (-not $titlePageNotice.Contains('Nothing has been saved or submitted') -or
+        -not $titlePageBody.Contains('Cortical memory networks') -or
+        -not $titlePageBody.Contains('Alex Doe') -or
+        -not $titlePageBody.Contains('Lab One') -or
+        -not $titlePageBody.Contains('Bea Nguyen') -or
+        -not $titlePageBody.Contains('Lab Two') -or
+        -not $titlePageBody.Contains('Corresponding author: alex@example.org') -or
+        -not $titlePageBody.Contains('Target journal (requirements not verified): Unverified UIA Journal')) {
+        throw 'F04 title page preview lost an author, affiliation, email, journal disclaimer or unsaved notice'
+    }
+    $titlePageSha = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $actualDraftHash = ([BitConverter]::ToString($titlePageSha.ComputeHash(
+            [System.Text.Encoding]::UTF8.GetBytes($titlePageBody)
+        ))).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $titlePageSha.Dispose()
+    }
+    if ($actualDraftHash -ne $previewMatch.Groups[1].Value) {
+        throw 'F04 unsaved title page preview SHA-256 does not match the real draft body'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $titlePageRevisionBefore) {
+        throw 'F04 title page preview unexpectedly recorded a project revision'
+    }
+    $closeTitlePage = FocusByShiftTab $titlePageTitle ([System.Windows.Automation.ControlType]::Button) 'Toggle offline manuscript title page builder' 2
+    $closeTitlePage.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 100
+    $closedTitleInputs = @((Children $window ([System.Windows.Automation.ControlType]::Edit)) | ForEach-Object { $_.Current.Name })
+    if ($closedTitleInputs -contains 'Title page manuscript title' -or
+        $closedTitleInputs -contains 'Copyable unsaved title page preview') {
+        throw 'F04 title page builder remained expanded after its collapse action'
+    }
+    Write-Output 'PASS: F04 collapsed native title-page builder previews an attributed unsaved draft with matching SHA-256 and no project revision change'
+
+    # The expanded title page may leave the parent Manuscript ID editor above
+    # the installed Windows viewport after collapse. Navigate from the real
+    # visible F05 citation editor back to that exact native control rather
+    # than assuming a clipped AccessKit node remains in the UIA tree.
+    $manuscriptReferenceAfterF04 = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $null = Reveal-ManuscriptIdAfterNativeScroll $window $manuscriptReferenceAfterF04
+
     foreach ($pair in @(
         @('Manuscript ID','uia-paper'),
         @('Manuscript section','Results'),
         @('Manuscript citations',$referenceId),
         @('Manuscript section body','Persisted UIA result supported by the registered reference.')
     )) {
-        $element = Named $window ([System.Windows.Automation.ControlType]::Edit) $pair[0]
+        $element = if ($pair[0] -eq 'Manuscript section body') {
+            # The newly inserted F05 controls shift the editor below the
+            # Slint/AccessKit viewport. Preserve the preexisting manuscript
+            # save assertion while reaching its REAL editor via keyboard.
+            $citationAnchor = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+            FocusByTab $citationAnchor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body' 35
+        } else {
+            Named $window ([System.Windows.Automation.ControlType]::Edit) $pair[0]
+        }
         ([System.Windows.Automation.ValuePattern]$element.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($pair[1])
     }
     (Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview manuscript section').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -1250,6 +2456,20 @@ try {
     $markdownExport = FocusByTab $manuscriptEditor ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown' 8
     $markdownExport.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
+    # We deliberately collapsed the operation-details pane to reach Export
+    # through the Windows keyboard focus order. The export callback updates its
+    # prepared receipt and the bottom status, but does not reopen that pane.
+    # Check the visible status, explicitly reopen the result for inspection,
+    # then collapse it again so subsequent Save controls remain reachable.
+    $preparedStatusNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($preparedStatusNames | Where-Object { $_ -like '*Manuscript MARKDOWN prepared; no file saved yet*' })) {
+        throw 'Manuscript export did not report a prepared Markdown artifact'
+    }
+    Invoke-AccessibleButton $window 'Toggle manuscript operation details'
+    Start-Sleep -Milliseconds 160
     $writingExportNames = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
         [System.Windows.Automation.Condition]::TrueCondition
@@ -1257,8 +2477,17 @@ try {
     if (-not ($writingExportNames | Where-Object { $_ -like '*## Results*Persisted UIA result supported by the registered reference.*' })) {
         throw 'Manuscript Markdown export was not generated from persisted section revisions'
     }
+    Invoke-AccessibleButton $window 'Toggle manuscript operation details'
+    Start-Sleep -Milliseconds 120
+    Write-Output 'PASS: manuscript Markdown export visible in the explicitly expanded result pane'
     $physicalMarkdown = Join-Path $hostData ('uia-physical-' + [guid]::NewGuid().ToString('N') + '.md')
-    $markdownPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path'
+    # Slint omits the lower Save row from UIA while it is outside the visible
+    # scroll viewport. Tab from the *live* Export action to the destination
+    # field; this uses the actual accessible Windows keyboard focus order and
+    # scrolls the field into view instead of treating an offscreen node as
+    # missing or skipping the physical file-save assertion.
+    $exportAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown'
+    $markdownPath = Reveal-ManuscriptExportPath $window $exportAnchor
     ([System.Windows.Automation.ValuePattern]$markdownPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($physicalMarkdown)
     Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
     Start-Sleep -Milliseconds 220
@@ -1289,7 +2518,8 @@ try {
     if (-not ($overwriteResult | Where-Object { $_ -like '*Prepare a manuscript or draft ZIP before saving*' })) {
         throw 'Repeated Save was not rejected after consuming its prepared artifact'
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $exportAgain = FocusByShiftTab $markdownPath ([System.Windows.Automation.ControlType]::Button) 'Export manuscript Markdown' 9
+    $exportAgain.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 150
     Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
     Start-Sleep -Milliseconds 150
@@ -1303,7 +2533,8 @@ try {
     if ([System.IO.File]::ReadAllText($physicalMarkdown) -ne $physicalMarkdownText) {
         throw 'Physical export overwrote a pre-existing file after a fresh preparation'
     }
-    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript DOCX').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $docxExport = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript DOCX'
+    $docxExport.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     Start-Sleep -Milliseconds 220
     $writingDocxNames = @($window.FindAll(
         [System.Windows.Automation.TreeScope]::Descendants,
@@ -1316,7 +2547,8 @@ try {
         throw 'Manuscript DOCX export did not expose the verified structural feature receipt'
     }
     $physicalDocx = Join-Path $hostData ('uia-physical-' + [guid]::NewGuid().ToString('N') + '.docx')
-    $markdownPath = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path'
+    $docxExportAnchor = Named $window ([System.Windows.Automation.ControlType]::Button) 'Export manuscript DOCX'
+    $markdownPath = FocusByTab $docxExportAnchor ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path' 9
     ([System.Windows.Automation.ValuePattern]$markdownPath.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue($physicalDocx)
     Invoke-AccessibleButton $window 'Save prepared manuscript artifact without overwrite'
     Start-Sleep -Milliseconds 220
@@ -1327,6 +2559,51 @@ try {
     if ($docxBytes.Length -lt 4 -or $docxBytes[0] -ne 80 -or $docxBytes[1] -ne 75) {
         throw 'Saved manuscript DOCX has no ZIP/OOXML signature'
     }
+    # F31: the real persisted manuscript sections are converted to a bounded,
+    # loss-disclosed, inert Quarto AST, then only saved after an explicit native
+    # sensitive-export approval. This is source export, NOT Quarto execution.
+    $f31Before = Get-F14ProjectSnapshot $temporary
+    $f31Prepare = FocusByTab $markdownPath ([System.Windows.Automation.ControlType]::Button) 'Prepare source bound inert Quarto document from persisted manuscript sections' 8
+    $f31Prepare.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Quarto source prepared offline*' 10000
+    $f31Result = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($f31Result | Where-Object {
+        $_ -like '*Quarto .qmd source prepared*NOT SAVED*'
+    })) { throw 'Native F31 preparation did not disclose unsaved, lossy Quarto source' }
+    $f31Destination = Join-Path $hostData ('uia-quarto-' + [guid]::NewGuid().ToString('N') + '.qmd')
+    $f31Input = FocusByShiftTab $f31Prepare ([System.Windows.Automation.ControlType]::Edit) 'Manuscript export destination path' 8
+    $f31Input.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue($f31Destination)
+    $f31Save = FocusByTab $f31Input ([System.Windows.Automation.ControlType]::Button) 'Explicitly save verified Quarto source without overwriting files' 7
+    $f31Save.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 250
+    if (-not (Test-Path -LiteralPath $f31Destination -PathType Leaf)) {
+        throw 'F31 explicit native Save did not create the real Quarto .qmd file'
+    }
+    $f31Source = [System.IO.File]::ReadAllText($f31Destination)
+    if (-not $f31Source.StartsWith("---`ntitle: ") -or
+        -not $f31Source.Contains("execute:`n  enabled: false") -or
+        -not $f31Source.Contains('Persisted UIA result supported by the registered reference.') -or
+        $f31Source.Contains('<script>')) {
+        throw 'Saved Quarto source failed title, persisted text, inert execution or safety validation'
+    }
+    $f31Hash = (Get-FileHash -LiteralPath $f31Destination -Algorithm SHA256).Hash.ToLowerInvariant()
+    $f31Names = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if (-not ($f31Names | Where-Object { $_ -like "*$f31Hash*" })) {
+        throw 'F31 actual saved Quarto SHA-256 was not in the native verified receipt'
+    }
+    $f31Save.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 120
+    if ([System.IO.File]::ReadAllText($f31Destination) -cne $f31Source) {
+        throw 'F31 repeated Save overwrote or changed the prior .qmd file'
+    }
+    Assert-F14Unchanged $f31Before (Get-F14ProjectSnapshot $temporary) $window 'F31 native Quarto source no-write to project'
+    Write-Output 'UIA_F31_BOUND_INERT_QUARTO_PHYSICAL_QMD_SHA_NO_OVERWRITE_NO_PROJECT_WRITE_OK'
     Write-Output 'PASS: Markdown and structured DOCX were physically saved through the native manuscript UI with verified digest and no overwrite'
     Write-Output 'PASS: Manuscript preview -> approved save -> inspect -> Markdown + structured DOCX export works through native UI'
 
@@ -1423,6 +2700,130 @@ try {
     [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
     Start-Sleep -Milliseconds 220
 
+    # F05: run after the original F04, exports and Publishing gates so the
+    # approved stored manuscript used by those earlier checks is untouched.
+    # Reuse the same disposable project and persisted $referenceId registered
+    # through the real References native UI. Only UIA controls may mutate it.
+    $f05ManuscriptAnchor = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05ManuscriptId = Reveal-ManuscriptIdAfterNativeScroll $window $f05ManuscriptAnchor
+    $f05Section = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section'
+    $f05Value = [System.Windows.Automation.ValuePattern]::Pattern
+    if ($f05ManuscriptId.GetCurrentPattern($f05Value).Current.Value -ne 'uia-paper' -or
+        $f05Section.GetCurrentPattern($f05Value).Current.Value -ne 'Results') {
+        throw 'F05 does not have the expected active manuscript and Results section'
+    }
+    # Deliberately seed duplicate metadata through the existing native editor
+    # and wait for its ordinary autosave BEFORE preview baseline. This proves
+    # Apply actually deduplicates; it is not just preserving one existing ID.
+    $f05CitationEdit = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citations'
+    $f05CitationEdit.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern).SetValue("$referenceId, $referenceId")
+    WaitForNameLike $window '*Manuscript autosaved to project revisions*' 15000
+    $f05InitialDraft = Read-F05ManuscriptDraft $window
+    $f05BodyBefore = $f05InitialDraft.Body
+    $f05CitationsBefore = $f05InitialDraft.Citations
+    if ($f05BodyBefore -notlike '*Persisted UIA result supported by the registered reference.*' -or
+        $f05CitationsBefore -cne "$referenceId, $referenceId") {
+        throw 'F05 existing manuscript draft and registered citation fixture do not match'
+    }
+    $f05RevisionBefore = Get-VisibleProjectRevision $window
+    $f05Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05UnknownId = '00000000-0000-4000-8000-000000000000'
+    if ($f05UnknownId -eq $referenceId) { throw 'F05 missing-reference fixture collided with the real registered ID' }
+    $f05Reference.GetCurrentPattern($f05Value).SetValue($f05UnknownId)
+    $f05Preview = FocusByTab $f05Reference ([System.Windows.Automation.ControlType]::Button) 'Preview verified project citation insertion' 3
+    $f05Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status Citation preview refused:*reference not found*' 10000
+    $f05InvalidDraft = Read-F05ManuscriptDraft $window
+    if ((Get-VisibleProjectRevision $window) -ne $f05RevisionBefore -or
+        $f05InvalidDraft.Body -cne $f05BodyBefore -or $f05InvalidDraft.Citations -cne $f05CitationsBefore) {
+        throw 'F05 missing reference preview mutated the manuscript or project revision'
+    }
+    $f05Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05Reference.GetCurrentPattern($f05Value).SetValue($referenceId)
+    $f05Preview = FocusByTab $f05Reference ([System.Windows.Automation.ControlType]::Button) 'Preview verified project citation insertion' 3
+    $f05Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status PREVIEW ONLY*Locally registered reference: UIA memory evidence (status: unverified)*' 10000
+    $f05Marker = "[@$referenceId]"
+    $f05SourceReceipt = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name } |
+        Where-Object { $_.StartsWith('Manuscript citation insertion status PREVIEW ONLY') -and $_.Contains($f05Marker) })
+    if ($f05SourceReceipt.Count -eq 0) {
+        throw 'F05 preview did not disclose the exact marker of the trusted project reference'
+    }
+    $f05PreviewDraft = Read-F05ManuscriptDraft $window
+    if ($f05PreviewDraft.Body -cne $f05BodyBefore -or
+        $f05PreviewDraft.Citations -cne $f05CitationsBefore -or
+        (Get-VisibleProjectRevision $window) -ne $f05RevisionBefore) {
+        throw 'F05 source-bound preview silently modified body, citation IDs or project revision'
+    }
+
+    # Change the exact UUID after preview, then click the REAL Apply action.
+    # The old pending reference must not be transferable to the new selection.
+    $f05Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05Reference.GetCurrentPattern($f05Value).SetValue($f05UnknownId)
+    $f05Apply = FocusByTab $f05Reference ([System.Windows.Automation.ControlType]::Button) 'Apply previewed project citation insertion' 4
+    $f05Apply.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status Citation not applied:*Reference identity or source record changed*' 10000
+    $f05StaleDraft = Read-F05ManuscriptDraft $window
+    if ($f05StaleDraft.Body -cne $f05BodyBefore -or
+        $f05StaleDraft.Citations -cne $f05CitationsBefore -or
+        (Get-VisibleProjectRevision $window) -ne $f05RevisionBefore) {
+        throw 'F05 stale reference selection Apply modified the draft or project revision'
+    }
+
+    $f05Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05Reference.GetCurrentPattern($f05Value).SetValue($referenceId)
+    $f05Preview = FocusByTab $f05Reference ([System.Windows.Automation.ControlType]::Button) 'Preview verified project citation insertion' 3
+    $f05Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status PREVIEW ONLY*UIA memory evidence*' 10000
+    $f05Apply = FocusByTab $f05Preview ([System.Windows.Automation.ControlType]::Button) 'Apply previewed project citation insertion' 3
+    $f05Apply.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status Applied the locally registered citation*Autosave is pending*' 10000
+    $f05AppliedDraft = Read-F05ManuscriptDraft $window
+    $f05BodyApplied = $f05AppliedDraft.Body
+    $f05CitationsApplied = $f05AppliedDraft.Citations
+    $f05Lf = [string][char]10
+    $f05BodyNormalized = $f05BodyApplied.Replace(([string][char]13 + $f05Lf), $f05Lf)
+    $f05BeforeNormalized = $f05BodyBefore.Replace(([string][char]13 + $f05Lf), $f05Lf)
+    if ($f05BodyNormalized -cne ($f05BeforeNormalized + ($f05Lf * 2) + $f05Marker) -or
+        $f05CitationsApplied -cne $referenceId) {
+        throw 'F05 explicit Apply did not append exactly one source marker or deduplicate existing citation metadata'
+    }
+    # The same marker cannot be appended twice, even though its metadata ID is
+    # already present; no second pending action is permitted.
+    $f05Preview = Named $window ([System.Windows.Automation.ControlType]::Button) 'Preview verified project citation insertion'
+    $f05Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Manuscript citation insertion status Citation preview refused:*already present in the draft body*' 10000
+    if ((Read-F05ManuscriptDraft $window).Body -cne $f05BodyApplied) {
+        throw 'F05 duplicate citation preview changed the just-applied draft'
+    }
+    # A previous setup autosave also emitted the same success status. Require
+    # the actual project header revision to advance *after* F05's explicit
+    # Apply, so a stale status alone cannot satisfy durable-save acceptance.
+    $f05Persisted = $false
+    for ($f05Attempt = 0; $f05Attempt -lt 60; $f05Attempt++) {
+        if ((Get-VisibleProjectRevision $window) -gt $f05RevisionBefore) {
+            $f05Persisted = $true
+            break
+        }
+        Start-Sleep -Milliseconds 200
+    }
+    if (-not $f05Persisted) {
+        throw 'F05 applied citation did not advance the persisted project revision'
+    }
+    WaitForNameLike $window '*Manuscript autosaved to project revisions*' 10000
+    $f05InspectAnchor = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f05InspectButton = FocusByTab $f05InspectAnchor ([System.Windows.Automation.ControlType]::Button) 'Inspect manuscript' 35
+    $f05InspectButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Persisted manuscript revisions loaded*' 10000
+    $f05InspectNames = @($window.FindAll([System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition) | ForEach-Object { $_.Current.Name })
+    if (-not ($f05InspectNames | Where-Object { $_.Contains($f05Marker) })) {
+        throw 'F05 autosaved citation marker was not found in persisted manuscript inspect'
+    }
+    Invoke-AccessibleButton $window 'Toggle manuscript operation details'
+    Write-Output 'PASS: F05 trusted source preview, no pre-apply writes, stale/missing ID refusal, exact explicit appended marker and deduplicated citations, persisted autosave'
+
     # Exercise the real edit-driven debounce path. UI Automation SetValue is
     # surfaced by Slint as an edit, which journals synchronously and restarts
     # the shared 800 ms single-shot autosave timer.
@@ -1447,6 +2848,182 @@ try {
         throw 'Debounced manuscript autosave was not persisted in the manuscript revision store'
     }
     Write-Output 'PASS: manuscript edit is journaled then debounced into the revision/CAS/audit save path'
+
+    # F03: use the exact SAVED Unicode manuscript section tested above. The
+    # real native F03 controls are collapsed by default. Open them via bounded
+    # Slint/AccessKit keyboard traversal: the reviewer toggle follows the
+    # citation controls and the (collapsed) F04 title-page builder.
+    # This must run only AFTER the manuscript autosave/inspect assertion and
+    # BEFORE Notebook/abrupt-exit recovery; close the panel afterwards.
+    # The preceding F05 gate already collapsed operation details. Inspect
+    # refreshes the result without opening it; do not toggle it again here.
+    $f03Before = Get-VisibleProjectRevision $window
+    $f03EditorBefore = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section body'
+    $null = FocusByShiftTab $f03EditorBefore ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID' 35
+    $f03Body = (Read-F05ManuscriptDraft $window).Body
+    if ($f03Body -cne $autosaveManuscript) {
+        throw 'F03 active manuscript editor differs from the verified saved Unicode section'
+    }
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03Manuscript = FocusByShiftTab $f03Reference ([System.Windows.Automation.ControlType]::Edit) 'Manuscript ID' 5
+    $f03Section = FocusByTab $f03Manuscript ([System.Windows.Automation.ControlType]::Edit) 'Manuscript section' 3
+    $f03Value = [System.Windows.Automation.ValuePattern]::Pattern
+    if ($f03Manuscript.GetCurrentPattern($f03Value).Current.Value -cne 'uia-paper' -or
+        $f03Section.GetCurrentPattern($f03Value).Current.Value -cne 'Results') {
+        throw 'F03 does not have the original source manuscript ID and Results section'
+    }
+    if ($autosaveManuscript.IndexOf($persianWord, [System.StringComparison]::Ordinal) -lt 0 -or
+        $autosaveManuscript.IndexOf($persianWord, $autosaveManuscript.IndexOf($persianWord, [System.StringComparison]::Ordinal) + 1, [System.StringComparison]::Ordinal) -ge 0) {
+        throw 'F03 synthetic Unicode quote is not unique in the saved manuscript'
+    }
+    $f03SourceHashBytes = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $f03BodySha = [BitConverter]::ToString($f03SourceHashBytes.ComputeHash(
+            [System.Text.Encoding]::UTF8.GetBytes($autosaveManuscript)
+        )).Replace('-', '').ToLowerInvariant()
+    } finally {
+        $f03SourceHashBytes.Dispose()
+    }
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03Toggle = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Button) 'Toggle source-bound manuscript reviewer comments' 12
+    $f03Toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f03QuoteInput = FocusByTab $f03Toggle ([System.Windows.Automation.ControlType]::Edit) 'Reviewer comment exact saved manuscript quote' 4
+    $f03QuoteInput.GetCurrentPattern($f03Value).SetValue('a')
+    $f03ReviewerInput = FocusByTab $f03QuoteInput ([System.Windows.Automation.ControlType]::Edit) 'Reviewer comment author label' 3
+    $f03Reviewer = 'UIA reviewer (synthetic)'
+    $f03ReviewerInput.GetCurrentPattern($f03Value).SetValue($f03Reviewer)
+    $f03CommentInput = FocusByTab $f03ReviewerInput ([System.Windows.Automation.ControlType]::Edit) 'Reviewer comment text input' 3
+    $f03Comment = "Check Unicode source quotation and local evidence for $persianWord."
+    $f03CommentInput.GetCurrentPattern($f03Value).SetValue($f03Comment)
+
+    # An ambiguous 'a' occurs repeatedly in the saved synthetic section.
+    # Preview is required to refuse it without even staging an approved write.
+    $f03Preview = FocusByTab $f03CommentInput ([System.Windows.Automation.ControlType]::Button) 'Preview source-bound manuscript reviewer comment without writing' 4
+    $f03Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f03Result = FocusByTab $f03Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 7
+    $f03AmbiguousReceipt = $f03Result.GetCurrentPattern($f03Value).Current.Value
+    if (-not $f03AmbiguousReceipt.Contains('Reviewer comment preview refused:') -or
+        -not $f03AmbiguousReceipt.Contains('Quoted text occurs more than once')) {
+        throw 'F03 did not refuse ambiguous saved-source quotation via native preview'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $f03Before -or
+        (Read-F03ManuscriptBody $window $f03Result) -cne $f03Body) {
+        throw 'F03 ambiguous-quote preview unexpectedly changed project or manuscript'
+    }
+
+    # Unsaved passage is also prohibited, even if entered into a real UI field.
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03QuoteInput = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Edit) 'Reviewer comment exact saved manuscript quote' 14
+    $f03QuoteInput.GetCurrentPattern($f03Value).SetValue('Not a passage in the persisted synthetic section')
+    $f03Preview = FocusByTab $f03QuoteInput ([System.Windows.Automation.ControlType]::Button) 'Preview source-bound manuscript reviewer comment without writing' 8
+    $f03Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f03Result = FocusByTab $f03Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 7
+    $f03UnsavedReceipt = $f03Result.GetCurrentPattern($f03Value).Current.Value
+    if (-not $f03UnsavedReceipt.Contains('Reviewer comment preview refused:') -or
+        -not $f03UnsavedReceipt.Contains('Quoted text is not present in the latest saved manuscript revision')) {
+        throw 'F03 did not refuse a quote absent from persisted source'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $f03Before -or
+        (Read-F03ManuscriptBody $window $f03Result) -cne $f03Body) {
+        throw 'F03 unsaved-quote preview unexpectedly changed project or manuscript'
+    }
+
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03QuoteInput = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Edit) 'Reviewer comment exact saved manuscript quote' 14
+    $f03QuoteInput.GetCurrentPattern($f03Value).SetValue($persianWord)
+    $f03Preview = FocusByTab $f03QuoteInput ([System.Windows.Automation.ControlType]::Button) 'Preview source-bound manuscript reviewer comment without writing' 8
+    $f03Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f03Result = FocusByTab $f03Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 7
+    $f03PreviewText = $f03Result.GetCurrentPattern($f03Value).Current.Value
+    $f03ExpectedStart = 'Debounced manuscript autosave '.Length
+    $f03ExpectedEnd = $f03ExpectedStart + $persianWord.Length
+    $f03SourceRegex = [regex]::Match(
+        $f03PreviewText,
+        'PREVIEW ONLY\. Latest saved section r([1-9][0-9]*), SHA-256 ([0-9a-f]{64}), exact Unicode scalar span ([0-9]+)\.\.([0-9]+)\.'
+    )
+    if (-not $f03SourceRegex.Success -or
+        $f03SourceRegex.Groups[2].Value -cne $f03BodySha -or
+        [int]::Parse($f03SourceRegex.Groups[3].Value) -ne $f03ExpectedStart -or
+        [int]::Parse($f03SourceRegex.Groups[4].Value) -ne $f03ExpectedEnd -or
+        -not $f03PreviewText.Contains('No text or project events changed.') -or
+        -not $f03PreviewText.Contains('This is NOT Word Track Changes.')) {
+        throw 'F03 preview failed source SHA, exact Unicode scalar span or no-write disclosure'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $f03Before -or
+        (Read-F03ManuscriptBody $window $f03Result) -cne $f03Body) {
+        throw 'F03 valid source-bound preview silently modified project or manuscript'
+    }
+
+    # The native Record is a distinct, explicit UIA InvokePattern action,
+    # exercising the trusted host's one-use approval and project CAS.
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03Preview = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Button) 'Preview source-bound manuscript reviewer comment without writing' 17
+    $f03Record = FocusByTab $f03Preview ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved immutable manuscript reviewer comment' 3
+    $f03Record.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Immutable reviewer comment recorded with source provenance*' 10000
+    $f03Result = FocusByTab $f03Record ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 5
+    $f03RecordedText = $f03Result.GetCurrentPattern($f03Value).Current.Value
+    if (-not $f03RecordedText.Contains('APPEND-ONLY REVIEWER COMMENT RECORDED.') -or
+        -not $f03RecordedText.Contains('Manuscript text unchanged;') -or
+        -not $f03RecordedText.Contains('"appended": true') -or
+        -not $f03RecordedText.Contains('"manuscript_body_mutated": false')) {
+        throw 'F03 explicit Record did not disclose its durable append-only event result'
+    }
+    $f03AfterRecord = Get-VisibleProjectRevision $window
+    if ($f03AfterRecord -ne ($f03Before + 1) -or
+        -not $f03RecordedText.Contains('"project_revision": ' + $f03AfterRecord) -or
+        (Read-F03ManuscriptBody $window $f03Result) -cne $f03Body) {
+        throw 'F03 approved comment did not append exactly one project revision or changed manuscript text'
+    }
+
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03Record = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved immutable manuscript reviewer comment' 18
+    $f03Load = FocusByTab $f03Record ([System.Windows.Automation.ControlType]::Button) 'Load saved manuscript reviewer comments' 3
+    $f03Load.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Source-bound reviewer comments loaded from project history*' 10000
+    $f03Result = FocusByTab $f03Load ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 4
+    $f03LoadedText = $f03Result.GetCurrentPattern($f03Value).Current.Value
+    if (-not $f03LoadedText.StartsWith('PROJECT-LOCAL IMMUTABLE REVIEW HISTORY.') -or
+        -not $f03LoadedText.Contains('no automatic relocation.')) {
+        throw 'F03 Load did not disclose project-local immutable comment history'
+    }
+    $f03JsonStart = $f03LoadedText.IndexOf('{')
+    if ($f03JsonStart -lt 0) { throw 'F03 Load did not expose its persisted structured comment list' }
+    $f03Loaded = $f03LoadedText.Substring($f03JsonStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($f03Loaded.count -ne 1 -or @($f03Loaded.comments).Count -ne 1 -or
+        $f03Loaded.manuscript_id -cne 'uia-paper' -or
+        $f03Loaded.section -cne 'Results' -or
+        $f03Loaded.read_only -ne $true -or
+        $f03Loaded.historical_anchors_never_silently_relocated -ne $true -or
+        $f03Loaded.comments[0].quote -cne $persianWord -or
+        $f03Loaded.comments[0].reviewer -cne $f03Reviewer -or
+        $f03Loaded.comments[0].comment -cne $f03Comment -or
+        $f03Loaded.comments[0].source_body_sha256 -cne $f03BodySha -or
+        $f03Loaded.comments[0].anchor_status -cne 'current' -or
+        [int]$f03Loaded.comments[0].start_scalar -ne $f03ExpectedStart -or
+        [int]$f03Loaded.comments[0].end_scalar -ne $f03ExpectedEnd) {
+        throw 'F03 persisted comment list mismatches unique synthetic source, reviewer, quote, hash or current anchor'
+    }
+    if ((Get-VisibleProjectRevision $window) -ne $f03AfterRecord -or
+        (Read-F03ManuscriptBody $window $f03Result) -cne $f03Body) {
+        throw 'F03 Load changed the project revision or edited original manuscript'
+    }
+
+    # Restore the pre-F03 collapsed layout for the existing Notebook and
+    # abrupt-exit recovery journeys. Do not reset, delete, or hide test data.
+    $f03Reference = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Manuscript citation reference ID'
+    $f03Result = FocusByTab $f03Reference ([System.Windows.Automation.ControlType]::Edit) 'Copyable source-bound reviewer comment history and preview' 19
+    $f03Toggle = FocusByShiftTab $f03Result ([System.Windows.Automation.ControlType]::Button) 'Toggle source-bound manuscript reviewer comments' 10
+    $f03Toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f03Controls = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    if ($f03Controls -contains 'Reviewer comment exact saved manuscript quote' -or
+        $f03Controls -contains 'Reviewer comment text input') {
+        throw 'F03 reviewer panel failed to collapse before existing native QA resumed'
+    }
+    Write-Output 'PASS: F03 native installed reviewer comments: ambiguous/unsaved quotes refused without writes; Unicode source-bound preview no-write; separate approved Record increments exactly one audited project revision; Load returns exact immutable current anchor; original manuscript unchanged'
 
     $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
     ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('Notebook')
@@ -1978,6 +3555,463 @@ try {
     WaitForNameLike $window '*Project metadata title UIA Updated Persian Project revision*'
     Write-Output 'PASS: approved project metadata revision survives native process restart'
     Capture-WindowScreenshot $window $Screenshot
+
+    # F14 positive: run after all existing Windows GUI journeys and their final
+    # screenshot. This app process was just restarted, so the F14 review panel
+    # is collapsed. A disposable second reference is registered through the
+    # installed GUI; a separate READONLY WinSQLite connection independently
+    # proves exact source bytes, project revision and append-only event history.
+    # The outer catch still captures a failure screenshot for this new gate.
+    $f14Baseline = Get-F14ProjectSnapshot $temporary
+    if ($f14Baseline.References.Count -ne 1 -or $f14Baseline.Aliases.Count -ne 0 -or
+        (Get-VisibleProjectRevision $window) -ne $f14Baseline.Revision) {
+        throw 'F14 positive fixture requires exactly one existing unaliased native UIA reference'
+    }
+    $f14InitialParts = $f14Baseline.References[0].Split('|')
+    if ($f14InitialParts.Count -ne 11 -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14InitialParts[0])) -cne $referenceId) {
+        throw 'F14 existing persisted source identity differs from the earlier native registration'
+    }
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    ([System.Windows.Automation.ValuePattern]$command.GetCurrentPattern([System.Windows.Automation.ValuePattern]::Pattern)).SetValue('References')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 180
+
+    $f14SecondRaw = '@article{uia2025reviewduplicate,author={UIA Researcher},title={UIA memory evidence},year={2025},note={Byte-distinct reviewed QA fixture}}'
+    $f14ReferenceValue = [System.Windows.Automation.ValuePattern]::Pattern
+    $f14Input = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Reference title'
+    EnsureLiveFocus $f14Input
+    $f14Input.GetCurrentPattern($f14ReferenceValue).SetValue('UIA memory evidence')
+    foreach ($f14Pair in @(
+        @('Reference authors', 'UIA Researcher'),
+        @('Reference year', '2025'),
+        @('Reference DOI', ''),
+        @('Reference kind', 'article'),
+        @('Reference format', 'bibtex'),
+        @('Raw reference record', $f14SecondRaw)
+    )) {
+        $f14Input = FocusByTab $f14Input ([System.Windows.Automation.ControlType]::Edit) $f14Pair[0] 6
+        $f14Input.GetCurrentPattern($f14ReferenceValue).SetValue($f14Pair[1])
+    }
+    $f14RegistrationPreview = FocusByTab $f14Input ([System.Windows.Automation.ControlType]::Button) 'Preview reference registration' 4
+    $f14RegistrationPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference preview ready; no project data changed*' 10000
+    Assert-F14Unchanged $f14Baseline (Get-F14ProjectSnapshot $temporary) $window 'second registration preview'
+    $f14RegistrationRecord = FocusByTab $f14RegistrationPreview ([System.Windows.Automation.ControlType]::Button) 'Register previewed reference' 3
+    $f14RegistrationRecord.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Previewed library operation recorded and audited*' 10000
+    $f14Registered = Get-F14ProjectSnapshot $temporary
+    Assert-F14SingleEvent $f14Baseline $f14Registered $window 'library.reference_add'
+    if ($f14Registered.References.Count -ne 2 -or $f14Registered.Aliases.Count -ne 0 -or
+        $f14Registered.References -cnotcontains $f14Baseline.References[0]) {
+        throw 'F14 new native reference registration did not preserve original source row'
+    }
+    $f14AddedRows = @($f14Registered.References | Where-Object { $_ -cne $f14Baseline.References[0] })
+    if ($f14AddedRows.Count -ne 1) {
+        throw 'F14 expected exactly one byte-distinct newly persisted native reference'
+    }
+    $f14DecodedAdded = [System.Collections.Generic.List[object]]::new()
+    foreach ($f14Cell in $f14AddedRows[0].Split('|')) {
+        if ($f14Cell -eq '~') {
+            $f14DecodedAdded.Add($null)
+        } else {
+            $f14DecodedAdded.Add([Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14Cell)))
+        }
+    }
+    if ($f14DecodedAdded.Count -ne 11 -or $f14DecodedAdded[1] -cne 'UIA memory evidence' -or
+        $f14DecodedAdded[2] -cne '["UIA Researcher"]' -or $f14DecodedAdded[3] -cne '2025' -or
+        $null -ne $f14DecodedAdded[4] -or $f14DecodedAdded[5] -cne 'article' -or
+        $f14DecodedAdded[6] -cne 'bibtex' -or $f14DecodedAdded[7] -cne $f14SecondRaw -or
+        $f14DecodedAdded[9] -cne 'unverified') {
+        throw 'F14 registered second source lost expected metadata or exact distinct raw record'
+    }
+    $f14SecondId = $f14DecodedAdded[0]
+    $f14UuidRegex = '^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$'
+    if ($f14SecondId -cnotmatch $f14UuidRegex -or $f14SecondId -ceq $referenceId) {
+        throw 'F14 new native reference identity is missing, malformed or equal to original'
+    }
+    Write-Output 'UIA_F14_TWO_DISTINCT_SOURCES_PERSISTED: exactly one approved registration event; first raw row unchanged'
+
+    # Bounded keyboard focus reveals candidate controls in Slint's scrollable
+    # form. Selecting a candidate copies trusted scan fields; it cannot write.
+    $f14Toggle = FocusByTab $f14RegistrationRecord ([System.Windows.Automation.ControlType]::Button) 'Toggle reviewable reference duplicate finder' 6
+    $f14Toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f14Scan = FocusByTab $f14Toggle ([System.Windows.Automation.ControlType]::Button) 'Scan local reference duplicate candidates without changing data' 4
+    $f14Scan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference candidates scanned locally; no changes recorded*' 10000
+    $f14ReceiptEditor = FocusByTab $f14Scan ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 20
+    $f14ScanText = $f14ReceiptEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    if (-not $f14ScanText.StartsWith('READ-ONLY CANDIDATE SCAN. No merge, revision or event was recorded.')) {
+        throw 'F14 positive scan did not expose exact native read-only receipt'
+    }
+    $f14ScanJsonOffset = $f14ScanText.IndexOf('{')
+    if ($f14ScanJsonOffset -lt 0) { throw 'F14 positive native scan has no structured candidate JSON' }
+    $f14ScanResult = $f14ScanText.Substring($f14ScanJsonOffset) | ConvertFrom-Json -ErrorAction Stop
+    $f14Ids = @($referenceId, $f14SecondId) | Sort-Object -CaseSensitive
+    $f14Candidate = @($f14ScanResult.candidates)
+    if ($f14ScanResult.candidate_count_in_scan -ne 1 -or $f14Candidate.Count -ne 1 -or
+        $f14ScanResult.scan_truncated -ne $false -or $f14ScanResult.candidates_truncated -ne $false -or
+        $f14ScanResult.writes -ne 0 -or $f14ScanResult.automatic_merge -ne $false -or
+        $f14ScanResult.review_required -ne $true -or $f14ScanResult.project_revision -ne $f14Registered.Revision -or
+        $f14Candidate[0].left_id -cne $f14Ids[0] -or $f14Candidate[0].right_id -cne $f14Ids[1] -or
+        $f14Candidate[0].score -ne 80 -or $f14Candidate[0].eligible_for_approval -ne $true -or
+        $f14Candidate[0].review_status -cne 'review_required' -or
+        $f14Candidate[0].candidate_sha256 -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'F14 native candidate scan lacks exactly one eligible score-80 source-bound pair'
+    }
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'positive candidate scan'
+    # Build the Unicode middle dot explicitly: PowerShell 5.1 can decode an
+    # unmarked UTF-8 .ps1 as ANSI, but its native UIA label is actual Unicode.
+    $f14CandidateLabel = 'Select unapproved reference candidate Score 80/100 ' + [char]0x00b7 +
+        ' Needs human source review ' + [char]0x00b7 + ' Not yet decided ' + [char]0x00b7 +
+        ' UIA memory evidence / UIA memory evidence'
+    $f14CandidateButton = FocusByShiftTab $f14ReceiptEditor ([System.Windows.Automation.ControlType]::Button) $f14CandidateLabel 16
+    $f14CandidateButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f14CanonicalEdit = FocusByTab $f14CandidateButton ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review canonical reference ID' 4
+    $f14DuplicateEdit = FocusByTab $f14CanonicalEdit ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review duplicate reference ID' 3
+    $f14FingerprintEdit = FocusByTab $f14DuplicateEdit ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review candidate SHA256' 3
+    if ($f14CanonicalEdit.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14Ids[0] -or
+        $f14DuplicateEdit.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14Ids[1] -or
+        $f14FingerprintEdit.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14Candidate[0].candidate_sha256) {
+        throw 'F14 actual native candidate selection did not populate exact approved IDs and fingerprint'
+    }
+    $f14RationaleEdit = FocusByTab $f14FingerprintEdit ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review rationale' 3
+    $f14Rationale = 'UIA synthetic human review of original bibliography identity'
+    $f14RationaleEdit.GetCurrentPattern($f14ReferenceValue).SetValue($f14Rationale)
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'candidate selection and rationale'
+
+    # An invented candidate SHA must be rejected during Preview, before any
+    # Record action could become approvable. Then stage a valid preview and
+    # edit the rationale before Record to prove one-use stale input refusal.
+    $f14FingerprintEdit.GetCurrentPattern($f14ReferenceValue).SetValue(('0' * 64))
+    $f14InvalidPreview = FocusByTab $f14FingerprintEdit ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 6
+    $f14InvalidPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup preview rejected*' 10000
+    $f14InvalidReceipt = FocusByTab $f14InvalidPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
+    if ($f14InvalidReceipt.GetCurrentPattern($f14ReferenceValue).Current.Value -notlike '*Dedup review rejected: stale candidate fingerprint*') {
+        throw 'F14 native candidate preview accepted fabricated SHA or reported unexpected rejection'
+    }
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'invalid fingerprint preview'
+    $f14FingerprintEdit = FocusByShiftTab $f14InvalidReceipt ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review candidate SHA256' 8
+    $f14FingerprintEdit.GetCurrentPattern($f14ReferenceValue).SetValue($f14Candidate[0].candidate_sha256)
+    $f14ValidPreview = FocusByTab $f14FingerprintEdit ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 6
+    $f14ValidPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'valid alias preview'
+    $f14RationaleEdit = FocusByShiftTab $f14ValidPreview ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review rationale' 3
+    $f14Rationale = 'UIA explicit reviewed identity; preserve two independent raw source records'
+    $f14RationaleEdit.GetCurrentPattern($f14ReferenceValue).SetValue($f14Rationale)
+    $f14StaleRecord = FocusByTab $f14RationaleEdit ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved reference dedup decision' 7
+    $f14StaleRecord.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference decision rejected; preview again*' 10000
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'stale rationale Record refusal'
+
+    # Only the second explicit valid Preview + Record is permitted to change
+    # the durable project, and the exact project event must be reference.merge.
+    $f14Preview = FocusByShiftTab $f14StaleRecord ([System.Windows.Automation.ControlType]::Button) 'Preview reviewed reference alias without changes' 7
+    $f14Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
+    Assert-F14Unchanged $f14Registered (Get-F14ProjectSnapshot $temporary) $window 'final approved alias preview'
+    $f14ApprovedEditor = FocusByTab $f14Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
+    $f14ApprovedText = $f14ApprovedEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    $f14ApprovedStart = $f14ApprovedText.IndexOf('{')
+    if (-not $f14ApprovedText.StartsWith('PREVIEW ONLY. Nothing recorded.') -or $f14ApprovedStart -lt 0) {
+        throw 'F14 approved alias preview did not show its independent native planned decision'
+    }
+    $f14ApprovedJson = $f14ApprovedText.Substring($f14ApprovedStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($f14ApprovedJson.decision -cne 'approve_alias' -or
+        $f14ApprovedJson.candidate_sha256 -cne $f14Candidate[0].candidate_sha256 -or
+        $f14ApprovedJson.alias_operation.preview -ne $true -or
+        $f14ApprovedJson.alias_operation.canonical_id -cne $f14Ids[0] -or
+        $f14ApprovedJson.alias_operation.alias_id -cne $f14Ids[1] -or
+        $f14ApprovedJson.alias_operation.metadata_resolution -cne 'preserved_both_records_no_auto_overwrite') {
+        throw 'F14 approved alias preview mismatched candidate, proposed identities or source-preservation guarantee'
+    }
+    $f14Record = FocusByShiftTab $f14ApprovedEditor ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved reference dedup decision' 3
+    $f14Record.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reviewed reference identity decision recorded locally*' 10000
+    $f14Aliased = Get-F14ProjectSnapshot $temporary
+    Assert-F14SingleEvent $f14Registered $f14Aliased $window 'reference.merge'
+    Assert-F14RowsEqual $f14Registered.References $f14Aliased.References 'approved alias immutable original reference'
+    $f14EncodedAlias = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($f14Ids[1])) + '|' +
+        [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($f14Ids[0])) + '|' +
+        [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($f14Rationale))
+    if ($f14Aliased.Aliases.Count -ne 1 -or $f14Aliased.Aliases[0] -cne $f14EncodedAlias) {
+        throw 'F14 explicitly approved alias was not durably bound to exact original identities and rationale'
+    }
+
+    # Reversal is a different, separately previewed human decision. It cannot
+    # delete or overwrite either bibliography source or rewrite earlier events.
+    $f14UndoPreview = FocusByShiftTab $f14Record ([System.Windows.Automation.ControlType]::Button) 'Preview restoring independent references' 4
+    $f14UndoPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
+    Assert-F14Unchanged $f14Aliased (Get-F14ProjectSnapshot $temporary) $window 'explicit restore preview'
+    $f14UndoEditor = FocusByTab $f14UndoPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
+    $f14UndoText = $f14UndoEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    $f14UndoStart = $f14UndoText.IndexOf('{')
+    if (-not $f14UndoText.StartsWith('PREVIEW ONLY. Nothing recorded.') -or $f14UndoStart -lt 0) {
+        throw 'F14 undo preview did not show the persisted alias being restored'
+    }
+    $f14UndoJson = $f14UndoText.Substring($f14UndoStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($f14UndoJson.decision -cne 'restore_independent_reference' -or
+        $f14UndoJson.alias_operation.preview -ne $true -or
+        $f14UndoJson.alias_operation.previous_canonical_id -cne $f14Ids[0] -or
+        $f14UndoJson.alias_operation.alias_id -cne $f14Ids[1] -or
+        $f14UndoJson.alias_operation.reverted -ne $false) {
+        throw 'F14 undo preview mismatched exact persisted alias and separate restore approval'
+    }
+    $f14UndoRecord = FocusByShiftTab $f14UndoEditor ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved reference dedup decision' 3
+    $f14UndoRecord.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reviewed reference identity decision recorded locally*' 10000
+    $f14Restored = Get-F14ProjectSnapshot $temporary
+    Assert-F14SingleEvent $f14Aliased $f14Restored $window 'reference.unmerge'
+    Assert-F14RowsEqual $f14Registered.References $f14Restored.References 'reversed alias original raw and metadata rows'
+    Assert-F14RowsEqual $f14Registered.Aliases $f14Restored.Aliases 'reversed alias map'
+    if ($f14Restored.Aliases.Count -ne 0 -or $f14Restored.References.Count -ne 2) {
+        throw 'F14 explicit undo failed to restore two intact independent source identities'
+    }
+    Write-Output 'PASS: F14 installed Windows UIA registers two distinct original records; selects a real score-80 candidate; rejects invented fingerprint and stale approval without writes; separately previews/records exactly one alias event and one undo event; read-only independent SQLite snapshots preserve both source records and prior events'
+
+    # F14 schema-v7 positive: a new project revision invalidates the earlier
+    # candidate SHA. Re-scan the *actual persisted* unchanged pair through the
+    # native UI, then preview/record immutable keep separate with no alias.
+    $f14KeepScan = FocusByShiftTab $f14UndoRecord ([System.Windows.Automation.ControlType]::Button) 'Scan local reference duplicate candidates without changing data' 22
+    $f14KeepScan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference candidates scanned locally; no changes recorded*' 10000
+    $f14KeepScanEditor = FocusByTab $f14KeepScan ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 20
+    $f14KeepScanText = [string]$f14KeepScanEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    $f14KeepScanStart = $f14KeepScanText.IndexOf('{')
+    if (-not $f14KeepScanText.StartsWith('READ-ONLY CANDIDATE SCAN.') -or $f14KeepScanStart -lt 0) {
+        throw 'F14 keep-separate fresh native source scan is not inspectable'
+    }
+    $f14KeepScanJson = $f14KeepScanText.Substring($f14KeepScanStart) | ConvertFrom-Json -ErrorAction Stop
+    $f14KeepCandidate = @($f14KeepScanJson.candidates)
+    if ($f14KeepScanJson.project_revision -ne $f14Restored.Revision -or
+        $f14KeepCandidate.Count -ne 1 -or
+        $f14KeepCandidate[0].decision_state -cne 'unreviewed' -or
+        $f14KeepCandidate[0].stable_pair_sha256 -cnotmatch '^[0-9a-f]{64}$' -or
+        $f14KeepCandidate[0].candidate_sha256 -cnotmatch '^[0-9a-f]{64}$') {
+        throw 'F14 fresh source scan is incomplete, stale or already decided'
+    }
+    Assert-F14Unchanged $f14Restored (Get-F14ProjectSnapshot $temporary) $window 'keep-separate rescan'
+    $f14KeepRow = FocusByShiftTab $f14KeepScanEditor ([System.Windows.Automation.ControlType]::Button) $f14CandidateLabel 20
+    $f14KeepRow.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f14KeepCanonical = FocusByTab $f14KeepRow ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review canonical reference ID' 4
+    $f14KeepDuplicate = FocusByTab $f14KeepCanonical ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review duplicate reference ID' 3
+    $f14KeepFingerprint = FocusByTab $f14KeepDuplicate ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review candidate SHA256' 3
+    $f14KeepRationale = FocusByTab $f14KeepFingerprint ([System.Windows.Automation.ControlType]::Edit) 'Duplicate review rationale' 3
+    if ($f14KeepCanonical.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14Ids[0] -or
+        $f14KeepDuplicate.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14Ids[1] -or
+        $f14KeepFingerprint.GetCurrentPattern($f14ReferenceValue).Current.Value -cne $f14KeepCandidate[0].candidate_sha256) {
+        throw 'F14 keep-separate row selection did not preserve current source-bound identity'
+    }
+    $f14KeepReason = 'UIA synthetic reviewer kept independent sources separate'
+    $f14KeepRationale.GetCurrentPattern($f14ReferenceValue).SetValue($f14KeepReason)
+    $f14KeepPreview = FocusByTab $f14KeepRationale ([System.Windows.Automation.ControlType]::Button) 'Preview immutable keep separate reference decision' 5
+    $f14KeepPreview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference dedup decision previewed; no changes recorded*' 10000
+    Assert-F14Unchanged $f14Restored (Get-F14ProjectSnapshot $temporary) $window 'native keep-separate preview'
+    $f14KeepPreviewEditor = FocusByTab $f14KeepPreview ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
+    $f14KeepPreviewText = [string]$f14KeepPreviewEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    $f14KeepPreviewStart = $f14KeepPreviewText.IndexOf('{')
+    if (-not $f14KeepPreviewText.StartsWith('PREVIEW ONLY. Nothing recorded.') -or $f14KeepPreviewStart -lt 0) {
+        throw 'F14 keep-separate native decision preview did not expose a real review receipt'
+    }
+    $f14KeepPreviewJson = $f14KeepPreviewText.Substring($f14KeepPreviewStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($f14KeepPreviewJson.decision -cne 'keep_separate' -or
+        $f14KeepPreviewJson.preview_only -ne $true -or $f14KeepPreviewJson.writes -ne 0 -or
+        $f14KeepPreviewJson.candidate_sha256 -cne $f14KeepCandidate[0].candidate_sha256 -or
+        $f14KeepPreviewJson.stable_pair_sha256 -cne $f14KeepCandidate[0].stable_pair_sha256) {
+        throw 'F14 keep-separate native preview invented a write or lost source-bound provenance'
+    }
+    $f14KeepRecord = FocusByShiftTab $f14KeepPreviewEditor ([System.Windows.Automation.ControlType]::Button) 'Record explicitly approved reference dedup decision' 3
+    $f14KeepRecord.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reviewed reference identity decision recorded locally*' 10000
+    $f14Kept = Get-F14ProjectSnapshot $temporary
+    Assert-F14SingleEvent $f14Restored $f14Kept $window 'reference.dedup_keep_separate'
+    Assert-F14RowsEqual $f14Restored.References $f14Kept.References 'kept source bytes'
+    Assert-F14RowsEqual $f14Restored.Aliases $f14Kept.Aliases 'kept alias map'
+    if ($f14Kept.Decisions.Count -ne 1 -or $f14Kept.Aliases.Count -ne 0) {
+        throw 'F14 keep-separate Record was not exactly one immutable decision without alias'
+    }
+    $f14KeptParts = $f14Kept.Decisions[0].Split('|')
+    if ($f14KeptParts.Count -ne 12 -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[1])) -cne $f14Ids[0] -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[2])) -cne $f14Ids[1] -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[3])) -cne 'keep_separate' -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[4])) -cne $f14KeepCandidate[0].candidate_sha256 -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[5])) -cne $f14KeepCandidate[0].stable_pair_sha256 -or
+        [Text.Encoding]::UTF8.GetString([Convert]::FromBase64String($f14KeptParts[8])) -cne $f14KeepReason) {
+        throw 'F14 immutable decision lacks exact approved source pair, rationale or digests'
+    }
+    $f14HistoryButton = FocusByShiftTab $f14KeepRecord ([System.Windows.Automation.ControlType]::Button) 'Load immutable reference pair decision history without changing project' 4
+    $f14HistoryButton.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Immutable reference decision history loaded locally*' 10000
+    Assert-F14Unchanged $f14Kept (Get-F14ProjectSnapshot $temporary) $window 'read-only decision history load'
+    $f14HistoryEditor = FocusByTab $f14HistoryButton ([System.Windows.Automation.ControlType]::Edit) 'Copyable reference duplicate candidate or decision details' 16
+    $f14HistoryText = [string]$f14HistoryEditor.GetCurrentPattern($f14ReferenceValue).Current.Value
+    $f14HistoryStart = $f14HistoryText.IndexOf('{')
+    if (-not $f14HistoryText.StartsWith('READ-ONLY IMMUTABLE REFERENCE DECISION HISTORY.') -or $f14HistoryStart -lt 0) {
+        throw 'F14 read-only native history did not expose actual persisted decision details'
+    }
+    $f14History = $f14HistoryText.Substring($f14HistoryStart) | ConvertFrom-Json -ErrorAction Stop
+    if ($f14History.decision_state -cne 'kept_separate' -or @($f14History.rows).Count -ne 1 -or
+        $f14History.rows[0].decision -cne 'keep_separate' -or
+        $f14History.rows[0].stable_pair_sha256 -cne $f14KeepCandidate[0].stable_pair_sha256) {
+        throw 'F14 native history was not source-consistent with immutable reviewed decision'
+    }
+    Write-Output 'UIA_F14_KEEP_SEPARATE_NATIVE_PREVIEW_RECORD_PERSISTED_HISTORY_NO_ALIAS_OK'
+
+    # Cold-process re-open of the *actual* installed app at the same isolated
+    # project. Neither reimport nor direct SQL seeding may stand in for the
+    # persisted human decision; the native candidate state must survive.
+    Stop-Process -Id $p.Id -Force
+    $p.WaitForExit()
+    $p = Start-Process -FilePath $Exe -PassThru
+    $window = WindowFor $p 'F14 retained-decision native window absent after restart'
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    $command.GetCurrentPattern($f14ReferenceValue).SetValue('Welcome')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 180
+    $projectPathInput = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Project path'
+    $projectPathInput.GetCurrentPattern($f14ReferenceValue).SetValue($temporary)
+    (Named $window ([System.Windows.Automation.ControlType]::Button) 'Open project').GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    Start-Sleep -Milliseconds 220
+    $f14Reopened = Get-F14ProjectSnapshot $temporary
+    Assert-F14Unchanged $f14Kept $f14Reopened $window 'restart and reopen immutable reference decision'
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    $command.GetCurrentPattern($f14ReferenceValue).SetValue('References')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 180
+    $firstReferenceField = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Reference title'
+    $reviewToggle = FocusByTab $firstReferenceField ([System.Windows.Automation.ControlType]::Button) 'Toggle reviewable reference duplicate finder' 16
+    $reviewToggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $reviewScan = FocusByTab $reviewToggle ([System.Windows.Automation.ControlType]::Button) 'Scan local reference duplicate candidates without changing data' 4
+    $reviewScan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Reference candidates scanned locally; no changes recorded*' 10000
+    $f14KeptLabel = 'Select unapproved reference candidate Score 80/100 ' + [char]0x00b7 +
+        ' Needs human source review ' + [char]0x00b7 + ' Previously kept separate (binding) ' + [char]0x00b7 +
+        ' UIA memory evidence / UIA memory evidence'
+    $keptRow = FocusByTab $reviewScan ([System.Windows.Automation.ControlType]::Button) $f14KeptLabel 4
+    if (-not $keptRow.Current.IsEnabled) {
+        throw 'F14 immutable keep-separate native review row unavailable after cold restart'
+    }
+    Assert-F14Unchanged $f14Kept (Get-F14ProjectSnapshot $temporary) $window 'restart native kept-separate candidate scan'
+    Write-Output 'UIA_F14_KEEP_SEPARATE_COLD_RESTART_SOURCEBOUND_ROW_WITH_NO_WRITE_OK'
+    # F43 is strictly suggest-only. Verify the installed accessible native
+    # entry point refuses an invalid source UUID and neither mutates the
+    # project revision nor changes the persisted reference/source/alias state.
+    $reviewToggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f43Toggle = FocusByTab $reviewToggle ([System.Windows.Automation.ControlType]::Button) 'Toggle suggest-only reference PDF metadata inspector' 8
+    $f43Toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f43Source = FocusByTab $f43Toggle ([System.Windows.Automation.ControlType]::Edit) 'Indexed PDF source ID for metadata suggestions' 5
+    $f43Value = [System.Windows.Automation.ValuePattern]::Pattern
+    $f43Source.GetCurrentPattern($f43Value).SetValue('this-is-not-a-source-uuid')
+    $f43Before = Get-F14ProjectSnapshot $temporary
+    $f43Preview = FocusByTab $f43Source ([System.Windows.Automation.ControlType]::Button) 'Preview unverified PDF source metadata without recording' 4
+    $f43Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*PDF metadata suggestions unavailable; no changes recorded*' 10000
+    Assert-F14Unchanged $f43Before (Get-F14ProjectSnapshot $temporary) $window 'F43 invalid indexed PDF metadata preview'
+    $f43Result = FocusByTab $f43Preview ([System.Windows.Automation.ControlType]::Edit) 'Read-only unverified reference PDF metadata candidates' 4
+    $f43Text = [string]$f43Result.GetCurrentPattern($f43Value).Current.Value
+    if (-not $f43Text.StartsWith('PDF metadata suggestions refused:') -or
+        -not $f43Text.Contains('No changes recorded')) {
+        throw 'F43 native invalid indexed PDF preview did not explain its strict refusal'
+    }
+    Write-Output 'UIA_F43_INDEXED_PDF_SUGGEST_ONLY_NATIVE_NEGATIVE_NO_PROJECT_WRITES_OK'
+    # F07: a preview must never send a network request. Inspect the actual
+    # native consent panel and its enabled separate Fetch control, but DO NOT
+    # activate Fetch in unattended CI (live Crossref needs user approval).
+    $f07Before = Get-F14ProjectSnapshot $temporary
+    $f07Toggle = FocusByTab $f43Result ([System.Windows.Automation.ControlType]::Button) 'Toggle consent-gated DOI Crossref lookup' 10
+    $f07Toggle.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    $f07Input = FocusByTab $f07Toggle ([System.Windows.Automation.ControlType]::Edit) 'DOI for explicit Crossref lookup' 6
+    $f07Input.GetCurrentPattern($f43Value).SetValue('not-a-doi')
+    $f07Preview = FocusByTab $f07Input ([System.Windows.Automation.ControlType]::Button) 'Preview Crossref DOI lookup offline without network' 4
+    $f07Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Crossref offline preview rejected; no network request*' 10000
+    Assert-F14Unchanged $f07Before (Get-F14ProjectSnapshot $temporary) $window 'F07 invalid DOI offline preview'
+    $f07Input.GetCurrentPattern($f43Value).SetValue('10.1038/nphys1170')
+    $f07Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Crossref request previewed locally; zero network requests*' 10000
+    $f07Fetch = Named $window ([System.Windows.Automation.ControlType]::Button) 'Approve and fetch one Crossref DOI metadata record'
+    if (-not $f07Fetch.Current.IsEnabled) {
+        throw 'F07 native Fetch consent action did not become separately available after offline preview'
+    }
+    Assert-F14Unchanged $f07Before (Get-F14ProjectSnapshot $temporary) $window 'F07 valid DOI offline preview'
+    Write-Output 'UIA_F07_NATIVE_DOI_OFFLINE_PREVIEW_ZERO_PROJECT_WRITES_NO_NETWORK_REQUEST_OK'
+    # F44: exercise the installed Windows native synthetic-only extraction
+    # evaluator through real UIA controls. No model call, source data fetch,
+    # network access or project event is permitted. This deliberately tests
+    # the *rendered* SHA receipt instead of rebuilding expected output in QA.
+    $f44Before = Get-F14ProjectSnapshot $temporary
+    $command = Named $window ([System.Windows.Automation.ControlType]::Edit) 'Command palette'
+    $command.GetCurrentPattern($f43Value).SetValue('Diagnostics')
+    $command.SetFocus()
+    [System.Windows.Forms.SendKeys]::SendWait('{ENTER}')
+    Start-Sleep -Milliseconds 250
+    Invoke-AccessibleButton $window 'Toggle offline synthetic extraction evaluation fixture panel'
+    $f44Sample = Named $window ([System.Windows.Automation.ControlType]::Button) 'Insert trusted synthetic extraction evaluation example without project data'
+    $f44Sample.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*A small, programmatically generated synthetic example is ready*' 10000
+    $f44Preview = FocusByTab $f44Sample ([System.Windows.Automation.ControlType]::Button) 'Preview strict synthetic extraction evaluation with no network or project write' 4
+    $f44Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*SYNTHETIC FIXTURE ONLY*1 checked slots*' 10000
+    $f44StatusNames = @($window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | ForEach-Object { $_.Current.Name })
+    $f44Status = [string]($f44StatusNames | Where-Object { $_ -like '*SYNTHETIC FIXTURE ONLY*Markdown SHA-256:*' } | Select-Object -First 1)
+    $f44Hash = [regex]::Match($f44Status, 'Markdown SHA-256: ([0-9a-f]{64})').Groups[1].Value
+    if ($f44Hash.Length -ne 64 -or
+        -not $f44Status.Contains('Not a trained-model, gold-custody, calibration, or scientific-result claim')) {
+        throw 'F44 synthetic installed preview lacks SHA or explicit no-model-validation limits'
+    }
+    $f44ReceiptEditor = FocusByTab $f44Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable SHA verified redacted synthetic extraction evaluation receipt' 8
+    $f44Receipt = [string]$f44ReceiptEditor.GetCurrentPattern($f43Value).Current.Value
+    $f44Digest = [System.Security.Cryptography.SHA256]::Create()
+    try {
+        $f44ObservedHash = ([BitConverter]::ToString($f44Digest.ComputeHash(
+            [System.Text.Encoding]::UTF8.GetBytes($f44Receipt)
+        ))).Replace('-', '').ToLowerInvariant()
+    } finally { $f44Digest.Dispose() }
+    if ($f44ObservedHash -cne $f44Hash -or
+        -not $f44Receipt.Contains('Synthetic fixture only') -or
+        -not $f44Receipt.Contains('| ALL | 1 | 1 | 0 | 0 | 0 | 0 | 1.0000') -or
+        $f44Receipt.Contains('Synthetic MRI measurement')) {
+        throw 'F44 native installed receipt failed full Markdown SHA/metric/redaction verification'
+    }
+    Assert-F14Unchanged $f44Before (Get-F14ProjectSnapshot $temporary) $window 'F44 synthetic evaluation preview'
+    Write-Output 'UIA_F44_SYNTHETIC_SHA_VERIFIED_REDACTED_NO_PROJECT_WRITE_OK'
+
+    $f44Fixture = FocusByShiftTab $f44ReceiptEditor ([System.Windows.Automation.ControlType]::Edit) 'Synthetic extraction evaluation typed JSON fixture input' 8
+    $f44Fixture.GetCurrentPattern($f43Value).SetValue('{}')
+    $f44Preview = FocusByTab $f44Fixture ([System.Windows.Automation.ControlType]::Button) 'Preview strict synthetic extraction evaluation with no network or project write' 5
+    $f44Preview.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
+    WaitForNameLike $window '*Synthetic evaluation refused:*' 10000
+    $f44ReceiptEditor = FocusByTab $f44Preview ([System.Windows.Automation.ControlType]::Edit) 'Copyable SHA verified redacted synthetic extraction evaluation receipt' 8
+    $f44InvalidReceipt = [string]$f44ReceiptEditor.GetCurrentPattern($f43Value).Current.Value
+    if ($f44InvalidReceipt -cne 'No valid SHA-verified synthetic evaluation receipt for this fixture.') {
+        throw 'F44 rejected fixture retained a previously valid scientific receipt'
+    }
+    Assert-F14Unchanged $f44Before (Get-F14ProjectSnapshot $temporary) $window 'F44 malformed synthetic fixture refusal'
+    Write-Output 'UIA_F44_MALFORMED_FIXTURE_FAIL_CLOSED_NO_PROJECT_WRITE_OK'
+} catch {
+    # CI archives the requested screenshot even on failures before the last
+    # test assertion. Keep the original failure authoritative if capture fails.
+    $originalFailure = $_
+    Write-Output "UIA_FAILURE: $($originalFailure.Exception.Message)"
+    if ($Screenshot -and $window) {
+        try {
+            Capture-WindowScreenshot $window $Screenshot
+        } catch {
+            Write-Warning "Failed to capture UIA failure screenshot: $($_.Exception.Message)"
+        }
+    }
+    throw $originalFailure
 } finally {
     if ($p -and -not $p.HasExited) {
         Stop-Process -Id $p.Id -Force
@@ -1991,7 +4025,8 @@ try {
         } else {
             [IO.Path]::GetFullPath((Join-Path $repoRoot $PreserveProjectDirectory))
         }
-        if (-not $preservePath.StartsWith($allowedRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        $allowedPrefix = $allowedRoot.TrimEnd([char[]]@('\', '/')) + [IO.Path]::DirectorySeparatorChar
+        if (-not $preservePath.StartsWith($allowedPrefix, [StringComparison]::OrdinalIgnoreCase)) {
             throw "Preserved UIA fixtures must stay under $allowedRoot"
         }
         New-Item -ItemType Directory -Path (Split-Path -Parent $preservePath) -Force | Out-Null

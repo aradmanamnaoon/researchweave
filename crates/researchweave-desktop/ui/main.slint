@@ -20,10 +20,43 @@ export struct QuickNote {
     archived: bool,
 }
 
+export struct NotebookCell {
+    id: string,
+    revision: int,
+    code: string,
+    result: string,
+}
+
+export struct ResearchLifecycleStage {
+    key: string,
+    title: string,
+    records: int,
+    state: string,
+    target-page: int,
+}
+
+export struct PdfCaptionCandidate {
+    label: string,
+    page-number: int,
+    provenance: string,
+    source-sha256: string,
+}
+
 export struct ManuscriptSection {
     name: string,
     label: string,
     revision: int,
+}
+
+export struct ReferenceDuplicateCandidate {
+    left-id: string,
+    right-id: string,
+    left-title: string,
+    right-title: string,
+    candidate-sha256: string,
+    eligible: bool,
+    score: int,
+    label: string,
 }
 
 export global Theme {
@@ -207,6 +240,7 @@ export component MainWindow inherits Window {
     in-out property <float> progress: 0;
     in-out property <string> project-title: "No project selected";
     in-out property <int> project-revision: 0;
+    in-out property <string> project-local-path: "";
     in-out property <string> status: "Offline ready";
     in-out property <string> durable-jobs: "No completed PDF operations";
     in-out property <string> durable-notifications: "No notifications";
@@ -215,6 +249,8 @@ export component MainWindow inherits Window {
     in-out property <image> pdf-image;
     in-out property <string> pdf-status: "Choose a local PDF file";
     in-out property <string> pdf-local-path: "";
+    // Bound to one explicit caption-anchor navigation, not ordinary PDF opens.
+    in-out property <string> pdf-verified-caption-sha: "";
     in-out property <string> data-local-path: "";
     // A successful import establishes a project-scoped immutable dataset
     // context for the next variable inspection or statistical analysis.
@@ -239,8 +275,29 @@ export component MainWindow inherits Window {
     in-out property <string> protocol-results: "Preview a protocol before recording it.";
     in-out property <string> protocol-export-receipt: "";
     in-out property <string> protocol-export-id: "";
+    in-out property <string> protocol-freeze-status: "No local freeze inspected. A local digest and computer timestamp are not an external preregistration.";
+    in-out property <string> protocol-freeze-summary: "No local baseline inspected yet.";
+    in-out property <string> protocol-freeze-export-receipt: "";
     in-out property <string> reference-results: "Register or inspect project references.";
+    in-out property <bool> reference-pdf-metadata-open: false;
+    in-out property <string> reference-pdf-metadata-results: "Choose an already indexed PDF source ID. Suggestions are unverified and never change bibliography records.";
+    in-out property <bool> reference-crossref-open: false;
+    in-out property <bool> reference-crossref-ready: false;
+    in-out property <bool> reference-crossref-busy: false;
+    in-out property <int> reference-crossref-request-id: 0;
+    in-out property <string> reference-crossref-results: "Enter a DOI. Offline preview makes no network request; a separate explicitly approved fetch contacts Crossref. Metadata is unverified and never automatically saved.";
+    in-out property <bool> reference-dedup-open: false;
+    in-out property <string> reference-dedup-results: "Scan local records, inspect source metadata, and explicitly preview a reversible decision. No automatic merge.";
+    in-out property <[ReferenceDuplicateCandidate]> reference-dedup-candidates: [];
+    in-out property <string> reference-dedup-canonical-id: "";
+    in-out property <string> reference-dedup-duplicate-id: "";
+    in-out property <string> reference-dedup-fingerprint: "";
+    in-out property <string> reference-dedup-rationale: "";
     in-out property <string> review-results: "Use persisted references to build and screen a review.";
+    in-out property <bool> review-screening-open: false;
+    in-out property <string> review-screening-results: "No screening suggestion loaded. Open a project and choose a persisted title/abstract review record.";
+    in-out property <bool> review-search-builder-open: false;
+    in-out property <string> review-search-results: "Specify PICO concepts to draft a database-specific search strategy. No search has been executed.";
     in-out property <string> extraction-results: "Create a versioned extraction schema, then record validated values for a review record.";
     in-out property <string> analysis-results: "Import an immutable dataset revision or inspect saved analysis data.";
     in-out property <string> statistics-result-title: "No analysis run yet";
@@ -250,15 +307,43 @@ export component MainWindow inherits Window {
     in-out property <bool> show-statistics-technical-details: false;
     in-out property <string> variable-results: "Inspect variable metadata, missingness and quality before creating a revised immutable dataset.";
     in-out property <string> analysis-report-results: "Persist verified statistical outputs, reload them by digest, and compose deterministic provenance reports.";
+    in-out property <string> selected-analysis-result-id: "";
+    in-out property <string> analysis-report-selected-ids: "";
     in-out property <string> mixed-methods-results: "Combine an immutable dataset revision with persisted qualitative case mappings. Caller-supplied coding provenance is not accepted.";
     in-out property <string> writing-results: "Preview and save a versioned manuscript section.";
     in-out property <string> agent-results: "Durable project-scoped assistant conversations and prompt templates are available offline.";
     in-out property <string> agent-action-results: "Stage an offline retrieval tool proposal to review its exact operation, effect and fingerprint before approval.";
     in-out property <string> provider-results: "Provider validation is offline-only; remote egress is disabled until explicitly configured.";
     in-out property <string> diagnostics-results: "Run structural diagnostics for the open project.";
+    in-out property <string> open-science-preview-results: "Research-object inventory is local and read-only. It cannot authorize redistribution, publish files, or verify consent.";
+    in-out property <bool> synthetic-evaluation-open: false;
+    in-out property <string> synthetic-evaluation-fixture: "";
+    in-out property <string> synthetic-evaluation-status: "Synthetic-only extraction metrics playground. No project source or trained model is evaluated.";
+    in-out property <string> synthetic-evaluation-receipt: "Load or paste a synthetic fixture and preview its redacted technical receipt. Nothing is saved.";
+    in-out property <int> open-science-request-id: 0;
+    in-out property <bool> open-science-busy: false;
+    in-out property <bool> lifecycle-open: false;
+    in-out property <bool> lifecycle-busy: false;
+    in-out property <int> lifecycle-request-id: 0;
+    in-out property <[ResearchLifecycleStage]> lifecycle-stages: [];
+    in-out property <string> lifecycle-status: "The research lifecycle summarizes saved local records; it cannot determine scientific completeness.";
     in-out property <string> project-activity-results: "Local project event provenance is not authenticated identity evidence.";
     in-out property <string> notebook-results: "Save a revisioned project notebook, inspect history, or export Markdown.";
     in-out property <string> notebook-draft: "";
+    in-out property <bool> notebook-cell-open: false;
+    in-out property <string> notebook-cell-id: "";
+    in-out property <int> notebook-cell-revision: 0;
+    in-out property <string> notebook-cell-code: "";
+    in-out property <string> notebook-cell-approval: "";
+    in-out property <string> notebook-cell-status: "Arithmetic cells run an offline restricted expression language; no Python kernel, file, or network access.";
+    in-out property <int> notebook-cell-offset: 0;
+    in-out property <int> notebook-cell-total: 0;
+    in-out property <int> notebook-cell-snapshot-revision: -1;
+    in-out property <[NotebookCell]> notebook-cells: [];
+    in-out property <[PdfCaptionCandidate]> pdf-caption-candidates: [];
+    in-out property <string> pdf-caption-status: "Figure/table caption candidates are unverified text anchors; image pixels and table cells are not extracted.";
+    in-out property <int> pdf-caption-request-id: 0;
+    in-out property <bool> pdf-caption-busy: false;
     in-out property <[QuickNote]> quick-notes: [];
     in-out property <bool> quick-note-view: true;
     in-out property <string> quick-note-results: "Quick notes are stored in this project, with searchable history.";
@@ -272,13 +357,29 @@ export component MainWindow inherits Window {
     in-out property <string> quick-note-color: "paper";
     in-out property <bool> quick-note-pinned: false;
     in-out property <bool> quick-note-archived: false;
+    in-out property <bool> quick-note-obsidian-open: false;
+    in-out property <string> quick-note-obsidian-markdown: "";
+    in-out property <string> quick-note-obsidian-approval: "";
+    in-out property <string> quick-note-obsidian-status: "Export a saved selected card. Edit the Markdown text, preview changes, then explicitly approve an imported revision.";
     in-out property <string> manuscript-draft-id: "";
     in-out property <string> manuscript-draft-section: "";
     in-out property <string> manuscript-draft-citations: "";
     in-out property <string> manuscript-draft-body: "";
+    in-out property <string> manuscript-citation-reference-id: "";
+    in-out property <string> manuscript-citation-status: "Enter a reference ID from this project's library. Preview before applying; the marker is appended at the end, not at the cursor.";
+    in-out property <bool> manuscript-review-open: false;
+    in-out property <string> manuscript-review-quote: "";
+    in-out property <string> manuscript-review-reviewer: "";
+    in-out property <string> manuscript-review-comment: "";
+    in-out property <string> manuscript-review-results: "Reviewer comments are anchored to an exact saved section revision; no comments loaded.";
+    in-out property <bool> manuscript-title-page-open: false;
+    in-out property <string> manuscript-title-page-preview: "Preview a title page from validated fields; this does not save or submit anything.";
     in-out property <[ManuscriptSection]> manuscript-sections: [];
     in-out property <bool> manuscript-outline-open: false;
     in-out property <string> manuscript-outline-status: "Load saved sections to navigate this manuscript.";
+    in-out property <string> manuscript-revision-summary: "Select a saved manuscript section and load its revision history.";
+    in-out property <string> manuscript-restore-source: "";
+    in-out property <bool> manuscript-history-panel-open: false;
     in-out property <int> manuscript-word-count: 0;
     in-out property <int> manuscript-character-count: 0;
     in-out property <int> manuscript-editor-zoom: 100;
@@ -288,12 +389,29 @@ export component MainWindow inherits Window {
     in-out property <string> manuscript-replace-term: "";
     in-out property <string> manuscript-replace-status: "Find and replace operates on this section only. Review before applying.";
     callback notebook-draft-edited(string);
+    callback preview-arithmetic-cell();
+    callback run-arithmetic-cell();
+    callback load-arithmetic-cells(int);
+    callback preview-open-science-manifest();
+    callback load-synthetic-evaluation-example();
+    callback preview-synthetic-evaluation(string);
+    callback load-research-lifecycle();
+    callback scan-pdf-caption-candidates(string, int);
     callback refresh-quick-notes(string, string);
     callback save-quick-note(string, int, string, string, string, string, bool, bool);
+    callback export-quick-note-obsidian(string);
+    callback preview-quick-note-obsidian(string);
+    callback import-quick-note-obsidian(string, string);
     callback prepare-quick-note-checklist();
     callback complete-next-quick-note(string, int, string, string, string, string, bool, bool);
     callback toggle-quick-note-checklist-item(string, int, string, string, string, string, bool, bool, int);
     callback manuscript-draft-edited(string, string, string, string);
+    callback preview-manuscript-citation();
+    callback apply-manuscript-citation();
+    callback preview-manuscript-comment();
+    callback record-manuscript-comment();
+    callback load-manuscript-comments();
+    callback invalidate-manuscript-comment-preview();
     callback load-manuscript-sections(string);
     callback select-manuscript-section(string, int);
     callback preview-manuscript-replace(string, string);
@@ -302,13 +420,19 @@ export component MainWindow inherits Window {
     in-out property <string> backup-results: "Open a project, then choose an absolute archive path.";
     in-out property <string> recovery-results: "Restore always creates a new project directory.";
     in-out property <string> command-results: "Search views, resources, settings and help";
+    in-out property <[string]> recent-project-options: [];
+    in-out property <int> recent-project-index: 0;
 
     callback load-pdf(string, string, int);
+    callback invalidate-pdf-view();
     callback find-next-pdf(string, string, int);
     callback choose-local-file(string);
     callback create-project(string, string);
     callback create-default-project(string);
     callback open-project(string);
+    callback open-recent-project(int);
+    callback forget-recent-project(int);
+    callback choose-project-folder();
     callback start-job();
     callback run-command(string);
     callback query-command(string) -> string;
@@ -323,6 +447,10 @@ export component MainWindow inherits Window {
     callback preview-question(string, string, string, string);
     callback preview-protocol(string, string, string, string);
     callback preview-protocol-amend(string, string, string, string, string);
+    callback preview-protocol-freeze(string);
+    callback record-protocol-freeze();
+    callback inspect-protocol-freeze(string);
+    callback load-protocol-freeze-receipt(string);
     callback apply-evidence-preview();
     callback load-question-history(string);
     callback load-protocol-history(string);
@@ -330,10 +458,21 @@ export component MainWindow inherits Window {
     callback preview-reference(string, string, string, string, string, string, string);
     callback apply-library-preview();
     callback refresh-references();
+    callback preview-reference-pdf-metadata(string);
+    callback preview-crossref-doi(string);
+    callback fetch-crossref-doi(string);
+    callback invalidate-crossref-doi();
+    callback scan-reference-duplicates();
+    callback preview-reference-dedup(string, string, string, string, string);
+    callback load-reference-dedup-history(string, string);
+    callback record-reference-dedup();
+    callback invalidate-reference-dedup-preview();
     callback preview-review-record(string, string);
     callback preview-review-screen(string, string, string, string, string, string);
     callback refresh-review(string);
+    callback build-review-search-strategy(string, string, string, string, string);
     callback load-review-status(string, string, string);
+    callback suggest-review-screening(string, string, string, string, string, string);
     callback preview-extraction-form(string, string, string);
     callback preview-extraction-form-revision(string, string, string, string, string);
     callback preview-extraction-values(string, string, string, string);
@@ -353,11 +492,17 @@ export component MainWindow inherits Window {
     callback apply-analysis-command-preview();
     callback load-analysis-result(string);
     callback render-analysis-report(string, string);
+    callback prepare-analysis-report-file(string, string);
     callback export-analysis-script(string);
     callback run-mixed-joint-display(string, string, string, string, string, string);
     callback preview-writing-section(string, string, string, string);
     callback inspect-manuscript(string);
+    callback preview-manuscript-title-page(string, string, string, string, string);
+    callback inspect-manuscript-revisions(string, string);
+    callback preview-manuscript-restore(string, string, string);
+    callback record-manuscript-restore();
     callback export-manuscript(string, string);
+    callback prepare-quarto-source(string);
     callback save-prepared-export(string, string);
     callback publishing-action(string, string, string);
     callback preview-conversation-create(string, string);
@@ -626,6 +771,18 @@ export component MainWindow inherits Window {
                             color: Theme.muted-ink;
                             font-size: 12px * Theme.ui-scale / 100;
                         }
+                        // Sidebar is visible in the true 886px installed
+                        // Windows viewport even when wide/header strip content
+                        // is clipped by child minimum layout widths. Keep the
+                        // durable project revision readable independent of
+                        // reported root.width and theme-scale thresholds.
+                        Text {
+                            text: "Project · r" + root.project-revision;
+                            visible: root.project-title != "";
+                            color: Theme.muted-ink;
+                            font-size: 11px * Theme.ui-scale / 100;
+                            accessible-label: "Project · r" + root.project-revision;
+                        }
                         Rectangle { height: 6px; }
 
                         if root.activity == 0: VerticalLayout {
@@ -823,13 +980,51 @@ export component MainWindow inherits Window {
                                         accessible-description: "Create a private local project without choosing a filesystem path";
                                         clicked => { root.create-default-project(project-name.text); }
                                     }
+                                    if root.recent-project-options.length > 0: VerticalLayout {
+                                        spacing: 6px;
+                                        Text {
+                                            text: "CONTINUE A RECENT PROJECT";
+                                            color: Theme.muted-ink;
+                                            font-size: 10px * Theme.ui-scale / 100;
+                                        }
+                                        HorizontalLayout {
+                                            spacing: 8px;
+                                            ComboBox {
+                                                model: root.recent-project-options;
+                                                current-index <=> root.recent-project-index;
+                                                accessible-label: "Recent local projects";
+                                                accessible-description: "Select a previously opened project. Its original location will be checked before opening.";
+                                                horizontal-stretch: 1;
+                                            }
+                                            Button {
+                                                text: "Reopen";
+                                                accessible-label: "Reopen selected recent project";
+                                                accessible-description: "Reopen the selected local project and verify its current on-disk metadata";
+                                                clicked => { root.open-recent-project(root.recent-project-index); }
+                                            }
+                                            Button {
+                                                text: "Forget";
+                                                accessible-label: "Forget selected recent project shortcut";
+                                                accessible-description: "Remove only the selected shortcut from this device. Do not change or delete any actual research project folder.";
+                                                clicked => { root.forget-recent-project(root.recent-project-index); }
+                                            }
+                                        }
+                                    }
                                     Text { text: "CUSTOM LOCATION"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     Text { text: "PROJECT LOCATION"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     project-path := LineEdit {
                                         placeholder-text: "Absolute project folder path";
+                                        text <=> root.project-local-path;
                                         accessible-id: "project-path";
                                         accessible-label: "Project path";
                                         accessible-description: "Absolute directory path for creating or opening a local project";
+                                    }
+                                    Button {
+                                        text: root.local-file-dialog-busy ? "Choosing a local folder…" : "Browse local folders…";
+                                        accessible-label: "Choose project folder with native dialog";
+                                        accessible-description: "Choose an existing ResearchWeave project to open or a parent folder for a new project subfolder. Review the resulting path before creating; Cancel preserves the typed path.";
+                                        enabled: !root.local-file-dialog-busy;
+                                        clicked => { root.choose-project-folder(); }
                                     }
                                     Text { text: "PROJECT TITLE"; color: Theme.muted-ink; font-size: 10px * Theme.ui-scale / 100; }
                                     project-name := LineEdit {
@@ -922,6 +1117,49 @@ export component MainWindow inherits Window {
                                     Button { text: "Library"; icon: @image-url("../../../assets/icons/sources.svg"); icon-size: 18px; colorize-icon: true; accessible-label: "Open library"; clicked => { root.page = 5; } }
                                     Button { text: "Data"; icon: @image-url("../../../assets/icons/data.svg"); icon-size: 18px; colorize-icon: true; accessible-label: "Open data view"; clicked => { root.page = 12; } }
                                 }
+                                Button {
+                                    text: root.lifecycle-open ? "Hide recorded research stages" : "Guided research lifecycle";
+                                    accessible-label: "Toggle source-verified research lifecycle navigator";
+                                    clicked => {
+                                        root.lifecycle-open = !root.lifecycle-open;
+                                        if root.lifecycle-open { root.load-research-lifecycle(); }
+                                    }
+                                }
+                                if root.lifecycle-open: Rectangle {
+                                    background: Theme.surface;
+                                    border-color: Theme.divider;
+                                    border-width: 1px;
+                                    border-radius: Theme.panel-radius;
+                                    VerticalLayout {
+                                        padding: 8px;
+                                        spacing: 6px;
+                                        Text {
+                                            text: root.lifecycle-status;
+                                            accessible-label: "Research lifecycle record status " + root.lifecycle-status;
+                                            color: Theme.muted-ink;
+                                            wrap: word-wrap;
+                                        }
+                                        Button {
+                                            text: root.lifecycle-busy ? "Checking local record history…" : "Refresh recorded research stages";
+                                            enabled: !root.lifecycle-busy;
+                                            accessible-label: "Refresh research lifecycle from actual persisted project";
+                                            clicked => { root.load-research-lifecycle(); }
+                                        }
+                                        ScrollView {
+                                            preferred-height: 168px;
+                                            min-height: 100px;
+                                            max-height: 210px;
+                                            VerticalLayout {
+                                                spacing: 4px;
+                                                for stage in root.lifecycle-stages: Button {
+                                                    text: stage.title + " · " + stage.records + " records";
+                                                    accessible-label: "Open research lifecycle stage " + stage.title;
+                                                    clicked => { root.page = stage.target-page; }
+                                                }
+                                            }
+                                        }
+                                    }
+                                }
                                 Rectangle {
                                     height: 76px;
                                     background: Theme.accent-subtle;
@@ -1013,6 +1251,15 @@ export component MainWindow inherits Window {
                                         placeholder-text: "Absolute path to a local PDF";
                                         accessible-label: "PDF file path";
                                         accessible-description: "Absolute path to the PDF file to display";
+                                        edited(value) => {
+                                            root.pdf-local-path = value;
+                                            root.pdf-verified-caption-sha = "";
+                                            root.invalidate-pdf-view();
+                                            root.pdf-caption-request-id += 1;
+                                            root.pdf-caption-busy = false;
+                                            root.pdf-caption-candidates = [];
+                                            root.pdf-caption-status = "PDF path changed. The earlier caption anchors were invalidated; scan the newly selected source.";
+                                        }
                                     }
                                     Button {
                                         text: "Browse PDF…";
@@ -1033,6 +1280,7 @@ export component MainWindow inherits Window {
                                         primary: true;
                                         accessible-label: "Open PDF";
                                         clicked => {
+                                            root.pdf-verified-caption-sha = "";
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering PDF…";
                                             root.pdf-page-number = 1;
@@ -1045,6 +1293,7 @@ export component MainWindow inherits Window {
                                         text: "Search";
                                         accessible-label: "Search PDF";
                                         clicked => {
+                                            root.pdf-verified-caption-sha = "";
                                             root.pdf-job += 1;
                                             root.pdf-status = "Searching PDF…";
                                             root.pdf-highlight-visible = false;
@@ -1056,6 +1305,7 @@ export component MainWindow inherits Window {
                                         accessible-label: "Find next PDF matching page";
                                         enabled: root.pdf-page-count > 0 && pdf-query.text != "";
                                         clicked => {
+                                            root.pdf-verified-caption-sha = "";
                                             root.pdf-job += 1;
                                             root.pdf-status = "Finding next matching PDF page…";
                                             root.pdf-highlight-visible = false;
@@ -1070,6 +1320,7 @@ export component MainWindow inherits Window {
                                         accessible-label: "Previous PDF page";
                                         enabled: root.pdf-page-number > 1;
                                         clicked => {
+                                            root.pdf-verified-caption-sha = "";
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering previous PDF page…";
                                             root.pdf-highlight-visible = false;
@@ -1086,6 +1337,7 @@ export component MainWindow inherits Window {
                                         accessible-label: "Next PDF page";
                                         enabled: root.pdf-page-count > 0 && root.pdf-page-number < root.pdf-page-count;
                                         clicked => {
+                                            root.pdf-verified-caption-sha = "";
                                             root.pdf-job += 1;
                                             root.pdf-status = "Rendering next PDF page…";
                                             root.pdf-highlight-visible = false;
@@ -1098,38 +1350,116 @@ export component MainWindow inherits Window {
                                         clicked => { root.page = 21; }
                                     }
                                 }
-                                Text {
-                                    text: root.pdf-status + " · matches: " + root.pdf-matches;
-                                    color: Theme.muted-ink;
-                                    accessible-label: "PDF search status: " + root.pdf-status + " matches: " + root.pdf-matches;
-                                }
-                                Rectangle {
-                                    background: Theme.reader-canvas;
-                                    clip: true;
-                                    pdf-fit := Rectangle {
-                                        width: root.pdf-render-width > 0 && root.pdf-render-height > 0
-                                            ? min(parent.width, parent.height * root.pdf-render-width / root.pdf-render-height)
-                                            : parent.width;
-                                        height: root.pdf-render-width > 0 && root.pdf-render-height > 0
-                                            ? min(parent.height, parent.width * root.pdf-render-height / root.pdf-render-width)
-                                            : parent.height;
-                                        x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2;
-                                        pdf-view := Image {
-                                            source: root.pdf-image;
-                                            width: parent.width;
-                                            height: parent.height;
-                                            image-fit: contain;
-                                            accessible-label: "Rendered PDF page";
+                                // Keep source selection and page navigation visible in a
+                                // compact window. The caption results and PDF page below
+                                // live in a separate scrollable work area, so a tall page
+                                // never collapses into a few clipped screen pixels.
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "View PDF page";
+                                        accessible-label: "Scroll to rendered PDF page";
+                                        clicked => {
+                                            // Land at the page's top, clamped to the
+                                            // real scroll range on compact windows.
+                                            // Slint ScrollView offsets are negative when
+                                            // scrolling down; positive offsets left the
+                                            // page below the physical monitor viewport.
+                                            pdf-reader-scroll.content-y = min(0px,
+                                                max(pdf-reader-scroll.visible-height - pdf-reader-scroll.content-height,
+                                                    -pdf-page-canvas.y));
                                         }
-                                        if root.pdf-highlight-visible: Rectangle {
-                                            x: root.pdf-highlight-x * parent.width;
-                                            y: root.pdf-highlight-y * parent.height;
-                                            width: root.pdf-highlight-w * parent.width;
-                                            height: root.pdf-highlight-h * parent.height;
-                                            background: Theme.accent-subtle;
-                                            border-color: Theme.warning;
-                                            border-width: 2px;
+                                    }
+                                    Button {
+                                        text: "Caption tools";
+                                        accessible-label: "Scroll back to PDF caption tools";
+                                        clicked => { pdf-reader-scroll.content-y = 0px; }
+                                    }
+                                }
+                                pdf-reader-scroll := ScrollView {
+                                    accessible-role: region;
+                                    accessible-label: "Scrollable PDF captions and page";
+                                    min-height: 100px;
+                                    vertical-stretch: 1;
+                                    VerticalLayout {
+                                        spacing: 8px;
+                                        Text {
+                                            text: root.pdf-status + " · matches: " + root.pdf-matches;
+                                            color: Theme.muted-ink;
+                                            accessible-label: "PDF search status: " + root.pdf-status + " matches: " + root.pdf-matches;
+                                        }
+                                        Button {
+                                            text: root.pdf-caption-busy ? "Scanning caption anchors…" : "Find figure/table captions";
+                                            accessible-label: "Preview unverified local PDF figure and table caption anchors";
+                                            enabled: !root.pdf-caption-busy && pdf-path.text != "";
+                                            clicked => {
+                                                root.pdf-caption-request-id += 1;
+                                                root.pdf-caption-busy = true;
+                                                root.pdf-caption-status = "Reading bounded local PDF text layer. No extracted figure or table contents.";
+                                                root.pdf-caption-candidates = [];
+                                                root.scan-pdf-caption-candidates(pdf-path.text, root.pdf-caption-request-id);
+                                            }
+                                        }
+                                        Text {
+                                            text: root.pdf-caption-status;
+                                            accessible-label: "PDF caption anchor preview status " + root.pdf-caption-status;
+                                            wrap: word-wrap;
+                                            color: Theme.muted-ink;
+                                        }
+                                        if root.pdf-caption-candidates.length > 0: ScrollView {
+                                            preferred-height: 135px;
+                                            min-height: 80px;
+                                            max-height: 160px;
+                                            VerticalLayout {
+                                                spacing: 4px;
+                                                for caption in root.pdf-caption-candidates: Button {
+                                                    text: caption.label + " · page " + caption.page-number;
+                                                    accessible-label: "Inspect unverified PDF caption " + caption.label + " page " + caption.page-number;
+                                                    clicked => {
+                                                        // Clear the previous page before checking the exact
+                                                        // source SHA; a same-path replacement must not show
+                                                        // stale pixels with old caption provenance.
+                                                        root.invalidate-pdf-view();
+                                                        root.pdf-verified-caption-sha = caption.source-sha256;
+                                                        root.pdf-caption-status = "Verifying the scanned PDF source bytes before opening this unverified caption anchor. " + caption.provenance;
+                                                        root.load-pdf(pdf-path.text, "", caption.page-number);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        pdf-page-canvas := Rectangle {
+                                            background: Theme.reader-canvas;
+                                            clip: true;
+                                            // The PDF page is a real scrollable destination,
+                                            // not the remainder of an overflowing VerticalLayout.
+                                            min-height: 380px;
+                                            preferred-height: 480px;
+                                            pdf-fit := Rectangle {
+                                                width: root.pdf-render-width > 0 && root.pdf-render-height > 0
+                                                    ? min(parent.width, parent.height * root.pdf-render-width / root.pdf-render-height)
+                                                    : parent.width;
+                                                height: root.pdf-render-width > 0 && root.pdf-render-height > 0
+                                                    ? min(parent.height, parent.width * root.pdf-render-height / root.pdf-render-width)
+                                                    : parent.height;
+                                                x: (parent.width - self.width) / 2;
+                                                y: (parent.height - self.height) / 2;
+                                                pdf-view := Image {
+                                                    source: root.pdf-image;
+                                                    width: parent.width;
+                                                    height: parent.height;
+                                                    image-fit: contain;
+                                                    accessible-label: "Rendered PDF page";
+                                                }
+                                                if root.pdf-highlight-visible: Rectangle {
+                                                    x: root.pdf-highlight-x * parent.width;
+                                                    y: root.pdf-highlight-y * parent.height;
+                                                    width: root.pdf-highlight-w * parent.width;
+                                                    height: root.pdf-highlight-h * parent.height;
+                                                    background: Theme.accent-subtle;
+                                                    border-color: Theme.warning;
+                                                    border-width: 2px;
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -1364,7 +1694,21 @@ export component MainWindow inherits Window {
                                 protocol-design := LineEdit { placeholder-text: "Design: observational, experimental, qualitative, mixed…"; accessible-label: "Protocol design"; }
                                 protocol-author := LineEdit { placeholder-text: "Author"; accessible-label: "Protocol author"; }
                             }
-                            protocol-objective := TextEdit { accessible-label: "Protocol objective"; text: ""; }
+                            // An unconstrained TextEdit inside this ScrollView
+                            // collapsed to height=0 after the longer local
+                            // baseline/receipt panels were introduced. Real
+                            // Linux Xvfb/AT-SPI showed its node at x=373,
+                            // y=305, width=883, height=0; the objective was
+                            // invisible and post-freeze amendment impossible.
+                            // Keep a usable multiline editor at narrow widths
+                            // while allowing the outer page to scroll.
+                            protocol-objective := TextEdit {
+                                accessible-label: "Protocol objective";
+                                text: "";
+                                min-height: 96px;
+                                preferred-height: 112px;
+                                max-height: 176px;
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
                                 Button {
@@ -1417,13 +1761,112 @@ export component MainWindow inherits Window {
                                 clicked => { root.preview-protocol-amend(protocol-id.text, protocol-design.text, protocol-objective.text, protocol-author.text, protocol-rationale.text); }
                             }
                             Text { text: "Amendments preserve all existing protocol-body fields, changing only nonempty design/objective inputs. A blank input keeps its previous value. Preview before recording; all earlier versions remain available."; color: Theme.muted-ink; wrap: word-wrap; }
-                            Text { text: root.protocol-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Protocol operation result"; }
+                            Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text { text: "LOCAL BASELINE FREEZE"; color: Theme.ink; font-weight: 700; }
+                                    Text {
+                                        text: "Freeze one existing protocol version with an auditable local event and SHA-256 receipt. Later amendments remain explicitly visible. This does not register or timestamp the protocol with an independent service.";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: root.protocol-freeze-summary;
+                                        color: Theme.ink;
+                                        font-weight: 600;
+                                        wrap: word-wrap;
+                                        accessible-label: "Protocol freeze summary " + root.protocol-freeze-summary;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Preview freeze";
+                                            accessible-label: "Preview local protocol baseline freeze";
+                                            clicked => { root.preview-protocol-freeze(protocol-id.text); }
+                                        }
+                                        Button {
+                                            text: "Record freeze";
+                                            accessible-label: "Record previewed local protocol baseline freeze";
+                                            clicked => { root.record-protocol-freeze(); }
+                                        }
+                                    }
+                                    TextEdit {
+                                        min-height: 64px;
+                                        preferred-height: 76px;
+                                        max-height: 90px;
+                                        text: root.protocol-results;
+                                        read-only: true;
+                                        accessible-label: "Read-only local protocol freeze preview outcome";
+                                    }
+                                    Button {
+                                        text: "Inspect frozen baseline";
+                                        accessible-label: "Inspect local protocol freeze receipt";
+                                        clicked => { root.inspect-protocol-freeze(protocol-id.text); }
+                                    }
+                                    Text {
+                                        text: "Inspected local baseline JSON (read-only, selectable; not an external registration receipt)";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    TextEdit {
+                                        min-height: 90px;
+                                        preferred-height: 110px;
+                                        max-height: 130px;
+                                        text: root.protocol-freeze-status;
+                                        read-only: true;
+                                        accessible-label: "Read-only inspected protocol freeze JSON";
+                                    }
+                                    Button {
+                                        text: "Prepare baseline receipt .md";
+                                        accessible-label: "Prepare local protocol baseline receipt Markdown";
+                                        clicked => { root.load-protocol-freeze-receipt(protocol-id.text); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        protocol-freeze-save-path := LineEdit {
+                                            horizontal-stretch: 1;
+                                            accessible-label: "Local protocol baseline receipt destination path";
+                                            placeholder-text: "Absolute destination ending in .md";
+                                        }
+                                        Button {
+                                            text: "Save verified receipt";
+                                            accessible-label: "Save verified local baseline receipt without overwrite";
+                                            clicked => { root.save-prepared-export(protocol-freeze-save-path.text, "protocol.freeze_receipt"); }
+                                        }
+                                    }
+                                    Text {
+                                        text: "Prepare and review the persisted baseline first. File Save is separately approval-audited, revalidates the current project revision, and never overwrites an existing file.";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    Text {
+                                        text: root.protocol-freeze-export-receipt;
+                                        visible: root.protocol-freeze-export-receipt != "";
+                                        color: Theme.ink;
+                                        wrap: word-wrap;
+                                        accessible-label: "Local protocol baseline file receipt " + root.protocol-freeze-export-receipt;
+                                    }
+                                    Text {
+                                        text: root.protocol-freeze-status;
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                        accessible-label: "Protocol local freeze status " + root.protocol-freeze-status;
+                                    }
+                                }
+                            }
+                            Text { text: root.protocol-results; color: Theme.ink; wrap: word-wrap; accessible-label: "Protocol operation result " + root.protocol-results; }
                             Rectangle { vertical-stretch: 1; }
                           }
                         }
                     }
                     if root.page == 20: Rectangle {
                         background: Theme.raised;
+                        ScrollView {
                         VerticalLayout {
                             padding: 24px;
                             spacing: 9px;
@@ -1438,7 +1881,18 @@ export component MainWindow inherits Window {
                                 reference-kind := LineEdit { placeholder-text: "Kind, e.g. article"; accessible-label: "Reference kind"; }
                                 reference-format := LineEdit { placeholder-text: "Format: bibtex, ris, csl-json"; accessible-label: "Reference format"; }
                             }
-                            reference-raw := TextEdit { accessible-label: "Raw reference record"; text: ""; }
+                            // A TextEdit without an explicit minimum can be
+                            // squeezed to zero height by the long References
+                            // page (previously confirmed on Protocol). Keep
+                            // the human-entered raw provenance visibly
+                            // selectable and usable at native narrow sizes.
+                            reference-raw := TextEdit {
+                                accessible-label: "Raw reference record";
+                                text: "";
+                                min-height: 100px;
+                                preferred-height: 140px;
+                                max-height: 220px;
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
                                 Button {
@@ -1454,7 +1908,199 @@ export component MainWindow inherits Window {
                                 Button { text: "Refresh references"; accessible-label: "Refresh project references"; clicked => { root.refresh-references(); } }
                             }
                             Text { text: root.reference-results; accessible-label: "Reference operation result " + root.reference-results; wrap: word-wrap; color: Theme.ink; }
+                            Button {
+                                text: root.reference-dedup-open ? "Hide duplicate review" : "Review possible duplicates";
+                                accessible-label: "Toggle reviewable reference duplicate finder";
+                                clicked => { root.reference-dedup-open = !root.reference-dedup-open; }
+                            }
+                            if root.reference-dedup-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 8px;
+                                    Text { text: "REVIEWABLE · REVERSIBLE · OFFLINE"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "A candidate score is not proof of scholarly identity. Compare original records before acting. Every approved decision preserves the original references and creates a revision."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    Button {
+                                        text: "Scan for possible duplicates";
+                                        accessible-label: "Scan local reference duplicate candidates without changing data";
+                                        clicked => {
+                                            root.reference-dedup-canonical-id = "";
+                                            root.reference-dedup-duplicate-id = "";
+                                            root.reference-dedup-fingerprint = "";
+                                            root.reference-dedup-rationale = "";
+                                            root.scan-reference-duplicates();
+                                        }
+                                    }
+                                    if root.reference-dedup-candidates.length > 0: Rectangle {
+                                        background: Theme.raised;
+                                        min-height: 60px;
+                                        preferred-height: min(220px, 20px + root.reference-dedup-candidates.length * 48px);
+                                        max-height: 220px;
+                                        border-radius: Theme.control-radius;
+                                        ScrollView {
+                                            VerticalLayout {
+                                                padding: 6px;
+                                                spacing: 5px;
+                                                for candidate in root.reference-dedup-candidates: Button {
+                                                    text: candidate.label;
+                                                    accessible-label: "Select unapproved reference candidate " + candidate.label;
+                                                    clicked => {
+                                                        // Selection copies only audited scan fields.
+                                                        // It does NOT preview, merge or approve a write.
+                                                        root.invalidate-reference-dedup-preview();
+                                                        root.reference-dedup-canonical-id = candidate.left-id;
+                                                        root.reference-dedup-duplicate-id = candidate.right-id;
+                                                        root.reference-dedup-fingerprint = candidate.candidate-sha256;
+                                                        root.reference-dedup-rationale = "";
+                                                    }
+                                                }
+                                            }
+                                        }
+                                    }
+                                    dedup-canonical := LineEdit { placeholder-text: "First reference ID (canonical for alias)"; accessible-label: "Duplicate review canonical reference ID"; text <=> root.reference-dedup-canonical-id; edited(text) => { root.invalidate-reference-dedup-preview(); } }
+                                    dedup-duplicate := LineEdit { placeholder-text: "Second reference ID"; accessible-label: "Duplicate review duplicate reference ID"; text <=> root.reference-dedup-duplicate-id; edited(text) => { root.invalidate-reference-dedup-preview(); } }
+                                    dedup-fingerprint := LineEdit { placeholder-text: "Candidate SHA-256 from latest source scan"; accessible-label: "Duplicate review candidate SHA256"; text <=> root.reference-dedup-fingerprint; edited(text) => { root.invalidate-reference-dedup-preview(); } }
+                                    dedup-rationale := LineEdit { placeholder-text: "Reason for this human decision"; accessible-label: "Duplicate review rationale"; text <=> root.reference-dedup-rationale; edited(text) => { root.invalidate-reference-dedup-preview(); } }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { text: "Preview merge"; accessible-label: "Preview reviewed reference alias without changes"; clicked => { root.preview-reference-dedup("approve", dedup-canonical.text, dedup-duplicate.text, dedup-fingerprint.text, dedup-rationale.text); } }
+                                        Button { text: "Preview undo"; accessible-label: "Preview restoring independent references"; clicked => { root.preview-reference-dedup("restore", dedup-canonical.text, dedup-duplicate.text, dedup-fingerprint.text, dedup-rationale.text); } }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button { text: "Preview keep separate"; accessible-label: "Preview immutable keep separate reference decision"; clicked => { root.preview-reference-dedup("keep", dedup-canonical.text, dedup-duplicate.text, dedup-fingerprint.text, dedup-rationale.text); } }
+                                        Button { text: "Preview reconsider"; accessible-label: "Preview explicit reconsideration of keep separate decision"; clicked => { root.preview-reference-dedup("reconsider", dedup-canonical.text, dedup-duplicate.text, dedup-fingerprint.text, dedup-rationale.text); } }
+                                    }
+                                    Button { text: "Load pair decision history"; accessible-label: "Load immutable reference pair decision history without changing project"; clicked => { root.load-reference-dedup-history(dedup-canonical.text, dedup-duplicate.text); } }
+                                    Button { text: "Record reviewed decision"; accessible-label: "Record explicitly approved reference dedup decision"; clicked => { root.record-reference-dedup(); } }
+                                    TextEdit {
+                                        min-height: 110px;
+                                        preferred-height: 180px;
+                                        max-height: 260px;
+                                        text: root.reference-dedup-results;
+                                        read-only: true;
+                                        accessible-label: "Copyable reference duplicate candidate or decision details";
+                                    }
+                                }
+                            }
+                            Button {
+                                text: root.reference-pdf-metadata-open ? "Hide PDF metadata suggestions" : "Review indexed PDF metadata suggestions";
+                                accessible-label: "Toggle suggest-only reference PDF metadata inspector";
+                                clicked => { root.reference-pdf-metadata-open = !root.reference-pdf-metadata-open; }
+                            }
+                            if root.reference-pdf-metadata-open: Rectangle {
+                                background: Theme.surface;
+                                border-width: 1px;
+                                border-color: Theme.divider;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text {
+                                        text: "UNVERIFIED PDF TEXT CANDIDATES — REVIEW ONLY";
+                                        color: Theme.ink;
+                                        font-weight: 700;
+                                        accessible-label: "Unverified PDF text metadata review";
+                                    }
+                                    Text {
+                                        text: "Only existing project-indexed PDF source IDs are accepted. DOI patterns and first-line titles are unverified, not resolved; preview never changes the project.";
+                                        wrap: word-wrap;
+                                        color: Theme.muted-ink;
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        pdf-metadata-source-id := LineEdit {
+                                            placeholder-text: "Indexed PDF source UUID";
+                                            accessible-label: "Indexed PDF source ID for metadata suggestions";
+                                            horizontal-stretch: 1;
+                                            edited(text) => { root.reference-pdf-metadata-results = "Source changed. Preview the current indexed PDF before reviewing unverified candidates."; }
+                                        }
+                                        Button {
+                                            text: "Preview candidates";
+                                            accessible-label: "Preview unverified PDF source metadata without recording";
+                                            clicked => { root.preview-reference-pdf-metadata(pdf-metadata-source-id.text); }
+                                        }
+                                    }
+                                    TextEdit {
+                                        min-height: 90px;
+                                        preferred-height: 165px;
+                                        max-height: 250px;
+                                        read-only: true;
+                                        text: root.reference-pdf-metadata-results;
+                                        accessible-label: "Read-only unverified reference PDF metadata candidates";
+                                    }
+                                    Text {
+                                        text: "No Apply button exists. Independently verify the original PDF and each proposed field before entering metadata through the normal human-approved reference workflow.";
+                                        wrap: word-wrap;
+                                        color: Theme.warning;
+                                    }
+                                }
+                            }
+                            Button {
+                                text: root.reference-crossref-open ? "Hide DOI metadata lookup" : "Review DOI metadata via Crossref";
+                                accessible-label: "Toggle consent-gated DOI Crossref lookup";
+                                clicked => { root.reference-crossref-open = !root.reference-crossref-open; }
+                            }
+                            if root.reference-crossref-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text {
+                                        text: "EXTERNAL CROSSREF — OPT-IN AND UNVERIFIED";
+                                        color: Theme.ink;
+                                        font-weight: 700;
+                                        accessible-label: "Crossref external network consent information";
+                                    }
+                                    Text {
+                                        text: "Preview is offline. Only clicking Fetch after Preview permits one HTTPS request to api.crossref.org. No DOI, author, reference or project record is automatically changed. Confirm each result against the original publication.";
+                                        wrap: word-wrap;
+                                        color: Theme.muted-ink;
+                                    }
+                                    crossref-doi-entry := LineEdit {
+                                        placeholder-text: "10.1038/nphys1170";
+                                        accessible-label: "DOI for explicit Crossref lookup";
+                                        enabled: !root.reference-crossref-busy;
+                                        edited(text) => { root.invalidate-crossref-doi(); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Preview without network";
+                                            accessible-label: "Preview Crossref DOI lookup offline without network";
+                                            enabled: !root.reference-crossref-busy;
+                                            clicked => { root.preview-crossref-doi(crossref-doi-entry.text); }
+                                        }
+                                        Button {
+                                            text: root.reference-crossref-busy ? "Fetching metadata..." : "Fetch once (external network)";
+                                            accessible-label: "Approve and fetch one Crossref DOI metadata record";
+                                            enabled: root.reference-crossref-ready && !root.reference-crossref-busy;
+                                            clicked => { root.fetch-crossref-doi(crossref-doi-entry.text); }
+                                        }
+                                    }
+                                    TextEdit {
+                                        min-height: 100px;
+                                        preferred-height: 165px;
+                                        max-height: 240px;
+                                        read-only: true;
+                                        text: root.reference-crossref-results;
+                                        accessible-label: "Read-only unverified Crossref DOI response";
+                                    }
+                                    Text {
+                                        text: "No automated Apply or Merge action. Crossref registration metadata and its publisher-supplied fields are unverified; human comparison and separately approved reference registration remain required.";
+                                        wrap: word-wrap;
+                                        color: Theme.warning;
+                                    }
+                                }
+                            }
                             Rectangle { vertical-stretch: 1; }
+                        }
                         }
                     }
                     if root.page == 21: Rectangle {
@@ -1530,6 +2176,9 @@ export component MainWindow inherits Window {
                                                 root.quick-note-color = "paper";
                                                 root.quick-note-pinned = false;
                                                 root.quick-note-archived = false;
+                                                root.quick-note-obsidian-approval = "";
+                                                root.quick-note-obsidian-markdown = "";
+                                                root.quick-note-obsidian-status = "Quick note selection cleared. Select and export a saved card before another import.";
                                             }
                                         }
                                         Button {
@@ -1539,6 +2188,64 @@ export component MainWindow inherits Window {
                                         }
                                     }
                                     Text { text: root.quick-note-results; accessible-label: "Quick note operation result " + root.quick-note-results; color: Theme.muted-ink; wrap: word-wrap; }
+                                    Button {
+                                        text: root.quick-note-obsidian-open ? "Hide local Obsidian exchange" : "Obsidian Markdown exchange";
+                                        accessible-label: "Toggle local Obsidian Markdown note exchange";
+                                        clicked => { root.quick-note-obsidian-open = !root.quick-note-obsidian-open; }
+                                    }
+                                    if root.quick-note-obsidian-open: Rectangle {
+                                        background: Theme.surface;
+                                        border-color: Theme.divider;
+                                        border-width: 1px;
+                                        border-radius: Theme.panel-radius;
+                                        VerticalLayout {
+                                            padding: 8px;
+                                            spacing: 7px;
+                                            Text {
+                                                text: "Local-only text exchange: no Obsidian vault or Notion account is accessed. Select an existing saved card, export its Markdown, edit the text, and review the exact import before recording.";
+                                                color: Theme.muted-ink;
+                                                wrap: word-wrap;
+                                            }
+                                            Button {
+                                                text: "Export selected saved card to Markdown";
+                                                accessible-label: "Export selected quick note as local Obsidian Markdown text";
+                                                enabled: root.quick-note-selected-id != "";
+                                                clicked => { root.export-quick-note-obsidian(root.quick-note-selected-id); }
+                                            }
+                                            TextEdit {
+                                                min-height: 100px;
+                                                preferred-height: 160px;
+                                                max-height: 210px;
+                                                text <=> root.quick-note-obsidian-markdown;
+                                                accessible-label: "Editable Obsidian Markdown note exchange";
+                                                edited(value) => {
+                                                    root.quick-note-obsidian-markdown = value;
+                                                    root.quick-note-obsidian-approval = "";
+                                                    root.quick-note-obsidian-status = "Markdown edited; previous import approval invalidated. Preview again before approval.";
+                                                }
+                                            }
+                                            HorizontalLayout {
+                                                spacing: 8px;
+                                                Button {
+                                                    text: "Preview revised note";
+                                                    accessible-label: "Preview edited Obsidian Markdown without changing project";
+                                                    clicked => { root.preview-quick-note-obsidian(root.quick-note-obsidian-markdown); }
+                                                }
+                                                Button {
+                                                    text: "Approve import";
+                                                    accessible-label: "Approve previewed Obsidian Markdown as a new immutable note revision";
+                                                    enabled: root.quick-note-obsidian-approval != "";
+                                                    clicked => { root.import-quick-note-obsidian(root.quick-note-obsidian-markdown,root.quick-note-obsidian-approval); }
+                                                }
+                                            }
+                                            Text {
+                                                text: root.quick-note-obsidian-status;
+                                                accessible-label: "Local Obsidian Markdown exchange status " + root.quick-note-obsidian-status;
+                                                color: Theme.muted-ink;
+                                                wrap: word-wrap;
+                                            }
+                                        }
+                                    }
                                     HorizontalLayout {
                                         spacing: 8px;
                                         LineEdit {
@@ -1601,6 +2308,9 @@ export component MainWindow inherits Window {
                                                         root.quick-note-color = note.color;
                                                         root.quick-note-pinned = note.pinned;
                                                         root.quick-note-archived = note.archived;
+                                                        root.quick-note-obsidian-approval = "";
+                                                        root.quick-note-obsidian-markdown = "";
+                                                        root.quick-note-obsidian-status = "Selected quick note changed. Export this exact saved card before previewing an import.";
                                                     }
                                                 }
                                                 Button {
@@ -1652,6 +2362,115 @@ export component MainWindow inherits Window {
                                         Button { text: "Export Markdown"; accessible-label: "Export notebook Markdown"; clicked => { root.export-notebook(); } }
                                     }
                                     Text { text: root.notebook-results; accessible-label: "Notebook operation result " + root.notebook-results; wrap: word-wrap; color: Theme.ink; }
+                                    Button {
+                                        text: root.notebook-cell-open ? "Hide arithmetic cells" : "Executable arithmetic cells";
+                                        accessible-label: "Toggle safe arithmetic notebook cells";
+                                        clicked => { root.notebook-cell-open = !root.notebook-cell-open; }
+                                    }
+                                    if root.notebook-cell-open: Rectangle {
+                                        background: Theme.surface;
+                                        border-width: 1px;
+                                        border-color: Theme.divider;
+                                        border-radius: Theme.panel-radius;
+                                        VerticalLayout {
+                                            padding: 9px;
+                                            spacing: 8px;
+                                            Text {
+                                                text: "Safe offline arithmetic runtime. Supports finite numbers, + - * /, parentheses, sqrt(), ln() and abs(). NOT Python/Jupyter; no filesystem, shell or network.";
+                                                color: Theme.muted-ink;
+                                                wrap: word-wrap;
+                                            }
+                                            Text {
+                                                text: root.notebook-cell-id == "" ? "New arithmetic cell" : "Selected immutable cell revision " + root.notebook-cell-revision;
+                                                color: Theme.ink;
+                                                font-weight: 700;
+                                            }
+                                            notebook-expression := LineEdit {
+                                                text <=> root.notebook-cell-code;
+                                                placeholder-text: "Example: (12 + sqrt(9)) / 3";
+                                                accessible-label: "Executable arithmetic notebook cell expression";
+                                                edited(value) => {
+                                                    root.notebook-cell-code = value;
+                                                    root.notebook-cell-approval = "";
+                                                    root.notebook-cell-status = "Expression changed. Preview the revised calculation before recording.";
+                                                }
+                                            }
+                                            HorizontalLayout {
+                                                spacing: 8px;
+                                                Button {
+                                                    text: "Preview calculation";
+                                                    accessible-label: "Preview arithmetic notebook cell without writes";
+                                                    clicked => { root.preview-arithmetic-cell(); }
+                                                }
+                                                Button {
+                                                    text: "Record calculation";
+                                                    enabled: root.notebook-cell-approval != "";
+                                                    accessible-label: "Approve previewed arithmetic notebook cell and append immutable execution";
+                                                    clicked => { root.run-arithmetic-cell(); }
+                                                }
+                                                Button {
+                                                    text: "New cell";
+                                                    accessible-label: "Clear arithmetic notebook cell for a new computation";
+                                                    clicked => {
+                                                        root.notebook-cell-id = "";
+                                                        root.notebook-cell-revision = 0;
+                                                        root.notebook-cell-code = "";
+                                                        root.notebook-cell-approval = "";
+                                                        root.notebook-cell-status = "New arithmetic cell; preview before saving.";
+                                                    }
+                                                }
+                                            }
+                                            Text {
+                                                text: root.notebook-cell-status;
+                                                accessible-label: "Arithmetic notebook execution status " + root.notebook-cell-status;
+                                                color: Theme.muted-ink;
+                                                wrap: word-wrap;
+                                            }
+                                            Text {
+                                                text: root.notebook-cell-total == 0 ? "No saved arithmetic cells on this project." : "Saved arithmetic cells: " + root.notebook-cell-total + " total; this page begins at record " + (root.notebook-cell-offset + 1) + ".";
+                                                accessible-label: root.notebook-cell-total == 0
+                                                    ? "Arithmetic notebook: no saved cells in this project"
+                                                    : "Arithmetic notebook page: record " + (root.notebook-cell-offset + 1)
+                                                        + " of " + root.notebook-cell-total
+                                                        + " saved cells. Project snapshot revision " + root.notebook-cell-snapshot-revision;
+                                                color: Theme.muted-ink;
+                                                wrap: word-wrap;
+                                            }
+                                            HorizontalLayout {
+                                                spacing: 8px;
+                                                Button {
+                                                    text: "Refresh saved cells";
+                                                    accessible-label: "Refresh immutable arithmetic notebook cells";
+                                                    clicked => { root.load-arithmetic-cells(0); }
+                                                }
+                                                Button {
+                                                    text: "Previous 100";
+                                                    accessible-label: "Load previous page of saved arithmetic notebook cells";
+                                                    enabled: root.notebook-cell-offset > 0 && root.notebook-cell-snapshot-revision >= 0;
+                                                    clicked => {
+                                                        root.load-arithmetic-cells(root.notebook-cell-offset >= 100 ? root.notebook-cell-offset - 100 : 0);
+                                                    }
+                                                }
+                                                Button {
+                                                    text: "Next 100";
+                                                    accessible-label: "Load next page of saved arithmetic notebook cells";
+                                                    enabled: root.notebook-cell-snapshot-revision >= 0 && root.notebook-cell-offset + 100 < root.notebook-cell-total;
+                                                    clicked => { root.load-arithmetic-cells(root.notebook-cell-offset + 100); }
+                                                }
+                                            }
+                                            for cell in root.notebook-cells: Button {
+                                                text: "v" + cell.revision + ": " + cell.code + " = " + cell.result;
+                                                accessible-label: "Load saved arithmetic notebook cell " + cell.id;
+                                                clicked => {
+                                                    root.notebook-cell-id = cell.id;
+                                                    root.notebook-cell-revision = cell.revision;
+                                                    root.notebook-cell-code = cell.code;
+                                                    root.notebook-cell-approval = "";
+                                                    root.notebook-cell-status = "Loaded a saved cell. Review and preview before recording a new revision.";
+                                                }
+                                            }
+                                        }
+                                    }
                                 }
                             }
                             Rectangle { vertical-stretch: 1; }
@@ -1660,25 +2479,104 @@ export component MainWindow inherits Window {
                     }
                     if root.page == 9: Rectangle {
                         background: Theme.raised;
+                        ScrollView {
                         VerticalLayout {
                             padding: 24px;
                             spacing: 9px;
                             Text { text: "Systematic review"; font-size: 22px * Theme.ui-scale / 100; color: Theme.ink; font-weight: 700; }
                             Text { text: "Register persisted references into a review, then record independent screening votes. Writes require Preview → Record."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Button {
+                                text: root.review-search-builder-open ? "Hide search strategy builder" : "Build database search strategy";
+                                accessible-label: "Toggle review PICO search strategy builder";
+                                clicked => { root.review-search-builder-open = !root.review-search-builder-open; }
+                            }
+                            if root.review-search-builder-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 7px;
+                                    Text { text: "PICO · reproducible offline search drafting"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "Separate synonyms with semicolons. Empty PICO categories may be omitted. Query syntax must be reviewed against each database before use; ResearchWeave does NOT execute searches or count results."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    strategy-population := LineEdit { placeholder-text: "Population synonyms; separate with ;"; accessible-label: "Search strategy population terms"; }
+                                    strategy-intervention := LineEdit { placeholder-text: "Intervention or exposure synonyms; separate with ;"; accessible-label: "Search strategy intervention terms"; }
+                                    strategy-comparison := LineEdit { placeholder-text: "Comparison synonyms; separate with ;"; accessible-label: "Search strategy comparison terms"; }
+                                    strategy-outcome := LineEdit { placeholder-text: "Outcome synonyms; separate with ;"; accessible-label: "Search strategy outcome terms"; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        strategy-databases := LineEdit {
+                                            horizontal-stretch: 1;
+                                            text: "pubmed;scopus;web_of_science";
+                                            placeholder-text: "pubmed;scopus;web_of_science";
+                                            accessible-label: "Search strategy databases";
+                                        }
+                                        Button {
+                                            text: "Build queries";
+                                            accessible-label: "Build offline verified review search queries";
+                                            clicked => { root.build-review-search-strategy(strategy-population.text, strategy-intervention.text, strategy-comparison.text, strategy-outcome.text, strategy-databases.text); }
+                                        }
+                                    }
+                                    TextEdit {
+                                        min-height: 105px;
+                                        preferred-height: 160px;
+                                        max-height: 210px;
+                                        text: root.review-search-results;
+                                        read-only: true;
+                                        accessible-label: "Copyable offline search strategy query drafts";
+                                    }
+                                }
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
-                                review-id := LineEdit { placeholder-text: "Review ID"; accessible-label: "Review ID"; }
+                                review-id := LineEdit { placeholder-text: "Review ID"; accessible-label: "Review ID"; edited(text) => { root.review-screening-results = "Review identity changed. Generate a new source-bound suggestion."; } }
                                 review-reference-id := LineEdit { placeholder-text: "Reference ID"; accessible-label: "Review reference ID"; }
                                 Button { text: "Preview add record"; accessible-label: "Preview add review record"; clicked => { root.preview-review-record(review-id.text, review-reference-id.text); } }
                             }
                             HorizontalLayout {
                                 spacing: 8px;
-                                review-record-id := LineEdit { placeholder-text: "Review record ID"; accessible-label: "Review record ID"; }
+                                review-record-id := LineEdit { placeholder-text: "Review record ID"; accessible-label: "Review record ID"; edited(text) => { root.review-screening-results = "Record identity changed. Generate a new source-bound suggestion."; } }
                                 review-reviewer := LineEdit { placeholder-text: "Reviewer"; accessible-label: "Review reviewer"; }
                                 review-stage := LineEdit { placeholder-text: "Stage: title_abstract or full_text"; accessible-label: "Review stage"; }
                                 review-decision := LineEdit { placeholder-text: "Decision: include, exclude, unsure"; accessible-label: "Review decision"; }
                             }
                             review-reason := LineEdit { placeholder-text: "Reason (required for exclusion)"; accessible-label: "Review decision reason"; }
+                            Button {
+                                text: root.review-screening-open ? "Hide offline PICO screening assistance" : "Inspect offline PICO screening assistance";
+                                accessible-label: "Toggle offline suggest-only PICO screening for an existing review record";
+                                clicked => { root.review-screening-open = !root.review-screening-open; }
+                            }
+                            if root.review-screening-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text { text: "Literal PICO matches · read-only"; font-weight: 700; color: Theme.ink; }
+                                    Text { text: "Use Review ID and Review record ID above. The exact persisted reference title and optional abstract are read from the open project. Separate synonyms with semicolons; at most 12 per PICO group. Missing concepts may be left empty."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    screen-population := LineEdit { placeholder-text: "Population terms; separate with ;"; accessible-label: "Screening PICO population synonyms"; edited(text) => { root.review-screening-results = "PICO criteria edited. Generate a new source-bound suggestion."; } }
+                                    screen-intervention := LineEdit { placeholder-text: "Intervention terms; separate with ;"; accessible-label: "Screening PICO intervention synonyms"; edited(text) => { root.review-screening-results = "PICO criteria edited. Generate a new source-bound suggestion."; } }
+                                    screen-comparison := LineEdit { placeholder-text: "Comparison terms; separate with ;"; accessible-label: "Screening PICO comparison synonyms"; edited(text) => { root.review-screening-results = "PICO criteria edited. Generate a new source-bound suggestion."; } }
+                                    screen-outcome := LineEdit { placeholder-text: "Outcome terms; separate with ;"; accessible-label: "Screening PICO outcome synonyms"; edited(text) => { root.review-screening-results = "PICO criteria edited. Generate a new source-bound suggestion."; } }
+                                    Button {
+                                        text: "Inspect persisted record and suggest";
+                                        accessible-label: "Read existing record and display local PICO matches without voting";
+                                        clicked => { root.suggest-review-screening(review-id.text, review-record-id.text, screen-population.text, screen-intervention.text, screen-comparison.text, screen-outcome.text); }
+                                    }
+                                    Text { text: "No exclusions, votes, adjudications or project writes. Lexical coverage is not probability or eligibility. Reviewers must decide independently."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    TextEdit {
+                                        min-height: 145px;
+                                        preferred-height: 220px;
+                                        max-height: 300px;
+                                        read-only: true;
+                                        text: root.review-screening-results;
+                                        accessible-label: "Read-only provenance, source and local PICO screening suggestion";
+                                    }
+                                }
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
                                 Button {
@@ -1692,6 +2590,7 @@ export component MainWindow inherits Window {
                             }
                             Text { text: root.review-results; accessible-label: "Review operation result " + root.review-results; wrap: word-wrap; color: Theme.ink; }
                             Rectangle { vertical-stretch: 1; }
+                        }
                         }
                     }
                     if root.page == 10: Rectangle {
@@ -2052,17 +2951,41 @@ export component MainWindow inherits Window {
                                             Text { text: "Inspect, replay & report"; color: Theme.ink; font-size: 14px * Theme.ui-scale / 100; font-weight: 600; }
                                             HorizontalLayout {
                                                 spacing: 6px;
-                                                result-id := LineEdit { placeholder-text: "Result ID"; accessible-label: "Analysis Results result ID"; }
+                                                result-id := LineEdit { text <=> root.selected-analysis-result-id; placeholder-text: "Result ID"; accessible-label: "Analysis Results result ID"; }
                                                 Button { text: "Load"; accessible-label: "Load verified analysis result"; clicked => { root.load-analysis-result(result-id.text); } }
                                                 Button { text: "Replay"; accessible-label: "Export analysis replay script"; clicked => { root.export-analysis-script(result-id.text); } }
                                             }
                                             report-title := LineEdit { text: "Analysis report"; placeholder-text: "Report title"; accessible-label: "Analysis report title"; }
                                             HorizontalLayout {
                                                 spacing: 6px;
-                                                report-result-ids := LineEdit { placeholder-text: "Comma-separated result IDs"; accessible-label: "Analysis report result IDs"; }
+                                                report-result-ids := LineEdit { text <=> root.analysis-report-selected-ids; placeholder-text: "Comma-separated result IDs"; accessible-label: "Analysis report result IDs"; }
                                                 Button { text: "Render report"; accessible-label: "Render verified analysis report"; clicked => { root.render-analysis-report(report-title.text, report-result-ids.text); } }
                                             }
+                                            Button {
+                                                text: "Use selected result";
+                                                accessible-label: "Use selected immutable result in analysis report";
+                                                enabled: root.selected-analysis-result-id != "";
+                                                clicked => { root.analysis-report-selected-ids = root.selected-analysis-result-id; }
+                                            }
+                                            Button {
+                                                text: "Prepare report Markdown";
+                                                accessible-label: "Prepare verified analysis report Markdown file";
+                                                clicked => { root.prepare-analysis-report-file(report-title.text, report-result-ids.text); }
+                                            }
                                         }
+                                    }
+                                }
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    report-save-path := LineEdit {
+                                        horizontal-stretch: 1;
+                                        accessible-label: "Analysis report export destination path";
+                                        placeholder-text: "Absolute filename ending in .md";
+                                    }
+                                    Button {
+                                        text: "Save prepared report";
+                                        accessible-label: "Save prepared analysis report without overwrite";
+                                        clicked => { root.save-prepared-export(report-save-path.text, "analysis.report.render"); }
                                     }
                                 }
                                 Rectangle {
@@ -2248,6 +3171,134 @@ export component MainWindow inherits Window {
                                 spacing: 8px;
                                 manuscript-citations := LineEdit { accessible-label: "Manuscript citations"; placeholder-text: "Citation IDs separated by commas"; text <=> root.manuscript-draft-citations; edited(text) => { root.manuscript-draft-citations = text; root.manuscript-draft-edited(manuscript-id.text, manuscript-section.text, manuscript-citations.text, manuscript-body.text); } }
                             }
+                            Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 6px;
+                                    Text { text: "Insert a reference from this project (F05)"; color: Theme.ink; font-weight: 600; }
+                                    Text { text: "The plain-text [@reference-uuid] marker is appended to the end of this section, not to the editor cursor. Local reference identity is checked; scientific claims and metadata are not externally verified."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        LineEdit {
+                                            horizontal-stretch: 1;
+                                            accessible-label: "Manuscript citation reference ID";
+                                            placeholder-text: "Exact registered reference UUID";
+                                            text <=> root.manuscript-citation-reference-id;
+                                            edited(text) => {
+                                                root.manuscript-citation-reference-id = text;
+                                                root.manuscript-citation-status = "Reference ID edited. Preview the citation again.";
+                                            }
+                                        }
+                                        Button { text: "Preview citation"; accessible-label: "Preview verified project citation insertion"; clicked => { root.preview-manuscript-citation(); } }
+                                        Button { text: "Apply citation"; accessible-label: "Apply previewed project citation insertion"; clicked => { root.apply-manuscript-citation(); } }
+                                    }
+                                    Text { text: root.manuscript-citation-status; wrap: word-wrap; color: Theme.muted-ink; accessible-label: "Manuscript citation insertion status " + root.manuscript-citation-status; }
+                                }
+                            }
+                            Button {
+                                text: root.manuscript-title-page-open ? "Hide title page builder" : "Title page builder";
+                                accessible-label: "Toggle offline manuscript title page builder";
+                                clicked => { root.manuscript-title-page-open = !root.manuscript-title-page-open; }
+                            }
+                            if root.manuscript-title-page-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 7px;
+                                    Text { text: "Offline title page draft · not a certified journal template"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "Preview only. Copy the draft into a Title Page section and use the existing section preview/approval to save. Verify authorship, journal rules and blinded-review requirements yourself."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    title-page-title := LineEdit { placeholder-text: "Full manuscript title"; accessible-label: "Title page manuscript title"; }
+                                    title-page-authors := LineEdit { placeholder-text: "Name | Affiliation; Name | Affiliation"; accessible-label: "Title page authors and affiliations"; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        title-page-email := LineEdit { placeholder-text: "Corresponding email"; accessible-label: "Title page corresponding email"; }
+                                        title-page-journal := LineEdit { placeholder-text: "Target journal, optional and unverified"; accessible-label: "Title page target journal"; }
+                                    }
+                                    Button {
+                                        text: "Preview offline title page";
+                                        accessible-label: "Preview offline title page without saving";
+                                        clicked => { root.preview-manuscript-title-page(manuscript-id.text, title-page-title.text, title-page-authors.text, title-page-email.text, title-page-journal.text); }
+                                    }
+                                    TextEdit {
+                                        min-height: 110px;
+                                        preferred-height: 170px;
+                                        max-height: 230px;
+                                        text: root.manuscript-title-page-preview;
+                                        read-only: true;
+                                        accessible-label: "Copyable unsaved title page preview";
+                                    }
+                                }
+                            }
+                            Button {
+                                text: root.manuscript-review-open ? "Hide reviewer comments" : "Reviewer comments";
+                                accessible-label: "Toggle source-bound manuscript reviewer comments";
+                                clicked => { root.manuscript-review-open = !root.manuscript-review-open; }
+                            }
+                            if root.manuscript-review-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 8px;
+                                    Text { text: "Source-bound, immutable reviewer comments"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "Copy an exact, unique passage from the latest SAVED version of this manuscript section. Comments bind the section SHA-256 and Unicode text position; they never edit the manuscript or automatically relocate after revisions. Not Microsoft Word Track Changes."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    manuscript-review-quote-input := LineEdit {
+                                        placeholder-text: "Exact unique passage in saved section";
+                                        accessible-label: "Reviewer comment exact saved manuscript quote";
+                                        text <=> root.manuscript-review-quote;
+                                        edited(text) => { root.invalidate-manuscript-comment-preview(); }
+                                    }
+                                    manuscript-review-reviewer-input := LineEdit {
+                                        placeholder-text: "Reviewer display label";
+                                        accessible-label: "Reviewer comment author label";
+                                        text <=> root.manuscript-review-reviewer;
+                                        edited(text) => { root.invalidate-manuscript-comment-preview(); }
+                                    }
+                                    manuscript-review-comment-input := TextEdit {
+                                        min-height: 70px;
+                                        preferred-height: 100px;
+                                        max-height: 180px;
+                                        accessible-label: "Reviewer comment text input";
+                                        text <=> root.manuscript-review-comment;
+                                        edited(text) => { root.invalidate-manuscript-comment-preview(); }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Preview comment";
+                                            accessible-label: "Preview source-bound manuscript reviewer comment without writing";
+                                            clicked => { root.preview-manuscript-comment(); }
+                                        }
+                                        Button {
+                                            text: "Record comment";
+                                            accessible-label: "Record explicitly approved immutable manuscript reviewer comment";
+                                            clicked => { root.record-manuscript-comment(); }
+                                        }
+                                        Button {
+                                            text: "Load comments";
+                                            accessible-label: "Load saved manuscript reviewer comments";
+                                            clicked => { root.load-manuscript-comments(); }
+                                        }
+                                    }
+                                    TextEdit {
+                                        min-height: 130px;
+                                        preferred-height: 180px;
+                                        max-height: 260px;
+                                        read-only: true;
+                                        text: root.manuscript-review-results;
+                                        accessible-label: "Copyable source-bound reviewer comment history and preview";
+                                    }
+                                }
+                            }
                             HorizontalLayout {
                                 spacing: 8px;
                                 Button {
@@ -2281,6 +3332,61 @@ export component MainWindow inherits Window {
                                             text: section.label;
                                             accessible-label: "Open saved manuscript section " + section.label;
                                             clicked => { root.select-manuscript-section(section.name, section.revision); }
+                                        }
+                                    }
+                                }
+                            }
+                            Button {
+                                text: root.manuscript-history-panel-open ? "Hide revision history" : "Revision history / Restore";
+                                accessible-label: "Toggle manuscript revision history and restore";
+                                clicked => { root.manuscript-history-panel-open = !root.manuscript-history-panel-open; }
+                            }
+                            if root.manuscript-history-panel-open: Rectangle {
+                                background: Theme.surface;
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 10px;
+                                    spacing: 6px;
+                                    Text { text: "VERSION HISTORY AND SAFE RESTORE"; color: Theme.ink; font-weight: 700; }
+                                    Text { text: "Inspect saved section versions, then preview a previous version. Recording creates a NEW audited revision and preserves every earlier version."; color: Theme.muted-ink; wrap: word-wrap; }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Load revisions";
+                                            accessible-label: "Load manuscript section revision history";
+                                            clicked => { root.inspect-manuscript-revisions(manuscript-id.text, manuscript-section.text); }
+                                        }
+                                        LineEdit {
+                                            horizontal-stretch: 1;
+                                            text <=> root.manuscript-restore-source;
+                                            placeholder-text: "Prior version number, e.g. 1";
+                                            accessible-label: "Manuscript restore source revision";
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Preview restore";
+                                            accessible-label: "Preview saved manuscript revision restore";
+                                            clicked => { root.preview-manuscript-restore(manuscript-id.text, manuscript-section.text, root.manuscript-restore-source); }
+                                        }
+                                        Button {
+                                            text: "Record restore";
+                                            accessible-label: "Record approved manuscript revision restore";
+                                            clicked => { root.record-manuscript-restore(); }
+                                        }
+                                    }
+                                    ScrollView {
+                                        min-height: 58px;
+                                        preferred-height: 110px;
+                                        max-height: 148px;
+                                        Text {
+                                            text: root.manuscript-revision-summary;
+                                            accessible-label: "Manuscript revision history status " + root.manuscript-revision-summary;
+                                            color: Theme.muted-ink;
+                                            wrap: word-wrap;
                                         }
                                     }
                                 }
@@ -2430,6 +3536,19 @@ export component MainWindow inherits Window {
                                     text: "Save prepared artifact";
                                     accessible-label: "Save prepared manuscript artifact without overwrite";
                                     clicked => { root.save-prepared-export(manuscript-save-path.text, "writing.manuscript_export"); }
+                                }
+                            }
+                            HorizontalLayout {
+                                spacing: 8px;
+                                Button {
+                                    text: "Prepare inert Quarto .qmd";
+                                    accessible-label: "Prepare source bound inert Quarto document from persisted manuscript sections";
+                                    clicked => { root.prepare-quarto-source(manuscript-id.text); }
+                                }
+                                Button {
+                                    text: "Save prepared .qmd";
+                                    accessible-label: "Explicitly save verified Quarto source without overwriting files";
+                                    clicked => { root.save-prepared-export(manuscript-save-path.text, "writing.quarto_source_preview"); }
                                 }
                             }
                             Text {
@@ -2653,6 +3772,92 @@ export component MainWindow inherits Window {
                             Text { text: "Structural checks only. No scientific or external-source certification."; color: Theme.muted-ink; wrap: word-wrap; }
                             Button { text: "Run diagnostics"; accessible-label: "Run project diagnostics"; clicked => { root.run-diagnostics(); } }
                             Text { text: root.diagnostics-results; accessible-label: "Project diagnostics summary " + root.diagnostics-results; color: Theme.ink; wrap: word-wrap; }
+                            Text { text: "Open-science inventory (offline preview)"; color: Theme.ink; font-weight: 700; }
+                            Text { text: "Source hashes and byte counts only. Private titles and paths are redacted. This cannot approve patient-data publication or verify any license, consent, or OSF deposit."; color: Theme.muted-ink; wrap: word-wrap; }
+                            Button {
+                                text: root.open-science-busy ? "Verifying local object hashes…" : "Preview redacted research-object inventory";
+                                enabled: !root.open-science-busy;
+                                accessible-label: "Preview integrity-verified redacted research-object manifest without publishing";
+                                clicked => { root.preview-open-science-manifest(); }
+                            }
+                            Text {
+                                text: root.open-science-preview-results;
+                                accessible-label: "Redacted open science inventory preview " + root.open-science-preview-results;
+                                color: Theme.muted-ink;
+                                wrap: word-wrap;
+                            }
+                            Button {
+                                text: root.synthetic-evaluation-open ? "▾ Synthetic extraction evaluation (fixture only)" : "▸ Synthetic extraction evaluation (fixture only)";
+                                accessible-label: "Toggle offline synthetic extraction evaluation fixture panel";
+                                clicked => { root.synthetic-evaluation-open = !root.synthetic-evaluation-open; }
+                            }
+                            if root.synthetic-evaluation-open: Rectangle {
+                                border-color: Theme.divider;
+                                border-width: 1px;
+                                border-radius: Theme.panel-radius;
+                                VerticalLayout {
+                                    padding: 12px;
+                                    spacing: 8px;
+                                    Text {
+                                        text: "F44 — synthetic fixture evaluator";
+                                        color: Theme.ink;
+                                        font-weight: 700;
+                                    }
+                                    Text {
+                                        text: "This is a bounded, offline and zero-write demonstration. It checks supplied SHA-256 gold/prediction commitments and exact source-byte anchors. It is NOT a trained-model benchmark, independent human-gold validation, patient-data analysis or calibration certification.";
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    synthetic-eval-input := TextEdit {
+                                        min-height: 130px;
+                                        preferred-height: 200px;
+                                        max-height: 280px;
+                                        text: root.synthetic-evaluation-fixture;
+                                        accessible-label: "Synthetic extraction evaluation typed JSON fixture input";
+                                        edited(text) => {
+                                            root.synthetic-evaluation-fixture = text;
+                                            root.synthetic-evaluation-status = "Fixture changed; preview again. No prior result is valid for these bytes.";
+                                            root.synthetic-evaluation-receipt = "No current receipt after a source edit.";
+                                        }
+                                    }
+                                    HorizontalLayout {
+                                        spacing: 8px;
+                                        Button {
+                                            text: "Load safe synthetic sample";
+                                            accessible-label: "Insert trusted synthetic extraction evaluation example without project data";
+                                            clicked => { root.load-synthetic-evaluation-example(); }
+                                        }
+                                        Button {
+                                            text: "Preview synthetic receipt";
+                                            accessible-label: "Preview strict synthetic extraction evaluation with no network or project write";
+                                            clicked => { root.preview-synthetic-evaluation(synthetic-eval-input.text); }
+                                        }
+                                        Button {
+                                            text: "Clear fixture";
+                                            accessible-label: "Clear local synthetic evaluation input and preview";
+                                            clicked => {
+                                                root.synthetic-evaluation-fixture = "";
+                                                root.synthetic-evaluation-receipt = "No fixture or verified receipt loaded.";
+                                                root.synthetic-evaluation-status = "Synthetic fixture cleared from this view; no project write occurred.";
+                                            }
+                                        }
+                                    }
+                                    Text {
+                                        text: root.synthetic-evaluation-status;
+                                        accessible-label: "Synthetic extraction evaluation status " + root.synthetic-evaluation-status;
+                                        color: Theme.muted-ink;
+                                        wrap: word-wrap;
+                                    }
+                                    TextEdit {
+                                        min-height: 130px;
+                                        preferred-height: 220px;
+                                        max-height: 330px;
+                                        read-only: true;
+                                        text: root.synthetic-evaluation-receipt;
+                                        accessible-label: "Copyable SHA verified redacted synthetic extraction evaluation receipt";
+                                    }
+                                }
+                            }
                          }
                         }
                     }

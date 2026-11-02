@@ -42,3 +42,13 @@ jobs:
       - run: cargo check --workspace --locked --all-targets
       - run: cargo clippy --workspace --locked --all-targets --all-features -- -D warnings
       - run: cargo test --workspace --locked --all-features
+      - name: Native AT-SPI push-button fallback contract
+        run: python3 -m unittest discover -s scripts/qa -p 'test_native_*.py' -v
+      - name: Windows UI Automation preview pipeline return contract
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/qa/test-windows-uia-return-contract.ps1
+      - name: Windows UIA project revision Unicode contract
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/qa/test-windows-uia-project-revision-contract.ps1

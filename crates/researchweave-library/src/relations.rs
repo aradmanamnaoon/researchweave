@@ -1,7 +1,7 @@
 //! Reversible reference identity decisions and human-attested citation graph.
 use super::{
     collections::{exists, mutate},
-    required,
+    dedup, required,
 };
 use researchweave_core::DispatchContext;
 use researchweave_project::ProjectStore;
@@ -240,6 +240,11 @@ fn merge(
         "rationale":rationale
     });
     let (_, revision) = mutate(store, "reference.merge", &payload, ctx, |tx, _now| {
+        // A preview/preflight check is not enough: a reviewer may have
+        // recorded a binding keep-separate decision on another connection.
+        // Read current source hashes and that decision within the alias write
+        // transaction so the two operations cannot silently interleave.
+        dedup::guard_direct_merge_on(tx, args)?;
         tx.execute(
             "INSERT INTO reference_alias(original_id,canonical_id,reason) VALUES (?1,?2,?3)",
             params![duplicate_id, canonical_id, rationale],

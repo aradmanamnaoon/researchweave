@@ -1,0 +1,314 @@
+AT_SPI_APP=researchweave-desktop
+AT_SPI_PHASE=welcome NAMED_NODES=56
+SCREENSHOT=welcome.png bytes=106182
+AT_SPI_ACTIVATED=Create default project
+AT_SPI_PHASE=project-created NAMED_NODES=66
+SCREENSHOT=project-created.png bytes=101745
+RECENT_PROJECT_INDEX_MATCHES_CREATED_PROJECT
+AT_SPI_ACTIVATED=Protocol
+AT_SPI_PHASE=protocol-before-freeze NAMED_NODES=55
+SCREENSHOT=protocol-before-freeze.png bytes=148704
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Protocol title NotImplementedError
+XVFB_TYPED_TEXT=Protocol title chars=30
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_READBACK_DEFERRED_TO_NATIVE_RESULT=Protocol title
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Protocol design NotImplementedError
+XVFB_TYPED_TEXT=Protocol design chars=13
+AT_SPI_TEXT_READBACK_OK=Protocol design
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Protocol author NotImplementedError
+XVFB_TYPED_TEXT=Protocol author chars=20
+AT_SPI_TEXT_READBACK_OK=Protocol author
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Protocol objective NotImplementedError
+XVFB_TYPED_TEXT=Protocol objective chars=50
+AT_SPI_TEXT_READBACK_OK=Protocol objective
+AT_SPI_ACTIVATED=Preview protocol
+AT_SPI_ACTIVATED=Record previewed protocol
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Protocol history ID NotImplementedError
+XVFB_TYPED_TEXT=Protocol history ID chars=36
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_READBACK_DEFERRED_TO_NATIVE_RESULT=Protocol history ID
+AT_SPI_ACTIVATED=Inspect local protocol freeze receipt
+AT_SPI_ACTIVATED=Preview local protocol baseline freeze
+AT_SPI_ACTIVATED=Record previewed local protocol baseline freeze
+AT_SPI_ACTIVATED=Inspect local protocol freeze receipt
+AT_SPI_PHASE=protocol-local-baseline-frozen NAMED_NODES=56
+SCREENSHOT=protocol-local-baseline-frozen.png bytes=139699
+AT_SPI_ACTIVATED=Preview local protocol baseline freeze
+LOCAL_PROTOCOL_FREEZE_ONE_TIME_DIGEST_AND_NO_PREVIEW_WRITE_OK
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Protocol objective NotImplementedError
+XVFB_TYPED_TEXT=Protocol objective chars=33
+AT_SPI_TEXT_READBACK_OK=Protocol objective
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Protocol amendment rationale NotImplementedError
+XVFB_TYPED_TEXT=Protocol amendment rationale chars=30
+AT_SPI_TEXT_READBACK_OK=Protocol amendment rationale
+AT_SPI_ACTIVATED=Preview protocol amendment
+AT_SPI_ACTIVATED=Record previewed protocol
+AT_SPI_ACTIVATED=Inspect local protocol freeze receipt
+LOCAL_PROTOCOL_FREEZE_POST_AMENDMENT_PROVENANCE_OK
+AT_SPI_ACTIVATED=Synthesize activity
+AT_SPI_PHASE=synthesize NAMED_NODES=54
+SCREENSHOT=synthesize.png bytes=102920
+AT_SPI_ACTIVATED=Notebook
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Quick note title NotImplementedError
+XVFB_TYPED_TEXT=Quick note title chars=18
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_READBACK_DEFERRED_TO_NATIVE_RESULT=Quick note title
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Quick note body NotImplementedError
+XVFB_TYPED_TEXT=Quick note body chars=42
+AT_SPI_TEXT_READBACK_OK=Quick note body
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Quick note tags NotImplementedError
+XVFB_TYPED_TEXT=Quick note tags chars=16
+AT_SPI_TEXT_READBACK_OK=Quick note tags
+AT_SPI_ACTIVATED=Add quick note to project
+QUICK_NOTE_SQLITE_CONTENT_VERIFIED
+AT_SPI_POST_SAVE_CLEAR_READBACK_UNAVAILABLE=Quick note title
+QUICK_NOTE_EDITOR_CLEARED_AFTER_SAVE
+QUICK_NOTE_SAVED_AS_CARD
+AT_SPI_PHASE=quick-note-created NAMED_NODES=59
+SCREENSHOT=quick-note-created.png bytes=107429
+AT_SPI_ACTIVATED=Pin Synthetic MRI memo
+AT_SPI_ACTIVATED=Show pinned quick notes
+AT_SPI_ACTIVATED=Archive Synthetic MRI memo
+AT_SPI_ACTIVATED=Show archived quick notes
+AT_SPI_ACTIVATED=Restore Synthetic MRI memo
+AT_SPI_ACTIVATED=Show active quick notes
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Search quick notes NotImplementedError
+XVFB_TYPED_TEXT=Search quick notes chars=7
+AT_SPI_TEXT_READBACK_OK=Search quick notes
+QUICK_NOTE_PIN_ARCHIVE_RESTORE_AND_TAG_SEARCH_OK
+AT_SPI_PHASE=quick-note-filtered NAMED_NODES=59
+SCREENSHOT=quick-note-filtered.png bytes=106420
+AT_SPI_ACTIVATED=Edit quick note Synthetic MRI memo
+AT_SPI_ACTIVATED=Convert quick note draft to checklist
+AT_SPI_ACTIVATED=Save selected quick note
+AT_SPI_ACTIVATED=Edit quick note Synthetic MRI memo
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Quick note body NotImplementedError
+XVFB_TYPED_TEXT=Quick note body chars=31
+AT_SPI_TEXT_READBACK_OK=Quick note body
+AT_SPI_ACTIVATED=Complete Research MRI note about a synthetic brain. in note Synthetic MRI memo
+AT_SPI_ACTIVATED=Mark unfinished Research MRI note about a synthetic brain. in note Synthetic MRI memo
+AT_SPI_ACTIVATED=Clear quick note editor to create another
+QUICK_NOTE_UNSAVED_COMPOSER_PRESERVED_THROUGH_CARD_ACTIONS_OK
+QUICK_NOTE_PER_ITEM_TOGGLE_AND_UNDO_OK
+AT_SPI_ACTIVATED=Complete next item in quick note Synthetic MRI memo
+QUICK_NOTE_CHECKLIST_PERSISTED_COMPLETION_OK
+AT_SPI_PHASE=quick-note-checklist-completed NAMED_NODES=59
+SCREENSHOT=quick-note-checklist-completed.png bytes=106336
+AT_SPI_ACTIVATED=Show long form project notebook
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Project notebook text NotImplementedError
+XVFB_TYPED_TEXT=Project notebook text chars=61
+AT_SPI_TEXT_READBACK_OK=Project notebook text
+AT_SPI_PHASE=notebook NAMED_NODES=45
+SCREENSHOT=notebook.png bytes=91892
+NOTEBOOK_AUTOSAVE_STATUS_PRESENT
+XVFB_WINDOW_GEOMETRY=850x600
+AT_SPI_PHASE=notebook-narrow NAMED_NODES=35
+SCREENSHOT=notebook-narrow.png bytes=70480
+XVFB_WINDOW_GEOMETRY=1280x800
+AT_SPI_ACTIVATED=Load notebook history
+AT_SPI_ACTION_NOT_AVAILABLE=Return to PDF
+AT_SPI_ACTIVATED=Synthesize activity
+AT_SPI_ACTIVATED=Manuscript
+AT_SPI_PHASE=manuscript NAMED_NODES=51
+SCREENSHOT=manuscript.png bytes=91816
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript ID NotImplementedError
+XVFB_TYPED_TEXT=Manuscript ID chars=18
+AT_SPI_TEXT_READBACK_OK=Manuscript ID
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript section NotImplementedError
+XVFB_TYPED_TEXT=Manuscript section chars=8
+AT_SPI_TEXT_READBACK_OK=Manuscript section
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript section body NotImplementedError
+XVFB_TYPED_TEXT=Manuscript section body chars=51
+AT_SPI_TEXT_READBACK_OK=Manuscript section body
+AT_SPI_ACTIVATED=Increase manuscript editor display zoom
+AT_SPI_ACTIVATED=Decrease manuscript editor display zoom
+MANUSCRIPT_WORD_COUNT_AND_VISUAL_ZOOM_OK
+AT_SPI_ACTIVATED=Toggle manuscript find and replace
+MANUSCRIPT_FIND_PANEL_REVEALED_OK
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript find text NotImplementedError
+XVFB_TYPED_TEXT=Manuscript find text chars=9
+AT_SPI_TEXT_READBACK_OK=Manuscript find text
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript replace with NotImplementedError
+XVFB_TYPED_TEXT=Manuscript replace with chars=8
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_READBACK_DEFERRED_TO_NATIVE_RESULT=Manuscript replace with
+AT_SPI_PHASE=manuscript-find-filled NAMED_NODES=58
+SCREENSHOT=manuscript-find-filled.png bytes=122987
+AT_SPI_ACTIVATED=Preview manuscript replace all
+AT_SPI_PHASE=manuscript-replace-preview NAMED_NODES=58
+SCREENSHOT=manuscript-replace-preview.png bytes=125308
+MANUSCRIPT_PREVIEW_STATUS_NODES=['Toggle manuscript find and replace', 'Find and replace in this section', 'Manuscript replacement status 1 exact occurrences found. No changes made. Review and choose Apply previewed replacement.', 'Manuscript replace with', 'Preview manuscript replace all', 'Apply previewed manuscript replacement']
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript replace with NotImplementedError
+XVFB_TYPED_TEXT=Manuscript replace with chars=10
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_READBACK_DEFERRED_TO_NATIVE_RESULT=Manuscript replace with
+AT_SPI_ACTIVATED=Apply previewed manuscript replacement
+MANUSCRIPT_STALE_PREVIEW_REJECTED_OK
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript replace with NotImplementedError
+XVFB_TYPED_TEXT=Manuscript replace with chars=8
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_READBACK_DEFERRED_TO_NATIVE_RESULT=Manuscript replace with
+AT_SPI_ACTIVATED=Preview manuscript replace all
+AT_SPI_ACTIVATED=Apply previewed manuscript replacement
+MANUSCRIPT_APPLY_STATUS=['Manuscript replacement status Applied 1 replacements to this draft. Autosave is pending; exported document is unchanged until saved.']
+MANUSCRIPT_PREVIEWED_REPLACE_ALL_OK
+MANUSCRIPT_AUTOSAVE_STATUS_PRESENT
+AT_SPI_ACTIVATED=Preview manuscript section
+AT_SPI_PHASE=manuscript-section-preview-attempt NAMED_NODES=58
+SCREENSHOT=manuscript-section-preview-attempt.png bytes=135051
+MANUSCRIPT_SECTION_PREVIEW_DIAGNOSTIC=['Preview manuscript section', 'Record previewed manuscript section', 'Writing operation result Preview ready. Section save will apply exactly this payload:\n{\n  "authoritative_revision": 14,\n  "preview": true,\n  "simulated_result": {\n    "autosave_safe": true,\n    "body_sha256": "f0caf2e1bfcd9e8622bc61ed9721e025baaa8e74803449ca20edb94372239e0c",\n    "manuscript_id": "synthetic-research",\n    "project_revision": 15,\n    "section": "Abstract",\n    "section_revision": 3\n  },\n  "simulated_revision": 15,\n  "writes": 1\n}', 'Preview manuscript replace all', 'Apply previewed manuscript replacement', 'Status: Manuscript section preview ready; project unchanged']
+AT_SPI_ACTIVATED=Record previewed manuscript section
+AT_SPI_PHASE=manuscript-section-record-attempt NAMED_NODES=58
+SCREENSHOT=manuscript-section-record-attempt.png bytes=143655
+MANUSCRIPT_SECTION_RECORD_DIAGNOSTIC=['Writing operation result Recorded through approved local-write command:\n{\n  "autosave_safe": true,\n  "body_sha256": "f0caf2e1bfcd9e8622bc61ed9721e025baaa8e74803449ca20edb94372239e0c",\n  "manuscript_id": "synthetic-research",\n  "project_revision": 15,\n  "section": "Abstract",\n  "section_revision": 3\n}', 'Status: Previewed evidence operation recorded and audited']
+AT_SPI_ACTIVATED=Inspect manuscript
+AT_SPI_PHASE=manuscript-inspect NAMED_NODES=58
+SCREENSHOT=manuscript-inspect.png bytes=129847
+MANUSCRIPT_PERSISTED_INSPECTION_VISIBLE_OK
+AT_SPI_ACTIVATED=Toggle manuscript operation details
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript section NotImplementedError
+XVFB_TYPED_TEXT=Manuscript section chars=7
+AT_SPI_TEXT_READBACK_OK=Manuscript section
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Manuscript section body NotImplementedError
+XVFB_TYPED_TEXT=Manuscript section body chars=52
+AT_SPI_TEXT_READBACK_OK=Manuscript section body
+AT_SPI_ACTIVATED=Toggle saved manuscript sections outline
+AT_SPI_PHASE=manuscript-section-outline NAMED_NODES=55
+SCREENSHOT=manuscript-section-outline.png bytes=99822
+AT_SPI_ACTIVATED=Open saved manuscript section Abstract · r3
+MANUSCRIPT_OUTLINE_SELECTION_STATUS=['Loaded saved section Abstract (revision 3).']
+AT_SPI_PHASE=manuscript-section-outline-selected NAMED_NODES=54
+SCREENSHOT=manuscript-section-outline-selected.png bytes=93775
+MANUSCRIPT_VERIFIED_SECTION_OUTLINE_NAVIGATION_OK
+XVFB_WINDOW_GEOMETRY=850x600
+AT_SPI_PHASE=manuscript-narrow NAMED_NODES=42
+SCREENSHOT=manuscript-narrow.png bytes=61774
+XVFB_WINDOW_GEOMETRY=1280x800
+AT_SPI_ACTIVATED=Analyze activity
+AT_SPI_ACTIVATED=Data View
+AT_SPI_PHASE=data-before-import NAMED_NODES=50
+SCREENSHOT=data-before-import.png bytes=91959
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Analysis import path NotImplementedError
+XVFB_TYPED_TEXT=Analysis import path chars=36
+AT_SPI_TEXT_READBACK_OK=Analysis import path
+AT_SPI_ACTIVATED=Preview analysis import
+DATA_IMPORT_PREVIEW_CONFIRMED
+AT_SPI_ACTIVATED=Import previewed analysis data
+AT_SPI_PHASE=data-after-import NAMED_NODES=54
+SCREENSHOT=data-after-import.png bytes=150949
+AT_SPI_ACTIVATED=Inspect variables in recently imported dataset
+DATA_TO_VARIABLES_CONTEXT_OK id_chars=24 revision_chars=64
+AT_SPI_ACTIVATED=Data View
+AT_SPI_ACTIVATED=Analyze recently imported dataset
+DATA_TO_STATISTICS_CONTEXT_OK
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Statistics numeric column NotImplementedError
+XVFB_TYPED_TEXT=Statistics numeric column chars=5
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_TEXT_READBACK_UNAVAILABLE=NotImplementedError
+AT_SPI_READBACK_DEFERRED_TO_NATIVE_RESULT=Statistics numeric column
+AT_SPI_ACTIVATED=Run descriptive statistics
+AT_SPI_PHASE=statistics-result NAMED_NODES=59
+SCREENSHOT=statistics-result.png bytes=132553
+DATA_TO_NATIVE_DESCRIPTIVES_MEAN_2_OK
+AT_SPI_ACTIVATED=Show statistical raw data and provenance details
+AT_SPI_PHASE=statistics-technical-details NAMED_NODES=60
+SCREENSHOT=statistics-technical-details.png bytes=133380
+AT_SPI_ACTIVATED=Hide statistical raw data and provenance details
+STATISTICS_PROGRESSIVE_DISCLOSURE_OK
+AT_SPI_ACTIVATED=Analysis Results
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Analysis Results dataset ID NotImplementedError
+XVFB_TYPED_TEXT=Analysis Results dataset ID chars=24
+AT_SPI_TEXT_READBACK_OK=Analysis Results dataset ID
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Analysis Results dataset revision NotImplementedError
+XVFB_TYPED_TEXT=Analysis Results dataset revision chars=64
+AT_SPI_TEXT_READBACK_OK=Analysis Results dataset revision
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Analysis Results numeric column NotImplementedError
+XVFB_TYPED_TEXT=Analysis Results numeric column chars=5
+AT_SPI_TEXT_READBACK_OK=Analysis Results numeric column
+AT_SPI_ACTIVATED=Preview immutable analysis result
+AT_SPI_ACTIVATED=Record previewed immutable analysis result
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Analysis report result IDs NotImplementedError
+XVFB_TYPED_TEXT=Analysis report result IDs chars=7
+AT_SPI_TEXT_READBACK_OK=Analysis report result IDs
+AT_SPI_ACTIVATED=Use selected immutable result in analysis report
+ANALYSIS_RESULT_SELECTION_AND_REPORT_SHORTCUT_OK
+AT_SPI_ACTIVATED=Prepare verified analysis report Markdown file
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Analysis report export destination path NotImplementedError
+XVFB_TYPED_TEXT=Analysis report export destination path chars=50
+AT_SPI_TEXT_READBACK_OK=Analysis report export destination path
+AT_SPI_ACTIVATED=Save prepared analysis report without overwrite
+AT_SPI_ACTIVATED=Save prepared analysis report without overwrite
+ANALYSIS_REPORT_PHYSICAL_MARKDOWN_PROVENANCE_AND_NO_OVERWRITE_OK
+AT_SPI_PHASE=analysis-report-physical-export NAMED_NODES=60
+SCREENSHOT=analysis-report-physical-export.png bytes=136062
+AT_SPI_ACTIVATED=Data View
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Analysis import path NotImplementedError
+XVFB_TYPED_TEXT=Analysis import path chars=36
+AT_SPI_TEXT_READBACK_OK=Analysis import path
+AT_SPI_ACTIVATED=Preview analysis import
+STALE_IMPORT_PREVIEW_STAGED_IN_ORIGINAL_PROJECT
+AT_SPI_ACTIVATED=Home activity
+AT_SPI_PHASE=home-after-staged-preview NAMED_NODES=66
+SCREENSHOT=home-after-staged-preview.png bytes=103169
+AT_SPI_ACTIVATED=Open Start Center to switch projects
+AT_SPI_ACTIVATED=Create default project
+AT_SPI_ACTIVATED=Analyze activity
+AT_SPI_ACTIVATED=Import previewed analysis data
+STALE_IMPORT_PREVIEW_REJECTED_AFTER_PROJECT_SWITCH
+DATASET_CONTEXT_CLEARED_AFTER_PROJECT_SWITCH_OK
+PROJECT_RESULT_ISOLATION_OK
+AT_SPI_ACTIVATED=Analysis Results
+ANALYSIS_RESULT_SELECTION_PROJECT_ISOLATION_OK
+AT_SPI_PHASE=data-after-project-switch NAMED_NODES=60
+SCREENSHOT=data-after-project-switch.png bytes=128155
+AT_SPI_ACTIVATED=Synthesize activity
+AT_SPI_ACTIVATED=Show quick note cards
+QUICK_NOTE_PROJECT_ISOLATION_OK
+AT_SPI_ACTIVATED=Notebook
+AT_SPI_ACTIVATED=Show long form project notebook
+AT_SPI_ACTIVATED=Manuscript
+NOTEBOOK_AND_MANUSCRIPT_PROJECT_ISOLATION_OK
+AT_SPI_ACTIVATED=Home activity
+AT_SPI_ACTIVATED=Open Start Center to switch projects
+AT_SPI_EDITABLE_INTERFACE_UNAVAILABLE=Project path NotImplementedError
+XVFB_TYPED_TEXT=Project path chars=65
+AT_SPI_TEXT_READBACK_OK=Project path
+AT_SPI_ACTIVATED=Open project
+AT_SPI_ACTIVATED=Synthesize activity
+AT_SPI_ACTIVATED=Show quick note cards
+QUICK_NOTE_CHECKLIST_REOPEN_PERSISTENCE_OK
+QUICK_NOTE_PERSISTED_AFTER_REOPEN_OK
+AT_SPI_ACTIVATED=Notebook
+AT_SPI_ACTIVATED=Show long form project notebook
+AT_SPI_ACTIVATED=Manuscript
+NOTES_AND_MANUSCRIPT_REOPEN_PERSISTENCE_OK
+AT_SPI_PHASE=reopened-project-writing NAMED_NODES=51
+SCREENSHOT=reopened-project-writing.png bytes=95957
+AT_SPI_ACTIVATED=Home activity
+AT_SPI_ACTIVATED=Open Start Center to switch projects
+AT_SPI_PHASE=recent-projects-visible NAMED_NODES=59
+SCREENSHOT=recent-projects-visible.png bytes=113557
+AT_SPI_ACTIVATED=Reopen selected recent project
+RECENT_PROJECT_ONE_CLICK_GUI_REOPEN_OK
+AT_SPI_PHASE=recent-project-reopened NAMED_NODES=66
+SCREENSHOT=recent-project-reopened.png bytes=100407
+AT_SPI_ACTIVATED=Home activity
+AT_SPI_ACTIVATED=Open Start Center to switch projects
+XVFB_WINDOW_GEOMETRY=850x600
+AT_SPI_PHASE=recent-projects-narrow NAMED_NODES=41
+SCREENSHOT=recent-projects-narrow.png bytes=68836
+RECENT_PROJECT_NARROW_ACCESSIBLE_OK
+AT_SPI_NAVIGATION_PROBE_OK

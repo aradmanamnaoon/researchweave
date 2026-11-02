@@ -32,11 +32,18 @@ use uuid::Uuid;
 #[cfg(test)]
 mod display_contrast;
 mod durable_activity;
+mod f44_synthetic_evaluation;
+mod manuscript_citation_insert;
 mod manuscript_outline;
+mod manuscript_quarto_source;
+mod manuscript_review_anchor;
 mod manuscript_search;
 mod pdf_engine;
 mod physical_export;
 mod quick_note_checklist;
+mod recent_projects;
+mod reference_dedup_view;
+mod review_screening;
 mod writing_autosave;
 
 fn flush_writing_drafts(
@@ -129,9 +136,64 @@ fn restore_writing_drafts(
 /// the previously active project.  Switching projects must never leave results
 /// from one project looking like they were computed for another.
 fn reset_project_visible_state(ui: &MainWindow) {
+    ui.set_lifecycle_open(false);
+    ui.set_lifecycle_busy(false);
+    ui.set_lifecycle_request_id(ui.get_lifecycle_request_id().wrapping_add(1));
+    ui.set_lifecycle_stages(
+        Rc::new(slint::VecModel::from(Vec::<ResearchLifecycleStage>::new())).into(),
+    );
+    ui.set_lifecycle_status(
+        "Recorded lifecycle items are project-specific; there is no scientific-completion certification.".into(),
+    );
+    ui.set_open_science_request_id(ui.get_open_science_request_id().wrapping_add(1));
+    ui.set_open_science_busy(false);
+    ui.set_open_science_preview_results(
+        "No research-object inventory preview for this project. Source rights and patient consent are not verified.".into(),
+    );
+    // An unsaved synthetic fixture is not tied to a project, but it may still
+    // contain sensitive text pasted in error. Never carry it to another view
+    // and never preserve a now-stale receipt across a project switch.
+    ui.set_synthetic_evaluation_fixture("".into());
+    ui.set_synthetic_evaluation_receipt(
+        "No synthetic fixture evaluated for this project view.".into(),
+    );
+    ui.set_synthetic_evaluation_status(
+        "Synthetic-only evaluation is offline and has no access to project research objects."
+            .into(),
+    );
+    ui.set_synthetic_evaluation_open(false);
+    ui.set_pdf_caption_request_id(ui.get_pdf_caption_request_id().wrapping_add(1));
+    ui.set_pdf_caption_busy(false);
+    ui.set_pdf_caption_candidates(
+        Rc::new(slint::VecModel::from(Vec::<PdfCaptionCandidate>::new())).into(),
+    );
+    ui.set_pdf_caption_status(
+        "Figure/table caption suggestions are unverified. Open a local PDF and inspect its source pages.".into(),
+    );
+    ui.set_notebook_cell_open(false);
+    ui.set_notebook_cell_id("".into());
+    ui.set_notebook_cell_revision(0);
+    ui.set_notebook_cell_code("".into());
+    ui.set_notebook_cell_approval("".into());
+    ui.set_notebook_cell_offset(0);
+    ui.set_notebook_cell_total(0);
+    ui.set_notebook_cell_snapshot_revision(-1);
+    ui.set_notebook_cell_status(
+        "Arithmetic cells are project-scoped and run only a restricted offline expression language.".into(),
+    );
+    ui.set_notebook_cells(Rc::new(slint::VecModel::from(Vec::<NotebookCell>::new())).into());
+    ui.set_quick_note_obsidian_open(false);
+    ui.set_quick_note_obsidian_markdown("".into());
+    ui.set_quick_note_obsidian_approval("".into());
+    ui.set_quick_note_obsidian_status(
+        "Select a saved card and explicitly export it to begin a new local Markdown exchange."
+            .into(),
+    );
     ui.set_data_local_path("".into());
     ui.set_recent_dataset_id("".into());
     ui.set_recent_dataset_revision("".into());
+    ui.set_selected_analysis_result_id("".into());
+    ui.set_analysis_report_selected_ids("".into());
     ui.set_analysis_results(
         "Import an immutable dataset revision or inspect saved analysis data.".into(),
     );
@@ -169,8 +231,43 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_protocol_results("Preview a protocol before recording it.".into());
     ui.set_protocol_export_receipt("".into());
     ui.set_protocol_export_id("".into());
+    ui.set_protocol_freeze_status(
+        "No local freeze inspected. A local digest and computer timestamp are not an external preregistration.".into(),
+    );
+    ui.set_protocol_freeze_summary("No local baseline inspected yet.".into());
+    ui.set_protocol_freeze_export_receipt("".into());
     ui.set_reference_results("Register or inspect project references.".into());
+    ui.set_reference_pdf_metadata_open(false);
+    ui.set_reference_pdf_metadata_results(
+        "Choose an already indexed PDF source ID. Suggestions are unverified and never change bibliography records.".into(),
+    );
+    ui.set_reference_crossref_open(false);
+    ui.set_reference_crossref_ready(false);
+    ui.set_reference_crossref_busy(false);
+    ui.set_reference_crossref_request_id(ui.get_reference_crossref_request_id().wrapping_add(1));
+    ui.set_reference_crossref_results(
+        "Enter a DOI. Preview is offline; a separate approved Fetch contacts Crossref only. Suggested metadata is unverified and no reference is automatically changed.".into(),
+    );
+    ui.set_reference_dedup_results("Scan local records, inspect source metadata, and explicitly preview a reversible decision. No automatic merge.".into());
+    ui.set_reference_dedup_candidates(
+        Rc::new(slint::VecModel::from(
+            Vec::<ReferenceDuplicateCandidate>::new(),
+        ))
+        .into(),
+    );
+    ui.set_reference_dedup_canonical_id("".into());
+    ui.set_reference_dedup_duplicate_id("".into());
+    ui.set_reference_dedup_fingerprint("".into());
+    ui.set_reference_dedup_rationale("".into());
+    // Collapse project-specific editing panels so their uncontrolled line-edit
+    // contents are destroyed instead of surviving a project identity switch.
+    ui.set_reference_dedup_open(false);
     ui.set_review_results("Use persisted references to build and screen a review.".into());
+    ui.set_review_screening_open(false);
+    ui.set_review_screening_results("No screening suggestion loaded. Open a project and choose a persisted title/abstract review record.".into());
+    ui.set_review_search_results(
+        "Specify PICO concepts to draft a database-specific search strategy. No search has been executed.".into(),
+    );
     ui.set_extraction_results(
         "Create a versioned extraction schema, then record validated values for a review record."
             .into(),
@@ -199,11 +296,36 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_manuscript_draft_section("".into());
     ui.set_manuscript_draft_citations("".into());
     ui.set_manuscript_draft_body("".into());
+    ui.set_manuscript_citation_reference_id("".into());
+    ui.set_manuscript_citation_status("Choose a reference from this project; preview then explicitly apply. The marker is appended at the end.".into());
+    ui.set_manuscript_review_open(false);
+    ui.set_manuscript_review_quote("".into());
+    ui.set_manuscript_review_reviewer("".into());
+    ui.set_manuscript_review_comment("".into());
+    ui.set_manuscript_review_results(
+        "Reviewer comments are anchored to an exact saved section revision; no comments loaded."
+            .into(),
+    );
+    ui.set_manuscript_title_page_preview(
+        "Preview a title page from validated fields; this does not save or submit anything.".into(),
+    );
+    ui.set_manuscript_title_page_open(false);
     ui.set_manuscript_sections(
         Rc::new(slint::VecModel::from(Vec::<ManuscriptSection>::new())).into(),
     );
     ui.set_manuscript_outline_open(false);
     ui.set_manuscript_outline_status("Load saved sections to navigate this manuscript.".into());
+    // The revision-history panel contains an uncontrolled source-revision
+    // LineEdit. Unlike project-bound stored manuscript revisions, this UI
+    // draft formerly survived opening another project (observed in private
+    // Xvfb acceptance with the previous project's source revision still
+    // visible). Collapse it and clear the stale source before the new project
+    // can preview or record a restore.
+    ui.set_manuscript_history_panel_open(false);
+    ui.set_manuscript_restore_source("".into());
+    ui.set_manuscript_revision_summary(
+        "Select a saved manuscript section and load its revision history.".into(),
+    );
     ui.set_manuscript_word_count(0);
     ui.set_manuscript_character_count(0);
     ui.set_manuscript_find_panel_open(false);
@@ -231,8 +353,13 @@ fn reset_project_visible_state(ui: &MainWindow) {
     );
     ui.set_backup_results("Open a project, then choose an absolute archive path.".into());
     ui.set_recovery_results("Restore always creates a new project directory.".into());
+    // A previous project's asynchronous PDF render may still be completing.
+    // Even if the next project chooses an identical source path, never display
+    // an old job's pixels after the project boundary.
+    ui.set_pdf_job(ui.get_pdf_job().wrapping_add(1));
     ui.set_pdf_image(Image::default());
     ui.set_pdf_local_path("".into());
+    ui.set_pdf_verified_caption_sha("".into());
     ui.set_pdf_status("Choose a local PDF file".into());
     ui.set_pdf_matches(0);
     ui.set_pdf_page_number(1);
@@ -355,6 +482,89 @@ fn show_activity(ui: &MainWindow, state: &durable_activity::Activity) {
 }
 
 slint::include_modules!();
+
+fn refresh_arithmetic_cells(
+    ui: &MainWindow,
+    project: &Path,
+    root: &Path,
+    offset: i32,
+) -> Result<(usize, i32), String> {
+    let offset_usize = usize::try_from(offset).map_err(|_| "Negative cell page offset")?;
+    let expected_snapshot = ui.get_notebook_cell_snapshot_revision();
+    let mut request = serde_json::json!({"limit":100,"offset":offset_usize});
+    if offset_usize > 0 {
+        if expected_snapshot < 0 {
+            return Err("Refresh saved cells before navigating history pages".into());
+        }
+        request["expected_project_revision"] = serde_json::json!(expected_snapshot);
+    }
+    let result = evidence_read_at(project, "notebook.cell_list", request, root)?;
+    let snapshot = result
+        .pointer("/data/project_revision")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|revision| i32::try_from(revision).ok())
+        .filter(|revision| *revision >= 0)
+        .ok_or("Persisted arithmetic cell source revision unavailable")?;
+    if offset_usize > 0 && snapshot != expected_snapshot {
+        return Err("Saved arithmetic cells changed; refresh the first page".into());
+    }
+    let total = result
+        .pointer("/data/total")
+        .and_then(serde_json::Value::as_i64)
+        .and_then(|count| i32::try_from(count).ok())
+        .filter(|count| (0..=500).contains(count))
+        .ok_or("Bounded saved-cell total unavailable")?;
+    if (total > 0 && offset >= total) || (total == 0 && offset != 0) {
+        return Err("Saved arithmetic cell page is beyond the current history".into());
+    }
+    if result
+        .pointer("/data/offset")
+        .and_then(serde_json::Value::as_u64)
+        != Some(offset_usize as u64)
+    {
+        return Err("Saved arithmetic cell page receipt has a mismatched offset".into());
+    }
+    let rows = result
+        .pointer("/data/cells")
+        .and_then(serde_json::Value::as_array)
+        .ok_or("Persisted arithmetic cell list unavailable")?;
+    let mut cells = Vec::with_capacity(rows.len());
+    for row in rows {
+        let record = &row["document"];
+        if record["language"] != "researchweave-arithmetic-v1"
+            || record["external_execution"] != false
+        {
+            return Err("Unverified arithmetic notebook result refused".into());
+        }
+        let code = record["code"]
+            .as_str()
+            .ok_or("Missing stored arithmetic expression")?;
+        let value = record["result"]["value"]
+            .as_f64()
+            .filter(|value| value.is_finite())
+            .ok_or("Missing finite stored arithmetic result")?;
+        let id = row["cell_id"]
+            .as_str()
+            .ok_or("Missing stored cell identifier")?;
+        let revision = row["cell_revision"]
+            .as_i64()
+            .and_then(|value| i32::try_from(value).ok())
+            .filter(|rev| *rev > 0)
+            .ok_or("Invalid saved cell revision")?;
+        cells.push(NotebookCell {
+            id: id.into(),
+            revision,
+            code: code.into(),
+            result: value.to_string().into(),
+        });
+    }
+    let count = cells.len();
+    ui.set_notebook_cells(Rc::new(slint::VecModel::from(cells)).into());
+    ui.set_notebook_cell_offset(offset);
+    ui.set_notebook_cell_total(total);
+    ui.set_notebook_cell_snapshot_revision(snapshot);
+    Ok((count, total))
+}
 
 fn refresh_quick_note_cards(
     ui: &MainWindow,
@@ -874,6 +1084,28 @@ fn host_data_root() -> Result<PathBuf, String> {
             .map(PathBuf::from)
             .map(|root| root.join(".local/share/researchweave"))
             .ok_or_else(|| "HOME is unavailable".into())
+    }
+}
+
+fn refresh_recent_project_shortcuts(ui: &MainWindow) -> Result<(), String> {
+    let recent = recent_projects::load(&host_data_root()?)?;
+    let labels = recent
+        .into_iter()
+        .map(|entry| slint::SharedString::from(entry.title))
+        .collect::<Vec<_>>();
+    let has_items = !labels.is_empty();
+    ui.set_recent_project_options(Rc::new(slint::VecModel::from(labels)).into());
+    ui.set_recent_project_index(if has_items { 0 } else { -1 });
+    Ok(())
+}
+
+fn remember_recent_project(ui: &MainWindow, path: &Path, title: &str) {
+    let result = host_data_root().and_then(|root| {
+        recent_projects::remember(&root, path, title)?;
+        refresh_recent_project_shortcuts(ui)
+    });
+    if let Err(error) = result {
+        ui.set_status(format!("Project ready; recent project history unavailable: {error}").into());
     }
 }
 
@@ -2570,6 +2802,115 @@ fn pretty_result_data(result: &serde_json::Value) -> String {
         .unwrap_or_else(|_| "Operation completed, but its result could not be formatted".into())
 }
 
+fn review_search_terms(input: &str) -> Vec<String> {
+    input
+        .split(';')
+        .map(str::trim)
+        .filter(|part| !part.is_empty())
+        .map(str::to_owned)
+        .collect()
+}
+
+fn review_search_preview_text(result: &serde_json::Value) -> Result<String, String> {
+    let data = result
+        .get("data")
+        .ok_or("Search builder has no verified response")?;
+    let provenance = &data["provenance"];
+    if result["status"] != "ok"
+        || data["schema_version"] != "review-search-strategy-v1"
+        || provenance["generated_offline"] != true
+        || provenance["query_executed"] != false
+        || provenance["retrieval_attempted"] != false
+        || provenance["manual_verification_required"] != true
+        || !provenance["result_count"].is_null()
+    {
+        return Err("Search provenance failed closed: queries must be unexecuted drafts".into());
+    }
+    let digest = provenance["content_sha256"]
+        .as_str()
+        .filter(|hash| hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit()))
+        .ok_or("Search provenance digest is missing or malformed")?;
+    let queries = data["queries"]
+        .as_array()
+        .filter(|rows| !rows.is_empty() && rows.len() <= 3)
+        .ok_or("No verified database query drafts were returned")?;
+    let mut out = format!(
+        "OFFLINE DRAFT ONLY · No database was queried; no results counted.\nContent SHA-256: {digest}\n\n"
+    );
+    for row in queries {
+        let database = row["database"]
+            .as_str()
+            .filter(|name| matches!(*name, "pubmed" | "scopus" | "web_of_science"))
+            .ok_or("Unknown search database")?;
+        let query = row["query"]
+            .as_str()
+            .filter(|query| !query.is_empty() && query.len() <= 12_000)
+            .ok_or("Search query exceeds safe display bounds")?;
+        let hash = row["query_sha256"]
+            .as_str()
+            .filter(|hash| hash.len() == 64 && hash.bytes().all(|c| c.is_ascii_hexdigit()))
+            .ok_or("Search query digest missing")?;
+        if row["executed"] != false {
+            return Err("Search builder incorrectly claimed a query was executed".into());
+        }
+        out.push_str(&format!("{database} · SHA-256 {hash}\n{query}\n\n"));
+    }
+    if out.len() > 36_000 {
+        return Err("Combined queries exceed the native review display limit".into());
+    }
+    out.push_str("Manually validate field tags, Boolean grammar, database coverage and search dates before running these queries in external databases. No retrieval is recorded here.");
+    Ok(out)
+}
+
+/// Human-readable, explicitly local-only protocol receipt derived from the
+/// existing verified read/record response, never from unsaved editor fields.
+fn protocol_freeze_summary(result: &serde_json::Value) -> Result<String, String> {
+    let data = result
+        .get("data")
+        .ok_or("Protocol baseline response has no data")?;
+    if result["status"] != "ok"
+        || data["local_only"] != true
+        || data["external_registration_verified"] != false
+    {
+        return Err("Protocol baseline local provenance could not be verified".into());
+    }
+    if data["frozen"] == false {
+        let current = data["current_version"]
+            .as_i64()
+            .filter(|version| *version > 0)
+            .ok_or("Protocol baseline current version is invalid")?;
+        return Ok(format!(
+            "Not frozen · protocol v{current}. Preview and explicitly record a local-only baseline."
+        ));
+    }
+    if data["frozen"] != true {
+        return Err("Protocol baseline frozen state is missing".into());
+    }
+    let baseline = data["frozen_version"]
+        .as_i64()
+        .filter(|version| *version > 0)
+        .ok_or("Protocol baseline frozen version is invalid")?;
+    let amendments = data["post_freeze_amendment_versions"]
+        .as_i64()
+        .filter(|count| *count >= 0)
+        .ok_or("Protocol baseline amendment count is invalid")?;
+    let expected_latest = baseline
+        .checked_add(amendments)
+        .ok_or("Protocol baseline version count overflow")?;
+    if data["current_version"] != serde_json::Value::Null
+        && data["current_version"].as_i64() != Some(expected_latest)
+    {
+        return Err("Protocol baseline versions are inconsistent".into());
+    }
+    let digest = data["snapshot_sha256"]
+        .as_str()
+        .filter(|hash| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+        .ok_or("Protocol baseline digest is invalid")?;
+    Ok(format!(
+        "Frozen locally · baseline v{baseline} · {amendments} post-baseline amendment version(s).\nSnapshot SHA-256: {digest}\nLocal event only; no independent registration or trusted timestamp."
+    ))
+}
+
 fn compact_stat_number(value: Option<&serde_json::Value>) -> String {
     value
         .and_then(serde_json::Value::as_f64)
@@ -3274,6 +3615,42 @@ fn chosen_local_file_path(path: &Path) -> Result<String, String> {
         .ok_or_else(|| "Selected file path cannot be represented as Unicode".into())
 }
 
+fn chosen_local_project_folder(path: &Path) -> Result<String, String> {
+    if !path.is_absolute() {
+        return Err("Native project chooser did not return an absolute folder".into());
+    }
+    let metadata = std::fs::symlink_metadata(path)
+        .map_err(|error| format!("Selected project folder is unavailable: {error}"))?;
+    if metadata.file_type().is_symlink() {
+        return Err("Choose a real project folder rather than a symbolic link".into());
+    }
+    if !metadata.is_dir() {
+        return Err("Selected project location must be a directory".into());
+    }
+    // ProjectStore::create refuses existing roots to prevent overwriting
+    // unrelated files. Native folder dialogs necessarily return existing
+    // directories, so select that directory only for a real project; when
+    // creating, propose a fresh child beneath the chosen parent.
+    let selected = if path.join("data").join("project.sqlite").is_file() {
+        path.to_path_buf()
+    } else {
+        let mut candidate = None;
+        for _ in 0..8 {
+            let child = path.join(format!("ResearchWeave-{}", Uuid::new_v4().simple()));
+            if !child.exists() {
+                candidate = Some(child);
+                break;
+            }
+        }
+        candidate.ok_or_else(|| "Could not prepare a new project folder".to_owned())?
+    };
+    selected
+        .as_path()
+        .to_str()
+        .map(str::to_owned)
+        .ok_or_else(|| "Selected project folder path is not valid Unicode".into())
+}
+
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     if let Some(args) = std::env::args().nth(1) {
         if args == "--smoke-native-workflow" {
@@ -3321,6 +3698,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
     let app = MainWindow::new()?;
+    if let Err(error) = refresh_recent_project_shortcuts(&app) {
+        app.set_status(format!("Recent project history unavailable: {error}").into());
+    }
     app.on_choose_local_file({
         let weak = app.as_weak();
         move |kind| {
@@ -3353,6 +3733,31 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     if let Some(selected) = selected {
                         match chosen_local_file_path(selected.path()) {
                             Ok(path) if kind == "pdf" => {
+                                // A native picker changes the path without a user
+                                // LineEdit `edited` event. Invalidate any in-flight
+                                // render and clear pixels from the previous source.
+                                ui.set_pdf_job(ui.get_pdf_job().wrapping_add(1));
+                                ui.set_pdf_verified_caption_sha("".into());
+                                ui.set_pdf_image(Image::default());
+                                ui.set_pdf_page_number(1);
+                                ui.set_pdf_page_count(0);
+                                ui.set_pdf_render_width(0.0);
+                                ui.set_pdf_render_height(0.0);
+                                ui.set_pdf_highlight_visible(false);
+                                ui.set_pdf_matches(0);
+                                ui.set_pdf_status("Source selected; open the new PDF to render".into());
+                                ui.set_pdf_caption_request_id(
+                                    ui.get_pdf_caption_request_id().wrapping_add(1),
+                                );
+                                ui.set_pdf_caption_busy(false);
+                                ui.set_pdf_caption_candidates(
+                                    Rc::new(slint::VecModel::from(
+                                        Vec::<PdfCaptionCandidate>::new()
+                                    )).into(),
+                                );
+                                ui.set_pdf_caption_status(
+                                    "A different PDF was selected. Prior caption anchors were cleared; scan the new source.".into(),
+                                );
                                 ui.set_pdf_local_path(path.into());
                                 ui.set_status("PDF selected from native file dialog".into());
                             }
@@ -3374,6 +3779,52 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Err(error) = slint::spawn_local(task) {
                 ui.set_local_file_dialog_busy(false);
                 ui.set_status(format!("Native file chooser unavailable: {error}").into());
+            }
+        }
+    });
+    app.on_choose_project_folder({
+        let weak = app.as_weak();
+        move || {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            if ui.get_local_file_dialog_busy() {
+                return;
+            }
+            ui.set_local_file_dialog_busy(true);
+            let weak_task = weak.clone();
+            let task = async move {
+                let selected = rfd::AsyncFileDialog::new().pick_folder().await;
+                if let Some(ui) = weak_task.upgrade() {
+                    match selected {
+                        Some(selected) => match chosen_local_project_folder(selected.path()) {
+                            Ok(folder) => {
+                                let existing = selected
+                                    .path()
+                                    .join("data")
+                                    .join("project.sqlite")
+                                    .is_file();
+                                ui.set_project_local_path(folder.into());
+                                ui.set_status(
+                                    if existing {
+                                        "Existing local project selected. Choose Open existing."
+                                    } else {
+                                        "New child project path prepared inside the selected parent folder. Review the path, then choose Create at custom path."
+                                    }.into(),
+                                );
+                            }
+                            Err(error) => ui.set_status(error.into()),
+                        },
+                        None => ui.set_status(
+                            "Folder selection canceled; existing project path preserved".into(),
+                        ),
+                    }
+                    ui.set_local_file_dialog_busy(false);
+                }
+            };
+            if let Err(error) = slint::spawn_local(task) {
+                ui.set_local_file_dialog_busy(false);
+                ui.set_status(format!("Native project folder chooser unavailable: {error}").into());
             }
         }
     });
@@ -3421,6 +3872,168 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let active_project: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    app.on_preview_arithmetic_cell({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_notebook_cell_approval("".into());
+                let result = (|| -> Result<(String, String, String), String> {
+                    let project = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let id = if ui.get_notebook_cell_id().is_empty() {
+                        format!("cell:{}", Uuid::new_v4())
+                    } else {
+                        ui.get_notebook_cell_id().to_string()
+                    };
+                    let code = ui.get_notebook_cell_code();
+                    let revision = ui.get_notebook_cell_revision();
+                    if revision < 0 {
+                        return Err("Invalid arithmetic cell revision".into());
+                    }
+                    let result = evidence_read_at(
+                        &project,
+                        "notebook.cell_preview",
+                        serde_json::json!({
+                            "cell_id":id,
+                            "expected_cell_revision":revision,
+                            "language":"researchweave-arithmetic-v1",
+                            "code":code.as_str()
+                        }),
+                        &host_data_root()?,
+                    )?;
+                    let data = &result["data"];
+                    if data["preview_only"] != true
+                        || data["writes"] != 0
+                        || data["cell_id"] != id
+                    {
+                        return Err("Unsafe or inconsistent cell preview refused".into());
+                    }
+                    let approval = data["approved_preview_sha256"]
+                        .as_str()
+                        .filter(|value| value.len() == 64
+                            && value.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                        .ok_or("Arithmetic preview receipt unavailable")?;
+                    let value = data["result"]
+                        .as_f64()
+                        .filter(|value| value.is_finite())
+                        .ok_or("Arithmetic preview result not finite")?;
+                    Ok((
+                        id,
+                        approval.to_owned(),
+                        format!("READ-ONLY PREVIEW: {value}. No project writes. Review expression and press Record calculation to append one project-scoped immutable cell revision."),
+                    ))
+                })();
+                match result {
+                    Ok((id, approval, message)) => {
+                        ui.set_notebook_cell_id(id.into());
+                        ui.set_notebook_cell_approval(approval.into());
+                        ui.set_notebook_cell_status(message.into());
+                    }
+                    Err(error) => ui.set_notebook_cell_status(
+                        format!("Arithmetic preview refused: {error}").into()
+                    ),
+                }
+            }
+        }
+    });
+    app.on_run_arithmetic_cell({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let token = ui.get_notebook_cell_approval().to_string();
+                ui.set_notebook_cell_approval("".into());
+                let result = (|| -> Result<(i64, i64, f64), String> {
+                    if token.is_empty() {
+                        return Err("Preview a calculation before recording it".into());
+                    }
+                    let project = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let cell = ui.get_notebook_cell_id().to_string();
+                    let code = ui.get_notebook_cell_code();
+                    let expected = ui.get_notebook_cell_revision();
+                    if cell.is_empty() || expected < 0 {
+                        return Err("Select or preview a valid arithmetic cell first".into());
+                    }
+                    let root = host_data_root()?;
+                    let (pending, preview) = evidence_preview_at(
+                        &project,
+                        "notebook.cell_execute",
+                        "notebook-arithmetic",
+                        serde_json::json!({
+                            "cell_id":cell,
+                            "expected_cell_revision":expected,
+                            "language":"researchweave-arithmetic-v1",
+                            "code":code.as_str(),
+                            "approved_preview_sha256":token
+                        }),
+                        &root,
+                    )?;
+                    if preview["data"]["writes"] != 1
+                        || preview["data"]["simulated_result"]["cell_id"] != cell
+                    {
+                        return Err("Notebook preview did not validate one immutable revision".into());
+                    }
+                    let (saved, project_revision) =
+                        evidence_execute_pending(&pending, &project, &root)?;
+                    if saved["data"]["cell_id"] != cell
+                        || saved["data"]["external_execution"] != false
+                    {
+                        return Err("Unexpected recorded arithmetic cell receipt; inspect history before retrying".into());
+                    }
+                    let cell_revision = saved["data"]["cell_revision"]
+                        .as_i64()
+                        .filter(|value| *value > expected as i64)
+                        .ok_or("Recorded arithmetic cell revision unavailable")?;
+                    let number = saved["data"]["result"]
+                        .as_f64()
+                        .filter(|value| value.is_finite())
+                        .ok_or("Recorded arithmetic result unavailable")?;
+                    refresh_arithmetic_cells(&ui, &project, &root, 0)?;
+                    Ok((cell_revision, project_revision, number))
+                })();
+                match result {
+                    Ok((revision, project_revision, number)) => {
+                        ui.set_notebook_cell_revision(revision as i32);
+                        ui.set_project_revision(project_revision as i32);
+                        ui.set_notebook_cell_status(format!(
+                            "Recorded arithmetic result {number} as immutable cell revision {revision}. Source and result receipts are in the project event chain."
+                        ).into());
+                    }
+                    Err(error) => ui.set_notebook_cell_status(
+                        format!("Arithmetic cell not recorded: {error}. No automatic retry. Inspect saved history if an execution receipt was interrupted.").into(),
+                    ),
+                }
+            }
+        }
+    });
+    app.on_load_arithmetic_cells({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |offset| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_notebook_cell_approval("".into());
+                let result = active_project.borrow().as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|project| {
+                        refresh_arithmetic_cells(&ui, project, &host_data_root()?, offset)
+                    });
+                match result {
+                    Ok((count, total)) => ui.set_notebook_cell_status(
+                        format!("Loaded {count} latest arithmetic cells at offset {offset} of {total} in this project. Select a saved cell to review or append another revision.").into()
+                    ),
+                    Err(error) => ui.set_notebook_cell_status(
+                        format!("Arithmetic cell history unavailable: {error}").into()
+                    )
+                }
+            }
+        }
+    });
     app.on_refresh_quick_notes({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -3496,6 +4109,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 })();
                 match result {
                     Ok((card_id, revision)) => {
+                        ui.set_quick_note_obsidian_approval("".into());
+                        ui.set_quick_note_obsidian_status(
+                            "A project note changed. Export its latest saved revision again before importing external Markdown.".into(),
+                        );
                         ui.set_project_revision(revision as i32);
                         // Row-level pin/archive/checklist actions can complete
                         // while this same card has unsaved edits in the composer.
@@ -3535,6 +4152,180 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_quick_note_results(format!("Quick note not saved: {error}").into());
                         ui.set_status("Quick note not saved; edit remains available".into());
                     }
+                }
+            }
+        }
+    });
+    app.on_export_quick_note_obsidian({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |selected| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_quick_note_obsidian_approval("".into());
+                let result = (|| -> Result<(String, String), String> {
+                    if selected.is_empty() {
+                        return Err("Select an existing saved quick note first".into());
+                    }
+                    let project = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let response = evidence_read_at(
+                        &project,
+                        "knowledge.obsidian_export_note",
+                        serde_json::json!({"card_id":selected.as_str()}),
+                        &host_data_root()?,
+                    )?;
+                    let data = &response["data"];
+                    if data["format"] != "researchweave-obsidian-markdown-note-v1"
+                        || data["physical_file_written"] != false
+                        || data["vault_accessed"] != false
+                        || data["card_id"] != selected.as_str()
+                    {
+                        return Err("Unexpected Markdown export identity or side effects".into());
+                    }
+                    let markdown = data["markdown"]
+                        .as_str()
+                        .ok_or("Native Markdown text unavailable")?
+                        .to_owned();
+                    let hash = data["markdown_sha256"]
+                        .as_str()
+                        .ok_or("Markdown source digest unavailable")?
+                        .to_owned();
+                    if hash.len() != 64
+                        || hex::encode(Sha256::digest(markdown.as_bytes())) != hash
+                    {
+                        return Err("Markdown export content hash mismatch".into());
+                    }
+                    Ok((markdown, hash))
+                })();
+                match result {
+                    Ok((markdown, hash)) => {
+                        ui.set_quick_note_obsidian_markdown(markdown.into());
+                        ui.set_quick_note_obsidian_status(
+                            format!("Source-bound Markdown exported to the native editor (SHA-256 {hash}). No physical file or cloud write. Edit and preview any changes before approval.").into(),
+                        );
+                    }
+                    Err(error) => ui.set_quick_note_obsidian_status(
+                        format!("Markdown export refused: {error}").into()
+                    ),
+                }
+            }
+        }
+    });
+    app.on_preview_quick_note_obsidian({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |markdown| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_quick_note_obsidian_approval("".into());
+                let result = (|| -> Result<(String, String), String> {
+                    let project = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let response = evidence_read_at(
+                        &project,
+                        "knowledge.obsidian_import_preview",
+                        serde_json::json!({"markdown":markdown.as_str()}),
+                        &host_data_root()?,
+                    )?;
+                    let data = &response["data"];
+                    if data["preview_only"] != true || data["writes"] != 0 {
+                        return Err("Markdown preview unexpectedly permits writes".into());
+                    }
+                    if data["card_id"] != ui.get_quick_note_selected_id().as_str() {
+                        return Err(
+                            "Markdown source does not match the currently selected saved card"
+                                .into(),
+                        );
+                    }
+                    let approval = data["approved_preview_sha256"]
+                        .as_str()
+                        .filter(|hash| hash.len() == 64
+                            && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                        .ok_or("Markdown preview digest unavailable")?;
+                    let note_id = data["card_id"]
+                        .as_str()
+                        .ok_or("Markdown card identity unavailable")?;
+                    let flags = format!(
+                        "Title changed: {}; body changed: {}",
+                        data["title_changed"] == true,
+                        data["body_changed"] == true,
+                    );
+                    Ok((approval.to_owned(), format!(
+                        "PREVIEW ONLY. Verified existing project note {note_id}; {flags}. Original note history unchanged. Review Markdown above before approving one immutable revision."
+                    )))
+                })();
+                match result {
+                    Ok((approval, message)) => {
+                        ui.set_quick_note_obsidian_approval(approval.into());
+                        ui.set_quick_note_obsidian_status(message.into());
+                    }
+                    Err(error) => ui.set_quick_note_obsidian_status(
+                        format!("Markdown import preview refused: {error}").into()
+                    ),
+                }
+            }
+        }
+    });
+    app.on_import_quick_note_obsidian({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |markdown, approval| {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_quick_note_obsidian_approval("".into());
+                let result = (|| -> Result<i64, String> {
+                    if approval.is_empty() {
+                        return Err("Fresh human-reviewed preview approval is required".into());
+                    }
+                    let project = active_project
+                        .borrow()
+                        .clone()
+                        .ok_or("Open a research project first")?;
+                    let root = host_data_root()?;
+                    let (pending, preview) = evidence_preview_at(
+                        &project,
+                        "knowledge.obsidian_import",
+                        "quick-note-obsidian",
+                        serde_json::json!({
+                            "markdown":markdown.as_str(),
+                            "approved_preview_sha256":approval.as_str()
+                        }),
+                        &root,
+                    )?;
+                    if preview["data"]["writes"] != 1
+                        || preview["data"]["simulated_result"]["approved_preview_sha256"]
+                            != approval.as_str()
+                    {
+                        return Err("Immutable Markdown import did not produce the exact approved one-revision preview".into());
+                    }
+                    let (result, revision) = evidence_execute_pending(&pending, &project, &root)?;
+                    if result["data"]["approved_preview_sha256"] != approval.as_str()
+                        || result["data"]["source_preserved"] != true
+                        || result["data"]["external_file_written"] != false
+                    {
+                        return Err("Approved Markdown import receipt failed validation; inspect project history before retrying".into());
+                    }
+                    refresh_quick_note_cards(
+                        &ui, &project,
+                        ui.get_quick_note_query().as_str(),
+                        ui.get_quick_note_filter().as_str(),
+                        &root,
+                    )?;
+                    Ok(revision)
+                })();
+                match result {
+                    Ok(revision) => {
+                        ui.set_project_revision(revision as i32);
+                        ui.set_quick_note_obsidian_status(
+                            "Imported approved Markdown as a new immutable note revision. Existing note editor draft was not overwritten; choose the saved card again to reload it.".into(),
+                        );
+                        ui.set_status("Approved local Obsidian Markdown import recorded in project history".into());
+                    }
+                    Err(error) => ui.set_quick_note_obsidian_status(
+                        format!("Markdown import refused: {error}. No retry without a new preview; inspect project history if a receipt was unavailable.").into(),
+                    ),
                 }
             }
         }
@@ -3743,6 +4534,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     });
     let pending_manuscript_replace: Rc<RefCell<Option<manuscript_search::PendingReplace>>> =
         Rc::new(RefCell::new(None));
+    let pending_manuscript_citation: Rc<
+        RefCell<Option<manuscript_citation_insert::PendingCitation>>,
+    > = Rc::new(RefCell::new(None));
+    let pending_manuscript_comment: Rc<RefCell<Option<PendingEvidenceAction>>> =
+        Rc::new(RefCell::new(None));
     app.on_preview_manuscript_replace({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -3891,7 +4687,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         let active_project = active_project.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
+        let pending_manuscript_citation = pending_manuscript_citation.clone();
+        let pending_manuscript_comment = pending_manuscript_comment.clone();
         move |id, section, citations, body| {
+            pending_manuscript_citation.borrow_mut().take();
+            pending_manuscript_comment.borrow_mut().take();
             if let Some(ui) = weak.upgrade() {
                 let (words, chars) = manuscript_search::counts(body.as_str());
                 ui.set_manuscript_word_count(i32::try_from(words).unwrap_or(i32::MAX));
@@ -3952,9 +4752,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let pending_evidence: Rc<RefCell<Option<PendingEvidenceAction>>> = Rc::new(RefCell::new(None));
+    let pending_manuscript_restore: Rc<RefCell<Option<PendingEvidenceAction>>> =
+        Rc::new(RefCell::new(None));
     let pending_physical_export: Rc<RefCell<Option<physical_export::PreparedPhysicalExport>>> =
         Rc::new(RefCell::new(None));
     let pending_library: Rc<RefCell<Option<PendingLibraryAction>>> = Rc::new(RefCell::new(None));
+    let pending_crossref: Rc<RefCell<Option<PendingLibraryAction>>> = Rc::new(RefCell::new(None));
     let pending_analysis: Rc<RefCell<Option<PendingAnalysisAction>>> = Rc::new(RefCell::new(None));
     let pending_analysis_command: Rc<RefCell<Option<PendingAnalysisCommand>>> =
         Rc::new(RefCell::new(None));
@@ -3967,23 +4770,335 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let invalidate_project_previews = Rc::new({
         let pending_project_metadata = pending_project_metadata.clone();
         let pending_evidence = pending_evidence.clone();
+        let pending_manuscript_restore = pending_manuscript_restore.clone();
         let pending_physical_export = pending_physical_export.clone();
         let pending_library = pending_library.clone();
+        let pending_crossref = pending_crossref.clone();
         let pending_analysis = pending_analysis.clone();
         let pending_analysis_command = pending_analysis_command.clone();
         let pending_ai = pending_ai.clone();
         let selected_agent_action = selected_agent_action.clone();
         let pending_manuscript_replace = pending_manuscript_replace.clone();
+        let pending_manuscript_citation = pending_manuscript_citation.clone();
+        let pending_manuscript_comment = pending_manuscript_comment.clone();
         move || {
             pending_project_metadata.borrow_mut().take();
             pending_evidence.borrow_mut().take();
+            pending_manuscript_restore.borrow_mut().take();
             pending_physical_export.borrow_mut().take();
             pending_library.borrow_mut().take();
+            pending_crossref.borrow_mut().take();
             pending_analysis.borrow_mut().take();
             pending_analysis_command.borrow_mut().take();
             pending_ai.borrow_mut().take();
             selected_agent_action.borrow_mut().take();
             pending_manuscript_replace.borrow_mut().take();
+            pending_manuscript_citation.borrow_mut().take();
+            pending_manuscript_comment.borrow_mut().take();
+        }
+    });
+    app.on_invalidate_manuscript_comment_preview({
+        let weak = app.as_weak();
+        let pending = pending_manuscript_comment.clone();
+        move || {
+            pending.borrow_mut().take();
+            if let Some(ui) = weak.upgrade() {
+                ui.set_status("Reviewer comment input changed; preview again".into());
+            }
+        }
+    });
+    app.on_preview_manuscript_comment({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_comment = pending_manuscript_comment.clone();
+        move || {
+            pending_comment.borrow_mut().take();
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<(PendingEvidenceAction, String), String> {
+                let project = active_project.borrow().clone()
+                    .ok_or("Open a project before reviewing a manuscript")?;
+                let manuscript_id = ui.get_manuscript_draft_id().trim().to_string();
+                let section = ui.get_manuscript_draft_section().trim().to_string();
+                if manuscript_id.is_empty() || section.is_empty() {
+                    return Err("Choose a manuscript ID and saved section before reviewing".into());
+                }
+                let quote = ui.get_manuscript_review_quote().to_string();
+                let reviewer = ui.get_manuscript_review_reviewer().to_string();
+                let comment = ui.get_manuscript_review_comment().to_string();
+                let root = host_data_root()?;
+                let history = evidence_read_at(
+                    &project,
+                    "writing.section_history",
+                    serde_json::json!({"manuscript_id":manuscript_id,"section":section}),
+                    &root,
+                )?;
+                let latest = history["data"]["revisions"].as_array()
+                    .and_then(|revisions| revisions.last())
+                    .ok_or("Save a manuscript section before anchoring reviewer comments")?;
+                let source_revision = latest["revision"].as_i64().filter(|revision| *revision > 0)
+                    .ok_or("Latest saved manuscript revision invalid")?;
+                let source_body = latest["body"].as_str().ok_or("Saved manuscript body missing")?;
+                let source_sha256 = format!("{:x}", Sha256::digest(source_body.as_bytes()));
+                if latest["body_sha256"] != source_sha256 {
+                    return Err("Stored manuscript history digest failed validation".into());
+                }
+                let (start_scalar,end_scalar) =
+                    manuscript_review_anchor::unique_scalar_span(source_body, &quote)?;
+                let (mut pending, preview) = evidence_preview_at(
+                    &project,
+                    "writing.comment_record",
+                    "manuscript_comment",
+                    serde_json::json!({
+                        "manuscript_id":manuscript_id,
+                        "section":section,
+                        "source_revision":source_revision,
+                        "source_body_sha256":source_sha256,
+                        "start_scalar":start_scalar,
+                        "end_scalar":end_scalar,
+                        "quote":quote,
+                        "reviewer":reviewer,
+                        "comment":comment,
+                    }),
+                    &root,
+                )?;
+                let preview_data = &preview["data"];
+                let digest = preview_data["preview_sha256"].as_str()
+                    .ok_or("Missing reviewer-comment preview digest")?;
+                if digest.len() != 64 || !digest.bytes().all(|b| b.is_ascii_hexdigit() && !b.is_ascii_uppercase())
+                    || preview_data["writes"] != 0
+                    || preview_data["approved"] != false
+                    || preview_data["requires_explicit_human_approval"] != true
+                    || preview_data["source_revision"] != source_revision
+                    || preview_data["source_body_sha256"] != source_sha256
+                    || preview_data["start_scalar"] != start_scalar
+                    || preview_data["end_scalar"] != end_scalar
+                {
+                    return Err("Source-bound reviewer comment preview failed provenance validation".into());
+                }
+                pending.arguments["approved_preview_sha256"] = serde_json::json!(digest);
+                Ok((pending,format!(
+                    "PREVIEW ONLY. Latest saved section r{source_revision}, SHA-256 {source_sha256}, exact Unicode scalar span {start_scalar}..{end_scalar}.\nPreview digest: {digest}\nNo text or project events changed. Recheck the selected quote and authorship before clicking Record comment. This is NOT Word Track Changes."
+                )))
+            })();
+            match result {
+                Ok((pending,notice)) => {
+                    *pending_comment.borrow_mut() = Some(pending);
+                    ui.set_manuscript_review_results(notice.into());
+                    ui.set_status("Reviewer comment previewed against saved source; no write".into());
+                }
+                Err(error) => {
+                    ui.set_manuscript_review_results(format!("Reviewer comment preview refused: {error}").into());
+                    ui.set_status("Reviewer comment preview rejected".into());
+                }
+            }
+        }
+    });
+    app.on_record_manuscript_comment({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_comment = pending_manuscript_comment.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let pending = pending_comment.borrow_mut().take();
+            let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                (Some(path), Some(action)) if action.surface == "manuscript_comment"
+                    && action.operation == "writing.comment_record" => {
+                    if action.arguments["manuscript_id"] != ui.get_manuscript_draft_id().as_str().trim()
+                        || action.arguments["section"] != ui.get_manuscript_draft_section().as_str().trim()
+                        || action.arguments["quote"] != ui.get_manuscript_review_quote().as_str()
+                        || action.arguments["reviewer"] != ui.get_manuscript_review_reviewer().as_str()
+                        || action.arguments["comment"] != ui.get_manuscript_review_comment().as_str()
+                    {
+                        Err("Manuscript or reviewer input changed after preview; preview again".into())
+                    } else {
+                        host_data_root().and_then(|root| evidence_execute_pending(action, path, &root))
+                    }
+                }
+                (None, _) => Err("Open a project first".into()),
+                _ => Err("Preview a source-bound reviewer comment before recording".into()),
+            };
+            match result {
+                Ok((recorded,revision)) => {
+                    ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                    ui.set_manuscript_review_results(format!(
+                        "APPEND-ONLY REVIEWER COMMENT RECORDED. Manuscript text unchanged; inspect the audited history with Load comments.\n{}",
+                        pretty_result_data(&recorded)
+                    ).into());
+                    ui.set_status("Immutable reviewer comment recorded with source provenance".into());
+                }
+                Err(error) => {
+                    ui.set_manuscript_review_results(format!("Reviewer comment NOT recorded: {error}").into());
+                    ui.set_status("Reviewer comment rejected; preview again".into());
+                }
+            }
+        }
+    });
+    app.on_load_manuscript_comments({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = active_project.borrow().as_ref()
+                .ok_or_else(|| "Open a project before loading comments".to_string())
+                .and_then(|project| evidence_read_at(
+                    project,
+                    "writing.comment_list",
+                    serde_json::json!({
+                        "manuscript_id":ui.get_manuscript_draft_id().as_str().trim(),
+                        "section":ui.get_manuscript_draft_section().as_str().trim(),
+                    }),
+                    &host_data_root()?,
+                ));
+            match result {
+                Ok(receipt) => {
+                    ui.set_manuscript_review_results(format!(
+                        "PROJECT-LOCAL IMMUTABLE REVIEW HISTORY. The current/historical/invalid anchor state is explicit; no automatic relocation.\n{}",
+                        pretty_result_data(&receipt)
+                    ).into());
+                    ui.set_status("Source-bound reviewer comments loaded from project history".into());
+                }
+                Err(error) => {
+                    ui.set_manuscript_review_results(format!("Comment history unavailable: {error}").into());
+                    ui.set_status("Reviewer comment history unavailable".into());
+                }
+            }
+        }
+    });
+    app.on_preview_manuscript_citation({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_citation = pending_manuscript_citation.clone();
+        move || {
+            pending_citation.borrow_mut().take();
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<manuscript_citation_insert::PendingCitation, String> {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a project before citing a reference")?;
+                let info = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?;
+                let project_id = Uuid::parse_str(&info.id).map_err(|_| "Invalid project ID")?;
+                let reference_id = Uuid::parse_str(
+                    ui.get_manuscript_citation_reference_id().as_str().trim(),
+                )
+                .map_err(|_| "Enter an exact registered reference UUID")?;
+                let draft = manuscript_citation_insert::DraftSnapshot {
+                    manuscript_id: ui.get_manuscript_draft_id().to_string(),
+                    section: ui.get_manuscript_draft_section().to_string(),
+                    body: ui.get_manuscript_draft_body().to_string(),
+                    citations: ui.get_manuscript_draft_citations().to_string(),
+                };
+                let prepared = manuscript_citation_insert::prepare(&draft, reference_id)?;
+                let receipt = library_read_at(
+                    &project,
+                    "library.reference_export",
+                    serde_json::json!({"reference_id":reference_id.to_string()}),
+                    &host_data_root()?,
+                )?;
+                let reference =
+                    manuscript_citation_insert::verified_reference(reference_id, &receipt)?;
+                Ok(manuscript_citation_insert::PendingCitation {
+                    project,
+                    project_id,
+                    project_revision: info.revision,
+                    draft,
+                    reference,
+                    prepared,
+                })
+            })();
+            match result {
+                Ok(pending) => {
+                    let marker = format!("[@{}]", pending.reference.id);
+                    let title: String = pending
+                        .reference
+                        .title
+                        .chars()
+                        .take(100)
+                        .map(|character| if character.is_control() { ' ' } else { character })
+                        .collect();
+                    ui.set_manuscript_citation_status(
+                        format!("PREVIEW ONLY — no draft changes. Locally registered reference: {title} (status: {}). Apply to append {marker} at the END of the section and deduplicate citation IDs. No claim or external metadata verification; autosave follows explicit apply.", pending.reference.status).into(),
+                    );
+                    *pending_citation.borrow_mut() = Some(pending);
+                }
+                Err(error) => ui.set_manuscript_citation_status(
+                    format!("Citation preview refused: {error}").into(),
+                ),
+            }
+        }
+    });
+    app.on_apply_manuscript_citation({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_citation = pending_manuscript_citation.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<manuscript_citation_insert::CitationDraft, String> {
+                let pending = pending_citation
+                    .borrow_mut()
+                    .take()
+                    .ok_or("Preview this citation before applying it")?;
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a project before inserting a citation")?;
+                let info = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?;
+                let project_id = Uuid::parse_str(&info.id).map_err(|_| "Invalid project ID")?;
+                let requested_id = ui.get_manuscript_citation_reference_id().to_string();
+                let draft = manuscript_citation_insert::DraftSnapshot {
+                    manuscript_id: ui.get_manuscript_draft_id().to_string(),
+                    section: ui.get_manuscript_draft_section().to_string(),
+                    body: ui.get_manuscript_draft_body().to_string(),
+                    citations: ui.get_manuscript_draft_citations().to_string(),
+                };
+                // Re-read the exact project-bound library row. Deleted or modified
+                // source records cannot inherit an earlier preview's authority.
+                let receipt = library_read_at(
+                    &project,
+                    "library.reference_export",
+                    serde_json::json!({"reference_id":pending.reference.id.to_string()}),
+                    &host_data_root()?,
+                )?;
+                let reference = manuscript_citation_insert::verified_reference(
+                    pending.reference.id,
+                    &receipt,
+                )?;
+                pending.validate(
+                    &project,
+                    project_id,
+                    info.revision,
+                    &draft,
+                    &requested_id,
+                    &reference,
+                )?;
+                Ok(pending.prepared)
+            })();
+            match result {
+                Ok(prepared) => {
+                    ui.set_manuscript_draft_body(prepared.body.clone().into());
+                    ui.set_manuscript_draft_citations(prepared.citations.clone().into());
+                    // Existing recoverable manuscript draft and autosave contract;
+                    // no separate write or claim that autosave already succeeded.
+                    ui.invoke_manuscript_draft_edited(
+                        ui.get_manuscript_draft_id(),
+                        ui.get_manuscript_draft_section(),
+                        prepared.citations.into(),
+                        prepared.body.into(),
+                    );
+                    ui.set_manuscript_citation_status(
+                        "Applied the locally registered citation to this editable draft; marker appended at end and metadata deduplicated. Autosave is pending, not yet confirmed. No external claim verification.".into(),
+                    );
+                }
+                Err(error) => ui.set_manuscript_citation_status(
+                    format!("Citation not applied: {error}").into(),
+                ),
+            }
         }
     });
     app.on_preview_question({
@@ -4131,6 +5246,151 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     Err(error) => {
                         pending_evidence.borrow_mut().take();
                         ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_preview_protocol_freeze({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        move |protocol_id| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|path| {
+                        let root = host_data_root()?;
+                        let protocol_id = protocol_id.as_str().trim();
+                        let history = evidence_read_at(
+                            path,
+                            "protocol.history",
+                            serde_json::json!({"protocol_id":protocol_id}),
+                            &root,
+                        )?;
+                        let version = history
+                            .pointer("/data/history")
+                            .and_then(serde_json::Value::as_array)
+                            .and_then(|history| history.last())
+                            .and_then(|last| last["version"].as_i64())
+                            .ok_or_else(|| "A persisted protocol version is required before freezing".to_owned())?;
+                        evidence_preview_at(
+                            path,
+                            "protocol.freeze",
+                            "protocol",
+                            serde_json::json!({
+                                "protocol_id":protocol_id,
+                                "expected_version":version
+                            }),
+                            &root,
+                        )
+                    });
+                match result {
+                    Ok((pending, preview)) => {
+                        *pending_evidence.borrow_mut() = Some(pending);
+                        ui.set_protocol_results(
+                            format!(
+                                "LOCAL FREEZE PREVIEW ONLY. Review exact version and SHA-256 below, then choose Record freeze. This does not create an external preregistration:\n{}",
+                                pretty_result_data(&preview)
+                            )
+                            .into(),
+                        );
+                        ui.set_status("Local protocol baseline freeze preview ready; no data changed".into());
+                    }
+                    Err(error) => {
+                        pending_evidence.borrow_mut().take();
+                        ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_record_protocol_freeze({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_evidence = pending_evidence.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let pending = pending_evidence.borrow().clone();
+                let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                    (Some(path), Some(pending))
+                        if pending.operation == "protocol.freeze"
+                            && pending.surface == "protocol" =>
+                    {
+                        host_data_root().and_then(|root| evidence_execute_pending(pending, path, &root))
+                    }
+                    (None, _) => Err("Open a research project first".into()),
+                    (_, _) => Err("Preview a local protocol baseline freeze before recording it".into()),
+                };
+                match result {
+                    Ok((recorded, revision)) => {
+                        let data = &recorded["data"];
+                        ui.set_protocol_freeze_summary(
+                            protocol_freeze_summary(&recorded)
+                                .unwrap_or_else(|error| format!("Baseline recorded; {error}"))
+                                .into(),
+                        );
+                        ui.set_protocol_freeze_status(
+                            format!(
+                                "Local baseline v{} frozen at computer time {}. Snapshot SHA-256: {}. No independent registration or trusted timestamp was performed.",
+                                data["frozen_version"],
+                                data["recorded_at_local_clock"].as_str().unwrap_or_default(),
+                                data["snapshot_sha256"].as_str().unwrap_or_default(),
+                            )
+                            .into(),
+                        );
+                        ui.set_protocol_results(pretty_result_data(&recorded).into());
+                        ui.set_project_revision(revision as i32);
+                        ui.set_status("Approved local protocol baseline recorded and audited".into());
+                        pending_evidence.borrow_mut().take();
+                    }
+                    Err(error) => {
+                        ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_inspect_protocol_freeze({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |protocol_id| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|path| {
+                        evidence_read_at(
+                            path,
+                            "protocol.freeze_status",
+                            serde_json::json!({"protocol_id":protocol_id.as_str().trim()}),
+                            &host_data_root()?,
+                        )
+                    });
+                match result {
+                    Ok(value) => {
+                        ui.set_protocol_freeze_summary(
+                            protocol_freeze_summary(&value)
+                                .unwrap_or_else(|error| format!("Inspect receipt: {error}"))
+                                .into(),
+                        );
+                        ui.set_protocol_freeze_status(pretty_result_data(&value).into());
+                        ui.set_status(
+                            "Local protocol baseline status verified against persisted history"
+                                .into(),
+                        );
+                    }
+                    Err(error) => {
+                        ui.set_protocol_freeze_summary(
+                            "Local baseline could not be inspected.".into(),
+                        );
+                        ui.set_protocol_freeze_status(error.clone().into());
                         ui.set_status(error.into());
                     }
                 }
@@ -4344,6 +5604,46 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_load_protocol_freeze_receipt({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        move |protocol_id| {
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a research project first".to_owned())
+                    .and_then(|path| {
+                        physical_export::prepare(
+                            path,
+                            "protocol.freeze_receipt",
+                            serde_json::json!({"protocol_id":protocol_id.as_str().trim()}),
+                            &host_data_root()?,
+                        )
+                    });
+                match result {
+                    Ok((pending, receipt)) => {
+                        *pending_physical_export.borrow_mut() = Some(pending);
+                        ui.set_protocol_freeze_export_receipt("".into());
+                        ui.set_protocol_results(
+                            format!(
+                                "VERIFIED LOCAL BASELINE RECEIPT PREVIEW ONLY. No file saved; no external preregistration or trusted timestamp. Review then choose explicit Save:\n{}",
+                                receipt.pointer("/data/text").and_then(serde_json::Value::as_str).unwrap_or_default()
+                            ).into()
+                        );
+                        ui.set_status("Local protocol baseline receipt prepared, not saved".into());
+                    }
+                    Err(error) => {
+                        pending_physical_export.borrow_mut().take();
+                        ui.set_protocol_freeze_export_receipt(error.clone().into());
+                        ui.set_protocol_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
     app.on_preview_reference({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -4404,6 +5704,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             if let Some(ui) = weak.upgrade() {
                 let pending = pending_library.borrow().clone();
                 let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                    (_, Some(pending)) if pending.surface == "reference_dedup" => Err(
+                        "Use Record reviewed decision for a previewed deduplication; this registration action cannot apply it".into()
+                    ),
                     (Some(path), Some(pending)) => host_data_root()
                         .and_then(|root| library_execute_pending(pending, path, &root)),
                     (None, _) => Err("Open a project first".into()),
@@ -4469,6 +5772,346 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_reference_results(error.clone().into());
                         ui.set_status(error.into());
                     }
+                }
+            }
+        }
+    });
+    app.on_preview_reference_pdf_metadata({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |selected_source_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = Uuid::parse_str(selected_source_id.trim())
+                .map_err(|_| "Select an indexed PDF source using its actual UUID; no reference was changed".to_owned())
+                .and_then(|source_id| {
+                    active_project
+                        .borrow()
+                        .as_ref()
+                        .ok_or_else(|| "Open a local project before inspecting a PDF source".to_owned())
+                        .and_then(|path| {
+                            library_read_at(
+                                path,
+                                "reference.pdf_metadata_preview",
+                                serde_json::json!({"source_id": source_id.to_string()}),
+                                &host_data_root()?,
+                            )
+                        })
+                });
+            match result {
+                Ok(receipt) => {
+                    ui.set_reference_pdf_metadata_results(
+                        format!("READ-ONLY PDF TEXT SUGGESTIONS. No reference was created, changed, merged or resolved externally. Review the indexed source and exact PDF before manually approving fields.\n{}", pretty_result_data(&receipt)).into(),
+                    );
+                    ui.set_status("PDF metadata text candidates inspected locally; no project changes".into());
+                }
+                Err(error) => {
+                    ui.set_reference_pdf_metadata_results(format!("PDF metadata suggestions refused: {error}. No changes recorded.").into());
+                    ui.set_status("PDF metadata suggestions unavailable; no changes recorded".into());
+                }
+            }
+        }
+    });
+    app.on_invalidate_crossref_doi({
+        let weak = app.as_weak();
+        let pending_crossref = pending_crossref.clone();
+        move || {
+            pending_crossref.borrow_mut().take();
+            if let Some(ui) = weak.upgrade() {
+                ui.set_reference_crossref_ready(false);
+                ui.set_reference_crossref_request_id(
+                    ui.get_reference_crossref_request_id().wrapping_add(1),
+                );
+                ui.set_reference_crossref_results(
+                    "DOI changed. Preview again offline before explicitly approving a single Crossref network request. No references changed.".into(),
+                );
+            }
+        }
+    });
+    app.on_preview_crossref_doi({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_crossref = pending_crossref.clone();
+        move |doi| {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_crossref.borrow_mut().take();
+            ui.set_reference_crossref_ready(false);
+            let preview = (|| -> Result<(PendingLibraryAction, serde_json::Value), String> {
+                let path = active_project.borrow().as_ref().cloned()
+                    .ok_or("Open a local project before previewing external metadata")?;
+                library_preview_at(
+                    &path,
+                    "reference.crossref_doi_lookup",
+                    "reference_crossref",
+                    serde_json::json!({"doi":doi.as_str(),"allow_network":true}),
+                    &host_data_root()?,
+                )
+            })();
+            match preview {
+                Ok((action, receipt)) => {
+                    *pending_crossref.borrow_mut() = Some(action);
+                    ui.set_reference_crossref_ready(true);
+                    ui.set_reference_crossref_results(format!(
+                        "OFFLINE PREVIEW ONLY. No network request or reference mutation. Fetch requires a separate explicit user click and one-time external-network approval.\n{}",
+                        pretty_result_data(&receipt),
+                    ).into());
+                    ui.set_status("Crossref request previewed locally; zero network requests".into());
+                }
+                Err(error) => {
+                    ui.set_reference_crossref_results(format!(
+                        "Crossref request refused before any network: {error}. No changes recorded."
+                    ).into());
+                    ui.set_status("Crossref offline preview rejected; no network request".into());
+                }
+            }
+        }
+    });
+    app.on_fetch_crossref_doi({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_crossref = pending_crossref.clone();
+        move |current_doi| {
+            let Some(ui) = weak.upgrade() else { return };
+            let pending = pending_crossref.borrow_mut().take();
+            ui.set_reference_crossref_ready(false);
+            if ui.get_reference_crossref_busy() {
+                ui.set_status("Crossref lookup already active; no duplicate request".into());
+                return;
+            }
+            let Some(action) = pending.filter(|action| {
+                action.surface == "reference_crossref"
+                    && action.operation == "reference.crossref_doi_lookup"
+                    && action.arguments.get("allow_network") == Some(&serde_json::Value::Bool(true))
+                    && action.arguments.get("doi").and_then(serde_json::Value::as_str)
+                        == Some(current_doi.as_str())
+            }) else {
+                ui.set_status("Preview this DOI offline before approving a network request".into());
+                return;
+            };
+            let Some(path) = active_project.borrow().as_ref().cloned() else {
+                ui.set_status("Open the previewed project before fetching metadata".into());
+                return;
+            };
+            let data_root = match host_data_root() {
+                Ok(root) => root,
+                Err(error) => {
+                    ui.set_status(format!("Crossref request refused: {error}").into());
+                    return;
+                }
+            };
+            let job_id = ui.get_reference_crossref_request_id().wrapping_add(1);
+            ui.set_reference_crossref_request_id(job_id);
+            ui.set_reference_crossref_busy(true);
+            ui.set_reference_crossref_results("One approved HTTPS request to api.crossref.org in progress. No automatic reference or project changes are permitted.".into());
+            ui.set_status("Fetching approved Crossref metadata (one request, no retries)".into());
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                // Blocking TLS request stays off the Slint UI thread. Existing
+                // one-use router approval and source/revision CAS guard run on
+                // this worker; no arbitrary URL or background retry exists.
+                let receipt = library_execute_pending(&action, &path, &data_root);
+                let _ = slint::invoke_from_event_loop(move || {
+                    let Some(ui) = weak.upgrade() else { return };
+                    if ui.get_reference_crossref_request_id() != job_id { return }
+                    ui.set_reference_crossref_busy(false);
+                    match receipt {
+                        Ok((result, _)) => {
+                            ui.set_reference_crossref_results(format!(
+                                "EXTERNAL CROSSREF METADATA — UNVERIFIED CANDIDATES ONLY. No reference was registered, merged, or modified. Compare fields with the original publication before entering them manually.\n{}",
+                                pretty_result_data(&result),
+                            ).into());
+                            ui.set_status("Crossref metadata received; project references unchanged".into());
+                        }
+                        Err(error) => {
+                            ui.set_reference_crossref_results(format!(
+                                "Crossref request refused or failed: {error}. No bibliography reference was automatically changed. Preview again before retrying."
+                            ).into());
+                            ui.set_status("Crossref request unavailable; no automatic reference updates".into());
+                        }
+                    }
+                });
+            });
+        }
+    });
+    app.on_scan_reference_duplicates({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_library = pending_library.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_library.borrow_mut().take();
+            ui.set_reference_dedup_candidates(Rc::new(slint::VecModel::from(Vec::<ReferenceDuplicateCandidate>::new())).into());
+            let result = active_project
+                .borrow()
+                .as_ref()
+                .ok_or_else(|| "Open a project first".to_string())
+                .and_then(|path| {
+                    let revision = ProjectStore::open(path).map_err(|error|error.to_string())?
+                        .info().map_err(|error|error.to_string())?.revision;
+                    let receipt = library_read_at(
+                        path,
+                        "reference.dedup_candidates",
+                        serde_json::json!({"limit":50}),
+                        &host_data_root()?,
+                    )?;
+                    let candidates = reference_dedup_view::candidates(&receipt, revision)?;
+                    Ok((receipt,candidates))
+                });
+            match result {
+                Ok((receipt,candidates)) => {
+                    ui.set_reference_dedup_candidates(Rc::new(slint::VecModel::from(candidates)).into());
+                    ui.set_reference_dedup_results(format!("READ-ONLY CANDIDATE SCAN. No merge, revision or event was recorded. Select one candidate row to fill IDs/digest, compare original records, then provide rationale and separately preview/record.\n{}", pretty_result_data(&receipt)).into());
+                    ui.set_status("Reference candidates scanned locally; no changes recorded".into());
+                }
+                Err(error) => {
+                    ui.set_reference_dedup_results(format!("Duplicate scan refused: {error}").into());
+                    ui.set_status("Duplicate scan unavailable".into());
+                }
+            }
+        }
+    });
+    app.on_invalidate_reference_dedup_preview({
+        let weak = app.as_weak();
+        let pending_library = pending_library.clone();
+        move || {
+            pending_library.borrow_mut().take();
+            if let Some(ui) = weak.upgrade() {
+                ui.set_status(
+                    "Reference decision inputs changed; preview again before recording".into(),
+                );
+            }
+        }
+    });
+    app.on_load_reference_dedup_history({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_library = pending_library.clone();
+        move |first, second| {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_library.borrow_mut().take();
+            let result = active_project
+                .borrow()
+                .as_ref()
+                .ok_or_else(|| "Open a project first".to_owned())
+                .and_then(|path| {
+                    library_read_at(
+                        path,
+                        "reference.dedup_decision_history",
+                        serde_json::json!({
+                            "left_id":first.as_str().trim(),
+                            "right_id":second.as_str().trim(),
+                            "limit":50,
+                        }),
+                        &host_data_root()?,
+                    )
+                });
+            match result {
+                Ok(history) => {
+                    ui.set_reference_dedup_results(format!(
+                        "READ-ONLY IMMUTABLE REFERENCE DECISION HISTORY. No revision, alias or reference record was changed.\n{}",
+                        pretty_result_data(&history),
+                    ).into());
+                    ui.set_status("Immutable reference decision history loaded locally".into());
+                }
+                Err(error) => {
+                    ui.set_reference_dedup_results(format!("Decision history unavailable: {error}").into());
+                    ui.set_status("Reference decision history rejected".into());
+                }
+            }
+        }
+    });
+    app.on_preview_reference_dedup({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_library = pending_library.clone();
+        move |action, canonical_id, duplicate_id, candidate_sha256, rationale| {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_library.borrow_mut().take();
+            let result = (|| -> Result<(PendingLibraryAction, serde_json::Value), String> {
+                let operation = match action.as_str() {
+                    "approve" => "reference.dedup_approve",
+                    "restore" => "reference.dedup_restore",
+                    "keep" => "reference.dedup_keep_separate",
+                    "reconsider" => "reference.dedup_reconsider",
+                    _ => return Err("Unsupported duplicate review decision".into()),
+                };
+                let is_separate = matches!(action.as_str(), "keep" | "reconsider");
+                let mut args = if is_separate {
+                    serde_json::json!({
+                        "left_id":canonical_id.as_str().trim(),
+                        "right_id":duplicate_id.as_str().trim(),
+                        "rationale":rationale.as_str().trim(),
+                    })
+                } else {
+                    serde_json::json!({
+                        "canonical_id":canonical_id.as_str().trim(),
+                        "duplicate_id":duplicate_id.as_str().trim(),
+                        "rationale":rationale.as_str().trim(),
+                    })
+                };
+                if action.as_str() != "restore" {
+                    args["candidate_sha256"] = serde_json::json!(candidate_sha256.as_str().trim());
+                }
+                let project = active_project.borrow().clone().ok_or("Open a project first")?;
+                library_preview_at(
+                    &project,
+                    operation,
+                    "reference_dedup",
+                    args,
+                    &host_data_root()?,
+                )
+            })();
+            match result {
+                Ok((pending, receipt)) => {
+                    *pending_library.borrow_mut() = Some(pending);
+                    ui.set_reference_dedup_results(format!("PREVIEW ONLY. Nothing recorded. Confirm the two original source records, decision type and exact rationale before clicking Record reviewed decision. Keep-separate and reconsideration create immutable audit entries; an alias is NEVER automatic.\n{}", pretty_result_data(&receipt)).into());
+                    ui.set_status("Reference dedup decision previewed; no changes recorded".into());
+                }
+                Err(error) => {
+                    ui.set_reference_dedup_results(format!("Dedup review rejected: {error}").into());
+                    ui.set_status("Reference dedup preview rejected".into());
+                }
+            }
+        }
+    });
+    app.on_record_reference_dedup({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_library = pending_library.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let pending = pending_library.borrow().clone();
+            let result = match (active_project.borrow().as_ref(), pending.as_ref()) {
+                (Some(path), Some(action))
+                    if action.surface == "reference_dedup"
+                        && matches!(action.operation.as_str(), "reference.dedup_approve" | "reference.dedup_restore" | "reference.dedup_keep_separate" | "reference.dedup_reconsider") => {
+                    let pair_decision = matches!(action.operation.as_str(), "reference.dedup_keep_separate" | "reference.dedup_reconsider");
+                    let first = if pair_decision { "left_id" } else { "canonical_id" };
+                    let second = if pair_decision { "right_id" } else { "duplicate_id" };
+                    if action.arguments[first] != ui.get_reference_dedup_canonical_id().as_str().trim()
+                        || action.arguments[second] != ui.get_reference_dedup_duplicate_id().as_str().trim()
+                        || action.arguments["rationale"] != ui.get_reference_dedup_rationale().as_str().trim()
+                        || (action.operation != "reference.dedup_restore"
+                            && action.arguments["candidate_sha256"] != ui.get_reference_dedup_fingerprint().as_str().trim())
+                    {
+                        Err("Review decision inputs changed after preview; preview again".into())
+                    } else {
+                        host_data_root().and_then(|root| library_execute_pending(action, path, &root))
+                    }
+                }
+                (None, _) => Err("Open a project first".into()),
+                _ => Err("Preview a specific merge, undo, keep-separate or reconsideration before recording".into()),
+            };
+            match result {
+                Ok((recorded, revision)) => {
+                    pending_library.borrow_mut().take();
+                    ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                    ui.set_reference_dedup_results(format!("AUDITED HUMAN DECISION RECORDED. Original reference and source rows remain intact. Reconsideration, undo or a subsequent alias requires a separate explicit preview and approval.\n{}", pretty_result_data(&recorded)).into());
+                    ui.set_status("Reviewed reference identity decision recorded locally".into());
+                }
+                Err(error) => {
+                    pending_library.borrow_mut().take();
+                    ui.set_reference_dedup_results(format!("Decision NOT recorded: {error}").into());
+                    ui.set_status("Reference decision rejected; preview again".into());
                 }
             }
         }
@@ -4641,6 +6284,124 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_review_results(error.clone().into());
                         ui.set_status(error.into());
                     }
+                }
+            }
+        }
+    });
+    app.on_suggest_review_screening({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |review_id, record_id, population, intervention, comparison, outcome| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<String, String> {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a project first")?;
+                let before = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?;
+                let review_id = review_id.as_str().trim();
+                let record_id = record_id.as_str().trim();
+                // Source text and record ownership come from the trusted,
+                // project-bound read handler, never from user-supplied text.
+                let receipt = evidence_read_at(
+                    &project,
+                    "review.suggestion_source",
+                    serde_json::json!({"review_id":review_id,"record_id":record_id}),
+                    &host_data_root()?,
+                )?;
+                let after = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info()
+                    .map_err(|error| error.to_string())?;
+                if before.id != after.id
+                    || before.revision != after.revision
+                    || receipt["data"]["project_revision"] != after.revision
+                {
+                    return Err("Review source changed during inspection; load again".into());
+                }
+                review_screening::render(
+                    &receipt,
+                    &after.id,
+                    review_id,
+                    record_id,
+                    researchweave_ai::screening_suggestions::ScreeningConcepts {
+                        population: review_search_terms(population.as_str()),
+                        intervention: review_search_terms(intervention.as_str()),
+                        comparison: review_search_terms(comparison.as_str()),
+                        outcome: review_search_terms(outcome.as_str()),
+                    },
+                )
+            })();
+            match result {
+                Ok(text) => {
+                    ui.set_review_screening_results(text.into());
+                    ui.set_status(
+                        "Persisted offline screening suggestion loaded; no review vote changed"
+                            .into(),
+                    );
+                }
+                Err(error) => {
+                    ui.set_review_screening_results(format!("Suggestion refused: {error}").into());
+                    ui.set_status(
+                        "Screening suggestion unavailable; inspect source and criteria".into(),
+                    );
+                }
+            }
+        }
+    });
+    app.on_build_review_search_strategy({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |population, intervention, comparison, outcome, databases| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<String, String> {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a research project first")?;
+                let database_list = review_search_terms(databases.as_str())
+                    .into_iter()
+                    .map(|database| database.to_ascii_lowercase())
+                    .collect::<Vec<_>>();
+                let mut concepts = serde_json::Map::new();
+                for (name, alternatives) in [
+                    ("population", review_search_terms(population.as_str())),
+                    ("intervention", review_search_terms(intervention.as_str())),
+                    ("comparison", review_search_terms(comparison.as_str())),
+                    ("outcome", review_search_terms(outcome.as_str())),
+                ] {
+                    // The backend's contract distinguishes an omitted optional
+                    // PICO concept from a supplied but empty alternatives list.
+                    if !alternatives.is_empty() {
+                        concepts.insert(name.into(), serde_json::json!(alternatives));
+                    }
+                }
+                let payload = serde_json::json!({
+                    "concepts": concepts,
+                    "databases": database_list
+                });
+                let receipt = evidence_read_at(
+                    &project,
+                    "review.search_strategy_build",
+                    payload,
+                    &host_data_root()?,
+                )?;
+                review_search_preview_text(&receipt)
+            })();
+            match result {
+                Ok(preview) => {
+                    ui.set_review_search_results(preview.into());
+                    ui.set_status(
+                        "Offline, non-executed review search queries prepared with provenance"
+                            .into(),
+                    );
+                }
+                Err(error) => {
+                    ui.set_review_search_results(format!("No query drafted: {error}").into());
+                    ui.set_status("Search builder input or provenance rejected".into());
                 }
             }
         }
@@ -5404,6 +7165,21 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 };
                 match result {
                     Ok(executed) => {
+                        if operation.as_deref() == Some("analysis.result.save") {
+                            if let Some(result_id) = executed
+                                .pointer("/data/result_id")
+                                .and_then(serde_json::Value::as_str)
+                                .filter(|id| {
+                                    id.len() == 64
+                                        && id.bytes().all(|byte| byte.is_ascii_hexdigit())
+                                })
+                            {
+                                ui.set_selected_analysis_result_id(result_id.into());
+                                if ui.get_analysis_report_selected_ids().is_empty() {
+                                    ui.set_analysis_report_selected_ids(result_id.into());
+                                }
+                            }
+                        }
                         match operation.as_deref() {
                             Some("dataset.variable") => ui.set_variable_results(
                                 format!(
@@ -5502,6 +7278,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         );
                     }
                     Err(error) => {
+                        ui.set_analysis_report_results(error.clone().into());
+                        ui.set_status(error.into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_prepare_analysis_report_file({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        move |title, result_ids| {
+            let ids = result_ids
+                .as_str()
+                .split(',')
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned)
+                .collect::<Vec<_>>();
+            if let Some(ui) = weak.upgrade() {
+                let result = active_project
+                    .borrow()
+                    .as_ref()
+                    .ok_or_else(|| "Open a project first".to_owned())
+                    .and_then(|path| {
+                        physical_export::prepare(
+                            path,
+                            "analysis.report.render",
+                            serde_json::json!({
+                                "title":title.as_str().trim(),
+                                "result_ids":ids
+                            }),
+                            &host_data_root()?,
+                        )
+                    });
+                match result {
+                    Ok((pending, result)) => {
+                        *pending_physical_export.borrow_mut() = Some(pending);
+                        ui.set_analysis_report_results(
+                            format!(
+                                "Verified analysis report Markdown prepared, NOT saved. Enter an absolute .md path and choose Save prepared report. Existing files will never be overwritten.\nReport provenance: {}\nMarkdown SHA-256: {}\nResult count: {}",
+                                result["data"]["report_sha256"].as_str().unwrap_or_default(),
+                                result["data"]["sha256"].as_str().unwrap_or_default(),
+                                result["data"]["manifest"]["result_ids"].as_array().map_or(0, Vec::len)
+                            )
+                            .into(),
+                        );
+                        ui.set_status(
+                            "Verified analysis report prepared; no file saved yet".into(),
+                        );
+                    }
+                    Err(error) => {
+                        pending_physical_export.borrow_mut().take();
                         ui.set_analysis_report_results(error.clone().into());
                         ui.set_status(error.into());
                     }
@@ -6282,6 +8111,268 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_load_synthetic_evaluation_example({
+        let weak = app.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                match f44_synthetic_evaluation::sample_fixture_json() {
+                    Ok(example) => {
+                        ui.set_synthetic_evaluation_fixture(example.into());
+                        ui.set_synthetic_evaluation_receipt(
+                            "Example loaded but not evaluated. Run the explicit offline preview.".into(),
+                        );
+                        ui.set_synthetic_evaluation_status(
+                            "A small, programmatically generated synthetic example is ready; no real research object was read.".into(),
+                        );
+                    }
+                    Err(_) => {
+                        ui.set_synthetic_evaluation_fixture("".into());
+                        ui.set_synthetic_evaluation_receipt("No valid fixture receipt available.".into());
+                        ui.set_synthetic_evaluation_status("Synthetic example creation refused.".into());
+                    }
+                }
+            }
+        }
+    });
+    app.on_preview_synthetic_evaluation({
+        let weak = app.as_weak();
+        move |fixture| {
+            if let Some(ui) = weak.upgrade() {
+                // No project handler, external transport, filesystem or
+                // persistence call is reachable from this callback.
+                match f44_synthetic_evaluation::preview_synthetic_json(fixture.as_str()) {
+                    Ok(preview) => {
+                        ui.set_synthetic_evaluation_status(format!(
+                            "SYNTHETIC FIXTURE ONLY — {} checked slots. Evaluation provenance SHA-256: {}. Markdown SHA-256: {}. Not a trained-model, gold-custody, calibration, or scientific-result claim. No project write or network.",
+                            preview.slots,
+                            preview.evaluation_provenance_sha256,
+                            preview.markdown_sha256
+                        ).into());
+                        ui.set_synthetic_evaluation_receipt(preview.markdown.into());
+                    }
+                    Err(reason) => {
+                        ui.set_synthetic_evaluation_status(
+                            format!("Synthetic evaluation refused: {reason}. No result was recorded or uploaded.").into(),
+                        );
+                        ui.set_synthetic_evaluation_receipt(
+                            "No valid SHA-verified synthetic evaluation receipt for this fixture.".into(),
+                        );
+                    }
+                }
+            }
+        }
+    });
+    app.on_preview_open_science_manifest({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let Some(project) = active_project.borrow().clone() else {
+                    ui.set_open_science_preview_results(
+                        "Open a research project before previewing its inventory.".into(),
+                    );
+                    return;
+                };
+                let request = ui.get_open_science_request_id().wrapping_add(1);
+                ui.set_open_science_request_id(request);
+                ui.set_open_science_busy(true);
+                ui.set_open_science_preview_results(
+                    "Checking the exact local event chain and every stored content hash. Nothing is uploaded or approved for public release.".into(),
+                );
+                let weak = weak.clone();
+                // Rc<RefCell<...>> is a UI-thread-only project selector. It
+                // must never cross the Send boundary of std::thread::spawn.
+                // reset_project_visible_state increments the UI request ID
+                // on every project switch; that ID is the stale-job fence.
+                std::thread::spawn(move || {
+                    let result = host_data_root().and_then(|root|
+                        project_read_safe(
+                            &project,
+                            "project.open_science_manifest_preview",
+                            serde_json::json!({}),
+                            &root,
+                        )
+                    );
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = weak.upgrade() {
+                            if ui.get_open_science_request_id() != request {
+                                return;
+                            }
+                            ui.set_open_science_busy(false);
+                            let message = (|| -> Result<String, String> {
+                                let data = result?;
+                                let manifest = &data["manifest"];
+                                if data["preview_only"] != true
+                                    || data["writes"] != 0
+                                    || data["physical_file_written"] != false
+                                    || data["remote_service_contacted"] != false
+                                    || manifest["redistribution_authorized"] != false
+                                    || manifest["rights_verified"] != false
+                                    || manifest["ethics_or_patient_consent_verified"] != false
+                                    || manifest["external_deposit_performed"] != false
+                                    || manifest["source_titles_and_paths_redacted"] != true
+                                {
+                                    return Err("research-object preview failed closed on privacy or no-write guarantees".into());
+                                }
+                                let encoded = data["manifest_json"]
+                                    .as_str()
+                                    .ok_or("research-object manifest receipt missing")?;
+                                let hash = data["manifest_sha256"]
+                                    .as_str()
+                                    .ok_or("research-object manifest checksum missing")?;
+                                if hash.len() != 64
+                                    || hex::encode(Sha256::digest(encoded.as_bytes())) != hash
+                                {
+                                    return Err("research-object inventory checksum invalid".into());
+                                }
+                                let source_count = manifest["source_count"]
+                                    .as_u64().ok_or("source count not verified")?;
+                                let byte_count = manifest["included_total_bytes"]
+                                    .as_u64().ok_or("inventory size not verified")?;
+                                Ok(format!(
+                                    "READ-ONLY REDACTED INVENTORY. {source_count} active source records, {byte_count} bytes. Manifest SHA-256: {hash}. No source files were copied, and no network was contacted. License, permission and clinical consent are UNVERIFIED; publication and OSF deposit are NOT authorized."
+                                ))
+                            })();
+                            ui.set_open_science_preview_results(
+                                match message {
+                                    Ok(summary) => summary,
+                                    Err(error) => format!(
+                                        "Open-science inventory refused: {error}. No public deposit or rights clearance claimed."
+                                    ),
+                                }.into(),
+                            );
+                        }
+                    });
+                });
+            }
+        }
+    });
+    app.on_load_research_lifecycle({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                let Some(project) = active_project.borrow().clone() else {
+                    ui.set_lifecycle_status(
+                        "Open a research project to inspect real local lifecycle records.".into(),
+                    );
+                    return;
+                };
+                let request = ui.get_lifecycle_request_id().wrapping_add(1);
+                ui.set_lifecycle_request_id(request);
+                ui.set_lifecycle_busy(true);
+                ui.set_lifecycle_status(
+                    "Checking actual project revisions and recorded research objects. This does not judge scientific readiness.".into(),
+                );
+                let weak = weak.clone();
+                // Only PathBuf and the Sendable Slint weak handle cross this
+                // worker boundary; the active_project Rc remains on the UI
+                // thread, with request IDs reset on project changes.
+                std::thread::spawn(move || {
+                    let result = host_data_root().and_then(|root|
+                        project_read_safe(
+                            &project,
+                            "project.lifecycle_overview",
+                            serde_json::json!({}),
+                            &root,
+                        )
+                    );
+                    let _ = slint::invoke_from_event_loop(move || {
+                        if let Some(ui) = weak.upgrade() {
+                            if ui.get_lifecycle_request_id() != request {
+                                return;
+                            }
+                            ui.set_lifecycle_busy(false);
+                            let checked = (|| -> Result<(Vec<ResearchLifecycleStage>, String), String> {
+                                let data = result?;
+                                let overview = &data["overview"];
+                                if data["preview_only"] != true
+                                    || data["writes"] != 0
+                                    || data["external_network_contacted"] != false
+                                    || data["research_records_changed"] != false
+                                    || overview["stage_presence_only"] != true
+                                    || overview["scientific_completion_verified"] != false
+                                    || overview["analysis_results_examined"] != false
+                                    || overview["publishing_status_examined"] != false
+                                    || overview["format"] != "researchweave-local-lifecycle-presence-v1"
+                                {
+                                    return Err("unverified or mutable research lifecycle response refused".into());
+                                }
+                                let canonical = data["overview_json"].as_str()
+                                    .ok_or("lifecycle source receipt unavailable")?;
+                                let hash = data["overview_sha256"].as_str()
+                                    .ok_or("lifecycle source checksum missing")?;
+                                if hash.len() != 64
+                                    || hex::encode(Sha256::digest(canonical.as_bytes())) != hash
+                                {
+                                    return Err("lifecycle receipt checksum mismatch".into());
+                                }
+                                let rows = overview["stages"].as_array()
+                                    .filter(|stages| stages.len() == 7)
+                                    .ok_or("unexpected lifecycle stage inventory")?;
+                                let mut stages = Vec::with_capacity(rows.len());
+                                let allowed = [
+                                    ("question",2), ("protocol",4), ("sources",5),
+                                    ("references",20), ("review",9), ("extraction",11),
+                                    ("manuscript",19),
+                                ];
+                                for (row, (key, target_page)) in rows.iter().zip(allowed) {
+                                    if row["key"] != key
+                                        || row["target_page"] != target_page
+                                        || row["scientific_completion_verified"] != false
+                                    {
+                                        return Err("lifecycle source/workspace mapping invalid".into());
+                                    }
+                                    let count = row["records"].as_u64()
+                                        .and_then(|value| i32::try_from(value).ok())
+                                        .ok_or("lifecycle record count invalid")?;
+                                    let presence = if count > 0 {
+                                        "local_records_present"
+                                    } else {
+                                        "no_local_records"
+                                    };
+                                    if row["state"] != presence {
+                                        return Err("lifecycle stage status is inconsistent".into());
+                                    }
+                                    stages.push(ResearchLifecycleStage {
+                                        key: key.into(),
+                                        title: row["title"].as_str().ok_or("stage title missing")?.into(),
+                                        target_page,
+                                        records: count,
+                                        state: presence.into(),
+                                    });
+                                }
+                                let present = overview["stages_with_local_records"].as_u64()
+                                    .filter(|value| *value <= rows.len() as u64)
+                                    .ok_or("record-presence summary invalid")?;
+                                Ok((stages, format!(
+                                    "Read-only project inventory: {present}/7 tracked workspaces contain local records. SHA-256 {hash}. Records present does NOT mean research complete or scientifically validated; choose a stage to inspect its real data."
+                                )))
+                            })();
+                            match checked {
+                                Ok((stages, summary)) => {
+                                    ui.set_lifecycle_stages(
+                                        Rc::new(slint::VecModel::from(stages)).into(),
+                                    );
+                                    ui.set_lifecycle_status(summary.into());
+                                }
+                                Err(error) => {
+                                    ui.set_lifecycle_stages(
+                                        Rc::new(slint::VecModel::from(
+                                            Vec::<ResearchLifecycleStage>::new()
+                                        )).into(),
+                                    );
+                                    ui.set_lifecycle_status(format!(
+                                        "Research lifecycle unavailable: {error}. No project mutation was approved."
+                                    ).into());
+                                }
+                            }
+                        }
+                    });
+                });
+            }
+        }
+    });
     app.on_load_project_activity({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -6890,15 +8981,75 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_preview_manuscript_title_page({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        move |manuscript_id, title, authors, corresponding_email, target_journal| {
+            let Some(ui) = weak.upgrade() else { return };
+            let result = (|| -> Result<String, String> {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a project first")?;
+                let response = evidence_read_at(
+                    &project,
+                    "writing.title_page_preview",
+                    serde_json::json!({
+                        "manuscript_id":manuscript_id.as_str().trim(),
+                        "title":title.as_str(),
+                        "authors":authors.as_str(),
+                        "corresponding_email":corresponding_email.as_str(),
+                        "target_journal":target_journal.as_str(),
+                    }),
+                    &host_data_root()?,
+                )?;
+                let data = &response["data"];
+                let body = data["body"].as_str().ok_or("title-page body missing")?;
+                let hash = data["body_sha256"]
+                    .as_str()
+                    .ok_or("title-page digest missing")?;
+                let computed = format!("{:x}", Sha256::digest(body.as_bytes()));
+                if data["draft_only"] != true
+                    || data["persisted"] != false
+                    || data["journal_requirements_verified"] != false
+                    || data["section"] != "Title Page"
+                    || data["manuscript_id"] != manuscript_id.as_str().trim()
+                    || hash != computed
+                {
+                    return Err("title-page provenance validation failed".into());
+                }
+                let notice = data["notice"].as_str().ok_or("title-page notice missing")?;
+                Ok(format!(
+                    "UNSAVED TITLE PAGE · SHA-256 {hash}\n{notice}\n\n{body}"
+                ))
+            })();
+            match result {
+                Ok(preview) => {
+                    ui.set_manuscript_title_page_preview(preview.into());
+                    ui.set_status(
+                        "Title page previewed offline; nothing saved or submitted".into(),
+                    );
+                }
+                Err(error) => {
+                    ui.set_manuscript_title_page_preview(
+                        format!("No title page produced: {error}").into(),
+                    );
+                    ui.set_status("Title page preview rejected".into());
+                }
+            }
+        }
+    });
     app.on_preview_writing_section({
         let weak = app.as_weak();
         let active_project = active_project.clone();
         let pending_evidence = pending_evidence.clone();
+        let pending_restore = pending_manuscript_restore.clone();
         let drafts = writing_drafts.clone();
         let timer = writing_timer.clone();
         move |manuscript_id, section, citations, body| {
             if let Some(ui) = weak.upgrade() {
                 pending_evidence.borrow_mut().take();
+                pending_restore.borrow_mut().take();
                 let citations: Vec<_> = citations
                     .as_str()
                     .split(',')
@@ -6956,6 +9107,187 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_manuscript_operation_details_open(true);
                         ui.set_status(error.into());
                     }
+                }
+            }
+        }
+    });
+    app.on_inspect_manuscript_revisions({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_restore = pending_manuscript_restore.clone();
+        move |manuscript_id, section| {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_restore.borrow_mut().take();
+            let result = (|| -> Result<String, String> {
+                let project = active_project.borrow().clone().ok_or("Open a project first")?;
+                let receipt = evidence_read_at(
+                    &project,
+                    "writing.section_history",
+                    serde_json::json!({
+                        "manuscript_id":manuscript_id.as_str().trim(),
+                        "section":section.as_str().trim()
+                    }),
+                    &host_data_root()?,
+                )?;
+                let records = receipt["data"]["revisions"]
+                    .as_array()
+                    .ok_or("Verified revision history is unavailable")?;
+                if records.is_empty() {
+                    return Ok("No recorded revisions for this section. Save it before restoring.".into());
+                }
+                let mut rows = vec![format!("{} immutable revisions. Six most recent versions:", records.len())];
+                for record in records.iter().rev().take(6) {
+                    let revision = record["revision"].as_i64().filter(|value| *value > 0).ok_or("Stored revision number invalid")?;
+                    let hash = record["body_sha256"].as_str().filter(|value| value.len() == 64 && value.bytes().all(|c| c.is_ascii_hexdigit())).ok_or("Stored revision digest invalid")?;
+                    let edited_at = record["edited_at"].as_str().unwrap_or("local time unavailable");
+                    rows.push(format!("v{revision} · SHA-256 {hash} · {edited_at}"));
+                }
+                rows.push("Type a prior version number, Preview restore, then Record restore. History is never overwritten.".into());
+                Ok(rows.join("\n"))
+            })();
+            match result {
+                Ok(history) => ui.set_manuscript_revision_summary(history.into()),
+                Err(error) => ui.set_manuscript_revision_summary(format!("History not loaded: {error}").into()),
+            }
+        }
+    });
+    app.on_preview_manuscript_restore({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_restore = pending_manuscript_restore.clone();
+        let pending_evidence = pending_evidence.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
+        move |manuscript_id, section, source_revision| {
+            let Some(ui) = weak.upgrade() else { return };
+            pending_restore.borrow_mut().take();
+            // Only one pending section save or restore proposal at a time.
+            pending_evidence.borrow_mut().take();
+            let result = (|| -> Result<(PendingEvidenceAction, String), String> {
+                let revision: i64 = source_revision.as_str().trim().parse().map_err(|_| "Enter a positive numeric source revision")?;
+                if revision <= 0 { return Err("Source revision must be positive".into()); }
+                let project = active_project.borrow().clone().ok_or("Open a project first")?;
+                if ui.get_manuscript_draft_id().as_str().trim() != manuscript_id.as_str().trim()
+                    || ui.get_manuscript_draft_section().as_str().trim() != section.as_str().trim()
+                {
+                    return Err("Select the section being restored before previewing".into());
+                }
+                let root = host_data_root()?;
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    let project_revision = flush_writing_drafts(&project, &mut drafts.borrow_mut(), &root)?;
+                    ui.set_project_revision(i32::try_from(project_revision).unwrap_or(i32::MAX));
+                }
+                if recovered_writing_requires_flush(&drafts.borrow()) {
+                    return Err("Unsaved writing drafts must be resolved before restoring".into());
+                }
+                timer.stop();
+                let history = evidence_read_at(
+                    &project,
+                    "writing.section_history",
+                    serde_json::json!({"manuscript_id":manuscript_id.as_str().trim(),"section":section.as_str().trim()}),
+                    &root,
+                )?;
+                let records = history["data"]["revisions"].as_array().ok_or("Revision history is malformed")?;
+                let latest = records.last().and_then(|entry| entry["revision"].as_i64()).ok_or("No recorded revision exists")?;
+                if revision == latest { return Err("That version is already current; choose an earlier revision".into()); }
+                let source = records.iter().find(|entry| entry["revision"] == revision).ok_or("Source revision was not found in the persisted history")?;
+                let digest = source["body_sha256"].as_str().filter(|value| value.len() == 64 && value.bytes().all(|byte| byte.is_ascii_hexdigit())).ok_or("Source body digest is invalid")?;
+                let body = source["body"].as_str().ok_or("Source body is missing")?;
+                // The persisted version may be a million-character document.
+                // Preserve its full digest while bounding the visible preview.
+                let excerpt: String = body.chars().take(2000).collect();
+                let omitted = body.chars().count().saturating_sub(2000);
+                let (pending, _) = evidence_preview_at(
+                    &project, "writing.section_restore", "writing",
+                    serde_json::json!({"manuscript_id":manuscript_id.as_str().trim(),"section":section.as_str().trim(),"source_revision":revision}),
+                    &root,
+                )?;
+                Ok((pending, format!(
+                    "RESTORE PREVIEW ONLY. No project write.\nSource version {revision}; current version {latest}.\nSource SHA-256: {digest}\nSource excerpt (first 2000 characters):\n{excerpt}\n{omitted} additional characters not shown.\n\nRecord restore creates an additional immutable revision with the COMPLETE original body and citations; earlier versions stay intact."
+                )))
+            })();
+            match result {
+                Ok((pending, summary)) => {
+                    *pending_restore.borrow_mut() = Some(pending);
+                    ui.set_manuscript_revision_summary(summary.into());
+                    ui.set_status("Manuscript revision restore previewed; nothing has been changed".into());
+                }
+                Err(error) => ui.set_manuscript_revision_summary(format!("Restore not previewed: {error}").into()),
+            }
+        }
+    });
+    app.on_record_manuscript_restore({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_restore = pending_manuscript_restore.clone();
+        let drafts = writing_drafts.clone();
+        let timer = writing_timer.clone();
+        move || {
+            let Some(ui) = weak.upgrade() else { return };
+            let pending = pending_restore.borrow_mut().take();
+            let result = (|| -> Result<(i64, String, String, String), String> {
+                let pending = pending.ok_or("Preview a previous manuscript revision before recording restore")?;
+                if pending.operation != "writing.section_restore" || pending.surface != "writing" {
+                    return Err("Restore approval does not match the manuscript operation".into());
+                }
+                let project = active_project.borrow().clone().ok_or("Open a project first")?;
+                let manuscript_id = pending.arguments["manuscript_id"].as_str().ok_or("Missing prepared manuscript ID")?;
+                let section = pending.arguments["section"].as_str().ok_or("Missing prepared manuscript section")?;
+                let approved_source = pending.arguments["source_revision"]
+                    .as_i64()
+                    .ok_or("Missing previewed source revision")?;
+                let visible_source: i64 = ui.get_manuscript_restore_source().as_str().trim()
+                    .parse().map_err(|_| "Restore source revision changed after preview; preview again")?;
+                if visible_source != approved_source {
+                    return Err("Restore source revision changed after preview; preview again".into());
+                }
+                if ui.get_manuscript_draft_id().as_str().trim() != manuscript_id
+                    || ui.get_manuscript_draft_section().as_str().trim() != section
+                {
+                    return Err("Manuscript or section changed since preview; preview again".into());
+                }
+                if drafts.borrow().manuscript_dirty {
+                    return Err("Manuscript draft changed since preview; save it and preview restore again".into());
+                }
+                let root = host_data_root()?;
+                let (executed, project_revision) = evidence_execute_pending(&pending, &project, &root)?;
+                let restored_revision = executed["data"]["section_revision"].as_i64().ok_or("Restored version missing")?;
+                let history = evidence_read_at(
+                    &project, "writing.section_history",
+                    serde_json::json!({"manuscript_id":manuscript_id,"section":section}), &root,
+                )?;
+                let restored = history["data"]["revisions"].as_array()
+                    .and_then(|rows| rows.iter().find(|row| row["revision"] == restored_revision))
+                    .ok_or("Restored revision not readable after approved save")?;
+                let body = restored["body"].as_str().ok_or("Restored section body unreadable")?.to_string();
+                let citations = restored["citations"].as_array().ok_or("Restored citations malformed")?
+                    .iter().map(|value| value.as_str().ok_or("Restored citation invalid"))
+                    .collect::<Result<Vec<_>,_>>()?.join(", ");
+                let mut updated = drafts.borrow().clone();
+                updated.manuscript_id = manuscript_id.into();
+                updated.section = section.into();
+                updated.body = body.clone();
+                updated.citations = citations.clone();
+                updated.manuscript_dirty = false;
+                writing_autosave::save(&writing_autosave::path(&root, &pending.project_id.to_string()), &updated)?;
+                *drafts.borrow_mut() = updated;
+                timer.stop();
+                Ok((project_revision, body, citations, format!("Restored as new version {restored_revision}, preserving all previous versions and citations.")))
+            })();
+            match result {
+                Ok((revision, body, citations, summary)) => {
+                    ui.set_manuscript_draft_body(body.clone().into());
+                    ui.set_manuscript_draft_citations(citations.into());
+                    let (words, chars) = manuscript_search::counts(&body);
+                    ui.set_manuscript_word_count(i32::try_from(words).unwrap_or(i32::MAX));
+                    ui.set_manuscript_character_count(i32::try_from(chars).unwrap_or(i32::MAX));
+                    ui.set_manuscript_revision_summary(summary.into());
+                    ui.set_project_revision(i32::try_from(revision).unwrap_or(i32::MAX));
+                    ui.set_status("Manuscript prior revision restored through approved audit".into());
+                }
+                Err(error) => {
+                    ui.set_manuscript_revision_summary(format!("Restore not recorded or reload failed: {error}").into());
+                    ui.set_status("Manuscript restore needs review; inspect current persisted history".into());
                 }
             }
         }
@@ -7050,6 +9382,64 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         ui.set_writing_results(error.clone().into());
                         ui.set_status(error.into());
                     }
+                }
+            }
+        }
+    });
+    app.on_prepare_quarto_source({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_physical_export = pending_physical_export.clone();
+        move |manuscript_id| {
+            let Some(ui) = weak.upgrade() else { return };
+            let id = manuscript_id.as_str().trim();
+            let result = (|| -> Result<(physical_export::PreparedPhysicalExport, serde_json::Value, manuscript_quarto_source::SourceProjection), String> {
+                let project = active_project.borrow().clone().ok_or("Open a project first")?;
+                let root = host_data_root()?;
+                let before = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info().map_err(|error| error.to_string())?;
+                let source = evidence_read_at(
+                    &project, "writing.inspect", serde_json::json!({"manuscript_id":id}), &root
+                )?;
+                let after = ProjectStore::open(&project)
+                    .map_err(|error| error.to_string())?
+                    .info().map_err(|error| error.to_string())?;
+                if before.id != after.id || before.revision != after.revision {
+                    return Err("Manuscript project changed during Quarto source inspection".into());
+                }
+                let projection = manuscript_quarto_source::from_inspect(&source, id)?;
+                let (prepared, receipt) = physical_export::prepare(
+                    &project,
+                    "writing.quarto_source_preview",
+                    serde_json::json!({
+                        "document":projection.document,
+                        "source_project_revision":before.revision
+                    }),
+                    &root,
+                )?;
+                Ok((prepared, receipt, projection))
+            })();
+            match result {
+                Ok((prepared, mut receipt, projection)) => {
+                    *pending_physical_export.borrow_mut() = Some(prepared);
+                    if let Some(data) = receipt.get_mut("data").and_then(serde_json::Value::as_object_mut) {
+                        data.remove("base64");
+                        data.remove("qmd");
+                        data.insert("source_text_and_binary_payload_redacted_from_ui".into(), serde_json::json!(true));
+                    }
+                    ui.set_writing_results(format!(
+                        "Inert, plain-section Quarto .qmd source prepared; NOT SAVED. {} source sections; losses: {:?}. Citation positions and original title pages are NOT preserved. Execution is disabled, no renderer or shell was invoked. Set an absolute .qmd output path, then click the separate explicit Save Quarto source button; existing files can never be overwritten.\n{}",
+                        projection.section_count, projection.source_loss_codes,
+                        pretty_result_data(&receipt)
+                    ).into());
+                    ui.set_manuscript_operation_details_open(true);
+                    ui.set_status("Quarto source prepared offline. Explicit non-overwriting file save still required.".into());
+                }
+                Err(error) => {
+                    pending_physical_export.borrow_mut().take();
+                    ui.set_writing_results(format!("Quarto source not prepared: {error}").into());
+                    ui.set_status("Quarto source preparation refused; no file saved".into());
                 }
             }
         }
@@ -7158,6 +9548,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         )
                     }),
                     (None, _) => Err("Open a project first".into()),
+                    (_, None) if screen_operation.as_str() == "analysis.report.render" => {
+                        Err("Prepare a verified analysis report before saving".into())
+                    }
+                    (_, None) if screen_operation.as_str() == "protocol.freeze_receipt" => {
+                        Err("Prepare a verified local protocol baseline receipt before saving".into())
+                    }
                     (_, None) => Err("Prepare a manuscript or draft ZIP before saving".into()),
                 };
                 match result {
@@ -7173,6 +9569,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 format!("Protocol saved SHA-256: {digest}").into(),
                             );
                             ui.set_protocol_results(message.into());
+                        } else if screen_operation.as_str() == "protocol.freeze_receipt" {
+                            let digest = receipt["sha256"].as_str().unwrap_or_default();
+                            ui.set_protocol_freeze_export_receipt(
+                                format!("Local baseline receipt saved without overwrite. Verified file SHA-256: {digest}").into(),
+                            );
+                            ui.set_protocol_results(message.into());
+                        } else if screen_operation.as_str() == "analysis.report.render" {
+                            ui.set_analysis_report_results(message.into());
                         } else {
                             ui.set_writing_results(message.into());
                         }
@@ -7182,6 +9586,11 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if screen_operation.as_str() == "protocol.export" {
                             ui.set_protocol_export_receipt("".into());
                             ui.set_protocol_results(error.clone().into());
+                        } else if screen_operation.as_str() == "protocol.freeze_receipt" {
+                            ui.set_protocol_freeze_export_receipt(error.clone().into());
+                            ui.set_protocol_results(error.clone().into());
+                        } else if screen_operation.as_str() == "analysis.report.render" {
+                            ui.set_analysis_report_results(error.clone().into());
                         } else {
                             ui.set_writing_results(error.clone().into());
                         }
@@ -7254,7 +9663,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         if draft_warning.is_none() {
                             resume_recovered_writing(&timer, &path, drafts.clone(), weak.clone());
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_recovery_results(message.clone().into());
                         ui.set_status(
@@ -7267,6 +9676,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .into(),
                         );
                         ui.set_page(1);
+                        remember_recent_project(&ui, &path, &info.title);
                     }
                     Err(error) => {
                         ui.set_recovery_results(error.clone().into());
@@ -7339,6 +9749,100 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
     });
+    app.on_scan_pdf_caption_candidates({
+        let weak = app.as_weak();
+        move |path, request_id| {
+            let weak = weak.clone();
+            std::thread::spawn(move || {
+                let result =
+                    pdf_engine::figure_candidates::preview_pdf_figure_table_candidates(
+                        Path::new(path.as_str()),
+                    );
+                let _ = slint::invoke_from_event_loop(move || {
+                    if let Some(ui) = weak.upgrade() {
+                        if ui.get_pdf_caption_request_id() != request_id
+                            || ui.get_pdf_local_path() != path
+                        {
+                            return;
+                        }
+                        ui.set_pdf_caption_busy(false);
+                        match result {
+                            Ok(preview) => {
+                                let source = preview.source_sha256;
+                                let scanned = preview.pages_inspected;
+                                let all = preview.candidates.len();
+                                let mut visible = Vec::new();
+                                for candidate in preview.candidates.iter().take(32) {
+                                    if candidate.content_extracted
+                                        || !candidate.human_confirmation_required
+                                        || candidate.page_number == 0
+                                    {
+                                        ui.set_pdf_caption_status(
+                                            "Unsafe PDF caption result refused: missing human-confirmation provenance.".into(),
+                                        );
+                                        return;
+                                    }
+                                    let first_line: String =
+                                        candidate.caption_first_line.chars().take(110).collect();
+                                    let label = format!(
+                                        "{:?}: {}", candidate.kind, first_line
+                                    );
+                                    let rect = candidate.caption_bounds_points;
+                                    let provenance = format!(
+                                        "UNVERIFIED caption anchor on page {}. Source SHA-256: {}. Caption text bounds in PDF points (not figure/table bounds): {:.1},{:.1}–{:.1},{:.1}. Heuristic score {:.2} is NOT scientific confidence. Verify the original page; no content was extracted or saved.",
+                                        candidate.page_number, source,
+                                        rect.left, rect.bottom, rect.right, rect.top,
+                                        candidate.anchor_heuristic_confidence
+                                    );
+                                    visible.push(PdfCaptionCandidate {
+                                        label: label.into(),
+                                        page_number: i32::try_from(candidate.page_number)
+                                            .unwrap_or(i32::MAX),
+                                        provenance: provenance.into(),
+                                        source_sha256: source.clone().into(),
+                                    });
+                                }
+                                ui.set_pdf_caption_candidates(
+                                    Rc::new(slint::VecModel::from(visible)).into(),
+                                );
+                                ui.set_pdf_caption_status(format!(
+                                    "Read-only PDF caption scan: {} candidates, {} pages inspected, source SHA-256 {}. Showing first {} candidates. {} {}",
+                                    all, scanned, source, all.min(32),
+                                    if preview.scan_truncated { "Scan truncated by safety limits." } else { "Scan within configured bounds." },
+                                    preview.warning,
+                                ).into());
+                            }
+                            Err(error) => {
+                                ui.set_pdf_caption_candidates(
+                                    Rc::new(slint::VecModel::from(
+                                        Vec::<PdfCaptionCandidate>::new()
+                                    )).into());
+                                ui.set_pdf_caption_status(
+                                    format!("Local caption-anchor scan refused: {error}").into()
+                                );
+                            }
+                        }
+                    }
+                });
+            });
+        }
+    });
+    app.on_invalidate_pdf_view({
+        let weak = app.as_weak();
+        move || {
+            if let Some(ui) = weak.upgrade() {
+                ui.set_pdf_job(ui.get_pdf_job().wrapping_add(1));
+                ui.set_pdf_image(Image::default());
+                ui.set_pdf_page_number(1);
+                ui.set_pdf_page_count(0);
+                ui.set_pdf_render_width(0.0);
+                ui.set_pdf_render_height(0.0);
+                ui.set_pdf_highlight_visible(false);
+                ui.set_pdf_matches(0);
+                ui.set_pdf_status("PDF source changed; open the selected file to render".into());
+            }
+        }
+    });
     app.on_load_pdf({
         let weak = app.as_weak();
         let activity = activity.clone();
@@ -7350,6 +9854,10 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "PDF search"
             };
             let job_id = weak.upgrade().map(|ui| ui.get_pdf_job()).unwrap_or_default();
+            let expected_source_sha = weak
+                .upgrade()
+                .map(|ui| ui.get_pdf_verified_caption_sha().to_string())
+                .unwrap_or_default();
             let kind = kind.to_owned();
             let weak = weak.clone();
             let activity = activity.clone();
@@ -7360,11 +9868,23 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                     .filter(|number| *number > 0)
                     .ok_or_else(|| "PDF page must be a positive number".to_string())
                     .and_then(|number| {
-                        pdf_engine::render_search_at(
-                            Path::new(path.as_str()),
-                            query.as_str(),
-                            number - 1,
-                        )
+                        if expected_source_sha.is_empty() {
+                            pdf_engine::render_search_at(
+                                Path::new(path.as_str()),
+                                query.as_str(),
+                                number - 1,
+                            )
+                        } else {
+                            // The PDFium renderer must verify the SAME bounded
+                            // bytes it loads, rather than hashing and reopening
+                            // a potentially replaced filesystem path.
+                            pdf_engine::render_search_at_verified(
+                                Path::new(path.as_str()),
+                                query.as_str(),
+                                number - 1,
+                                expected_source_sha.as_str(),
+                            )
+                        }
                     });
                 let _ = slint::invoke_from_event_loop(move || {
                     if let Some(ui) = weak.upgrade() {
@@ -7380,11 +9900,20 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                         }
                         // Every completed job is recorded, but a superseded
                         // request must not replace the latest displayed page.
-                        if ui.get_pdf_job() != job_id {
+                        if ui.get_pdf_job() != job_id || ui.get_pdf_local_path() != path {
                             return;
                         }
                         match result {
                             Ok(rendered) => {
+                                if !expected_source_sha.is_empty() {
+                                    ui.set_pdf_caption_status(
+                                        format!(
+                                            "SOURCE SHA-256 VERIFIED against scanned bytes ({}). Caption bounds are unverified; no figure pixels or table cells were extracted.",
+                                            expected_source_sha
+                                        )
+                                        .into(),
+                                    );
+                                }
                                 ui.set_pdf_page_number(
                                     i32::try_from(rendered.page_index.saturating_add(1))
                                         .unwrap_or(i32::MAX),
@@ -7433,6 +9962,18 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 );
                             }
                             Err(e) => {
+                                if !expected_source_sha.is_empty() {
+                                    ui.set_pdf_verified_caption_sha("".into());
+                                    ui.set_pdf_caption_candidates(
+                                        Rc::new(slint::VecModel::from(
+                                            Vec::<PdfCaptionCandidate>::new(),
+                                        ))
+                                        .into(),
+                                    );
+                                    ui.set_pdf_caption_status(
+                                        format!("Caption navigation refused: {e}. Source or render could not be verified. Rescan the PDF before inspecting captions.").into(),
+                                    );
+                                }
                                 ui.set_pdf_status(format!("PDF error: {}", e).into());
                                 ui.set_pdf_page_number(1);
                                 ui.set_pdf_page_count(0);
@@ -7527,7 +10068,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 weak.clone(),
                             );
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status(
                             match draft_warning {
@@ -7539,6 +10080,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .into(),
                         );
                         ui.set_page(1);
+                        remember_recent_project(&ui, Path::new(path.as_str()), &info.title);
                     }
                     Err(error) => ui.set_status(error.into()),
                 }
@@ -7580,13 +10122,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 weak.clone(),
                             );
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status(match draft_warning {
                             Some(error) => format!("Project created; draft recovery warning: {error}"),
                             None => "Project created in managed local storage".into(),
                         }.into());
                         ui.set_page(1);
+                        remember_recent_project(&ui, &project, &info.title);
                     }
                     Err(error) => ui.set_status(error.into()),
                 }
@@ -7619,7 +10162,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                                 weak.clone(),
                             );
                         }
-                        ui.set_project_title(info.title.into());
+                        ui.set_project_title(info.title.clone().into());
                         ui.set_project_revision(info.revision as i32);
                         ui.set_status(
                             match draft_warning {
@@ -7631,9 +10174,59 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                             .into(),
                         );
                         ui.set_page(1);
+                        remember_recent_project(&ui, Path::new(path.as_str()), &info.title);
                     }
                     Err(error) => ui.set_status(error.into()),
                 }
+            }
+        }
+    });
+    app.on_open_recent_project({
+        let weak = app.as_weak();
+        move |selected| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            let selected =
+                usize::try_from(selected).map_err(|_| "Select a recent project".to_owned());
+            let result = selected.and_then(|index| {
+                let entries = recent_projects::load(&host_data_root()?)?;
+                entries
+                    .get(index)
+                    .map(|item| item.path.clone())
+                    .ok_or_else(|| "Selected recent project no longer exists in the list".into())
+            });
+            match result {
+                Ok(path) => ui.invoke_open_project(path.into()),
+                Err(error) => ui.set_status(error.into()),
+            }
+        }
+    });
+    app.on_forget_recent_project({
+        let weak = app.as_weak();
+        move |selected| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            let result = usize::try_from(selected)
+                .map_err(|_| "Select a recent project shortcut".to_owned())
+                .and_then(|index| {
+                    let root = host_data_root()?;
+                    let previous = recent_projects::load(&root)?;
+                    let title = previous
+                        .get(index)
+                        .map(|entry| entry.title.clone())
+                        .ok_or_else(|| "Selected shortcut is no longer in the list".to_owned())?;
+                    recent_projects::forget(&root, index)?;
+                    refresh_recent_project_shortcuts(&ui)?;
+                    Ok(title)
+                });
+            match result {
+                Ok(title) => ui.set_status(
+                    format!("Forgot recent shortcut for {title}. No project files were deleted.")
+                        .into(),
+                ),
+                Err(error) => ui.set_status(format!("Shortcut unchanged: {error}").into()),
             }
         }
     });
@@ -7685,6 +10278,272 @@ mod tests {
     use super::*;
 
     #[test]
+    fn reviewer_comment_preview_and_approval_use_real_desktop_host_and_immutable_project() {
+        let folder = std::env::temp_dir().join(format!("rw-comment-host-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&folder).unwrap();
+        let project = folder.join("Synthetic reviewer project");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "Synthetic researcher",
+            true,
+            &folder.join("creation-audit.sqlite"),
+        )
+        .unwrap();
+        let host = folder.join("host");
+        let original = "Context 🧠 فارسی analysis";
+        let (save_pending, save_preview) = evidence_preview_at(
+            &project,
+            "writing.section_save",
+            "writing",
+            serde_json::json!({
+                "manuscript_id":"paper-f03","section":"Results",
+                "body":original,"citations":[]
+            }),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(save_preview["status"], "ok");
+        let (_, saved_revision) = evidence_execute_pending(&save_pending, &project, &host).unwrap();
+        assert_eq!(saved_revision, 1);
+        let quote = "🧠 فارسی";
+        let (start_scalar, end_scalar) =
+            manuscript_review_anchor::unique_scalar_span(original, quote).unwrap();
+        let source_hash = format!("{:x}", Sha256::digest(original.as_bytes()));
+        let (mut pending, preview) = evidence_preview_at(
+            &project,
+            "writing.comment_record",
+            "manuscript_comment",
+            serde_json::json!({
+                "manuscript_id":"paper-f03","section":"Results",
+                "source_revision":1,"source_body_sha256":source_hash,
+                "start_scalar":start_scalar,"end_scalar":end_scalar,
+                "quote":quote,"reviewer":"Synthetic reviewer",
+                "comment":"Clarify the synthetic source passage"
+            }),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(pending.expected_revision, 1);
+        assert_eq!(preview["status"], "ok", "{preview}");
+        assert_eq!(preview["data"]["writes"], 0);
+        let approved = preview["data"]["preview_sha256"].as_str().unwrap();
+        assert_eq!(approved.len(), 64);
+        pending.arguments["approved_preview_sha256"] = serde_json::json!(approved);
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            1
+        );
+        let (record, rev) = evidence_execute_pending(&pending, &project, &host).unwrap();
+        assert_eq!(rev, 2);
+        assert_eq!(record["data"]["appended"], true);
+        assert_eq!(record["data"]["manuscript_body_mutated"], false);
+        assert!(evidence_execute_pending(&pending, &project, &host).is_err());
+        let listed = evidence_read_at(
+            &project,
+            "writing.comment_list",
+            serde_json::json!({"manuscript_id":"paper-f03","section":"Results"}),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(listed["data"]["count"], 1);
+        assert_eq!(listed["data"]["comments"][0]["anchor_status"], "current");
+        assert_eq!(listed["data"]["comments"][0]["quote"], quote);
+        let history = evidence_read_at(
+            &project,
+            "writing.section_history",
+            serde_json::json!({"manuscript_id":"paper-f03","section":"Results"}),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(history["data"]["count"], 1);
+        assert_eq!(history["data"]["revisions"][0]["body"], original);
+        let wrong_project = folder.join("Different project");
+        load_project_with_audit(
+            wrong_project.to_str().unwrap(),
+            "Unrelated",
+            true,
+            &folder.join("other-audit.sqlite"),
+        )
+        .unwrap();
+        assert!(evidence_execute_pending(&pending, &wrong_project, &host).is_err());
+        let store = ProjectStore::open(&project).unwrap();
+        assert_eq!(
+            store
+                .connection()
+                .query_row::<i64, _, _>("SELECT count(*) FROM manuscript_comments", [], |r| r
+                    .get(0))
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            store
+                .connection()
+                .query_row::<i64, _, _>("SELECT count(*) FROM events", [], |r| r.get(0))
+                .unwrap(),
+            2
+        );
+        drop(store);
+        std::fs::remove_dir_all(folder).unwrap();
+    }
+
+    #[test]
+    fn review_search_query_builder_is_read_only_and_project_scoped_through_desktop_host() {
+        let root = std::env::temp_dir().join(format!("rw-pico-query-host-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let project = root.join("Scientific review");
+        load_project_with_audit(
+            project.to_str().unwrap(),
+            "PICO review",
+            true,
+            &root.join("create-audit.sqlite"),
+        )
+        .unwrap();
+        let info = ProjectStore::open(&project).unwrap().info().unwrap();
+        let host = root.join("host");
+        let args = serde_json::json!({
+            "concepts":{
+                "population":["older adults","geriatric patients"],
+                "intervention":["mindfulness"],
+                "outcome":["sleep quality"]
+            },
+            "databases":["pubmed","scopus","web_of_science"]
+        });
+        let first = evidence_read_at(
+            &project,
+            "review.search_strategy_build",
+            args.clone(),
+            &host,
+        )
+        .unwrap();
+        let displayed = review_search_preview_text(&first).unwrap();
+        assert!(displayed.contains("OFFLINE DRAFT ONLY"));
+        assert!(displayed.contains("pubmed"));
+        assert!(displayed.contains("scopus"));
+        assert!(displayed.contains("web_of_science"));
+        assert_eq!(first["data"]["project_id"], info.id);
+        assert_eq!(first["data"]["queries"].as_array().unwrap().len(), 3);
+        assert_eq!(first["data"]["provenance"]["query_executed"], false);
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            info.revision
+        );
+        let again = evidence_read_at(
+            &project,
+            "review.search_strategy_build",
+            args.clone(),
+            &host,
+        )
+        .unwrap();
+        assert_eq!(
+            first["data"], again["data"],
+            "offline strategy must be reproducible"
+        );
+        let bad = serde_json::json!({"concepts":{"population":["science\");DROP TABLE manuscripts;--"]},"databases":["pubmed"]});
+        assert!(evidence_read_at(&project, "review.search_strategy_build", bad, &host).is_err());
+        assert_eq!(
+            ProjectStore::open(&project)
+                .unwrap()
+                .info()
+                .unwrap()
+                .revision,
+            info.revision
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn offline_review_search_preview_rejects_execution_claims_and_unverified_queries() {
+        let query_sha = "a".repeat(64);
+        let digest = "b".repeat(64);
+        let draft = serde_json::json!({
+            "status":"ok", "data":{
+                "schema_version":"review-search-strategy-v1",
+                "queries":[{
+                    "database":"pubmed", "query":"(\"anxiety\"[Title/Abstract])",
+                    "query_sha256":query_sha,"executed":false
+                }],
+                "provenance":{
+                    "content_sha256":digest,"generated_offline":true,
+                    "query_executed":false,"retrieval_attempted":false,
+                    "result_count":null,"manual_verification_required":true
+                }
+            }
+        });
+        let preview = review_search_preview_text(&draft).unwrap();
+        assert!(preview.contains("OFFLINE DRAFT ONLY"));
+        assert!(preview.contains(&digest));
+        assert!(preview.contains("no results counted"));
+        assert!(preview.contains("pubmed · SHA-256"));
+        assert_eq!(
+            review_search_terms(" anxiety ; ; stress ; "),
+            vec!["anxiety", "stress"]
+        );
+        let mut invalid = draft.clone();
+        invalid["data"]["provenance"]["query_executed"] = serde_json::json!(true);
+        assert!(review_search_preview_text(&invalid).is_err());
+        invalid = draft.clone();
+        invalid["data"]["queries"][0]["executed"] = serde_json::json!(true);
+        assert!(review_search_preview_text(&invalid).is_err());
+        invalid = draft.clone();
+        invalid["data"]["provenance"]["result_count"] = serde_json::json!(4);
+        assert!(review_search_preview_text(&invalid).is_err());
+        invalid = draft.clone();
+        invalid["data"]["queries"][0]["query_sha256"] = serde_json::json!("bad");
+        assert!(review_search_preview_text(&invalid).is_err());
+        invalid = draft.clone();
+        invalid["data"]["queries"][0]["database"] = serde_json::json!("unknown");
+        assert!(review_search_preview_text(&invalid).is_err());
+    }
+
+    #[test]
+    fn protocol_freeze_summary_is_source_bound_and_never_implies_external_registration() {
+        let unfrozen = serde_json::json!({
+            "status":"ok", "data":{
+                "frozen":false,"current_version":2,"local_only":true,
+                "external_registration_verified":false
+            }
+        });
+        assert!(protocol_freeze_summary(&unfrozen)
+            .unwrap()
+            .contains("Not frozen · protocol v2"));
+        let digest = "a".repeat(64);
+        let frozen = serde_json::json!({
+            "status":"ok", "data":{
+                "frozen":true,"frozen_version":1,"current_version":2,
+                "post_freeze_amendment_versions":1,"snapshot_sha256":digest,
+                "local_only":true,"external_registration_verified":false
+            }
+        });
+        let summary = protocol_freeze_summary(&frozen).unwrap();
+        assert!(summary.contains("baseline v1 · 1 post-baseline amendment"));
+        assert!(summary.contains(&digest));
+        assert!(summary.contains("no independent registration or trusted timestamp"));
+        let mut invalid = frozen.clone();
+        invalid["data"]["external_registration_verified"] = serde_json::json!(true);
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["data"]["current_version"] = serde_json::json!(10);
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["data"]["snapshot_sha256"] = serde_json::json!("not a sha256");
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["data"]["post_freeze_amendment_versions"] = serde_json::json!(-1);
+        assert!(protocol_freeze_summary(&invalid).is_err());
+        invalid = frozen.clone();
+        invalid["status"] = serde_json::json!("error");
+        assert!(protocol_freeze_summary(&invalid).is_err());
+    }
+
+    #[test]
     fn recent_dataset_shortcut_requires_a_successfully_persisted_import() {
         let imported = serde_json::json!({
             "status":"ok",
@@ -7725,6 +10584,47 @@ mod tests {
             chosen_local_file_path(&absolute).unwrap(),
             absolute.to_str().unwrap()
         );
+    }
+
+    #[test]
+    fn native_project_folder_selection_rejects_invalid_locations_without_mutation() {
+        struct Cleanup(PathBuf);
+        impl Drop for Cleanup {
+            fn drop(&mut self) {
+                let _ = std::fs::remove_dir_all(&self.0);
+            }
+        }
+        let temp = std::env::temp_dir().join(format!(
+            "researchweave-native-project-picker-{}",
+            uuid::Uuid::new_v4()
+        ));
+        std::fs::create_dir(&temp).unwrap();
+        let _cleanup = Cleanup(temp.clone());
+        assert!(chosen_local_project_folder(Path::new("relative/folder")).is_err());
+        assert!(chosen_local_project_folder(&temp.join("missing")).is_err());
+        let file = temp.join("regular-file");
+        std::fs::write(&file, b"keep original bytes").unwrap();
+        assert!(chosen_local_project_folder(&file).is_err());
+        assert_eq!(std::fs::read(&file).unwrap(), b"keep original bytes");
+        let unicode = temp.join("پژوهش");
+        std::fs::create_dir(&unicode).unwrap();
+        let prepared = PathBuf::from(chosen_local_project_folder(&unicode).unwrap());
+        assert_eq!(prepared.parent(), Some(unicode.as_path()));
+        assert!(!prepared.exists(), "the chooser must not create a project");
+        let preexisting = unicode.join("data");
+        std::fs::create_dir(&preexisting).unwrap();
+        std::fs::write(preexisting.join("project.sqlite"), b"existing").unwrap();
+        assert_eq!(
+            chosen_local_project_folder(&unicode).unwrap(),
+            unicode.to_str().unwrap(),
+            "an existing project folder must never be silently nested"
+        );
+        #[cfg(unix)]
+        {
+            let symlink = temp.join("linked-folder");
+            std::os::unix::fs::symlink(&unicode, &symlink).unwrap();
+            assert!(chosen_local_project_folder(&symlink).is_err());
+        }
     }
 
     #[test]

@@ -24,7 +24,8 @@ cleanup() {
 }
 trap cleanup EXIT
 
-dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' \
+    timeout --signal=TERM --kill-after=10s 5m \
+    dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' \
     bash -c '
         set -euo pipefail
         binary="$1"
@@ -37,7 +38,20 @@ dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' \
         pid=$!
         cleanup_app() {
             kill "$pid" >/dev/null 2>&1 || true
+            # An unresponsive GUI must not strand the Xvfb/D-Bus job for the
+            # entire 20-minute Actions step timeout after a Python traceback.
+            # This watchdog only affects disposable native QA processes.
+            (
+                sleep 5
+                if kill -0 "$pid" >/dev/null 2>&1; then
+                    echo GUI_CLEANUP_ESCALATED_TO_SIGKILL
+                    kill -KILL "$pid" >/dev/null 2>&1 || true
+                fi
+            ) &
+            watchdog=$!
             wait "$pid" >/dev/null 2>&1 || true
+            kill "$watchdog" >/dev/null 2>&1 || true
+            wait "$watchdog" >/dev/null 2>&1 || true
         }
         trap cleanup_app EXIT
         sleep 2
@@ -53,7 +67,20 @@ dbus-run-session -- xvfb-run -a -s '-screen 0 1440x1000x24' \
         dbus-send --session --print-reply --dest=org.a11y.Bus \
             /org/a11y/bus org.freedesktop.DBus.Properties.Set \
             string:org.a11y.Status string:IsEnabled variant:boolean:true >/dev/null
-        python3 "$probe" "$output" "$RESEARCHWEAVE_HOST_DATA_DIR/measurements.csv" | tee "$output/atspi-navigation.txt"
+        # A background toolkit/clipboard child can inherit a tee pipe after
+        # Python has already raised, preventing pipe EOF and trapping cleanup
+        # for minutes. Write the diagnostic file directly and replay it after
+        # the exact Python process exits; preserve its real nonzero status.
+        set +e
+        python3 "$probe" "$output" "$RESEARCHWEAVE_HOST_DATA_DIR/measurements.csv" \
+            > "$output/atspi-navigation.txt" 2>&1
+        probe_status=$?
+        set -e
+        cat "$output/atspi-navigation.txt"
+        if (( probe_status != 0 )); then
+            echo "ISOLATED_ATSPI_PROBE_FAILED exit=$probe_status"
+            exit "$probe_status"
+        fi
         if ! kill -0 "$pid" >/dev/null 2>&1; then
             echo GUI_DIED_AFTER_INTERACTION
             exit 21
