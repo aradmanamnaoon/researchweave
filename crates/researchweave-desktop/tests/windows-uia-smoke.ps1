@@ -924,6 +924,53 @@ function Read-F37CaptionStatus([System.Windows.Automation.AutomationElement]$Win
     throw "F37 required native caption status is absent: $Pattern"
 }
 
+function Get-F37ReaderViewport([System.Windows.Automation.AutomationElement]$Window) {
+    $matches = @($Window.FindAll(
+        [System.Windows.Automation.TreeScope]::Descendants,
+        [System.Windows.Automation.Condition]::TrueCondition
+    ) | Where-Object { $_.Current.Name -eq 'Scrollable PDF captions and page' })
+    if ($matches.Count -ne 1) {
+        throw "F37 reader scroll viewport is not uniquely accessible: count=$($matches.Count)"
+    }
+    return $matches[0].Current.BoundingRectangle
+}
+function Get-F37PhysicalIntersection([object[]]$Bounds) {
+    # Round inward: never include desktop pixels outside a native UIA element.
+    $left = [double]::NegativeInfinity
+    $top = [double]::NegativeInfinity
+    $right = [double]::PositiveInfinity
+    $bottom = [double]::PositiveInfinity
+    foreach ($item in $Bounds) {
+        if ($null -eq $item -or [double]::IsNaN($item.Left) -or
+            [double]::IsNaN($item.Top) -or [double]::IsNaN($item.Right) -or
+            [double]::IsNaN($item.Bottom)) {
+            throw 'F37 native UIA geometry is invalid'
+        }
+        $left = [Math]::Max($left, [double]$item.Left)
+        $top = [Math]::Max($top, [double]$item.Top)
+        $right = [Math]::Min($right, [double]$item.Right)
+        $bottom = [Math]::Min($bottom, [double]$item.Bottom)
+    }
+    if ($right -le $left -or $bottom -le $top) {
+        return [Drawing.Rectangle]::Empty
+    }
+    $x1 = [int][Math]::Ceiling($left)
+    $y1 = [int][Math]::Ceiling($top)
+    $x2 = [int][Math]::Floor($right)
+    $y2 = [int][Math]::Floor($bottom)
+    if ($x2 -le $x1 -or $y2 -le $y1) { return [Drawing.Rectangle]::Empty }
+    return [Drawing.Rectangle]::FromLTRB($x1, $y1, $x2, $y2)
+}
+function Invoke-F37ReaderScroll(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [string]$Name
+) {
+    if ($Name -cnotin @('Scroll to rendered PDF page', 'Scroll back to PDF caption tools')) {
+        throw "F37 unexpected reader scroll action: $Name"
+    }
+    Invoke-AccessibleButton $Window $Name
+    Start-Sleep -Milliseconds 150
+}
 function Focus-F37CaptionAction(
     [System.Windows.Automation.AutomationElement]$Window,
     [System.Windows.Automation.AutomationElement]$Anchor,
@@ -931,59 +978,93 @@ function Focus-F37CaptionAction(
     [int]$MaxTabs = 14
 ) {
     $button = FocusByTab $Anchor ([System.Windows.Automation.ControlType]::Button) $Name $MaxTabs
-    $windowBounds = $Window.Current.BoundingRectangle
+    $viewport = Get-F37ReaderViewport $Window
     $bounds = $button.Current.BoundingRectangle
-    if (-not $button.Current.IsEnabled -or $button.Current.IsOffscreen -or
-        $bounds.Width -lt 30 -or $bounds.Height -lt 12 -or
-        $bounds.Left -lt $windowBounds.Left -or $bounds.Top -lt $windowBounds.Top -or
-        $bounds.Right -gt $windowBounds.Right -or $bounds.Bottom -gt $windowBounds.Bottom) {
-        throw "F37 native caption action is not visibly reachable: $Name"
+    $win = $Window.Current.BoundingRectangle
+    $screen = [Windows.Forms.Screen]::FromPoint(
+        [Drawing.Point]::new([int]($win.Left + 8), [int]($win.Top + 8))
+    ).WorkingArea
+    $visible = Get-F37PhysicalIntersection @($bounds, $viewport, $win, $screen)
+    if (-not $button.Current.IsEnabled -or $visible.Width -lt 30 -or $visible.Height -lt 12) {
+        throw "F37 caption action has no usable visible intersection: $Name button=$bounds viewport=$viewport visible=$visible"
+    }
+    $point = [System.Windows.Point]::new(
+        $visible.Left + $visible.Width / 2.0,
+        $visible.Top + $visible.Height / 2.0)
+    $hit = [System.Windows.Automation.AutomationElement]::FromPoint($point)
+    if (-not $hit -or -not [System.Windows.Automation.Automation]::Compare($hit, $button)) {
+        $hitName = if ($hit) { $hit.Current.Name } else { '<none>' }
+        throw "F37 caption action is occluded or not hit-testable: $Name hit=$hitName visible=$visible"
     }
     return $button
 }
-
-function Get-F37CanvasSample([System.Windows.Automation.AutomationElement]$Window) {
-    # Sample the *real installed screen pixels* of the accessible PDF Image,
-    # not an app state field or mocked bitmap. Require the image inside the
-    # viewport; inaccessible/offscreen PDF pixels cannot prove clearing.
+function Get-F37CanvasSample(
+    [System.Windows.Automation.AutomationElement]$Window,
+    [object]$ExpectedRegion = $null
+) {
+    # Only real installed desktop pixels in the UIA Image AND ScrollView.
+    # Reuse identical desktop coordinates for blank, verified, and refusal.
     $images = @(Children $Window ([System.Windows.Automation.ControlType]::Image) |
         Where-Object { $_.Current.Name -eq 'Rendered PDF page' })
-    if ($images.Count -ne 1 -or $images[0].Current.IsOffscreen) {
-        throw 'F37 cannot locate exactly one visible native PDF page image'
+    if ($images.Count -ne 1) {
+        throw "F37 must have exactly one native PDF page Image: count=$($images.Count)"
     }
-    $rect = $images[0].Current.BoundingRectangle
+    $imageRect = $images[0].Current.BoundingRectangle
+    $viewport = Get-F37ReaderViewport $Window
     $win = $Window.Current.BoundingRectangle
-    if ($rect.Width -lt 180 -or $rect.Height -lt 90 -or
-        $rect.Left -lt $win.Left -or $rect.Top -lt $win.Top -or
-        $rect.Right -gt $win.Right -or $rect.Bottom -gt $win.Bottom) {
-        throw 'F37 native PDF canvas is clipped or outside the installed viewport'
-    }
     $screen = [Windows.Forms.Screen]::FromPoint(
-        [Drawing.Point]::new([int]($rect.Left + $rect.Width / 2), [int]($rect.Top + $rect.Height / 2))
-    ).Bounds
-    if ($rect.Left -lt $screen.Left -or $rect.Right -gt $screen.Right -or
-        $rect.Top -lt $screen.Top -or $rect.Bottom -gt $screen.Bottom) {
-        throw 'F37 native PDF canvas extends outside the capture screen'
+        [Drawing.Point]::new([int]($win.Left + 8), [int]($win.Top + 8))
+    ).WorkingArea
+    $visible = Get-F37PhysicalIntersection @($imageRect, $viewport, $win, $screen)
+    if ($visible.Width -lt 116 -or $visible.Height -lt 56) {
+        throw "F37 PDF has no usable visible native screen ROI: image=$imageRect viewport=$viewport window=$win screen=$screen visible=$visible"
+    }
+    $region = if ($null -eq $ExpectedRegion) {
+        [Drawing.Rectangle]::FromLTRB($visible.Left + 8, $visible.Top + 8,
+            $visible.Right - 8, $visible.Bottom - 8)
+    } else {
+        [Drawing.Rectangle]$ExpectedRegion
+    }
+    $covered = [Drawing.Rectangle]::Intersect($region, $visible)
+    if ($region.Width -lt 100 -or $region.Height -lt 40 -or
+        -not $covered.Equals($region)) {
+        throw "F37 prior screen ROI is no longer wholly on visible PDF: wanted=$region image=$imageRect viewport=$viewport visible=$visible"
+    }
+    # An accessibility rectangle alone can lie beneath another window.
+    # Reject a sample unless its screen-center hit resolves to that Image.
+    $point = [System.Windows.Point]::new(
+        $region.Left + $region.Width / 2.0, $region.Top + $region.Height / 2.0)
+    $hit = [System.Windows.Automation.AutomationElement]::FromPoint($point)
+    if (-not $hit -or -not [System.Windows.Automation.Automation]::Compare($hit, $images[0])) {
+        $hitName = if ($hit) { $hit.Current.Name } else { '<none>' }
+        throw "F37 PDF ROI is occluded or is not the native Image: region=$region hit=$hitName"
     }
     [Windows.Forms.Cursor]::Position = [Drawing.Point]::new([int]($win.Left + 8), [int]($win.Top + 8))
-    Start-Sleep -Milliseconds 100
-    $bitmap = [Drawing.Bitmap]::new([int]$rect.Width, [int]$rect.Height)
-    $graphics = [Drawing.Graphics]::FromImage($bitmap)
-    try {
-        $graphics.CopyFromScreen([int]$rect.Left, [int]$rect.Top, 0, 0, $bitmap.Size)
-        $samples = New-Object 'System.Collections.Generic.List[string]'
-        foreach ($yPercent in @(20, 35, 50, 65, 80)) {
-            foreach ($xPercent in @(20, 35, 50, 65, 80)) {
-                $x = [int][Math]::Floor(($bitmap.Width - 1) * $xPercent / 100.0)
-                $y = [int][Math]::Floor(($bitmap.Height - 1) * $yPercent / 100.0)
-                $samples.Add($bitmap.GetPixel($x, $y).ToArgb().ToString('X8'))
+    $previousHash = $null
+    for ($attempt = 0; $attempt -lt 10; $attempt++) {
+        Start-Sleep -Milliseconds 120
+        $bitmap = [Drawing.Bitmap]::new($region.Width, $region.Height,
+            [Drawing.Imaging.PixelFormat]::Format32bppArgb)
+        $graphics = [Drawing.Graphics]::FromImage($bitmap)
+        $memory = [IO.MemoryStream]::new()
+        $sha = [Security.Cryptography.SHA256]::Create()
+        try {
+            $graphics.CopyFromScreen($region.Left, $region.Top, 0, 0, $bitmap.Size)
+            $bitmap.Save($memory, [Drawing.Imaging.ImageFormat]::Png)
+            $digest = [BitConverter]::ToString($sha.ComputeHash($memory.ToArray())).Replace('-', '')
+            if ($null -ne $previousHash -and $digest -ceq $previousHash) {
+                Write-Host "F37_NATIVE_REAL_SCREEN_SAMPLE region=$region sha256=$digest"
+                return [pscustomobject]@{ Region = $region; Digest = $digest }
             }
+            $previousHash = $digest
+        } finally {
+            $sha.Dispose()
+            $memory.Dispose()
+            $graphics.Dispose()
+            $bitmap.Dispose()
         }
-        return [string]::Join(',', $samples)
-    } finally {
-        $graphics.Dispose()
-        $bitmap.Dispose()
     }
+    throw "F37 installed PDF screen pixels did not stabilize: region=$region last_sha256=$previousHash"
 }
 try {
     $p = Start-Process -FilePath $Exe -PassThru
@@ -1402,9 +1483,9 @@ try {
     }
     if (-not $f37Selected) { throw 'F37 native PDF chooser did not select its disposable caption source' }
     WaitForNameLike $window '*No PDF page loaded*' 10000
-    $f37BlankCanvas = Get-F37CanvasSample $window
     $f37Search = Named $window ([System.Windows.Automation.ControlType]::Edit) 'PDF search query'
     $f37ScanName = 'Preview unverified local PDF figure and table caption anchors'
+    Invoke-F37ReaderScroll $window 'Scroll back to PDF caption tools'
     $f37Scan = Focus-F37CaptionAction $window $f37Search $f37ScanName 16
     $f37Scan.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
     $f37Scanned = Read-F37CaptionStatus $window '*Read-only PDF caption scan: 2 candidates*'
@@ -1422,6 +1503,11 @@ try {
     if ($f37Candidates.Count -ne 2) {
         throw 'F37 did not expose both actual synthetic PDF Figure/Table caption anchors as native UIA buttons'
     }
+    # Capture blank native pixels AFTER scanning inserts the candidate list.
+    # The visible page jump aligns the same real monitor ROI for all 3 states.
+    Invoke-F37ReaderScroll $window 'Scroll to rendered PDF page'
+    $f37BlankCanvas = Get-F37CanvasSample $window
+    Invoke-F37ReaderScroll $window 'Scroll back to PDF caption tools'
     $f37Scan = Named $window ([System.Windows.Automation.ControlType]::Button) $f37ScanName
     $f37Figure = Focus-F37CaptionAction $window $f37Scan $f37FigureName 8
     $f37Figure.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -1433,8 +1519,9 @@ try {
     }
     WaitForNameLike $window '*PDF page 1 of 1*' 15000
     WaitForNameLike $window '*PDF search status: Rendered page 1 of 1*' 15000
-    $f37RenderedCanvas = Get-F37CanvasSample $window
-    if ($f37RenderedCanvas -ceq $f37BlankCanvas) {
+    Invoke-F37ReaderScroll $window 'Scroll to rendered PDF page'
+    $f37RenderedCanvas = Get-F37CanvasSample $window $f37BlankCanvas.Region
+    if ($f37RenderedCanvas.Digest -ceq $f37BlankCanvas.Digest) {
         throw 'F37 valid caption navigation did not visibly render the synthetic PDF page'
     }
     Assert-F14Unchanged $f37Before (Get-F14ProjectSnapshot $temporary) $window 'F37 source-SHA verified native page navigation'
@@ -1448,6 +1535,7 @@ try {
         $f37ReplacementSha -ceq $f37ExpectedSha) {
         throw 'F37 fixture substitution did not preserve the source path/size while changing source bytes'
     }
+    Invoke-F37ReaderScroll $window 'Scroll back to PDF caption tools'
     $f37Scan = Named $window ([System.Windows.Automation.ControlType]::Button) $f37ScanName
     $f37Figure = Focus-F37CaptionAction $window $f37Scan $f37FigureName 8
     $f37Figure.GetCurrentPattern([System.Windows.Automation.InvokePattern]::Pattern).Invoke()
@@ -1457,8 +1545,9 @@ try {
     }
     WaitForNameLike $window '*PDF search status: PDF error: PDF source bytes changed since the caption scan*matches: 0*' 15000
     WaitForNameLike $window '*No PDF page loaded*' 10000
-    $f37RefusedCanvas = Get-F37CanvasSample $window
-    if ($f37RefusedCanvas -cne $f37BlankCanvas) {
+    Invoke-F37ReaderScroll $window 'Scroll to rendered PDF page'
+    $f37RefusedCanvas = Get-F37CanvasSample $window $f37BlankCanvas.Region
+    if ($f37RefusedCanvas.Digest -cne $f37BlankCanvas.Digest) {
         throw 'F37 same-path substitution refusal left stale PDF pixels in the native viewport'
     }
     $f37StillPresent = @(Children $window ([System.Windows.Automation.ControlType]::Button) |

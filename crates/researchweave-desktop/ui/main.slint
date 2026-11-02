@@ -1350,77 +1350,113 @@ export component MainWindow inherits Window {
                                         clicked => { root.page = 21; }
                                     }
                                 }
-                                Text {
-                                    text: root.pdf-status + " · matches: " + root.pdf-matches;
-                                    color: Theme.muted-ink;
-                                    accessible-label: "PDF search status: " + root.pdf-status + " matches: " + root.pdf-matches;
-                                }
-                                Button {
-                                    text: root.pdf-caption-busy ? "Scanning caption anchors…" : "Find figure/table captions";
-                                    accessible-label: "Preview unverified local PDF figure and table caption anchors";
-                                    enabled: !root.pdf-caption-busy && pdf-path.text != "";
-                                    clicked => {
-                                        root.pdf-caption-request-id += 1;
-                                        root.pdf-caption-busy = true;
-                                        root.pdf-caption-status = "Reading bounded local PDF text layer. No extracted figure or table contents.";
-                                        root.pdf-caption-candidates = [];
-                                        root.scan-pdf-caption-candidates(pdf-path.text, root.pdf-caption-request-id);
+                                // Keep source selection and page navigation visible in a
+                                // compact window. The caption results and PDF page below
+                                // live in a separate scrollable work area, so a tall page
+                                // never collapses into a few clipped screen pixels.
+                                HorizontalLayout {
+                                    spacing: 8px;
+                                    Button {
+                                        text: "View PDF page";
+                                        accessible-label: "Scroll to rendered PDF page";
+                                        clicked => {
+                                            // Land at the page's top, clamped to the
+                                            // real scroll range on compact windows.
+                                            pdf-reader-scroll.content-y = max(0px,
+                                                min(pdf-page-canvas.y,
+                                                    pdf-reader-scroll.content-height - pdf-reader-scroll.visible-height));
+                                        }
+                                    }
+                                    Button {
+                                        text: "Caption tools";
+                                        accessible-label: "Scroll back to PDF caption tools";
+                                        clicked => { pdf-reader-scroll.content-y = 0px; }
                                     }
                                 }
-                                Text {
-                                    text: root.pdf-caption-status;
-                                    accessible-label: "PDF caption anchor preview status " + root.pdf-caption-status;
-                                    wrap: word-wrap;
-                                    color: Theme.muted-ink;
-                                }
-                                if root.pdf-caption-candidates.length > 0: ScrollView {
-                                    preferred-height: 135px;
-                                    min-height: 80px;
-                                    max-height: 160px;
+                                pdf-reader-scroll := ScrollView {
+                                    accessible-role: region;
+                                    accessible-label: "Scrollable PDF captions and page";
+                                    min-height: 100px;
+                                    vertical-stretch: 1;
                                     VerticalLayout {
-                                        spacing: 4px;
-                                        for caption in root.pdf-caption-candidates: Button {
-                                            text: caption.label + " · page " + caption.page-number;
-                                            accessible-label: "Inspect unverified PDF caption " + caption.label + " page " + caption.page-number;
+                                        spacing: 8px;
+                                        Text {
+                                            text: root.pdf-status + " · matches: " + root.pdf-matches;
+                                            color: Theme.muted-ink;
+                                            accessible-label: "PDF search status: " + root.pdf-status + " matches: " + root.pdf-matches;
+                                        }
+                                        Button {
+                                            text: root.pdf-caption-busy ? "Scanning caption anchors…" : "Find figure/table captions";
+                                            accessible-label: "Preview unverified local PDF figure and table caption anchors";
+                                            enabled: !root.pdf-caption-busy && pdf-path.text != "";
                                             clicked => {
-                                                // Clear the previous page before checking the exact
-                                                // source SHA; a same-path replacement must not show
-                                                // stale pixels with old caption provenance.
-                                                root.invalidate-pdf-view();
-                                                root.pdf-verified-caption-sha = caption.source-sha256;
-                                                root.pdf-caption-status = "Verifying the scanned PDF source bytes before opening this unverified caption anchor. " + caption.provenance;
-                                                root.load-pdf(pdf-path.text, "", caption.page-number);
+                                                root.pdf-caption-request-id += 1;
+                                                root.pdf-caption-busy = true;
+                                                root.pdf-caption-status = "Reading bounded local PDF text layer. No extracted figure or table contents.";
+                                                root.pdf-caption-candidates = [];
+                                                root.scan-pdf-caption-candidates(pdf-path.text, root.pdf-caption-request-id);
                                             }
                                         }
-                                    }
-                                }
-                                Rectangle {
-                                    background: Theme.reader-canvas;
-                                    clip: true;
-                                    pdf-fit := Rectangle {
-                                        width: root.pdf-render-width > 0 && root.pdf-render-height > 0
-                                            ? min(parent.width, parent.height * root.pdf-render-width / root.pdf-render-height)
-                                            : parent.width;
-                                        height: root.pdf-render-width > 0 && root.pdf-render-height > 0
-                                            ? min(parent.height, parent.width * root.pdf-render-height / root.pdf-render-width)
-                                            : parent.height;
-                                        x: (parent.width - self.width) / 2;
-                                        y: (parent.height - self.height) / 2;
-                                        pdf-view := Image {
-                                            source: root.pdf-image;
-                                            width: parent.width;
-                                            height: parent.height;
-                                            image-fit: contain;
-                                            accessible-label: "Rendered PDF page";
+                                        Text {
+                                            text: root.pdf-caption-status;
+                                            accessible-label: "PDF caption anchor preview status " + root.pdf-caption-status;
+                                            wrap: word-wrap;
+                                            color: Theme.muted-ink;
                                         }
-                                        if root.pdf-highlight-visible: Rectangle {
-                                            x: root.pdf-highlight-x * parent.width;
-                                            y: root.pdf-highlight-y * parent.height;
-                                            width: root.pdf-highlight-w * parent.width;
-                                            height: root.pdf-highlight-h * parent.height;
-                                            background: Theme.accent-subtle;
-                                            border-color: Theme.warning;
-                                            border-width: 2px;
+                                        if root.pdf-caption-candidates.length > 0: ScrollView {
+                                            preferred-height: 135px;
+                                            min-height: 80px;
+                                            max-height: 160px;
+                                            VerticalLayout {
+                                                spacing: 4px;
+                                                for caption in root.pdf-caption-candidates: Button {
+                                                    text: caption.label + " · page " + caption.page-number;
+                                                    accessible-label: "Inspect unverified PDF caption " + caption.label + " page " + caption.page-number;
+                                                    clicked => {
+                                                        // Clear the previous page before checking the exact
+                                                        // source SHA; a same-path replacement must not show
+                                                        // stale pixels with old caption provenance.
+                                                        root.invalidate-pdf-view();
+                                                        root.pdf-verified-caption-sha = caption.source-sha256;
+                                                        root.pdf-caption-status = "Verifying the scanned PDF source bytes before opening this unverified caption anchor. " + caption.provenance;
+                                                        root.load-pdf(pdf-path.text, "", caption.page-number);
+                                                    }
+                                                }
+                                            }
+                                        }
+                                        pdf-page-canvas := Rectangle {
+                                            background: Theme.reader-canvas;
+                                            clip: true;
+                                            // The PDF page is a real scrollable destination,
+                                            // not the remainder of an overflowing VerticalLayout.
+                                            min-height: 380px;
+                                            preferred-height: 480px;
+                                            pdf-fit := Rectangle {
+                                                width: root.pdf-render-width > 0 && root.pdf-render-height > 0
+                                                    ? min(parent.width, parent.height * root.pdf-render-width / root.pdf-render-height)
+                                                    : parent.width;
+                                                height: root.pdf-render-width > 0 && root.pdf-render-height > 0
+                                                    ? min(parent.height, parent.width * root.pdf-render-height / root.pdf-render-width)
+                                                    : parent.height;
+                                                x: (parent.width - self.width) / 2;
+                                                y: (parent.height - self.height) / 2;
+                                                pdf-view := Image {
+                                                    source: root.pdf-image;
+                                                    width: parent.width;
+                                                    height: parent.height;
+                                                    image-fit: contain;
+                                                    accessible-label: "Rendered PDF page";
+                                                }
+                                                if root.pdf-highlight-visible: Rectangle {
+                                                    x: root.pdf-highlight-x * parent.width;
+                                                    y: root.pdf-highlight-y * parent.height;
+                                                    width: root.pdf-highlight-w * parent.width;
+                                                    height: root.pdf-highlight-h * parent.height;
+                                                    background: Theme.accent-subtle;
+                                                    border-color: Theme.warning;
+                                                    border-width: 2px;
+                                                }
+                                            }
                                         }
                                     }
                                 }
