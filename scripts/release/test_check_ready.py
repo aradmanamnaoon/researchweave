@@ -31,6 +31,37 @@ def quality_jobs() -> list[dict[str, str]]:
 
 
 class ReleasePreflightTests(unittest.TestCase):
+    def test_workspace_lock_requires_all_eleven_crates_in_cloud_staging(self) -> None:
+        # Adding optional cloud code must make the existing release gate
+        # stricter, not bypass it. The first nine versioned crates remain
+        # mandatory, and both sync and cloud must be explicitly accounted for.
+        names = (
+            "researchweave-core", "researchweave-crypto", "researchweave-project",
+            "researchweave-sync", "researchweave-cloud",
+            "researchweave-desktop", "researchweave-analysis", "researchweave-evidence",
+            "researchweave-ai", "researchweave-cli", "researchweave-library",
+        )
+
+        def write_lock(path: Path, package_names: tuple[str, ...], *,
+                       wrong_version: bool = False) -> None:
+            rows = ["version = 3"]
+            for index, name in enumerate(package_names):
+                version = "0.3.0" if wrong_version and index == 3 else "0.2.0"
+                rows.append(f'\n[[package]]\nname = "{name}"\nversion = "{version}"')
+            path.write_text("\n".join(rows) + "\n", encoding="utf-8")
+
+        with TemporaryDirectory() as directory:
+            lock = Path(directory) / "Cargo.lock"
+            write_lock(lock, names)
+            ready.check_workspace_lock(Path(directory), "0.2.0")
+            for invalid in (names[:-1], names + ("researchweave-unreviewed",)):
+                write_lock(lock, invalid)
+                with self.assertRaisesRegex(ready.ReleaseBlocked, "unexpected local workspace"):
+                    ready.check_workspace_lock(Path(directory), "0.2.0")
+            write_lock(lock, names, wrong_version=True)
+            with self.assertRaisesRegex(ready.ReleaseBlocked, "out of sync"):
+                ready.check_workspace_lock(Path(directory), "0.2.0")
+
     def test_all_45_fully_accepted_features_required_before_tag(self) -> None:
         def ledger(rows: list[str], root: Path) -> None:
             location = root / "docs/verification"

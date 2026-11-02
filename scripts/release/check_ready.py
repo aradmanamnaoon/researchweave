@@ -80,6 +80,7 @@ def check_workspace_lock(root: Path, version: str) -> None:
     ]
     expected = {
         "researchweave-core", "researchweave-crypto", "researchweave-project",
+        "researchweave-sync", "researchweave-cloud",
         "researchweave-desktop", "researchweave-analysis", "researchweave-evidence",
         "researchweave-ai", "researchweave-cli", "researchweave-library",
     }
