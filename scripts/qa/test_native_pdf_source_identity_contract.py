@@ -88,7 +88,13 @@ class PdfSourceIdentityContract(unittest.TestCase):
         self.assertIn("Assert-F14Unchanged $f37Before", qa)
         self.assertIn("$f37ReplacementSize -ne $f37OriginalSize", qa)
         self.assertIn("$f37ReplacementSha -ceq $f37ExpectedSha", qa)
-        self.assertIn("$f37RefusedCanvas -cne $f37BlankCanvas", qa)
+        self.assertIn(
+            "$f37RefusedCanvas.Digest -cne $f37BlankCanvas.Digest", qa
+        )
+        self.assertIn(
+            "$f37RefusedCanvas = Get-F37CanvasSample $window $f37BlankCanvas.Region",
+            qa,
+        )
         self.assertIn(
             "UIA_F37_NATIVE_CAPTION_SOURCE_SHA_VERIFIED_SAME_PATH_SUBSTITUTION_REFUSED_"
             "STALE_PIXELS_CLEARED_NO_PROJECT_WRITE_OK",

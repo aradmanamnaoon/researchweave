@@ -59,6 +59,7 @@ class PdfReaderScrollableLayoutContract(unittest.TestCase):
         cls.outer = slint_block(cls.reader, "pdf-reader-scroll := ScrollView {")
 
     def test_pdf_image_and_caption_list_both_belong_to_outer_scroll(self) -> None:
+        self.assertIn("accessible-role: region;", self.outer)
         self.assertIn('accessible-label: "Scrollable PDF captions and page";', self.outer)
         self.assertIn("vertical-stretch: 1;", self.outer)
         self.assertIn("if root.pdf-caption-candidates.length > 0: ScrollView {", self.outer)
