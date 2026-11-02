@@ -9,7 +9,9 @@ use researchweave_ai::{
     EgressPolicy, NativeHttpTransport,
 };
 use researchweave_analysis::AnalysisService;
-use researchweave_cloud::{CloudOperationHandler, OsKeyringStore, OsSyncSecretStore, S3Profile};
+use researchweave_cloud::{
+    CloudOperationHandler, MemorySecretStore, MemorySyncSecretStore, S3Profile,
+};
 use researchweave_core::{
     AuditStore, Authority, Capability, Command, CommandRouter, DispatchContext, Effect,
     OperationHandler,
@@ -1096,6 +1098,11 @@ fn host_data_root() -> Result<PathBuf, String> {
 // stage. There is intentionally no network operation or credential UI callback.
 // CloudOperationHandler still owns the full protocol; its network capabilities
 // remain unreachable here until a separately reviewed, source-bound approval.
+// Use an EMPTY ephemeral secret store here: the GUI is only recording an
+// uncredentialed profile draft. It must never touch real OS keyring entries at
+// preview/save time (a missing Linux secret service is not a metadata error).
+// A future credential-bearing router must separately validate and authorize
+// actual keyring bindings; the ephemeral store is NOT used for any S3 action.
 fn cloud_profile_router(data_root: &Path) -> Result<CommandRouter, String> {
     let audit = Arc::new(
         AuditStore::open(data_root.join("cloud-profile-audit.sqlite"))
@@ -1103,8 +1110,8 @@ fn cloud_profile_router(data_root: &Path) -> Result<CommandRouter, String> {
     );
     let handler = Arc::new(
         CloudOperationHandler::with_profile_path(
-            Arc::new(OsKeyringStore),
-            Arc::new(OsSyncSecretStore),
+            Arc::new(MemorySecretStore::default()),
+            Arc::new(MemorySyncSecretStore::default()),
             data_root.join("cloud-profiles.json"),
         )
         .map_err(|_| "Cloud profile metadata is unavailable")?,

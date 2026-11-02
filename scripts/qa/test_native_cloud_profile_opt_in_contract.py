@@ -27,6 +27,10 @@ class LocalLiaraOptInSourceContract(unittest.TestCase):
         self.assertIn('"cloud.profile.configure"', router)
         self.assertIn("filter(|cap| matches!(cap.operation.as_str()", router)
         self.assertIn('.register("cloud", handler, allowed)', router)
+        self.assertIn("MemorySecretStore::default()", router)
+        self.assertIn("MemorySyncSecretStore::default()", router)
+        self.assertNotIn("OsKeyringStore", router)
+        self.assertNotIn("OsSyncSecretStore", router)
         self.assertNotIn('router.register("cloud", handler, CloudOperationHandler::capabilities()', router)
         for forbidden in (
             '"cloud.credentials.store"',
