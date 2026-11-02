@@ -1362,9 +1362,12 @@ export component MainWindow inherits Window {
                                         clicked => {
                                             // Land at the page's top, clamped to the
                                             // real scroll range on compact windows.
-                                            pdf-reader-scroll.content-y = max(0px,
-                                                min(pdf-page-canvas.y,
-                                                    pdf-reader-scroll.content-height - pdf-reader-scroll.visible-height));
+                                            // Slint ScrollView offsets are negative when
+                                            // scrolling down; positive offsets left the
+                                            // page below the physical monitor viewport.
+                                            pdf-reader-scroll.content-y = min(0px,
+                                                max(pdf-reader-scroll.visible-height - pdf-reader-scroll.content-height,
+                                                    -pdf-page-canvas.y));
                                         }
                                     }
                                     Button {

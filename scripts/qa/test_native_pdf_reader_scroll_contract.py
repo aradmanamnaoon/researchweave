@@ -84,8 +84,13 @@ class PdfReaderScrollableLayoutContract(unittest.TestCase):
             "Next PDF page", "Find next PDF matching page",
         ):
             self.assertIn(f'accessible-label: "{name}";', before)
-        self.assertIn("min(pdf-page-canvas.y,", before)
-        self.assertIn("pdf-reader-scroll.content-height - pdf-reader-scroll.visible-height", before)
+        # Slint scrolls downward with NEGATIVE content-y. The former positive
+        # clamp left the PDF image below small physical monitors despite a
+        # successful AT-SPI/UIA button action.
+        self.assertIn("pdf-reader-scroll.content-y = min(0px,", before)
+        self.assertIn("max(pdf-reader-scroll.visible-height - pdf-reader-scroll.content-height,", before)
+        self.assertIn("-pdf-page-canvas.y));", before)
+        self.assertNotIn("pdf-reader-scroll.content-y = max(0px,", before)
         self.assertIn("pdf-reader-scroll.content-y = 0px;", before)
         self.assertIn('accessible-label: "Scroll to rendered PDF page";', before)
         self.assertIn('accessible-label: "Scroll back to PDF caption tools";', before)
