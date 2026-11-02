@@ -4851,7 +4851,7 @@ checksum = "19b30a45b0cd0bcca8037f3d0dc3421eaf95327a17cad11964fb8179b4fc4832"
 
 [[package]]
 name = "researchweave-ai"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "hex",
  "researchweave-core",
@@ -4866,7 +4866,7 @@ dependencies = [
 
 [[package]]
 name = "researchweave-analysis"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "ambers",
  "arrow-array 57.1.0",
@@ -4897,7 +4897,7 @@ dependencies = [
 
 [[package]]
 name = "researchweave-cli"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "researchweave-ai",
  "researchweave-analysis",
@@ -4912,7 +4912,7 @@ dependencies = [
 
 [[package]]
 name = "researchweave-core"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "hex",
  "hmac",
@@ -4927,7 +4927,7 @@ dependencies = [
 
 [[package]]
 name = "researchweave-crypto"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "aes-gcm",
  "base64 0.22.1",
@@ -4943,7 +4943,7 @@ dependencies = [
 
 [[package]]
 name = "researchweave-desktop"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "firecrawl-pdfium",
@@ -4967,7 +4967,7 @@ dependencies = [
 
 [[package]]
 name = "researchweave-evidence"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "chrono",
  "hex",
@@ -4982,7 +4982,7 @@ dependencies = [
 
 [[package]]
 name = "researchweave-library"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "base64 0.22.1",
  "chrono",
@@ -5000,7 +5000,7 @@ dependencies = [
 
 [[package]]
 name = "researchweave-project"
-version = "0.2.0"
+version = "0.3.0"
 dependencies = [
  "hex",
  "researchweave-core",

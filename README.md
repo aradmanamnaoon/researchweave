@@ -50,6 +50,8 @@
 
 **Current download:** [Latest verified GitHub release](https://github.com/aradmanamnaoon/researchweave/releases/latest). Older [Python v0.1.2](https://github.com/aradmanamnaoon/researchweave/releases/tag/v0.1.2) remains available separately. Check each release's assets and checksums before installation.
 
+**ResearchWeave v0.3.0 preview:** [Preview release and its current verification notes](https://github.com/aradmanamnaoon/researchweave/releases/tag/preview-v0.3.0). This is an experimental build from the completion branch, not the latest stable or an F01–F45 release-verification claim. Download the five platform-specific packages and `SHA256SUMS.txt` from that page **only after the preview is actually published**. The stable v0.2.0 download links remain below. The preview omits live Liara cloud sync, and signing/notarization and installed-test limitations must be checked in its release notes.
+
 **Rust v0.2.0 assets:** The exact URLs below are checked by the release workflow. They become available after that GitHub release is publicly published and verified; a missing link indicates that the release has not been published successfully.
 
 | Platform | Native Rust artifact | Verification required | Public Rust download |
