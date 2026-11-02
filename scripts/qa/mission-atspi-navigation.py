@@ -2917,7 +2917,13 @@ def main() -> int:
         activate_bounded_control(app, "Preview offline title page without saving", down=True)
         time.sleep(0.3)
         reveal_bounded_control(app, "Copyable unsaved title page preview", down=True)
-        title_page_preview = read_field(app, "Copyable unsaved title page preview")
+        # Slint's read-only TextEdit can expose a real, visible accessibility
+        # node while its AT-SPI Text interface raises NotImplementedError.
+        # Read the *actual focused native preview* via the private Xvfb
+        # clipboard instead; never substitute generated or database text.
+        title_page_preview = read_visible_field_keyboard(
+            app, "Copyable unsaved title page preview", force_clipboard=True
+        )
         receipt_match = re.search(
             r"UNSAVED TITLE PAGE\s*·\s*SHA-256\s+([a-f0-9]{64})",
             title_page_preview,
