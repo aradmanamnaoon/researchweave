@@ -9,6 +9,7 @@ use researchweave_ai::{
     EgressPolicy, NativeHttpTransport,
 };
 use researchweave_analysis::AnalysisService;
+use researchweave_cloud::{CloudOperationHandler, OsKeyringStore, OsSyncSecretStore, S3Profile};
 use researchweave_core::{
     AuditStore, Authority, Capability, Command, CommandRouter, DispatchContext, Effect,
     OperationHandler,
@@ -226,6 +227,10 @@ fn reset_project_visible_state(ui: &MainWindow) {
     ui.set_project_metadata_results(
         "Open a project, enter only fields you want to change, and preview before recording."
             .into(),
+    );
+    ui.set_cloud_profile_pending(false);
+    ui.set_cloud_profile_results(
+        "Project changed. Review the optional Liara metadata against the newly opened project before saving. No network or cloud sync is active.".into(),
     );
     ui.set_question_results("Preview a structured question before recording it.".into());
     ui.set_protocol_results("Preview a protocol before recording it.".into());
@@ -1085,6 +1090,135 @@ fn host_data_root() -> Result<PathBuf, String> {
             .map(|root| root.join(".local/share/researchweave"))
             .ok_or_else(|| "HOME is unavailable".into())
     }
+}
+
+// Only local metadata operations are exposed to this desktop integration
+// stage. There is intentionally no network operation or credential UI callback.
+// CloudOperationHandler still owns the full protocol; its network capabilities
+// remain unreachable here until a separately reviewed, source-bound approval.
+fn cloud_profile_router(data_root: &Path) -> Result<CommandRouter, String> {
+    let audit = Arc::new(
+        AuditStore::open(data_root.join("cloud-profile-audit.sqlite"))
+            .map_err(|_| "Cloud profile audit storage is unavailable")?,
+    );
+    let handler = Arc::new(
+        CloudOperationHandler::with_profile_path(
+            Arc::new(OsKeyringStore),
+            Arc::new(OsSyncSecretStore),
+            data_root.join("cloud-profiles.json"),
+        )
+        .map_err(|_| "Cloud profile metadata is unavailable")?,
+    );
+    let mut router = CommandRouter::new(Arc::new(Authority::new()), audit);
+    // A deliberately restricted capability manifest: the router cannot even
+    // dispatch credentials, connectivity checks, S3 probes, or sync actions.
+    let allowed = CloudOperationHandler::capabilities()
+        .into_iter()
+        .filter(|cap| matches!(cap.operation.as_str(), "cloud.profile.configure"))
+        .collect::<Vec<_>>();
+    router
+        .register("cloud", handler, allowed)
+        .map_err(|_| "Cloud profile authorization is unavailable")?;
+    Ok(router)
+}
+
+struct PendingCloudProfile {
+    project_path: PathBuf,
+    command: Command,
+    source_sha256: String,
+}
+
+fn liara_profile_inputs(id: &str, endpoint: &str, bucket: &str) -> Result<S3Profile, String> {
+    let profile = S3Profile::liara(id.trim(), endpoint.trim(), bucket.trim());
+    profile
+        .validate()
+        .map_err(|_| "Invalid Liara profile: use an HTTPS *.liara.site or *.liara.space endpoint without credentials, a safe profile ID, and a bucket name".to_owned())?;
+    Ok(profile)
+}
+
+fn preview_local_liara_profile(
+    project_path: &Path,
+    data_root: &Path,
+    id: &str,
+    endpoint: &str,
+    bucket: &str,
+) -> Result<PendingCloudProfile, String> {
+    let (project_id, info) = active_project_identity(project_path)?;
+    let revision = u64::try_from(info.revision).map_err(|_| "Invalid active project revision")?;
+    let profile = liara_profile_inputs(id, endpoint, bucket)?;
+    let arguments = serde_json::to_value(profile).map_err(|_| "Invalid cloud profile metadata")?;
+    let mut command = Command::new(project_id, "cloud.profile.configure", arguments);
+    command.actor = "desktop-user".into();
+    command.expected_revision = Some(revision);
+    let mut preview = command.clone();
+    preview.preview = true;
+    let result = cloud_profile_router(data_root)?
+        .dispatch(&preview, None, now_seconds()?)
+        .map_err(|_| "Cloud profile preview audit failed")?;
+    if result["status"] != "ok" || result["result"]["validated"] != true {
+        return Err("Liara profile validation failed; nothing was saved".into());
+    }
+    let source_sha256 = hex::encode(
+        command
+            .approval_digest()
+            .map_err(|_| "Cloud preview fingerprint unavailable")?,
+    );
+    Ok(PendingCloudProfile {
+        project_path: project_path.to_path_buf(),
+        command,
+        source_sha256,
+    })
+}
+
+fn save_local_liara_profile(
+    pending: PendingCloudProfile,
+    current_project: &Path,
+    data_root: &Path,
+    id: &str,
+    endpoint: &str,
+    bucket: &str,
+    confirmation: &str,
+) -> Result<(), String> {
+    if confirmation != "SAVE LOCAL PROFILE" {
+        return Err("Type SAVE LOCAL PROFILE to authorize local metadata storage".into());
+    }
+    if pending.project_path != current_project {
+        return Err("Project changed after Liara preview; preview again".into());
+    }
+    let (project_id, info) = active_project_identity(current_project)?;
+    if pending.command.project_id != project_id
+        || Some(u64::try_from(info.revision).map_err(|_| "Invalid project revision")?)
+            != pending.command.expected_revision
+    {
+        return Err("Project identity or revision changed; preview the Liara profile again".into());
+    }
+    let actual = serde_json::to_value(liara_profile_inputs(id, endpoint, bucket)?)
+        .map_err(|_| "Invalid Liara profile metadata")?;
+    if pending.command.arguments != actual
+        || hex::encode(
+            pending
+                .command
+                .approval_digest()
+                .map_err(|_| "Cloud source fingerprint unavailable")?,
+        ) != pending.source_sha256
+    {
+        return Err("Liara profile fields changed after preview; preview again".into());
+    }
+    // One-use HMAC approval is issued only after the second explicit UI action
+    // and bound to the already previewed command/request ID/project revision.
+    // Only cloud.profile.configure is registered; network remains impossible.
+    let router = cloud_profile_router(data_root)?;
+    let now = now_seconds()?;
+    let approval = router
+        .issue_approval(&pending.command, 30, now)
+        .map_err(|_| "Cloud profile approval unavailable")?;
+    let result = router
+        .dispatch(&pending.command, Some(&approval), now)
+        .map_err(|_| "Cloud profile audit or storage unavailable")?;
+    if result["status"] != "ok" || result["result"]["validated"] != true {
+        return Err("Liara profile was not saved; inspect local profile storage".into());
+    }
+    Ok(())
 }
 
 fn refresh_recent_project_shortcuts(ui: &MainWindow) -> Result<(), String> {
@@ -3872,6 +4006,96 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     });
     let active_project: Rc<RefCell<Option<PathBuf>>> = Rc::new(RefCell::new(None));
+    let pending_cloud_profile: Rc<RefCell<Option<PendingCloudProfile>>> =
+        Rc::new(RefCell::new(None));
+    app.on_preview_local_liara_profile({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_cloud_profile = pending_cloud_profile.clone();
+        move |id, endpoint, bucket| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            ui.set_cloud_profile_pending(false);
+            pending_cloud_profile.borrow_mut().take();
+            let result = (|| -> Result<PendingCloudProfile, String> {
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open a local project before reviewing a Liara profile")?;
+                preview_local_liara_profile(
+                    &project,
+                    &host_data_root()?,
+                    id.as_str(),
+                    endpoint.as_str(),
+                    bucket.as_str(),
+                )
+            })();
+            match result {
+                Ok(preview) => {
+                    let profile_id = preview.command.arguments["profile_id"]
+                        .as_str()
+                        .unwrap_or("invalid");
+                    let project_id = preview.command.project_id;
+                    let revision = preview.command.expected_revision.unwrap_or(0);
+                    ui.set_cloud_profile_results(
+                        format!(
+                            "OFFLINE REVIEW ONLY: profile {profile_id}, Liara endpoint {}, bucket {}. Project {project_id} revision {revision}; approval SHA-256 {}. Saving an existing profile ID replaces its metadata. No credential read, network request, upload or CAS test. To save only this metadata, type SAVE LOCAL PROFILE below, then press Save.",
+                            endpoint.trim(),
+                            bucket.trim(),
+                            preview.source_sha256,
+                        )
+                        .into(),
+                    );
+                    *pending_cloud_profile.borrow_mut() = Some(preview);
+                    ui.set_cloud_profile_pending(true);
+                }
+                Err(error) => ui.set_cloud_profile_results(
+                    format!("Liara profile not staged: {error}. No network or profile change.").into(),
+                ),
+            }
+        }
+    });
+    app.on_save_local_liara_profile({
+        let weak = app.as_weak();
+        let active_project = active_project.clone();
+        let pending_cloud_profile = pending_cloud_profile.clone();
+        move |id, endpoint, bucket, confirmation| {
+            let Some(ui) = weak.upgrade() else {
+                return;
+            };
+            ui.set_cloud_profile_pending(false);
+            // Consume the preview, successful or not; never reuse a stale
+            // project-bound approval after any failed attempt.
+            let result = (|| -> Result<(), String> {
+                let preview = pending_cloud_profile
+                    .borrow_mut()
+                    .take()
+                    .ok_or("Preview the Liara profile before saving")?;
+                let project = active_project
+                    .borrow()
+                    .clone()
+                    .ok_or("Open the original project and preview again")?;
+                save_local_liara_profile(
+                    preview,
+                    &project,
+                    &host_data_root()?,
+                    id.as_str(),
+                    endpoint.as_str(),
+                    bucket.as_str(),
+                    confirmation.as_str(),
+                )
+            })();
+            match result {
+                Ok(()) => ui.set_cloud_profile_results(
+                    "Liara profile metadata saved locally with single-use, project-revision-bound approval. No credentials were read or stored here; network, CAS probe and encrypted sync remain disabled until a separate explicit consent workflow is implemented and verified.".into(),
+                ),
+                Err(error) => ui.set_cloud_profile_results(
+                    format!("Liara profile not saved: {error}. Preview again; no network request was made.").into(),
+                ),
+            }
+        }
+    });
     app.on_preview_arithmetic_cell({
         let weak = app.as_weak();
         let active_project = active_project.clone();
@@ -10276,6 +10500,152 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn liara_local_profile_requires_source_bound_review_and_fresh_consent() {
+        let temp = tempfile::tempdir().unwrap();
+        let root = temp.path();
+        let data_root = root.join("host");
+        let project_path = root.join("project");
+        let project_id = Uuid::new_v4();
+        let other_project_id = Uuid::new_v4();
+        ProjectStore::create(
+            &project_path,
+            &ProjectInfo {
+                id: project_id.to_string(),
+                title: "Local Liara test".into(),
+                question: "Does profile consent remain source-bound?".into(),
+                design: "observational".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: "2026-11-02T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+        let other_project = root.join("other-project");
+        ProjectStore::create(
+            &other_project,
+            &ProjectInfo {
+                id: other_project_id.to_string(),
+                title: "Other project".into(),
+                question: "Is a swapped project rejected?".into(),
+                design: "observational".into(),
+                locale: "en".into(),
+                privacy: "private".into(),
+                revision: 0,
+                created_at: "2026-11-02T00:00:00Z".into(),
+            },
+        )
+        .unwrap();
+        let profile_file = data_root.join("cloud-profiles.json");
+        let endpoint = "https://storage.c2.liara.site";
+        let preview =
+            preview_local_liara_profile(&project_path, &data_root, "study", endpoint, "bucket-one")
+                .unwrap();
+        assert!(!profile_file.exists());
+        assert_eq!(preview.command.operation, "cloud.profile.configure");
+        assert_eq!(preview.command.project_id, project_id);
+        assert_eq!(preview.command.expected_revision, Some(0));
+        assert!(matches!(
+            save_local_liara_profile(
+                preview,
+                &project_path,
+                &data_root,
+                "study",
+                endpoint,
+                "bucket-one",
+                "SAVE",
+            ),
+            Err(message) if message.contains("SAVE LOCAL PROFILE")
+        ));
+        assert!(!profile_file.exists());
+
+        let preview =
+            preview_local_liara_profile(&project_path, &data_root, "study", endpoint, "bucket-one")
+                .unwrap();
+        assert!(matches!(
+            save_local_liara_profile(
+                preview,
+                &other_project,
+                &data_root,
+                "study",
+                endpoint,
+                "bucket-one",
+                "SAVE LOCAL PROFILE",
+            ),
+            Err(message) if message.contains("Project changed")
+        ));
+        assert!(!profile_file.exists());
+
+        let preview =
+            preview_local_liara_profile(&project_path, &data_root, "study", endpoint, "bucket-one")
+                .unwrap();
+        assert!(matches!(
+            save_local_liara_profile(
+                preview,
+                &project_path,
+                &data_root,
+                "study",
+                endpoint,
+                "bucket-two",
+                "SAVE LOCAL PROFILE",
+            ),
+            Err(message) if message.contains("fields changed")
+        ));
+        assert!(!profile_file.exists());
+
+        let preview =
+            preview_local_liara_profile(&project_path, &data_root, "study", endpoint, "bucket-one")
+                .unwrap();
+        save_local_liara_profile(
+            preview,
+            &project_path,
+            &data_root,
+            "study",
+            endpoint,
+            "bucket-one",
+            "SAVE LOCAL PROFILE",
+        )
+        .unwrap();
+        let stored = std::fs::read_to_string(profile_file).unwrap();
+        assert!(stored.contains("storage.c2.liara.site"));
+        assert!(stored.contains("bucket-one"));
+        assert!(!stored.contains("secret_key"));
+        assert!(!stored.contains("access_key"));
+        assert!(!stored.contains("passphrase"));
+    }
+
+    #[test]
+    fn local_liara_router_excludes_network_credential_and_sync_capabilities() {
+        let temp = tempfile::tempdir().unwrap();
+        let router = cloud_profile_router(temp.path()).unwrap();
+        assert_eq!(
+            router.effect_for("cloud.profile.configure"),
+            Some(Effect::LocalWrite)
+        );
+        for operation in [
+            "cloud.conditional.probe",
+            "cloud.connection.verify",
+            "cloud.credentials.store",
+            "cloud.encryption.store",
+            "cloud.sync.push",
+            "cloud.sync.pull",
+            "cloud.sync.tip",
+            "cloud.sync.history",
+        ] {
+            assert_eq!(router.effect_for(operation), None);
+            let command = Command::new(Uuid::new_v4(), operation, serde_json::json!({}));
+            let response = router.dispatch(&command, None, 0.0).unwrap();
+            assert_eq!(response["status"], "failed");
+            assert_eq!(response["error"]["code"], "NOT_FOUND");
+        }
+        assert!(liara_profile_inputs("test", "https://other.example", "bucket-one").is_err());
+        assert!(
+            liara_profile_inputs("test", "https://liara.site.evil.example", "bucket-one").is_err()
+        );
+        assert!(liara_profile_inputs("test", "http://127.0.0.1:1", "bucket-one").is_err());
+    }
 
     #[test]
     fn reviewer_comment_preview_and_approval_use_real_desktop_host_and_immutable_project() {

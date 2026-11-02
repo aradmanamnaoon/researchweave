@@ -275,7 +275,12 @@ impl S3Profile {
             return Err(CloudError::InvalidConfiguration);
         }
         if self.provider == ProviderKind::Liara
-            && (!self.force_path_style || self.region != DEFAULT_REGION)
+            && (!self.force_path_style
+                || self.region != DEFAULT_REGION
+                || endpoint.scheme() != "https"
+                || endpoint.path() != "/"
+                || endpoint.port().is_some()
+                || !(host.ends_with(".liara.site") || host.ends_with(".liara.space")))
         {
             return Err(CloudError::InvalidConfiguration);
         }
@@ -1758,7 +1763,7 @@ mod tests {
                     id: id.to_string(),
                     title: "Immutable sync source".into(),
                     question: "Was the uploaded archive the one verified?".into(),
-                    design: "test".into(),
+                    design: "observational".into(),
                     locale: "en".into(),
                     privacy: "private".into(),
                     revision: 0,
@@ -2148,6 +2153,25 @@ mod tests {
     }
 
     #[test]
+    fn liara_profile_refuses_non_liara_hosts_even_over_https() {
+        let mut profile = S3Profile::liara("user-profile", "https://other.example", "bucket-one");
+        assert!(matches!(
+            profile.validate(),
+            Err(CloudError::InvalidConfiguration)
+        ));
+        profile.endpoint = "https://liara.site.evil.example".into();
+        assert!(profile.validate().is_err());
+        profile.endpoint = "http://127.0.0.1:9000".into();
+        assert!(profile.validate().is_err());
+        profile.endpoint = "https://storage.c2.liara.site/private-token".into();
+        assert!(profile.validate().is_err());
+        profile.endpoint = "https://storage.c2.liara.site:444".into();
+        assert!(profile.validate().is_err());
+        profile.endpoint = "https://storage.c2.liara.site".into();
+        assert!(profile.validate().is_ok());
+    }
+
+    #[test]
     fn rejects_insecure_remote_and_endpoint_credentials() {
         let mut profile = S3Profile::liara("p", "http://storage.example.com", "bucket-name");
         assert!(profile.validate().is_err());
@@ -2372,7 +2396,7 @@ mod tests {
                     id: project_id.to_string(),
                     title: "Live S3 acceptance".into(),
                     question: "Does the real provider preserve encrypted sync semantics?".into(),
-                    design: "acceptance".into(),
+                    design: "observational".into(),
                     locale: "en".into(),
                     privacy: "private".into(),
                     revision: 0,

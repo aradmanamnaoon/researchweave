@@ -314,6 +314,8 @@ export component MainWindow inherits Window {
     in-out property <string> agent-results: "Durable project-scoped assistant conversations and prompt templates are available offline.";
     in-out property <string> agent-action-results: "Stage an offline retrieval tool proposal to review its exact operation, effect and fingerprint before approval.";
     in-out property <string> provider-results: "Provider validation is offline-only; remote egress is disabled until explicitly configured.";
+    in-out property <bool> cloud-profile-pending: false;
+    in-out property <string> cloud-profile-results: "Optional Liara sync is off. Configure local profile metadata only; no credentials or network connections are available in this stage.";
     in-out property <string> diagnostics-results: "Run structural diagnostics for the open project.";
     in-out property <string> open-science-preview-results: "Research-object inventory is local and read-only. It cannot authorize redistribution, publish files, or verify consent.";
     in-out property <bool> synthetic-evaluation-open: false;
@@ -439,6 +441,8 @@ export component MainWindow inherits Window {
     callback sync-widget-theme(bool);
     callback update-preference(string, bool);
     callback update-ui-scale(int);
+    callback preview-local-liara-profile(string, string, string);
+    callback save-local-liara-profile(string, string, string, string);
     callback library-action(string, string, string);
     callback refresh-research();
     callback inspect-project-metadata();
@@ -1504,6 +1508,61 @@ export component MainWindow inherits Window {
                                 text: Theme.reduced-motion ? "Reduced motion: on" : "Reduced motion: off";
                                 accessible-label: "Toggle reduced motion";
                                 clicked => { root.update-preference("reduced-motion", !Theme.reduced-motion); }
+                            }
+                            Rectangle { min-height: 1px; background: Theme.divider; }
+                            Text {
+                                text: "Optional Liara encrypted sync — offline profile setup";
+                                color: Theme.ink;
+                                font-size: 17px * Theme.ui-scale / 100;
+                                font-weight: 650;
+                            }
+                            Text {
+                                text: "Open a project first. Only the profile ID, public HTTPS Liara endpoint and bucket are saved locally after review. Saving the same profile ID replaces its previous local metadata. No keys or passwords are requested here. No network operation, upload or CAS verification is available until separately approved.";
+                                color: Theme.muted-ink;
+                                wrap: word-wrap;
+                            }
+                            cloud-profile-id := LineEdit {
+                                placeholder-text: "Local profile ID (letters, digits, ._-)";
+                                accessible-label: "Optional Liara profile ID";
+                                edited(text) => { root.cloud-profile-pending = false; }
+                            }
+                            cloud-endpoint := LineEdit {
+                                placeholder-text: "https://storage.c2.liara.site";
+                                accessible-label: "Liara HTTPS bucket endpoint (not a credential)";
+                                edited(text) => { root.cloud-profile-pending = false; }
+                            }
+                            cloud-bucket := LineEdit {
+                                placeholder-text: "Your Liara bucket name";
+                                accessible-label: "Liara bucket name";
+                                edited(text) => { root.cloud-profile-pending = false; }
+                            }
+                            Button {
+                                text: "Review offline Liara profile";
+                                accessible-label: "Review Liara profile and current project fingerprint without connecting";
+                                clicked => {
+                                    root.cloud-profile-pending = false;
+                                    root.preview-local-liara-profile(cloud-profile-id.text, cloud-endpoint.text, cloud-bucket.text);
+                                }
+                            }
+                            Text {
+                                text: root.cloud-profile-results;
+                                color: Theme.ink;
+                                wrap: word-wrap;
+                                accessible-label: "Offline Liara profile review " + root.cloud-profile-results;
+                            }
+                            cloud-consent := LineEdit {
+                                placeholder-text: "Type SAVE LOCAL PROFILE to consent";
+                                accessible-label: "Explicit consent phrase for local Liara profile metadata storage";
+                            }
+                            Button {
+                                text: "Save reviewed local profile (no network)";
+                                enabled: root.cloud-profile-pending;
+                                accessible-label: "Approve reviewed Liara profile metadata for local storage only";
+                                clicked => {
+                                    root.cloud-profile-pending = false;
+                                    root.save-local-liara-profile(cloud-profile-id.text, cloud-endpoint.text, cloud-bucket.text, cloud-consent.text);
+                                    cloud-consent.text = "";
+                                }
                             }
                             Rectangle { vertical-stretch: 1; }
                           }

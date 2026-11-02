@@ -5731,6 +5731,7 @@ dependencies = [
  "png 0.17.16",
  "researchweave-ai",
  "researchweave-analysis",
+ "researchweave-cloud",
  "researchweave-core",
  "researchweave-evidence",
  "researchweave-library",
@@ -5741,6 +5742,7 @@ dependencies = [
  "sha2 0.10.9",
  "slint",
  "slint-build",
+ "tempfile",
  "uuid",
 ]
 
