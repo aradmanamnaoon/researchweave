@@ -7,6 +7,11 @@ on:
         description: Three-component Rust release version
         required: true
         type: string
+      preview_incomplete_native_acceptance:
+        description: "PREVIEW ONLY: preserve expanded installed-GUI failures as evidence without suppressing basic package smoke or checksums"
+        required: false
+        default: false
+        type: boolean
   pull_request:
     paths:
       - 'README.md'
@@ -39,6 +44,16 @@ jobs:
         env:
           EXPECTED_SOURCE_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
         run: test "$(git rev-parse HEAD)" = "$EXPECTED_SOURCE_SHA"
+      - name: Confine incomplete-native exception to explicitly dispatched preview branch
+        shell: bash
+        env:
+          PREVIEW_INCOMPLETE: ${{ inputs.preview_incomplete_native_acceptance }}
+        run: |
+          if [[ "$PREVIEW_INCOMPLETE" == 'true' ]]; then
+            [[ "$GITHUB_EVENT_NAME" == 'workflow_dispatch' ]]
+            [[ "$GITHUB_REF" == refs/heads/release/preview-* ]]
+            echo 'PREVIEW_ONLY_INCOMPLETE_NATIVE_ACCEPTANCE: strict production tag and PR checks are unchanged'
+          fi
       - name: Linux workspace build prerequisites
         run: |
           sudo apt-get update
@@ -216,6 +231,7 @@ jobs:
           }
       - name: Windows installed candidate UI Automation smoke
         if: runner.os == 'Windows'
+        continue-on-error: ${{ inputs.preview_incomplete_native_acceptance == true }}
         shell: pwsh
         run: |
           New-Item -ItemType Directory -Path 'target/qa' -Force | Out-Null
@@ -264,6 +280,7 @@ jobs:
         run: bash packaging/rust/unix-package-smoke.sh "$PLATFORM" "$RELEASE_VERSION"
       - name: macOS normal GUI launch, relaunch and native window acceptance
         if: runner.os == 'macOS'
+        continue-on-error: ${{ inputs.preview_incomplete_native_acceptance == true }}
         shell: bash
         run: bash packaging/rust/macos-native-acceptance.sh "$PLATFORM" "$RELEASE_VERSION"
       - name: Linux install, direct AppImage and AT-SPI acceptance
@@ -272,6 +289,7 @@ jobs:
         run: bash packaging/rust/linux-native-acceptance.sh "$RELEASE_VERSION"
       - name: Full isolated Linux scientific GUI interaction regression
         if: matrix.platform == 'linux-x64'
+        continue-on-error: ${{ inputs.preview_incomplete_native_acceptance == true }}
         shell: bash
         timeout-minutes: 20
         env:

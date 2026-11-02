@@ -26,8 +26,30 @@ if [[ "$platform" == macos-* ]]; then
 EOF
   chmod +x "$app/Contents/MacOS/researchweave-desktop"
   install_name_tool -add_rpath '@executable_path/../Frameworks' "$app/Contents/MacOS/researchweave-desktop" || true
-  hdiutil create -volname ResearchWeave -srcfolder "$app" -ov -format UDZO "dist/ResearchWeave-v$version-$platform.dmg"
-  hdiutil verify "dist/ResearchWeave-v$version-$platform.dmg"
+  # A macOS hosted runner can transiently return "Resource busy" when the
+  # diskimages service creates its compressed image. Each attempt uses a new
+  # private filename; the output is moved into dist only after native verify.
+  # Never publish a partial image or treat a failed verification as success.
+  dmg_output="dist/ResearchWeave-v$version-$platform.dmg"
+  dmg_temp_dir="$(mktemp -d "$stage/researchweave-dmg.XXXXXXXX")"
+  trap 'rm -rf "$dmg_temp_dir"' EXIT
+  dmg_verified=""
+  for attempt in 1 2 3 4; do
+    candidate="$dmg_temp_dir/candidate-$attempt.dmg"
+    if hdiutil create -volname ResearchWeave -srcfolder "$app" -format UDZO "$candidate"; then
+      hdiutil verify "$candidate"
+      dmg_verified="$candidate"
+      break
+    fi
+    echo "macOS DMG creation attempt $attempt failed; bounded retry" >&2
+    sleep "$((attempt * 2))"
+  done
+  if [[ -z "$dmg_verified" ]]; then
+    echo "macOS DMG creation failed after four attempts" >&2
+    exit 1
+  fi
+  mv "$dmg_verified" "$dmg_output"
+  test -s "$dmg_output"
 elif [[ "$platform" == linux-x64 ]]; then
   pkg="target/native-package/linux-x64/deb"
   mkdir -p "$pkg/DEBIAN" "$pkg/usr/bin" "$pkg/usr/lib/researchweave" "$pkg/usr/share/applications" "$pkg/usr/share/icons/hicolor/scalable/apps"
