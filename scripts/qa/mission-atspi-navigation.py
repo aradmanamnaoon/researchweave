@@ -2511,8 +2511,11 @@ def main() -> int:
         if not activate(app, "Analyze activity"):
             raise RuntimeError("Analyze activity is not available")
         time.sleep(0.25)
-        if not activate(app, "Data View"):
-            raise RuntimeError("Data View navigation is not available")
+        # The actual sidebar button is named "Data View workspace screen".
+        # "Data View" matches its name only by substring: the strict native
+        # click fallback requires exact identity and correctly refuses it.
+        # Reveal the real target and require the imported page editor next.
+        activate_bounded_control(app, "Data View workspace screen", down=False)
         time.sleep(0.3)
         audit(app, "data-before-import", output)
         # Slint's AT-SPI Text interface can temporarily report
@@ -2558,8 +2561,7 @@ def main() -> int:
         if not variable_id or not variable_revision:
             raise RuntimeError("Imported dataset identity did not propagate into Variables")
         print(f"DATA_TO_VARIABLES_CONTEXT_OK id_chars={len(variable_id)} revision_chars={len(variable_revision)}")
-        if not activate(app, "Data View"):
-            raise RuntimeError("Cannot return to Data View")
+        activate_bounded_control(app, "Data View workspace screen", down=False)
         time.sleep(0.25)
         if not activate(app, "Analyze recently imported dataset"):
             raise RuntimeError("Dataset-to-Statistics shortcut is broken")
@@ -2665,8 +2667,7 @@ def main() -> int:
 
         # Leave a new import merely staged in project A, then switch projects.
         # Its approval must be invalidated before project B can perform writes.
-        if not activate(app, "Data View"):
-            raise RuntimeError("Cannot return to Data View to stage a pending import")
+        activate_bounded_control(app, "Data View workspace screen", down=False)
         time.sleep(0.25)
         edit_text(app, "Analysis import path", str(fixture), allow_unreadable=True)
         if not activate(app, "Preview analysis import"):
@@ -2697,7 +2698,7 @@ def main() -> int:
         # Analyze navigation may restore the last workspace, while a hidden
         # or offscreen Data View editor can appear in the AT-SPI tree. Enter
         # Data View *explicitly* before asserting cross-project emptiness.
-        activate_bounded_control(app, "Data View", down=False)
+        activate_bounded_control(app, "Data View workspace screen", down=False)
         time.sleep(0.3)
         if nodes_named(app, "Recently imported dataset identifier and immutable revision"):
             raise RuntimeError("Dataset context leaked into a different project")
