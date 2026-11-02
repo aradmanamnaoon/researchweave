@@ -986,13 +986,32 @@ impl CloudOperationHandler {
                 let profile: S3Profile = serde_json::from_value(arguments.clone())
                     .map_err(|_| CloudError::InvalidConfiguration)?;
                 profile.validate()?;
-                if !preview && operation == "cloud.profile.configure" {
-                    self.verified.lock().revoke(&profile.profile_id);
+                if operation == "cloud.profile.configure" {
+                    if !preview {
+                        self.verified.lock().revoke(&profile.profile_id);
+                    }
                     let mut profiles = self.profiles.lock();
-                    let mut updated = profiles.clone();
-                    updated.insert(profile.profile_id.clone(), profile.clone());
-                    self.save_profiles(&updated)?;
-                    *profiles = updated;
+                    if let Some(existing) = profiles.get(&profile.profile_id) {
+                        // Never silently reuse stored credentials against a changed
+                        // provider/endpoint. A human must delete those credentials
+                        // and disconnect this identity before using a new endpoint.
+                        let changed_destination = existing.provider != profile.provider
+                            || existing.endpoint != profile.endpoint
+                            || existing.region != profile.region
+                            || existing.force_path_style != profile.force_path_style;
+                        if changed_destination {
+                            // Profile identity cannot change its credential
+                            // destination. Refuse without even reading the
+                            // OS keyring during an offline metadata review.
+                            return Err(CloudError::InvalidConfiguration);
+                        }
+                    }
+                    if !preview {
+                        let mut updated = profiles.clone();
+                        updated.insert(profile.profile_id.clone(), profile.clone());
+                        self.save_profiles(&updated)?;
+                        *profiles = updated;
+                    }
                 }
                 Ok(
                     json!({"profile_id":profile.profile_id, "provider":profile.provider, "validated":true}),
@@ -1972,6 +1991,88 @@ mod tests {
                 .unwrap()
                 .effect,
             Effect::ExternalNetwork
+        );
+    }
+
+    #[test]
+    fn changing_a_profile_endpoint_never_reuses_existing_credentials() {
+        let secrets = Arc::new(MemorySecretStore::default());
+        let handler = CloudOperationHandler::new(secrets.clone());
+        let context = DispatchContext {
+            request_id: Uuid::new_v4(),
+            project_id: Uuid::new_v4(),
+            actor: "test".into(),
+            expected_revision: None,
+        };
+        let original = S3Profile::liara("profile", "https://storage.c2.liara.site", "bucket-one");
+        let mut changed = original.clone();
+        changed.endpoint = "https://storage.c3.liara.site".into();
+        let original_args = serde_json::to_value(&original).unwrap();
+        let changed_args = serde_json::to_value(&changed).unwrap();
+        assert_eq!(
+            handler.execute("cloud.profile.configure", &original_args, &context)["status"],
+            "ok"
+        );
+        secrets
+            .put(
+                "profile",
+                &CredentialBundle {
+                    access_key: "access-SECRET".into(),
+                    secret_key: "secret-SECRET".into(),
+                    session_token: None,
+                },
+            )
+            .unwrap();
+
+        for result in [
+            handler.preview("cloud.profile.configure", &changed_args, &context),
+            handler.execute("cloud.profile.configure", &changed_args, &context),
+        ] {
+            assert_eq!(result["status"], "failed");
+            assert_eq!(result["error"]["code"], "INVALID_INPUT");
+            assert!(!result.to_string().contains("SECRET"));
+        }
+        let listed = handler.execute("cloud.profile.list", &json!({}), &context);
+        assert_eq!(
+            listed["result"]["profiles"][0]["endpoint"],
+            original.endpoint
+        );
+        assert_eq!(listed["result"]["profiles"][0]["credentials_present"], true);
+
+        assert_eq!(
+            handler.execute(
+                "cloud.credentials.delete",
+                &json!({"profile_id":"profile"}),
+                &context,
+            )["status"],
+            "ok"
+        );
+        // Changing destination requires an explicitly separate disconnect;
+        // neither preview nor configure reads from the credential store.
+        assert_eq!(
+            handler.execute("cloud.profile.configure", &changed_args, &context)["status"],
+            "failed"
+        );
+        assert_eq!(
+            handler.execute(
+                "cloud.profile.disconnect",
+                &json!({"profile_id":"profile"}),
+                &context,
+            )["status"],
+            "ok"
+        );
+        assert_eq!(
+            handler.execute("cloud.profile.configure", &changed_args, &context)["status"],
+            "ok"
+        );
+        let listed = handler.execute("cloud.profile.list", &json!({}), &context);
+        assert_eq!(
+            listed["result"]["profiles"][0]["endpoint"],
+            changed.endpoint
+        );
+        assert_eq!(
+            listed["result"]["profiles"][0]["credentials_present"],
+            false
         );
     }
 
